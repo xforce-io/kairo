@@ -116,6 +116,19 @@ class AsrRule:
         return WorkItem(key, input_hash, run, is_stale)
 
 
+_OUTPUT_DISCIPLINE = (
+    "\n\n[输出纪律]\n"
+    "- 只输出文档正文本身,不要旁白、元评论、寒暄,或「需要的话我可以…」式的提议。\n"
+    "- 不寻常的专名(品牌/人名)若仅单一来源支持,标 ⚠️ 待核,不要默认采信为事实。"
+)
+
+_COMPOSE_DISCIPLINE = (
+    "\n- 你只产出当前这一个文档,不要内联其它文档的内容"
+    "(例如 understanding 中不要写 assessment 段落)。\n"
+    "- 正文中的 [来源:...] 是溯源标签,不是磁盘文件路径,无需也不应去读取。"
+)
+
+
 class DigestRule:
     """有正文(transcript/source_text)且无 digest → 产忠实纪要(用 provider)。"""
 
@@ -147,7 +160,9 @@ class DigestRule:
         input_hash = _hash(f"{self.prompt}\n\n---正文---\n{body}")
 
         def run(state: State) -> None:
-            content = _run_agent(self.provider, self.prompt, body, "digest.md")
+            content = _run_agent(
+                self.provider, self.prompt + _OUTPUT_DISCIPLINE, body, "digest.md"
+            )
             (self.ws.root / key).write_text(content)
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -247,7 +262,12 @@ class ComposeRule:
                 + f"---新增 digest({len(delta)} 条,批量融入)---\n"
                 + "\n\n".join(digest_blocks)
             )
-            content = _run_agent(self.provider, target.fold_protocol, context, "doc.md")
+            content = _run_agent(
+                self.provider,
+                target.fold_protocol + _OUTPUT_DISCIPLINE + _COMPOSE_DISCIPLINE,
+                context,
+                "doc.md",
+            )
             doc_path.write_text(content)
             ts = state.targets.get(key) or TargetState(depends_on=list(target.depends_on))
             ts.folded = dict(all_digests)
