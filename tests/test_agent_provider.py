@@ -4,6 +4,7 @@ StubProvider 是确定性 Fake:守可测性 —— 把输入 echo 进产物 + ST
 让 rules/engine 的「正文流过产物」「收敛幂等」断言在新接口下继续成立。
 """
 
+import json
 from pathlib import Path
 
 from kairo.provider import (
@@ -75,13 +76,13 @@ def test_stub_provider_identity_for_provenance():
 # ---- ClaudeCodeProvider(driving `claude -p`,注入 runner 不真跑 CLI)----
 
 
-def test_claude_code_provider_invokes_cli_and_collects_artifacts(tmp_path):
+def test_claude_code_provider_invokes_cli_and_reads_stdout_result(tmp_path):
     calls = []
 
-    def fake_runner(cmd, args, *, cwd, input, timeout=None):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
         calls.append((cmd, args, input))
-        # 模拟 agent 在 cwd 写产物
-        (Path(cwd) / "digest.md").write_text(f"AGENT OUTPUT\n{input}")
+        # claude -p 把回答写 stdout(json);runner 重定向到 stdout_file
+        Path(stdout_file).write_text(json.dumps({"result": "AGENT 纪要"}))
 
     p = ClaudeCodeProvider(model="opus", runner=fake_runner)
     res = p.run(
@@ -99,9 +100,11 @@ def test_claude_code_provider_invokes_cli_and_collects_artifacts(tmp_path):
     assert "你是X" in sent and "材料Y" in sent  # persona + context 进 prompt
     out = tmp_path / "digest.md"
     assert out in res.artifacts
-    assert "AGENT OUTPUT" in out.read_text()
-    # 内部 _prompt.md 不计入 artifacts
-    assert all(Path(a).name != "_prompt.md" for a in res.artifacts)
+    assert "AGENT 纪要" in out.read_text()  # stdout result → artifact
+    assert res.result_text and "AGENT 纪要" in res.result_text
+    # 内部文件不计入 artifacts
+    names = {Path(a).name for a in res.artifacts}
+    assert "_prompt.md" not in names and "_claude_stdout.json" not in names
 
 
 def test_claude_code_provider_identity():
@@ -113,12 +116,14 @@ def test_claude_code_provider_identity():
 # ---- CodexProvider(driving `codex exec`,注入 runner)----
 
 
-def test_codex_provider_invokes_cli_and_collects_artifacts(tmp_path):
+def test_codex_provider_invokes_cli_and_reads_last_message(tmp_path):
     calls = []
 
-    def fake_runner(cmd, args, *, cwd, input, timeout=None):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         calls.append((cmd, args, input))
-        (Path(cwd) / "out.md").write_text(f"CODEX OUTPUT\n{input}")
+        # codex 把最终消息写到 --output-last-message 指定的文件
+        idx = args.index("--output-last-message")
+        Path(args[idx + 1]).write_text("CODEX 纪要")
 
     p = CodexProvider(model="gpt-5", runner=fake_runner)
     res = p.run(
@@ -133,9 +138,13 @@ def test_codex_provider_invokes_cli_and_collects_artifacts(tmp_path):
     cmd, args, sent = calls[0]
     assert cmd == "codex"
     assert "exec" in args
+    assert "--output-last-message" in args
     assert "-m" in args and "gpt-5" in args  # 模型透传
     assert "角色A" in sent and "任务B" in sent
-    assert (tmp_path / "out.md") in res.artifacts
+    out = tmp_path / "out.md"
+    assert out in res.artifacts
+    assert "CODEX 纪要" in out.read_text()
+    assert res.result_text and "CODEX 纪要" in res.result_text
 
 
 def test_codex_provider_identity():

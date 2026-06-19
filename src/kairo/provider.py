@@ -2,12 +2,14 @@
 
 #4:从「`complete(prompt)->str` 模型缝」升级为「`run(config)->artifacts` agent 缝」。
 agent 靠往 `artifact_dir` 写文件来通信;外壳(rules/engine)只编排与记账。
-backend:StubProvider(测试)/ ClaudeProvider(直连 SDK)/ ClaudeCodeProvider / CodexProvider(CLI)。
+backend:StubProvider(测试)/ ClaudeCodeProvider / CodexProvider(CLI,subscription)。
+真实 LLM 只走 subscription(claude-code),不支持直连 API。
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -74,50 +76,24 @@ class StubProvider:
         )
 
 
-class ClaudeProvider:
-    """真 Claude(claude-opus-4-8,adaptive thinking)。client 可注入便于测试。"""
-
-    name = "claude"
-
-    def __init__(self, model: str = "claude-opus-4-8", client=None) -> None:
-        self.model = model
-        self._client = client
-
-    @property
-    def client(self):
-        if self._client is None:
-            import anthropic
-
-            self._client = anthropic.Anthropic()
-        return self._client
-
-    def run(self, config: AgentConfig, signal=None) -> AgentResult:
-        config.artifact_dir.mkdir(parents=True, exist_ok=True)
-        resp = self.client.messages.create(
-            model=self.model,
-            max_tokens=16000,
-            thinking={"type": "adaptive"},
-            system=config.persona,  # §5:persona → system
-            messages=[{"role": "user", "content": config.context}],  # context → user
-        )
-        text = "".join(b.text for b in resp.content if b.type == "text")
-        (config.artifact_dir / (config.artifact or "output.md")).write_text(text)
-        return AgentResult(
-            artifacts=_scan_artifacts(config.artifact_dir), result_text=text
-        )
-
-
-def _default_cli_runner(cmd, args, *, cwd, input, timeout=None):
+def _default_cli_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
     import subprocess
 
-    subprocess.run(
-        [cmd, *args],
-        cwd=str(cwd),
-        input=input,
-        text=True,
-        timeout=timeout,
-        check=False,  # exit code 不当异常;外壳凭 artifacts 判断
-    )
+    # 回答在 stdout(claude)时重定向到文件;codex 用 --output-last-message 自写文件,无需重定向
+    out = open(stdout_file, "w") if stdout_file else None
+    try:
+        subprocess.run(
+            [cmd, *args],
+            cwd=str(cwd),
+            input=input,
+            text=True,
+            stdout=out,
+            timeout=timeout,
+            check=False,  # exit code 不当异常;外壳凭产物判断
+        )
+    finally:
+        if out:
+            out.close()
 
 
 class ClaudeCodeProvider:
@@ -133,14 +109,25 @@ class ClaudeCodeProvider:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
         (config.artifact_dir / "_prompt.md").write_text(prompt)  # 内部文件,不计 artifact
+        stdout_file = config.artifact_dir / "_claude_stdout.json"
         self._runner(
             "claude",
             ["-p", "--model", self.model, "--output-format", "json"],
             cwd=config.artifact_dir,
             input=prompt,
+            stdout_file=stdout_file,
             timeout=config.timeout_s,
         )
-        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
+        # claude -p 把回答写 stdout 的 json result(不写文件)→ 取回落到 config.artifact
+        if not stdout_file.exists():
+            raise RuntimeError(f"claude-code 无 stdout 输出:{stdout_file}")
+        result = json.loads(stdout_file.read_text()).get("result")
+        if not isinstance(result, str):
+            raise RuntimeError(f"claude-code stdout 缺 result 字段:{stdout_file}")
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(result)
+        return AgentResult(
+            artifacts=_scan_artifacts(config.artifact_dir), result_text=result
+        )
 
 
 class CodexProvider:
@@ -156,6 +143,7 @@ class CodexProvider:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
         (config.artifact_dir / "_prompt.md").write_text(prompt)
+        last_msg = config.artifact_dir / "_codex_last.txt"
         args = [
             "exec",
             "-C",
@@ -163,6 +151,8 @@ class CodexProvider:
             "--sandbox",
             "workspace-write",
             "--skip-git-repo-check",
+            "--output-last-message",
+            str(last_msg),
         ]
         if self.model.strip():
             args += ["-m", self.model]
@@ -173,24 +163,46 @@ class CodexProvider:
             input=prompt,
             timeout=config.timeout_s,
         )
-        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
+        # codex 把最终消息写到 --output-last-message 文件 → 取回落到 config.artifact
+        if not last_msg.exists():
+            raise RuntimeError(f"codex 无 last-message 输出:{last_msg}")
+        result = last_msg.read_text()
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(result)
+        return AgentResult(
+            artifacts=_scan_artifacts(config.artifact_dir), result_text=result
+        )
 
 
 _BACKENDS = {
     "stub": StubProvider,
-    "claude": ClaudeProvider,
     "claude-code": ClaudeCodeProvider,
     "codex": CodexProvider,
 }
 
 
+def _cli_available(cmd: str) -> bool:
+    """探活:`<cmd> --version` exit 0 → True;异常 / 非 0 → False。"""
+    import subprocess
+
+    try:
+        r = subprocess.run(
+            [cmd, "--version"], capture_output=True, timeout=10, check=False
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def select_provider():
-    """选 backend:KAIRO_STUB(测试隔离,最高)> KAIRO_PROVIDER(显式)> auto(有 key→Claude,否则 stub)。"""
+    """选 backend:KAIRO_STUB(测试隔离,最高)> KAIRO_PROVIDER(显式)> auto。
+
+    auto 只走 subscription:claude CLI 可用 → ClaudeCodeProvider;否则 StubProvider。
+    """
     if os.environ.get("KAIRO_STUB"):
         return StubProvider()
     explicit = os.environ.get("KAIRO_PROVIDER")
     if explicit:
         return _BACKENDS.get(explicit, StubProvider)()
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return ClaudeProvider()
+    if _cli_available("claude"):
+        return ClaudeCodeProvider()
     return StubProvider()
