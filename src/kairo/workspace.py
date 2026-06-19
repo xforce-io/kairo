@@ -13,7 +13,9 @@ import yaml
 from kairo.models import Constitution, Form, Manifest, State
 
 def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    # 保留中文/字母数字(unicode word),标点/空白 → -;全标点(空)回退内容 hash 保唯一
+    s = re.sub(r"[^\w]+", "-", text.lower()).strip("-_")
+    return s or hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
 
 
 class Workspace:
