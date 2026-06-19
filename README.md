@@ -14,4 +14,4 @@
 
 ## 技术栈
 
-Python + uv；薄 `ModelProvider`（Claude `claude-opus-4-8` / stub），无 audit、无 agent loop。
+Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub / claude / claude-code / codex），无 audit。详见 Issue [#4](https://github.com/xforce-io/kairo/issues/4)。

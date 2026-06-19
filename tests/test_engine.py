@@ -1,6 +1,26 @@
+import yaml
+
 from kairo.engine import accept, re_step, step
-from kairo.provider import StubProvider
+from kairo.models import Transform
+from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.workspace import Workspace
+
+
+class _NonDeterministicProvider:
+    """每次 run 输出都不同 —— 验证收敛锚输入指纹、不依赖输出确定性(#4 §5)。"""
+
+    name = "nondet"
+    model = "nondet"
+
+    def __init__(self):
+        self.n = 0
+
+    def run(self, config, signal=None):
+        self.n += 1
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        content = f"OUTPUT #{self.n}\n{config.context}"  # 每次内容不同
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
+        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
 
 def test_step_runs_text_chain_to_convergence(tmp_path):
@@ -158,6 +178,82 @@ def test_drift_counter_resets_on_full_recompose(tmp_path):
     re_step(ws, StubProvider(), "understanding.md")  # A:重置漂移
     ts = ws.read_state().targets["understanding.md"]
     assert len(ts.folded) - len(ts.last_major_folded) == 0
+
+
+def test_convergence_anchors_input_not_output(tmp_path):
+    """#4 §5:provider 非确定时,输入未变 → 不重跑 → 收敛。锚 input_hash,不锚 output。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    prov = _NonDeterministicProvider()
+    step(ws, prov)
+    calls_after_first = prov.n
+    u1 = (ws.root / "understanding.md").read_text()
+    progressed = step(ws, prov)  # 输入未变
+    assert progressed is False  # 收敛:不重跑
+    assert prov.n == calls_after_first  # provider 未被再调(锚输入,非输出)
+    assert (ws.root / "understanding.md").read_text() == u1  # 文档不抖动
+
+
+def test_nondeterministic_provider_still_detects_manual_edit(tmp_path):
+    """#4 §5:手改检测靠 output_hash 基线,与 provider 是否确定无关。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    prov = _NonDeterministicProvider()
+    step(ws, prov)
+    (ws.root / "understanding.md").write_text("人工改动")
+    step(ws, prov)
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.status == "blocked" and ts.reason == "manual-edit"
+    assert (ws.root / "understanding.md").read_text() == "人工改动"  # 不静默覆盖
+
+
+def test_new_text_resource_type_zero_code_change(tmp_path):
+    """#3 实证:加一种文本资源(.md→source_text)只声明 constitution、不改码,端到端跑通。"""
+    ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.roles_by_ext[".md"] = "source_text"  # 声明:.md 是正文资源
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
+    ws2 = Workspace(ws.root)
+    doc = tmp_path / "paper.md"
+    doc.write_text("白皮书要点MD")
+    ws2.add([doc])  # guess_role → source_text(声明驱动)
+    step(ws2, StubProvider())
+    # source_text 经 Digest→Compose 流到 understanding,全程零改码
+    assert "白皮书要点MD" in (ws2.root / "understanding.md").read_text()
+
+
+def test_new_audio_like_transform_zero_code_change(tmp_path, monkeypatch):
+    """#3 实证:加 video→transcript 转换,只声明 constitution(role + transform),不改码。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.roles_by_ext[".mp4"] = "video"
+    con.transforms.append(
+        Transform(
+            name="video-asr",
+            consumes=["video"],
+            produces="transcript",
+            backend="asr-stub",
+        )
+    )
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
+    ws2 = Workspace(ws.root)
+    v = tmp_path / "clip.mp4"
+    v.write_bytes(b"fake video")
+    ws2.add([v])  # role → video(声明驱动)
+    step(ws2, StubProvider())
+    rid = ws2.list_reference_ids()[0]
+    # video→transcript 转换由声明装配并跑通,经 Digest→Compose 流到 understanding
+    assert (ws2.root / f"references/{rid}/transcript.md").exists()
+    assert "STUB TRANSCRIPT" in (ws2.root / "understanding.md").read_text()
 
 
 def test_step_writes_history_snapshot(tmp_path):
