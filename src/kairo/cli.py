@@ -29,10 +29,15 @@ def add(
     files: list[Path],
     ref_id: str = typer.Option(None, "--id", help="覆盖派生 id"),
     role: str = typer.Option(None, "--role", help="覆盖按扩展名猜测的 role"),
+    corpus: bool = typer.Option(
+        False, "--corpus", help="标为基线参考资料(corpus);默认会议流(stream)"
+    ),
 ) -> None:
     """登记一条 reference 的所有形态(指针)。"""
     ws = Workspace(Path.cwd())
-    rid = ws.add(files, ref_id=ref_id, role=role)
+    rid = ws.add(
+        files, ref_id=ref_id, role=role, source_class="corpus" if corpus else None
+    )
     typer.echo(f"added {rid}")
 
 

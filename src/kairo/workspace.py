@@ -70,6 +70,7 @@ class Workspace:
         ref_id: str | None = None,
         role: str | None = None,
         title: str | None = None,
+        source_class: str | None = None,
     ) -> str:
         files = [Path(f) for f in files]
         if ref_id is None:
@@ -86,9 +87,16 @@ class Workspace:
             )
             for f in files
         ]
-        man = Manifest(id=ref_id, title=title or files[0].stem, forms=forms)
+        man = Manifest(
+            id=ref_id,
+            title=title or files[0].stem,
+            source_class=source_class or self.constitution.default_class,
+            forms=forms,
+        )
         (ref_dir / "manifest.yaml").write_text(
-            yaml.safe_dump(man.model_dump(), allow_unicode=True, sort_keys=False)
+            yaml.safe_dump(
+                man.model_dump(by_alias=True), allow_unicode=True, sort_keys=False
+            )
         )
         return ref_id
 
@@ -99,7 +107,9 @@ class Workspace:
     def write_manifest(self, ref_id: str, man: Manifest) -> None:
         path = self.references_dir() / ref_id / "manifest.yaml"
         path.write_text(
-            yaml.safe_dump(man.model_dump(), allow_unicode=True, sort_keys=False)
+            yaml.safe_dump(
+                man.model_dump(by_alias=True), allow_unicode=True, sort_keys=False
+            )
         )
 
     def list_reference_ids(self) -> list[str]:

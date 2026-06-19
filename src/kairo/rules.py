@@ -194,6 +194,32 @@ class ComposeRule:
                 out[f"references/{ref_id}/digest.md"] = _hash(d.read_text())
         return out
 
+    # ---- 源分层(#13):digest path → class ----
+
+    def _delta_classes(self, delta: dict[str, str]) -> dict[str, str]:
+        """每条 digest path 映射到其 reference 的 class(corpus/stream)。"""
+        out: dict[str, str] = {}
+        for p in delta:
+            ref_id = p.split("/")[1]  # references/<id>/digest.md
+            out[p] = self.ws.read_manifest(ref_id).source_class
+        return out
+
+    def _class_suffix(self, cls: str, mixed: bool) -> str:
+        """混合批次给来源标签加 ·标签(如 ·基线);单类不加,保持与今天一致。"""
+        if not mixed:
+            return ""
+        sc = self.ws.constitution.source_classes.get(cls)
+        return f" ·{sc.label if sc else cls}"
+
+    def _source_class_preamble(self, classes: dict[str, str]) -> str:
+        """据本批出现的 class 组装源分类前言(语义取自 constitution)。"""
+        lines = []
+        for cls in sorted(set(classes.values())):
+            sc = self.ws.constitution.source_classes.get(cls)
+            if sc:
+                lines.append(f"- {sc.label}:{sc.hint}")
+        return "\n\n[源分类](来源标签 ·X 标注其类)\n" + "\n".join(lines)
+
     def _upstream_changed(self, target, state, ts) -> bool:
         for dep in target.depends_on:
             dep_out = (
@@ -253,9 +279,16 @@ class ComposeRule:
                 for dep in target.depends_on
                 if (self.ws.root / dep).exists()
             ]
+            # 源分层(#13):每条 delta 的 class(corpus/stream)。仅当本批含 ≥2 类时
+            # 才打 ·标签 + 注入源分类前言,单类场景与今天逐字一致。
+            classes = self._delta_classes(delta)
+            mixed = len(set(classes.values())) >= 2
             digest_blocks = [
-                f"[来源:{p}]\n{(self.ws.root / p).read_text()}" for p in sorted(delta)
+                f"[来源:{p}{self._class_suffix(classes[p], mixed)}]\n"
+                f"{(self.ws.root / p).read_text()}"
+                for p in sorted(delta)
             ]
+            source_preamble = self._source_class_preamble(classes) if mixed else ""
             context = (
                 f"---当前文档---\n{current}\n\n"
                 + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
@@ -264,7 +297,10 @@ class ComposeRule:
             )
             content = _run_agent(
                 self.provider,
-                target.fold_protocol + _OUTPUT_DISCIPLINE + _COMPOSE_DISCIPLINE,
+                target.fold_protocol
+                + source_preamble
+                + _OUTPUT_DISCIPLINE
+                + _COMPOSE_DISCIPLINE,
                 context,
                 "doc.md",
             )

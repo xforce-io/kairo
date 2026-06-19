@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_DIGEST_PROMPT = "为这条 reference 写一份忠实纪要,保留要点,可溯源。"
 
@@ -70,6 +70,30 @@ def _default_transforms() -> list[Transform]:
     return [Transform(name="asr", consumes=["audio"], produces="transcript")]
 
 
+class SourceClass(BaseModel):
+    """一类源的认识论地位:显示标签 + fold 语义(由 constitution 声明,引擎不硬编码)。"""
+
+    label: str
+    hint: str = ""
+
+
+def _default_source_classes() -> dict[str, SourceClass]:
+    # stream(观测):会议/事件流;corpus(基线):权威参考资料。
+    return {
+        "stream": SourceClass(
+            label="观测",
+            hint="会议/事件流;逐条融入,判断随之演进、可推翻旧判断。",
+        ),
+        "corpus": SourceClass(
+            label="基线",
+            hint=(
+                "权威参考资料;与观测冲突时以基线为准,"
+                "用基线校正专名/术语(如 看医通→康医通),并作术语权威基线。"
+            ),
+        ),
+    }
+
+
 class Constitution(BaseModel):
     topic: str = "main"
     pipeline: Pipeline = Field(default_factory=Pipeline)
@@ -79,6 +103,10 @@ class Constitution(BaseModel):
         default_factory=lambda: ["transcript", "source_text"]
     )
     transforms: list[Transform] = Field(default_factory=_default_transforms)
+    source_classes: dict[str, SourceClass] = Field(  # 源分层语义(corpus/stream)
+        default_factory=_default_source_classes
+    )
+    default_class: str = "stream"  # add 不指定时的兜底归类
     targets: list[Target] = Field(default_factory=_default_targets)
 
 
@@ -93,8 +121,12 @@ class Form(BaseModel):
 
 
 class Manifest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     id: str
     title: str = ""
+    # 认识论归类:corpus(基线)/ stream(观测)。yaml 键为 `class`;旧 manifest 无此键 → stream。
+    source_class: str = Field(default="stream", alias="class")
     forms: list[Form] = Field(default_factory=list)
 
 
