@@ -96,7 +96,7 @@ def test_compose_discovers_target_with_unfolded_digest(tmp_path):
     _make_digest(ws, rid, "纪要内容")
     state = State()
     items = ComposeRule(ws, StubProvider()).discover(state)
-    assert [it.key for it in items] == ["understanding.md"]
+    assert [it.key for it in items] == ["understanding.md", "assessment.md"]
 
 
 def test_compose_run_folds_digest_into_understanding_with_source(tmp_path):
@@ -122,7 +122,8 @@ def test_compose_converges_after_folding(tmp_path):
     _make_digest(ws, rid, "纪要")
     state = State()
     rule = ComposeRule(ws, StubProvider())
-    rule.discover(state)[0].run(state)
-    # 融完后无未融入 Δ → 收敛
+    for item in rule.discover(state):  # 两层都融(understanding → assessment)
+        item.run(state)
+    # 融完后无未融入 Δ、上游未变 → 收敛
     assert rule.discover(state) == []
 

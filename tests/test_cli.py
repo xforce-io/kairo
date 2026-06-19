@@ -32,9 +32,11 @@ def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
     assert "STUB TRANSCRIPT" in understanding
     # 文本链:Digest→Compose
     assert "三智能体定位与落地优先级" in understanding
-    # 两条 reference 都被综合进 understanding(各一条 digest 折入)
+    # 两层文档都生成
+    assert (tmp_path / "assessment.md").is_file()
+    # understanding + assessment 各折入两条 digest → 4 处 folded
     state_targets = (tmp_path / ".kairo" / "history" / "0000" / "state.targets.json").read_text()
-    assert state_targets.count("digest.md") == 2
+    assert state_targets.count("digest.md") == 4
 
 
 def test_cli_status_lists_references(tmp_path, monkeypatch):

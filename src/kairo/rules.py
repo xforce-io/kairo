@@ -139,6 +139,18 @@ class ComposeRule:
                 out[f"references/{ref_id}/digest.md"] = _hash(d.read_text())
         return out
 
+    def _upstream_changed(self, target, state, ts) -> bool:
+        for dep in target.depends_on:
+            dep_out = (
+                state.targets[dep].output_hash
+                if (state and dep in state.targets)
+                else ""
+            )
+            recorded = ts.upstream_hash.get(dep) if ts else None
+            if recorded != dep_out:
+                return True
+        return False
+
     def discover(self, state: State | None = None) -> list[WorkItem]:
         all_digests = self._all_digests()
         items: list[WorkItem] = []
@@ -146,7 +158,7 @@ class ComposeRule:
             ts = state.targets.get(target.path) if state else None
             folded = ts.folded if ts else {}
             delta = {p: h for p, h in all_digests.items() if folded.get(p) != h}
-            if delta:
+            if delta or self._upstream_changed(target, state, ts):
                 items.append(self._make(target, delta, all_digests))
         return items
 
@@ -157,14 +169,20 @@ class ComposeRule:
         def run(state: State) -> None:
             doc_path = self.ws.root / key
             current = doc_path.read_text() if doc_path.exists() else ""
-            blocks = [
+            upstream_blocks = [
+                f"---上游 {dep}---\n{(self.ws.root / dep).read_text()}"
+                for dep in target.depends_on
+                if (self.ws.root / dep).exists()
+            ]
+            digest_blocks = [
                 f"[来源:{p}]\n{(self.ws.root / p).read_text()}" for p in sorted(delta)
             ]
             prompt = (
                 f"{target.fold_protocol}\n\n"
                 f"---当前文档---\n{current}\n\n"
-                f"---新增 digest({len(delta)} 条,批量融入)---\n"
-                + "\n\n".join(blocks)
+                + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
+                + f"---新增 digest({len(delta)} 条,批量融入)---\n"
+                + "\n\n".join(digest_blocks)
             )
             content = self.provider.complete(prompt)
             doc_path.write_text(content)
@@ -175,11 +193,17 @@ class ComposeRule:
                 "provider": self.provider.name,
                 "model": self.provider.model,
             }
+            ts.upstream_hash = {
+                dep: (state.targets[dep].output_hash if dep in state.targets else "")
+                for dep in target.depends_on
+            }
             state.targets[key] = ts
 
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)
             folded = ts.folded if ts else {}
-            return any(folded.get(p) != h for p, h in all_digests.items())
+            if any(folded.get(p) != h for p, h in all_digests.items()):
+                return True
+            return self._upstream_changed(target, state, ts)
 
         return WorkItem(key, input_hash, run, is_stale)

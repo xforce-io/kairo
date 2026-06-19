@@ -44,6 +44,48 @@ def test_step_is_idempotent_after_convergence(tmp_path):
     assert u1 == u2  # 不抖动
 
 
+def test_step_produces_both_layers_with_upstream_flow(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("会议要点ZZZ")
+    ws.add([t])
+    step(ws, StubProvider())
+    assert (ws.root / "understanding.md").exists()
+    assert (ws.root / "assessment.md").exists()
+    # assessment 输入含当前 understanding(上游流入)
+    assert "understanding.md" in (ws.root / "assessment.md").read_text()
+    # 级联记账:assessment 记了 upstream_hash
+    ts = ws.read_state().targets["assessment.md"]
+    assert "understanding.md" in ts.upstream_hash
+
+
+def test_assessment_cascades_when_understanding_changes(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("初始材料")
+    ws.add([t])
+    step(ws, StubProvider())
+    up1 = ws.read_state().targets["assessment.md"].upstream_hash["understanding.md"]
+    # 加新 reference → understanding 变 → assessment 上游变,级联重综合
+    t2 = tmp_path / "n.txt"
+    t2.write_text("新增材料")
+    ws.add([t2])
+    step(ws, StubProvider())
+    up2 = ws.read_state().targets["assessment.md"].upstream_hash["understanding.md"]
+    assert up2 != up1
+
+
+def test_two_layer_step_is_idempotent(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    step(ws, StubProvider())
+    a1 = (ws.root / "assessment.md").read_text()
+    assert step(ws, StubProvider()) is False  # 两层都收敛
+    assert (ws.root / "assessment.md").read_text() == a1
+
+
 def test_step_writes_history_snapshot(tmp_path):
     ws = Workspace.init(tmp_path)
     t = tmp_path / "m.txt"
