@@ -15,7 +15,11 @@ MAX_ITER = 100
 def step(ws, provider) -> bool:
     """跑调和循环到收敛。返回是否有推进。"""
     state = ws.read_state()
-    rules = [AsrRule(ws), DigestRule(ws, provider), ComposeRule(ws, provider)]
+    transform_rules = [
+        AsrRule(ws, t.consumes, t.produces, t.backend)
+        for t in ws.constitution.transforms
+    ]
+    rules = [*transform_rules, DigestRule(ws, provider), ComposeRule(ws, provider)]
     any_progress = False
     for _ in range(MAX_ITER):
         progressed = False

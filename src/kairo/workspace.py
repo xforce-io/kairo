@@ -12,17 +12,6 @@ import yaml
 
 from kairo.models import Constitution, Form, Manifest, State
 
-AUDIO_EXTS = {".m4a", ".wav", ".mp3", ".aac", ".flac", ".ogg"}
-
-
-def guess_role(path: Path) -> str:
-    """按扩展名猜 role;此后以 manifest 为准(可 --role 覆盖)。"""
-    if path.suffix.lower() in AUDIO_EXTS:
-        return "audio"
-    # M0:其余文本默认当转写稿正文;资料 source_text 用 --role 覆盖。
-    return "transcript"
-
-
 def _slug(text: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
 
@@ -67,6 +56,12 @@ class Workspace:
     def references_dir(self) -> Path:
         return self.root / "references"
 
+    def guess_role(self, path: Path) -> str:
+        """按扩展名猜 role(读 constitution.roles_by_ext);此后以 manifest 为准(可 --role 覆盖)。"""
+        return self.constitution.roles_by_ext.get(
+            path.suffix.lower(), self.constitution.default_role
+        )
+
     def add(
         self,
         files: list[Path | str],
@@ -82,7 +77,7 @@ class Workspace:
         ref_dir.mkdir(parents=True, exist_ok=True)
         forms = [
             Form(
-                role=role or guess_role(f),
+                role=role or self.guess_role(f),
                 location=str(f),
                 hash=hashlib.sha256(f.read_bytes()).hexdigest()[:12],
                 origin="added",

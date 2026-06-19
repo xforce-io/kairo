@@ -50,9 +50,35 @@ def _default_targets() -> list[Target]:
     ]
 
 
+_AUDIO_EXTS = (".m4a", ".wav", ".mp3", ".aac", ".flac", ".ogg")
+
+
+def _default_roles_by_ext() -> dict[str, str]:
+    return {e: "audio" for e in _AUDIO_EXTS}
+
+
+class Transform(BaseModel):
+    """声明一条资源转换:consumes role(s) → produces role,由 backend 执行。"""
+
+    name: str
+    consumes: list[str]
+    produces: str
+    backend: str = "asr-stub"
+
+
+def _default_transforms() -> list[Transform]:
+    return [Transform(name="asr", consumes=["audio"], produces="transcript")]
+
+
 class Constitution(BaseModel):
     topic: str = "main"
     pipeline: Pipeline = Field(default_factory=Pipeline)
+    roles_by_ext: dict[str, str] = Field(default_factory=_default_roles_by_ext)
+    default_role: str = "transcript"  # 无匹配扩展名时兜底
+    body_roles: list[str] = Field(  # DigestRule 取正文的 role(优先序)
+        default_factory=lambda: ["transcript", "source_text"]
+    )
+    transforms: list[Transform] = Field(default_factory=_default_transforms)
     targets: list[Target] = Field(default_factory=_default_targets)
 
 

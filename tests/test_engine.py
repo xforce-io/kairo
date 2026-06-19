@@ -1,4 +1,7 @@
+import yaml
+
 from kairo.engine import accept, re_step, step
+from kairo.models import Transform
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.workspace import Workspace
 
@@ -206,6 +209,51 @@ def test_nondeterministic_provider_still_detects_manual_edit(tmp_path):
     ts = ws.read_state().targets["understanding.md"]
     assert ts.status == "blocked" and ts.reason == "manual-edit"
     assert (ws.root / "understanding.md").read_text() == "人工改动"  # 不静默覆盖
+
+
+def test_new_text_resource_type_zero_code_change(tmp_path):
+    """#3 实证:加一种文本资源(.md→source_text)只声明 constitution、不改码,端到端跑通。"""
+    ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.roles_by_ext[".md"] = "source_text"  # 声明:.md 是正文资源
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
+    ws2 = Workspace(ws.root)
+    doc = tmp_path / "paper.md"
+    doc.write_text("白皮书要点MD")
+    ws2.add([doc])  # guess_role → source_text(声明驱动)
+    step(ws2, StubProvider())
+    # source_text 经 Digest→Compose 流到 understanding,全程零改码
+    assert "白皮书要点MD" in (ws2.root / "understanding.md").read_text()
+
+
+def test_new_audio_like_transform_zero_code_change(tmp_path, monkeypatch):
+    """#3 实证:加 video→transcript 转换,只声明 constitution(role + transform),不改码。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.roles_by_ext[".mp4"] = "video"
+    con.transforms.append(
+        Transform(
+            name="video-asr",
+            consumes=["video"],
+            produces="transcript",
+            backend="asr-stub",
+        )
+    )
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
+    ws2 = Workspace(ws.root)
+    v = tmp_path / "clip.mp4"
+    v.write_bytes(b"fake video")
+    ws2.add([v])  # role → video(声明驱动)
+    step(ws2, StubProvider())
+    rid = ws2.list_reference_ids()[0]
+    # video→transcript 转换由声明装配并跑通,经 Digest→Compose 流到 understanding
+    assert (ws2.root / f"references/{rid}/transcript.md").exists()
+    assert "STUB TRANSCRIPT" in (ws2.root / "understanding.md").read_text()
 
 
 def test_step_writes_history_snapshot(tmp_path):

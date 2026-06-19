@@ -1,7 +1,15 @@
+import yaml
+
 from kairo.models import State
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import AsrRule, ComposeRule, DigestRule
 from kairo.workspace import Workspace
+
+
+def _save_constitution(ws, con):
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
 
 
 class _RunOnlyProvider:
@@ -58,6 +66,21 @@ def test_asr_run_produces_marked_stub_transcript_and_appends_form(tmp_path, monk
     assert "transcript" in roles
     # products 记账
     assert f"references/{rid}/transcript.md" in state.products
+
+
+def test_asr_rule_parametrized_consumes_produces(tmp_path, monkeypatch):
+    """#3:AsrRule 的 consumes/produces 可参数化(声明驱动,复用 stub/no-asr 占位逻辑)。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path)
+    v = tmp_path / "clip.mp4"
+    v.write_bytes(b"fake video")
+    rid = ws.add([v], role="video")
+    state = State()
+    rule = AsrRule(ws, consumes=["video"], produces="transcript", backend="asr-stub")
+    assert [it.key for it in rule.discover()] == [f"references/{rid}/transcript.md"]
+    rule.discover()[0].run(state)
+    assert (ws.root / f"references/{rid}/transcript.md").exists()
+    assert "transcript" in [f.role for f in ws.read_manifest(rid).forms]
 
 
 def test_asr_skips_when_transcript_already_present(tmp_path):
@@ -183,6 +206,20 @@ def test_digest_uses_agent_run_interface(tmp_path):
     DigestRule(ws, prov).discover()[0].run(state)
     assert prov.calls, "DigestRule 应通过 run() 调用 provider"
     assert "正文DELTA" in (ws.root / f"references/{rid}/digest.md").read_text()
+
+
+def test_digest_body_roles_data_driven(tmp_path):
+    """#3:DigestRule 正文来源由 constitution.body_roles 声明,可加新 role 不改码。"""
+    ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.body_roles = ["memo"]  # 只认 memo role 作正文
+    _save_constitution(ws, con)
+    ws2 = Workspace(ws.root)
+    src = tmp_path / "x.txt"
+    src.write_text("备忘正文MEMO")
+    rid = ws2.add([src], role="memo")
+    items = DigestRule(ws2, StubProvider()).discover()
+    assert [it.key for it in items] == [f"references/{rid}/digest.md"]
 
 
 def test_compose_uses_agent_run_interface(tmp_path):

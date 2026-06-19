@@ -45,59 +45,68 @@ class WorkItem:
 
 
 class AsrRule:
-    """有 audio form 且无 transcript form → 产标记占位 transcript(M0 恒 stub)。"""
+    """声明驱动的资源转换:有 consumes role、无 produces role → 用 backend 产 produces。
 
-    def __init__(self, ws) -> None:
+    MVP backend=asr-stub:KAIRO_STUB 下产占位 produces;真实模式 blocked: no-asr;
+    源丢失 blocked: missing-source。consumes/produces 参数化 → 加 audio-like 资源只声明。
+    """
+
+    def __init__(
+        self, ws, consumes=("audio",), produces="transcript", backend="asr-stub"
+    ) -> None:
         self.ws = ws
+        self.consumes = list(consumes)
+        self.produces = produces
+        self.backend = backend
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
         for ref_id in self.ws.list_reference_ids():
             roles = {f.role for f in self.ws.read_manifest(ref_id).forms}
-            if "audio" in roles and "transcript" not in roles:
+            if any(c in roles for c in self.consumes) and self.produces not in roles:
                 items.append(self._make(ref_id))
         return items
 
     def _make(self, ref_id: str) -> WorkItem:
         man = self.ws.read_manifest(ref_id)
-        audio = next(f for f in man.forms if f.role == "audio")
-        key = f"references/{ref_id}/transcript.md"
-        input_hash = audio.hash
+        src = next(f for f in man.forms if f.role in self.consumes)
+        key = f"references/{ref_id}/{self.produces}.md"
+        input_hash = src.hash
 
         def run(state: State) -> None:
-            loc = Path(audio.location)
-            audio_path = loc if loc.is_absolute() else self.ws.root / loc
-            if not audio_path.exists():
+            loc = Path(src.location)
+            src_path = loc if loc.is_absolute() else self.ws.root / loc
+            if not src_path.exists():
                 # 源不可达且需重派生(D-source)
                 state.products[key] = ProductState(
                     input_hash=input_hash, status="blocked", reason="missing-source"
                 )
                 return
             if not os.environ.get("KAIRO_STUB"):
-                # 真实模式无 ASR 后端(P4 接入);不在假转写上跑 Digest
+                # 真实模式无转换后端(P4 接入);不在假产物上往下跑
                 state.products[key] = ProductState(
                     input_hash=input_hash, status="blocked", reason="no-asr"
                 )
                 return
             content = (
-                "⚠️ STUB TRANSCRIPT\n"
-                f"(audio: {audio.location}, hash: {audio.hash})\n"
-                "[stub 占位:无真实 ASR 后端]\n"
+                f"⚠️ STUB {self.produces.upper()}\n"
+                f"(source: {src.location}, hash: {src.hash})\n"
+                f"[stub 占位:无真实 {self.backend} 后端]\n"
             )
             (self.ws.root / key).write_text(content)
             m = self.ws.read_manifest(ref_id)
             m.forms.append(
                 Form(
-                    role="transcript",
+                    role=self.produces,
                     location=key,
                     hash=_hash(content),
-                    origin=f"asr-from:{audio.hash}",
+                    origin=f"{self.backend}-from:{src.hash}",
                 )
             )
             self.ws.write_manifest(ref_id, m)
             state.products[key] = ProductState(
                 input_hash=input_hash,
-                produced_by={"provider": "asr-stub", "model": "stub"},
+                produced_by={"provider": self.backend, "model": "stub"},
             )
 
         def is_stale(state: State) -> bool:
@@ -116,7 +125,7 @@ class DigestRule:
         self.prompt = ws.constitution.pipeline.digest.prompt
 
     def _read_body(self, man) -> str | None:
-        for role in ("transcript", "source_text"):
+        for role in self.ws.constitution.body_roles:
             for f in man.forms:
                 if f.role == role:
                     loc = Path(f.location)
