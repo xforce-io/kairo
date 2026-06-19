@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 from kairo.engine import step as engine_step
-from kairo.provider import StubProvider
+from kairo.provider import select_provider
 from kairo.workspace import Workspace
 
 app = typer.Typer(help="step 驱动的增量知识构建引擎")
@@ -34,9 +34,9 @@ def add(
 
 @app.command()
 def step() -> None:
-    """跑调和循环到收敛(M0 恒 stub provider)。"""
+    """跑调和循环到收敛(provider 自动选:有 key→Claude,否则 stub;KAIRO_STUB 强制 stub)。"""
     ws = Workspace(Path.cwd())
-    progressed = engine_step(ws, StubProvider())
+    progressed = engine_step(ws, select_provider())
     typer.echo("stepped" if progressed else "no change")
 
 

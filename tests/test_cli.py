@@ -15,6 +15,7 @@ def test_cli_init_creates_workspace(tmp_path, monkeypatch):
 
 def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")  # 强制 stub,端到端不触真 API
     runner.invoke(app, ["init"])
     audio = tmp_path / "rec.m4a"
     audio.write_bytes(b"fake audio")
