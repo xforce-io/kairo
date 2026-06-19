@@ -1,0 +1,25 @@
+[project]
+name = "kairo"
+version = "0.0.1"
+description = "step 驱动的增量知识构建引擎 —— 丢一个 reference，step 一下，知识往前长一格"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "typer>=0.12",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "anthropic>=0.40",
+]
+
+[project.scripts]
+kairo = "kairo.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kairo"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
