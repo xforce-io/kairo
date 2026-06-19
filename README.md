@@ -10,7 +10,7 @@
 
 ## 状态
 
-设计阶段。MVP 设计稿是 **single source of truth**：[docs/design/kairo-mvp.md](docs/design/kairo-mvp.md)。
+设计阶段。MVP 设计稿是 **single source of truth**：[docs/design/1-kairo-mvp.md](docs/design/1-kairo-mvp.md)（Issue [#1](https://github.com/xforce-io/kairo/issues/1)）。
 
 ## 技术栈
 

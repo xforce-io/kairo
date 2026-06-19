@@ -3,7 +3,7 @@
 > 状态:**MVP 设计基本收敛**。2026-06-19 一轮 review 敲定:Compose 常态(B 批量 Δ)、漂移/抖动治理、指纹拆 model、target 间依赖、手改处理、版本/rollback、MVP 四段切分。详见 §2 决策表(★ = 本轮新增/修订)。剩余小项见 §13。
 > 来源:[../brainstorm/2026-06-18-kairo-concept.md](../brainstorm/2026-06-18-kairo-concept.md)(发散稿)+ 后续 review;并以 `~/lab/tiansu/toc/` 的 `understanding.md` / `assessment.md`(三场会议增量综合而成)为真实参照。
 > 范围:**一个 workspace = 一个 topic**,MVP 跑通它。多 topic = 多 workspace(P2)。分层归并 / 异构 loader 见分期。
-> (尚无 issue 号;有了之后本文件按约定改名为 `docs/design/{issue-no}-kairo-mvp.md`。)
+> Issue:[#1](https://github.com/xforce-io/kairo/issues/1)。本文件是 **single source of truth**;issue 只放一行摘要 + 指回本文件的链接。
 
 ---
 
