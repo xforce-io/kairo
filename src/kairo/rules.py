@@ -8,15 +8,32 @@ from __future__ import annotations
 
 import hashlib
 import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from kairo.models import Form, ProductState, State, TargetState
+from kairo.provider import AgentConfig
 
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _run_agent(provider, persona: str, context: str, artifact: str) -> str:
+    """跑 agent,从隔离 artifact_dir 取回产物内容。sandbox:artifact-only。"""
+    with tempfile.TemporaryDirectory() as d:
+        provider.run(
+            AgentConfig(
+                persona=persona,
+                context=context,
+                artifact_dir=Path(d),
+                model=provider.model,
+                artifact=artifact,
+            )
+        )
+        return (Path(d) / artifact).read_text()
 
 
 @dataclass
@@ -118,11 +135,10 @@ class DigestRule:
         return items
 
     def _make(self, key: str, body: str) -> WorkItem:
-        full_prompt = f"{self.prompt}\n\n---正文---\n{body}"
-        input_hash = _hash(full_prompt)
+        input_hash = _hash(f"{self.prompt}\n\n---正文---\n{body}")
 
         def run(state: State) -> None:
-            content = self.provider.complete(full_prompt)
+            content = _run_agent(self.provider, self.prompt, body, "digest.md")
             (self.ws.root / key).write_text(content)
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -216,14 +232,13 @@ class ComposeRule:
             digest_blocks = [
                 f"[来源:{p}]\n{(self.ws.root / p).read_text()}" for p in sorted(delta)
             ]
-            prompt = (
-                f"{target.fold_protocol}\n\n"
+            context = (
                 f"---当前文档---\n{current}\n\n"
                 + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
                 + f"---新增 digest({len(delta)} 条,批量融入)---\n"
                 + "\n\n".join(digest_blocks)
             )
-            content = self.provider.complete(prompt)
+            content = _run_agent(self.provider, target.fold_protocol, context, "doc.md")
             doc_path.write_text(content)
             ts = state.targets.get(key) or TargetState(depends_on=list(target.depends_on))
             ts.folded = dict(all_digests)

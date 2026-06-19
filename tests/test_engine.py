@@ -1,6 +1,23 @@
 from kairo.engine import accept, re_step, step
-from kairo.provider import StubProvider
+from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.workspace import Workspace
+
+
+class _NonDeterministicProvider:
+    """每次 run 输出都不同 —— 验证收敛锚输入指纹、不依赖输出确定性(#4 §5)。"""
+
+    name = "nondet"
+    model = "nondet"
+
+    def __init__(self):
+        self.n = 0
+
+    def run(self, config, signal=None):
+        self.n += 1
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        content = f"OUTPUT #{self.n}\n{config.context}"  # 每次内容不同
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
+        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
 
 def test_step_runs_text_chain_to_convergence(tmp_path):
@@ -158,6 +175,37 @@ def test_drift_counter_resets_on_full_recompose(tmp_path):
     re_step(ws, StubProvider(), "understanding.md")  # A:重置漂移
     ts = ws.read_state().targets["understanding.md"]
     assert len(ts.folded) - len(ts.last_major_folded) == 0
+
+
+def test_convergence_anchors_input_not_output(tmp_path):
+    """#4 §5:provider 非确定时,输入未变 → 不重跑 → 收敛。锚 input_hash,不锚 output。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    prov = _NonDeterministicProvider()
+    step(ws, prov)
+    calls_after_first = prov.n
+    u1 = (ws.root / "understanding.md").read_text()
+    progressed = step(ws, prov)  # 输入未变
+    assert progressed is False  # 收敛:不重跑
+    assert prov.n == calls_after_first  # provider 未被再调(锚输入,非输出)
+    assert (ws.root / "understanding.md").read_text() == u1  # 文档不抖动
+
+
+def test_nondeterministic_provider_still_detects_manual_edit(tmp_path):
+    """#4 §5:手改检测靠 output_hash 基线,与 provider 是否确定无关。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    prov = _NonDeterministicProvider()
+    step(ws, prov)
+    (ws.root / "understanding.md").write_text("人工改动")
+    step(ws, prov)
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.status == "blocked" and ts.reason == "manual-edit"
+    assert (ws.root / "understanding.md").read_text() == "人工改动"  # 不静默覆盖
 
 
 def test_step_writes_history_snapshot(tmp_path):

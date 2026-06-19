@@ -1,7 +1,24 @@
 from kairo.models import State
-from kairo.provider import StubProvider
+from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import AsrRule, ComposeRule, DigestRule
 from kairo.workspace import Workspace
+
+
+class _RunOnlyProvider:
+    """只实现 run、不实现 complete —— 锁定 rules 走 agent 接口(#4)。"""
+
+    name = "runonly"
+    model = "runonly"
+
+    def __init__(self):
+        self.calls = []
+
+    def run(self, config, signal=None):
+        self.calls.append(config)
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        content = f"RUN-ONLY\n\n{config.context}"  # echo context 供溯源断言
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
+        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
 
 def _make_digest(ws, ref_id, content):
@@ -151,4 +168,32 @@ def test_compose_converges_after_folding(tmp_path):
         item.run(state)
     # 融完后无未融入 Δ、上游未变 → 收敛
     assert rule.discover(state) == []
+
+
+# ---- rules 走 agent run 接口(#4),不再依赖 complete ----
+
+
+def test_digest_uses_agent_run_interface(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("正文DELTA")
+    rid = ws.add([t])
+    prov = _RunOnlyProvider()
+    state = State()
+    DigestRule(ws, prov).discover()[0].run(state)
+    assert prov.calls, "DigestRule 应通过 run() 调用 provider"
+    assert "正文DELTA" in (ws.root / f"references/{rid}/digest.md").read_text()
+
+
+def test_compose_uses_agent_run_interface(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    _make_digest(ws, rid, "纪要QQQ")
+    prov = _RunOnlyProvider()
+    state = State()
+    ComposeRule(ws, prov).discover(state)[0].run(state)
+    assert prov.calls, "ComposeRule 应通过 run() 调用 provider"
+    assert "纪要QQQ" in (ws.root / "understanding.md").read_text()
 

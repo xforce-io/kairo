@@ -1,23 +1,11 @@
-from kairo.provider import ClaudeProvider, StubProvider, select_provider
-
-
-def test_stub_complete_is_deterministic_and_marked():
-    p = StubProvider()
-    out1 = p.complete("分析这段文字:你好")
-    out2 = p.complete("分析这段文字:你好")
-    assert out1 == out2  # 同输入 → 同输出(确定性)
-    assert "STUB" in out1  # 显式标记,不被当真
-
-
-def test_stub_complete_varies_with_prompt():
-    p = StubProvider()
-    assert p.complete("AAA") != p.complete("BBB")  # 不同输入 → 不同输出
-
-
-def test_stub_provider_identity_for_provenance():
-    p = StubProvider()
-    assert p.name == "stub"
-    assert p.model == "stub"
+from kairo.provider import (
+    AgentConfig,
+    ClaudeCodeProvider,
+    ClaudeProvider,
+    CodexProvider,
+    StubProvider,
+    select_provider,
+)
 
 
 # ---- ClaudeProvider(注入式 client,不触真 API)----
@@ -49,14 +37,25 @@ class _FakeClient:
         self.messages = _Messages(resp)
 
 
-def test_claude_provider_calls_sdk_and_extracts_only_text():
+def test_claude_provider_run_splits_system_user_and_extracts_text(tmp_path):
     fake = _FakeClient(_Resp([_Block("thinking", ""), _Block("text", "忠实纪要")]))
     p = ClaudeProvider(client=fake)
-    out = p.complete("为这条 reference 写纪要")
-    assert out == "忠实纪要"  # 只取 text block,丢 thinking
+    res = p.run(
+        AgentConfig(
+            persona="你是纪要员",
+            context="正文内容",
+            artifact_dir=tmp_path,
+            model="claude-opus-4-8",
+            artifact="digest.md",
+        )
+    )
+    out = tmp_path / "digest.md"
+    assert out.read_text() == "忠实纪要"  # 只取 text block,丢 thinking
+    assert out in res.artifacts
     call = fake.messages.calls[0]
+    assert call["system"] == "你是纪要员"  # persona → system(§5 分离)
+    assert call["messages"] == [{"role": "user", "content": "正文内容"}]  # context → user
     assert call["model"] == "claude-opus-4-8"
-    assert call["messages"] == [{"role": "user", "content": "为这条 reference 写纪要"}]
 
 
 def test_claude_provider_identity_for_provenance():
@@ -82,4 +81,23 @@ def test_select_provider_uses_claude_with_key(monkeypatch):
 def test_select_provider_forced_stub_overrides_key(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     monkeypatch.setenv("KAIRO_STUB", "1")
+    assert isinstance(select_provider(), StubProvider)
+
+
+def test_select_provider_explicit_claude_code(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "claude-code")
+    assert isinstance(select_provider(), ClaudeCodeProvider)
+
+
+def test_select_provider_explicit_codex(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "codex")
+    assert isinstance(select_provider(), CodexProvider)
+
+
+def test_select_provider_kairo_stub_overrides_explicit_provider(monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    monkeypatch.setenv("KAIRO_PROVIDER", "codex")
+    # KAIRO_STUB 最高优先(测试隔离保证,永不真跑 agent)
     assert isinstance(select_provider(), StubProvider)
