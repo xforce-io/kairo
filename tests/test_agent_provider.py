@@ -4,7 +4,10 @@ StubProvider 是确定性 Fake:守可测性 —— 把输入 echo 进产物 + ST
 让 rules/engine 的「正文流过产物」「收敛幂等」断言在新接口下继续成立。
 """
 
+import json
 from pathlib import Path
+
+import pytest
 
 from kairo.provider import (
     AgentConfig,
@@ -75,13 +78,13 @@ def test_stub_provider_identity_for_provenance():
 # ---- ClaudeCodeProvider(driving `claude -p`,注入 runner 不真跑 CLI)----
 
 
-def test_claude_code_provider_invokes_cli_and_collects_artifacts(tmp_path):
+def test_claude_code_provider_invokes_cli_and_reads_stdout_result(tmp_path):
     calls = []
 
-    def fake_runner(cmd, args, *, cwd, input, timeout=None):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
         calls.append((cmd, args, input))
-        # 模拟 agent 在 cwd 写产物
-        (Path(cwd) / "digest.md").write_text(f"AGENT OUTPUT\n{input}")
+        # claude -p 把回答写 stdout(json);runner 重定向到 stdout_file
+        Path(stdout_file).write_text(json.dumps({"result": "AGENT 纪要"}))
 
     p = ClaudeCodeProvider(model="opus", runner=fake_runner)
     res = p.run(
@@ -99,9 +102,11 @@ def test_claude_code_provider_invokes_cli_and_collects_artifacts(tmp_path):
     assert "你是X" in sent and "材料Y" in sent  # persona + context 进 prompt
     out = tmp_path / "digest.md"
     assert out in res.artifacts
-    assert "AGENT OUTPUT" in out.read_text()
-    # 内部 _prompt.md 不计入 artifacts
-    assert all(Path(a).name != "_prompt.md" for a in res.artifacts)
+    assert "AGENT 纪要" in out.read_text()  # stdout result → artifact
+    assert res.result_text and "AGENT 纪要" in res.result_text
+    # 内部文件不计入 artifacts
+    names = {Path(a).name for a in res.artifacts}
+    assert "_prompt.md" not in names and "_claude_stdout.json" not in names
 
 
 def test_claude_code_provider_identity():
@@ -113,12 +118,14 @@ def test_claude_code_provider_identity():
 # ---- CodexProvider(driving `codex exec`,注入 runner)----
 
 
-def test_codex_provider_invokes_cli_and_collects_artifacts(tmp_path):
+def test_codex_provider_invokes_cli_and_reads_last_message(tmp_path):
     calls = []
 
-    def fake_runner(cmd, args, *, cwd, input, timeout=None):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         calls.append((cmd, args, input))
-        (Path(cwd) / "out.md").write_text(f"CODEX OUTPUT\n{input}")
+        # codex 把最终消息写到 --output-last-message 指定的文件
+        idx = args.index("--output-last-message")
+        Path(args[idx + 1]).write_text("CODEX 纪要")
 
     p = CodexProvider(model="gpt-5", runner=fake_runner)
     res = p.run(
@@ -133,10 +140,66 @@ def test_codex_provider_invokes_cli_and_collects_artifacts(tmp_path):
     cmd, args, sent = calls[0]
     assert cmd == "codex"
     assert "exec" in args
+    assert "--output-last-message" in args
     assert "-m" in args and "gpt-5" in args  # 模型透传
     assert "角色A" in sent and "任务B" in sent
-    assert (tmp_path / "out.md") in res.artifacts
+    out = tmp_path / "out.md"
+    assert out in res.artifacts
+    assert "CODEX 纪要" in out.read_text()
+    assert res.result_text and "CODEX 纪要" in res.result_text
 
 
 def test_codex_provider_identity():
     assert CodexProvider().name == "codex"
+
+
+# ---- #8:错误响应须抛错,不写坏产物、不记账 ----
+
+
+def test_claude_code_provider_raises_on_error_response(tmp_path):
+    """claude -p 报错(is_error=true,result 含错误文本)→ 抛错,不写产物。"""
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
+        # 连接中断时 claude -p 把错误塞进 result 且 is_error=true
+        Path(stdout_file).write_text(
+            json.dumps(
+                {
+                    "is_error": True,
+                    "subtype": "error_during_execution",
+                    "result": "API Error: Connection closed mid-response.",
+                }
+            )
+        )
+
+    p = ClaudeCodeProvider(model="opus", runner=fake_runner)
+    with pytest.raises(RuntimeError):
+        p.run(
+            AgentConfig(
+                persona="X",
+                context="Y",
+                artifact_dir=tmp_path,
+                model="opus",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()  # 不写坏产物
+
+
+def test_codex_provider_raises_when_no_last_message(tmp_path):
+    """codex 失败(未产出 last-message)→ 抛错,不写产物。"""
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        pass  # 模拟 codex 失败,不写 last-message
+
+    p = CodexProvider(model="gpt-5", runner=fake_runner)
+    with pytest.raises(RuntimeError):
+        p.run(
+            AgentConfig(
+                persona="X",
+                context="Y",
+                artifact_dir=tmp_path,
+                model="gpt-5",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()
