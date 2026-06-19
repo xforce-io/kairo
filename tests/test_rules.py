@@ -234,3 +234,35 @@ def test_compose_uses_agent_run_interface(tmp_path):
     assert prov.calls, "ComposeRule 应通过 run() 调用 provider"
     assert "纪要QQQ" in (ws.root / "understanding.md").read_text()
 
+
+# ---- #10:输出纪律(P1 无旁白 / P2 不内联 / P4 来源是标签 / P6 可疑专名）----
+
+
+def test_compose_persona_carries_output_discipline(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    _make_digest(ws, rid, "纪要")
+    prov = _RunOnlyProvider()
+    state = State()
+    ComposeRule(ws, prov).discover(state)[0].run(state)
+    persona = prov.calls[0].persona
+    assert "只输出文档正文" in persona  # P1 无旁白/提议
+    assert "只产出当前这一个文档" in persona  # P2 不内联其它文档
+    assert "溯源标签" in persona  # P4 来源是标签非文件
+    assert "待核" in persona  # P6 可疑专名标 ⚠️
+
+
+def test_digest_persona_carries_output_discipline(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("正文")
+    ws.add([t])
+    prov = _RunOnlyProvider()
+    state = State()
+    DigestRule(ws, prov).discover()[0].run(state)
+    persona = prov.calls[0].persona
+    assert "只输出文档正文" in persona  # P1
+    assert "待核" in persona  # P6
+
