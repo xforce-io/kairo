@@ -1,3 +1,5 @@
+import json
+
 from typer.testing import CliRunner
 
 from kairo.cli import app
@@ -34,9 +36,12 @@ def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
     assert "三智能体定位与落地优先级" in understanding
     # 两层文档都生成
     assert (tmp_path / "assessment.md").is_file()
-    # understanding + assessment 各折入两条 digest → 4 处 folded
-    state_targets = (tmp_path / ".kairo" / "history" / "0000" / "state.targets.json").read_text()
-    assert state_targets.count("digest.md") == 4
+    # understanding + assessment 各折入两条 digest
+    targets = json.loads(
+        (tmp_path / ".kairo" / "history" / "0000" / "state.targets.json").read_text()
+    )
+    assert len(targets["understanding.md"]["folded"]) == 2
+    assert len(targets["assessment.md"]["folded"]) == 2
 
 
 def test_cli_re_step_discards_manual_edit(tmp_path, monkeypatch):
@@ -52,6 +57,33 @@ def test_cli_re_step_discards_manual_edit(tmp_path, monkeypatch):
     result = runner.invoke(app, ["re-step", "understanding.md"])
     assert result.exit_code == 0
     assert (tmp_path / "understanding.md").read_text() == canonical
+
+
+def test_cli_history_and_diff(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    runner.invoke(app, ["add", str(t)])
+    runner.invoke(app, ["step"])
+    h = runner.invoke(app, ["history"])
+    assert h.exit_code == 0 and "0000" in h.stdout
+    (tmp_path / "understanding.md").write_text("手改")
+    d = runner.invoke(app, ["diff"])
+    assert d.exit_code == 0 and "understanding.md" in d.stdout
+
+
+def test_cli_status_shows_drift_counter(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    runner.invoke(app, ["add", str(t)])
+    runner.invoke(app, ["step"])
+    s = runner.invoke(app, ["status"])
+    assert s.exit_code == 0 and "距上次 A" in s.stdout
 
 
 def test_cli_status_lists_references(tmp_path, monkeypatch):

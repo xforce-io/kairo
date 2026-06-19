@@ -18,7 +18,8 @@ def test_step_runs_text_chain_to_convergence(tmp_path):
     assert "understanding.md" in state.targets
 
 
-def test_step_audio_chain_asr_digest_compose_in_one_step(tmp_path):
+def test_step_audio_chain_asr_digest_compose_in_one_step(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")  # stub ASR 才走通音频链
     ws = Workspace.init(tmp_path)
     a = tmp_path / "rec.m4a"
     a.write_bytes(b"audio")
@@ -138,6 +139,25 @@ def test_accept_pins_edit_as_new_baseline_and_unblocks(tmp_path):
     assert ws.read_state().targets["understanding.md"].status == "ok"
     step(ws, StubProvider())  # 不再 blocked
     assert (ws.root / "understanding.md").read_text() == "人工修正"  # 手改成新基线
+
+
+def test_drift_counter_resets_on_full_recompose(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("初始")
+    ws.add([t])
+    step(ws, StubProvider())  # A:刷新漂移基线
+    ts = ws.read_state().targets["understanding.md"]
+    assert len(ts.folded) - len(ts.last_major_folded) == 0
+    t2 = tmp_path / "n.txt"
+    t2.write_text("新增")
+    ws.add([t2])
+    step(ws, StubProvider())  # B:增量,漂移 +1
+    ts = ws.read_state().targets["understanding.md"]
+    assert len(ts.folded) - len(ts.last_major_folded) == 1
+    re_step(ws, StubProvider(), "understanding.md")  # A:重置漂移
+    ts = ws.read_state().targets["understanding.md"]
+    assert len(ts.folded) - len(ts.last_major_folded) == 0
 
 
 def test_step_writes_history_snapshot(tmp_path):

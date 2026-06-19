@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -47,6 +48,20 @@ class AsrRule:
         input_hash = audio.hash
 
         def run(state: State) -> None:
+            loc = Path(audio.location)
+            audio_path = loc if loc.is_absolute() else self.ws.root / loc
+            if not audio_path.exists():
+                # 源不可达且需重派生(D-source)
+                state.products[key] = ProductState(
+                    input_hash=input_hash, status="blocked", reason="missing-source"
+                )
+                return
+            if not os.environ.get("KAIRO_STUB"):
+                # 真实模式无 ASR 后端(P4 接入);不在假转写上跑 Digest
+                state.products[key] = ProductState(
+                    input_hash=input_hash, status="blocked", reason="no-asr"
+                )
+                return
             content = (
                 "⚠️ STUB TRANSCRIPT\n"
                 f"(audio: {audio.location}, hash: {audio.hash})\n"
@@ -223,6 +238,8 @@ class ComposeRule:
             }
             ts.status = "ok"
             ts.reason = None
+            if ts0 is None:  # 全量重综合(A)→ 刷新漂移基线
+                ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts
 
         def is_stale(state: State) -> bool:

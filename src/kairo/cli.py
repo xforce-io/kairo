@@ -9,6 +9,8 @@ import typer
 from kairo.engine import accept as engine_accept
 from kairo.engine import re_step as engine_re_step
 from kairo.engine import step as engine_step
+from kairo.history import diff_worktree, list_snapshots
+from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
 from kairo.workspace import Workspace
 
@@ -67,7 +69,43 @@ def status() -> None:
     state = ws.read_state()
     for ref_id in ws.list_reference_ids():
         roles = ",".join(f.role for f in ws.read_manifest(ref_id).forms)
-        typer.echo(f"reference {ref_id}: [{roles}]")
+        blocked = [
+            f"{k.rsplit('/', 1)[-1]}:{v.reason}"
+            for k, v in state.products.items()
+            if k.startswith(f"references/{ref_id}/") and v.status == "blocked"
+        ]
+        flag = f"  ⚠ {','.join(blocked)}" if blocked else ""
+        typer.echo(f"reference {ref_id}: [{roles}]{flag}")
     for target in ws.constitution.targets:
         ts = state.targets.get(target.path)
-        typer.echo(f"target {target.path}: folded {len(ts.folded) if ts else 0}")
+        if ts is None:
+            typer.echo(f"target {target.path}: (未生成)")
+            continue
+        drift = len(ts.folded) - len(ts.last_major_folded)
+        flag = f"  ⚠ blocked:{ts.reason}" if ts.status == "blocked" else ""
+        typer.echo(
+            f"target {target.path}: folded {len(ts.folded)};距上次 A 已 {drift} 条{flag}"
+        )
+
+
+@app.command()
+def history() -> None:
+    """列版本快照。"""
+    ws = Workspace(Path.cwd())
+    for seq in list_snapshots(ws):
+        typer.echo(seq)
+
+
+@app.command()
+def rollback(seq: str = typer.Argument(..., help="要回退到的快照 seq")) -> None:
+    """回退文档 + targets 段到某版本(references/ 不动,下次 step 重融更晚 digest)。"""
+    ws = Workspace(Path.cwd())
+    history_rollback(ws, seq)
+    typer.echo(f"rolled back to {seq}")
+
+
+@app.command()
+def diff(seq: str = typer.Argument(None, help="对比的快照;省略=最近")) -> None:
+    """工作态 vs 版本文档差异(自带,不依赖 git)。"""
+    ws = Workspace(Path.cwd())
+    typer.echo(diff_worktree(ws, seq) or "(no changes)")

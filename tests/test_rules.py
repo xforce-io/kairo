@@ -27,7 +27,8 @@ def test_asr_discovers_audio_without_transcript(tmp_path):
     assert [it.key for it in items] == [f"references/{rid}/transcript.md"]
 
 
-def test_asr_run_produces_marked_stub_transcript_and_appends_form(tmp_path):
+def test_asr_run_produces_marked_stub_transcript_and_appends_form(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")  # stub 模式才产占位转写
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
@@ -50,6 +51,30 @@ def test_asr_skips_when_transcript_already_present(tmp_path):
     t.write_text("用户给的真实转写稿")
     ws.add([a, t])  # roles: audio, transcript
     assert AsrRule(ws).discover() == []
+
+
+def test_asr_blocks_no_asr_in_real_mode(tmp_path, monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)  # 真实模式无 ASR 后端
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws).discover()[0].run(state)
+    ps = state.products[f"references/{rid}/transcript.md"]
+    assert ps.status == "blocked" and ps.reason == "no-asr"
+    assert not (ws.root / "references" / rid / "transcript.md").exists()
+
+
+def test_asr_blocks_missing_source_when_audio_gone(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path)
+    a = tmp_path / "rec.m4a"
+    a.write_bytes(b"audio")
+    rid = ws.add([a])
+    a.unlink()  # 源丢失
+    state = State()
+    AsrRule(ws).discover()[0].run(state)
+    ps = state.products[f"references/{rid}/transcript.md"]
+    assert ps.status == "blocked" and ps.reason == "missing-source"
 
 
 # ---- Digest ----
