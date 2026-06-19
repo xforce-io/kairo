@@ -121,7 +121,12 @@ class ClaudeCodeProvider:
         # claude -p 把回答写 stdout 的 json result(不写文件)→ 取回落到 config.artifact
         if not stdout_file.exists():
             raise RuntimeError(f"claude-code 无 stdout 输出:{stdout_file}")
-        result = json.loads(stdout_file.read_text()).get("result")
+        data = json.loads(stdout_file.read_text())
+        # claude -p 报错(连接中断/执行失败)时 is_error=true,且把错误信息塞进 result;
+        # 必须在写产物前拦截,否则错误文本会被当正常产物写入 + 记账(#8)
+        if data.get("is_error"):
+            raise RuntimeError(f"claude-code 报错:{data.get('result')!r}")
+        result = data.get("result")
         if not isinstance(result, str):
             raise RuntimeError(f"claude-code stdout 缺 result 字段:{stdout_file}")
         (config.artifact_dir / (config.artifact or "output.md")).write_text(result)

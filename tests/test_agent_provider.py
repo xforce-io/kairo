@@ -7,6 +7,8 @@ StubProvider 是确定性 Fake:守可测性 —— 把输入 echo 进产物 + ST
 import json
 from pathlib import Path
 
+import pytest
+
 from kairo.provider import (
     AgentConfig,
     AgentResult,
@@ -149,3 +151,55 @@ def test_codex_provider_invokes_cli_and_reads_last_message(tmp_path):
 
 def test_codex_provider_identity():
     assert CodexProvider().name == "codex"
+
+
+# ---- #8:错误响应须抛错,不写坏产物、不记账 ----
+
+
+def test_claude_code_provider_raises_on_error_response(tmp_path):
+    """claude -p 报错(is_error=true,result 含错误文本)→ 抛错,不写产物。"""
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
+        # 连接中断时 claude -p 把错误塞进 result 且 is_error=true
+        Path(stdout_file).write_text(
+            json.dumps(
+                {
+                    "is_error": True,
+                    "subtype": "error_during_execution",
+                    "result": "API Error: Connection closed mid-response.",
+                }
+            )
+        )
+
+    p = ClaudeCodeProvider(model="opus", runner=fake_runner)
+    with pytest.raises(RuntimeError):
+        p.run(
+            AgentConfig(
+                persona="X",
+                context="Y",
+                artifact_dir=tmp_path,
+                model="opus",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()  # 不写坏产物
+
+
+def test_codex_provider_raises_when_no_last_message(tmp_path):
+    """codex 失败(未产出 last-message)→ 抛错,不写产物。"""
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        pass  # 模拟 codex 失败,不写 last-message
+
+    p = CodexProvider(model="gpt-5", runner=fake_runner)
+    with pytest.raises(RuntimeError):
+        p.run(
+            AgentConfig(
+                persona="X",
+                context="Y",
+                artifact_dir=tmp_path,
+                model="gpt-5",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()
