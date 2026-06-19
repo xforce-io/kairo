@@ -90,6 +90,8 @@ class TargetState(BaseModel):
     folded: dict[str, str] = Field(default_factory=dict)
     last_major_folded: dict[str, str] = Field(default_factory=dict)
     upstream_hash: dict[str, str] = Field(default_factory=dict)
+    status: str = "ok"  # ok | blocked
+    reason: str | None = None  # manual-edit | …
 
 
 class State(BaseModel):

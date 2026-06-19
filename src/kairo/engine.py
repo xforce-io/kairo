@@ -7,7 +7,7 @@ step 不懂规则干啥:扫规则 → 跑 stale 的 → 收敛即停。一次 st
 from __future__ import annotations
 
 from kairo.history import snapshot
-from kairo.rules import AsrRule, ComposeRule, DigestRule
+from kairo.rules import AsrRule, ComposeRule, DigestRule, _hash
 
 MAX_ITER = 100
 
@@ -31,3 +31,34 @@ def step(ws, provider) -> bool:
     if any_progress:
         snapshot(ws, state)
     return any_progress
+
+
+def re_step(ws, provider, target: str | None = None) -> bool:
+    """强制重算。全量 / 指定文档(整篇重综合,丢手改)/ 指定 reference(重产 digest)。"""
+    state = ws.read_state()
+    target_paths = [t.path for t in ws.constitution.targets]
+    if target is None:
+        for tp in target_paths:
+            (ws.root / tp).unlink(missing_ok=True)
+        state.targets = {}
+    elif target in target_paths:
+        (ws.root / target).unlink(missing_ok=True)
+        state.targets.pop(target, None)
+    else:
+        (ws.root / f"references/{target}/digest.md").unlink(missing_ok=True)
+        state.products.pop(f"references/{target}/digest.md", None)
+    ws.write_state(state)
+    return step(ws, provider)
+
+
+def accept(ws, doc: str) -> None:
+    """接受手改:把当前文档内容钉为新 output_hash 基线,解除 blocked。"""
+    state = ws.read_state()
+    ts = state.targets.get(doc)
+    if ts is None:
+        return
+    ts.output_hash = _hash((ws.root / doc).read_text())
+    ts.status = "ok"
+    ts.reason = None
+    state.targets[doc] = ts
+    ws.write_state(state)

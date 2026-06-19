@@ -39,6 +39,21 @@ def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
     assert state_targets.count("digest.md") == 4
 
 
+def test_cli_re_step_discards_manual_edit(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    runner.invoke(app, ["add", str(t)])
+    runner.invoke(app, ["step"])
+    canonical = (tmp_path / "understanding.md").read_text()
+    (tmp_path / "understanding.md").write_text("乱改")
+    result = runner.invoke(app, ["re-step", "understanding.md"])
+    assert result.exit_code == 0
+    assert (tmp_path / "understanding.md").read_text() == canonical
+
+
 def test_cli_status_lists_references(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["init"])

@@ -151,6 +151,15 @@ class ComposeRule:
                 return True
         return False
 
+    def _is_edited(self, path: str, ts) -> bool:
+        doc = self.ws.root / path
+        return (
+            ts is not None
+            and ts.status != "blocked"  # 已 blocked 不重复处理
+            and doc.exists()
+            and _hash(doc.read_text()) != ts.output_hash
+        )
+
     def discover(self, state: State | None = None) -> list[WorkItem]:
         all_digests = self._all_digests()
         items: list[WorkItem] = []
@@ -158,7 +167,11 @@ class ComposeRule:
             ts = state.targets.get(target.path) if state else None
             folded = ts.folded if ts else {}
             delta = {p: h for p, h in all_digests.items() if folded.get(p) != h}
-            if delta or self._upstream_changed(target, state, ts):
+            if (
+                delta
+                or self._upstream_changed(target, state, ts)
+                or self._is_edited(target.path, ts)
+            ):
                 items.append(self._make(target, delta, all_digests))
         return items
 
@@ -168,6 +181,17 @@ class ComposeRule:
 
         def run(state: State) -> None:
             doc_path = self.ws.root / key
+            ts0 = state.targets.get(key)
+            if (
+                ts0
+                and doc_path.exists()
+                and _hash(doc_path.read_text()) != ts0.output_hash
+            ):
+                # 检测到手改 → 暂停该文档,不静默覆盖(D-status manual-edit)
+                ts0.status = "blocked"
+                ts0.reason = "manual-edit"
+                state.targets[key] = ts0
+                return
             current = doc_path.read_text() if doc_path.exists() else ""
             upstream_blocks = [
                 f"---上游 {dep}---\n{(self.ws.root / dep).read_text()}"
@@ -197,10 +221,19 @@ class ComposeRule:
                 dep: (state.targets[dep].output_hash if dep in state.targets else "")
                 for dep in target.depends_on
             }
+            ts.status = "ok"
+            ts.reason = None
             state.targets[key] = ts
 
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)
+            doc_path = self.ws.root / key
+            if (
+                ts
+                and doc_path.exists()
+                and _hash(doc_path.read_text()) != ts.output_hash
+            ):
+                return ts.status != "blocked"  # 手改未标 blocked → 需标记
             folded = ts.folded if ts else {}
             if any(folded.get(p) != h for p, h in all_digests.items()):
                 return True

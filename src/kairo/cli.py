@@ -6,6 +6,8 @@ from pathlib import Path
 
 import typer
 
+from kairo.engine import accept as engine_accept
+from kairo.engine import re_step as engine_re_step
 from kairo.engine import step as engine_step
 from kairo.provider import select_provider
 from kairo.workspace import Workspace
@@ -38,6 +40,24 @@ def step() -> None:
     ws = Workspace(Path.cwd())
     progressed = engine_step(ws, select_provider())
     typer.echo("stepped" if progressed else "no change")
+
+
+@app.command(name="re-step")
+def re_step(
+    target: str = typer.Argument(None, help="文档 / reference id;省略=全量"),
+) -> None:
+    """强制重算(文档级=整篇重综合,丢手改)。"""
+    ws = Workspace(Path.cwd())
+    engine_re_step(ws, select_provider(), target)
+    typer.echo(f"re-stepped {target or '(all)'}")
+
+
+@app.command()
+def accept(doc: str = typer.Argument(..., help="要接受手改的文档")) -> None:
+    """接受手改、钉为新基线,解除 blocked: manual-edit。"""
+    ws = Workspace(Path.cwd())
+    engine_accept(ws, doc)
+    typer.echo(f"accepted {doc}")
 
 
 @app.command()

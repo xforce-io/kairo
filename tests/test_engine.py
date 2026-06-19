@@ -1,4 +1,4 @@
-from kairo.engine import step
+from kairo.engine import accept, re_step, step
 from kairo.provider import StubProvider
 from kairo.workspace import Workspace
 
@@ -84,6 +84,60 @@ def test_two_layer_step_is_idempotent(tmp_path):
     a1 = (ws.root / "assessment.md").read_text()
     assert step(ws, StubProvider()) is False  # 两层都收敛
     assert (ws.root / "assessment.md").read_text() == a1
+
+
+def test_re_step_document_discards_edit_and_recomposes(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    step(ws, StubProvider())
+    canonical = (ws.root / "understanding.md").read_text()
+    (ws.root / "understanding.md").write_text("人工乱改")
+    re_step(ws, StubProvider(), "understanding.md")
+    # 文档级 re-step 丢弃手改、整篇重综合回规范内容
+    assert (ws.root / "understanding.md").read_text() == canonical
+
+
+def test_re_step_all_recomposes_every_target(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    step(ws, StubProvider())
+    (ws.root / "understanding.md").write_text("乱改1")
+    (ws.root / "assessment.md").write_text("乱改2")
+    re_step(ws, StubProvider())  # 全量
+    assert "乱改" not in (ws.root / "understanding.md").read_text()
+    assert "乱改" not in (ws.root / "assessment.md").read_text()
+
+
+def test_manual_edit_blocks_compose_without_overwriting(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    step(ws, StubProvider())
+    (ws.root / "understanding.md").write_text("人工改了事实")
+    step(ws, StubProvider())  # 检测手改
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.status == "blocked"
+    assert ts.reason == "manual-edit"
+    assert (ws.root / "understanding.md").read_text() == "人工改了事实"  # 不静默覆盖
+
+
+def test_accept_pins_edit_as_new_baseline_and_unblocks(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("内容")
+    ws.add([t])
+    step(ws, StubProvider())
+    (ws.root / "understanding.md").write_text("人工修正")
+    step(ws, StubProvider())  # blocked
+    accept(ws, "understanding.md")
+    assert ws.read_state().targets["understanding.md"].status == "ok"
+    step(ws, StubProvider())  # 不再 blocked
+    assert (ws.root / "understanding.md").read_text() == "人工修正"  # 手改成新基线
 
 
 def test_step_writes_history_snapshot(tmp_path):
