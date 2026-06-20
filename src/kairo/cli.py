@@ -12,6 +12,7 @@ from kairo.engine import step as engine_step
 from kairo.history import diff_worktree, list_snapshots
 from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
+from kairo.rules import ComposeRule
 from kairo.workspace import Workspace
 
 app = typer.Typer(help="step 驱动的增量知识构建引擎")
@@ -72,6 +73,7 @@ def status() -> None:
     """列 references / 各文档融入状态。"""
     ws = Workspace(Path.cwd())
     state = ws.read_state()
+    compose = ComposeRule(ws, None)  # 仅用于 corpus 漂移检测(不调 provider)
     for ref_id in ws.list_reference_ids():
         roles = ",".join(f.role for f in ws.read_manifest(ref_id).forms)
         blocked = [
@@ -88,6 +90,8 @@ def status() -> None:
             continue
         drift = len(ts.folded) - len(ts.last_major_folded)
         flag = f"  ⚠ blocked:{ts.reason}" if ts.status == "blocked" else ""
+        if compose.corpus_drifted(target.path, state):
+            flag += "  ⚠ corpus 已变,可 re-step 重算"
         typer.echo(
             f"target {target.path}: folded {len(ts.folded)};距上次 A 已 {drift} 条{flag}"
         )
