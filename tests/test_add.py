@@ -1,5 +1,7 @@
 import datetime
 
+import yaml
+
 from kairo.workspace import Workspace
 
 
@@ -64,3 +66,47 @@ def test_add_two_chinese_filenames_no_collision(tmp_path):
     b = tmp_path / "会议乙.txt"
     b.write_text("乙")
     assert ws.add([a]) != ws.add([b])
+
+
+# ---- #13:源分层 class(corpus 基线 / stream 观测) ----
+
+
+def test_add_default_class_is_stream(tmp_path):
+    """不指定 → 默认 stream(会议流)。"""
+    ws = Workspace.init(tmp_path)
+    f = tmp_path / "meeting.txt"
+    f.write_text("会议正文")
+    rid = ws.add([f])
+    assert ws.read_manifest(rid).source_class == "stream"
+
+
+def test_add_corpus_class_set(tmp_path):
+    """--corpus 路径:source_class='corpus' → manifest 记 corpus。"""
+    ws = Workspace.init(tmp_path)
+    f = tmp_path / "whitepaper.md"
+    f.write_text("产品白皮书")
+    rid = ws.add([f], source_class="corpus")
+    assert ws.read_manifest(rid).source_class == "corpus"
+
+
+def test_manifest_class_yaml_key_is_class(tmp_path):
+    """yaml 落盘键为 `class`(贴合概念命名)。"""
+    ws = Workspace.init(tmp_path)
+    f = tmp_path / "wp.md"
+    f.write_text("白皮书")
+    rid = ws.add([f], source_class="corpus")
+    raw = (ws.references_dir() / rid / "manifest.yaml").read_text()
+    assert "class: corpus" in raw
+
+
+def test_legacy_manifest_without_class_defaults_stream(tmp_path):
+    """旧 manifest 无 class 字段 → 默认 stream(向后兼容)。"""
+    ws = Workspace.init(tmp_path)
+    f = tmp_path / "m.txt"
+    f.write_text("x")
+    rid = ws.add([f])
+    mpath = ws.references_dir() / rid / "manifest.yaml"
+    data = yaml.safe_load(mpath.read_text())
+    data.pop("class", None)  # 模拟旧版无该字段
+    mpath.write_text(yaml.safe_dump(data, allow_unicode=True))
+    assert ws.read_manifest(rid).source_class == "stream"
