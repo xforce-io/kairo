@@ -7,6 +7,25 @@ from kairo.cli import app
 runner = CliRunner()
 
 
+def test_cli_status_warns_on_corpus_drift(tmp_path, monkeypatch):
+    """#13 v2:改 corpus 后 status 给 advisory(不自动重算,提示 re-step)。"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    meeting = tmp_path / "m.txt"
+    meeting.write_text("会议")
+    wp = tmp_path / "wp.md"
+    wp.write_text("基线v1")
+    runner.invoke(app, ["add", str(meeting)])
+    runner.invoke(app, ["add", str(wp), "--corpus"])
+    runner.invoke(app, ["step"])
+    # 折叠后无漂移:status 不报 corpus 提示
+    assert "corpus" not in runner.invoke(app, ["status"]).output
+    wp.write_text("基线v2-改了关键内容")  # corpus 变更
+    out = runner.invoke(app, ["status"]).output
+    assert "corpus" in out and "re-step" in out  # advisory
+
+
 def test_cli_init_creates_workspace(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["init", "kidney"])

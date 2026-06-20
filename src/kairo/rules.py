@@ -21,8 +21,11 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
-def _run_agent(provider, persona: str, context: str, artifact: str) -> str:
-    """跑 agent,从隔离 artifact_dir 取回产物内容。sandbox:artifact-only。"""
+def _run_agent(
+    provider, persona: str, context: str, artifact: str, read_dirs=None
+) -> str:
+    """跑 agent,从隔离 artifact_dir 取回产物内容。写沙箱:artifact-only;
+    read_dirs 为额外只读授权目录(corpus 参考层),agent 按需 Read。"""
     with tempfile.TemporaryDirectory() as d:
         provider.run(
             AgentConfig(
@@ -31,6 +34,7 @@ def _run_agent(provider, persona: str, context: str, artifact: str) -> str:
                 artifact_dir=Path(d),
                 model=provider.model,
                 artifact=artifact,
+                read_dirs=list(read_dirs or []),
             )
         )
         return (Path(d) / artifact).read_text()
@@ -150,6 +154,10 @@ class DigestRule:
         items: list[WorkItem] = []
         for ref_id in self.ws.list_reference_ids():
             man = self.ws.read_manifest(ref_id)
+            # 源分层(#13 v2):fold=False 的类(corpus)是只读参考层,不 digest。
+            sc = self.ws.constitution.source_classes.get(man.source_class)
+            if sc is not None and not sc.fold:
+                continue
             body = self._read_body(man)
             key = f"references/{ref_id}/digest.md"
             if body is not None and not (self.ws.root / key).exists():
@@ -186,39 +194,84 @@ class ComposeRule:
         self.ws = ws
         self.provider = provider
 
+    def _is_fold_class(self, source_class: str) -> bool:
+        """该类源是否折叠进 target(fold=True);fold=False 为只读参考层(corpus)。"""
+        sc = self.ws.constitution.source_classes.get(source_class)
+        return sc is None or sc.fold
+
     def _all_digests(self) -> dict[str, str]:
         out: dict[str, str] = {}
         for ref_id in self.ws.list_reference_ids():
+            # 源分层(#13 v2):只折叠 fold=True 的源;corpus(参考层)的 digest 不计入。
+            if not self._is_fold_class(self.ws.read_manifest(ref_id).source_class):
+                continue
             d = self.ws.root / f"references/{ref_id}/digest.md"
             if d.exists():
                 out[f"references/{ref_id}/digest.md"] = _hash(d.read_text())
         return out
 
-    # ---- 源分层(#13):digest path → class ----
+    # ---- 源分层(#13 v2):fold 类(stream)折叠;非 fold 类(corpus)作只读参考层 ----
 
     def _delta_classes(self, delta: dict[str, str]) -> dict[str, str]:
-        """每条 digest path 映射到其 reference 的 class(corpus/stream)。"""
+        """每条 delta digest path 映射到其 reference 的 class(均为 fold 类)。"""
         out: dict[str, str] = {}
         for p in delta:
             ref_id = p.split("/")[1]  # references/<id>/digest.md
             out[p] = self.ws.read_manifest(ref_id).source_class
         return out
 
-    def _class_suffix(self, cls: str, mixed: bool) -> str:
-        """混合批次给来源标签加 ·标签(如 ·基线);单类不加,保持与今天一致。"""
-        if not mixed:
-            return ""
+    def _fold_label(self, cls: str) -> str:
+        """fold 块的来源标签加 ·标签(如 ·观测);仅当存在 corpus 参考层时调用。"""
         sc = self.ws.constitution.source_classes.get(cls)
         return f" ·{sc.label if sc else cls}"
 
-    def _source_class_preamble(self, classes: dict[str, str]) -> str:
-        """据本批出现的 class 组装源分类前言(语义取自 constitution)。"""
-        lines = []
-        for cls in sorted(set(classes.values())):
+    def _body_path(self, man) -> Path | None:
+        """按 body_roles 优先序取该 reference 的正文文件绝对路径。"""
+        for role in self.ws.constitution.body_roles:
+            for f in man.forms:
+                if f.role == role:
+                    loc = Path(f.location)
+                    return loc if loc.is_absolute() else self.ws.root / loc
+        return None
+
+    def _corpus_refs(self) -> list[tuple[str, Path, str, str]]:
+        """非 fold 类(corpus)且有正文的 ref → (ref_id, body_path, title, class)。只读参考层。"""
+        out: list[tuple[str, Path, str, str]] = []
+        for ref_id in self.ws.list_reference_ids():
+            man = self.ws.read_manifest(ref_id)
+            if self._is_fold_class(man.source_class):
+                continue
+            bp = self._body_path(man)
+            if bp is not None:
+                out.append((ref_id, bp, man.title or ref_id, man.source_class))
+        return out
+
+    def _corpus_stamp(self) -> str:
+        """corpus 参考层的粗粒度版本戳(全 corpus 正文 hash)。空层 → 稳定常量。"""
+        bodies = sorted(
+            bp.read_text() for _, bp, _, _ in self._corpus_refs() if bp.exists()
+        )
+        return _hash("\n".join(bodies))
+
+    def corpus_drifted(self, target_path: str, state: State) -> bool:
+        """corpus 自该 target 上次折叠后是否变更(advisory;不进 staleness 循环)。"""
+        ts = state.targets.get(target_path)
+        return ts is not None and ts.corpus_stamp != self._corpus_stamp()
+
+    def _corpus_reference_section(self, corpus_refs) -> str:
+        """组装基线参考前言:各 corpus 类的 hint + 文件清单(供 agent 按需 Read)。"""
+        hint_lines = []
+        for cls in sorted({c for _, _, _, c in corpus_refs}):
             sc = self.ws.constitution.source_classes.get(cls)
             if sc:
-                lines.append(f"- {sc.label}:{sc.hint}")
-        return "\n\n[源分类](来源标签 ·X 标注其类)\n" + "\n".join(lines)
+                hint_lines.append(f"- {sc.label}:{sc.hint}")
+        file_lines = [f"- {title}:{bp}" for _, bp, title, _ in corpus_refs]
+        return (
+            "\n\n[基线参考资料](权威底座;按需 Read 校正专名/锚定事实,勿照搬原文)\n"
+            + "\n".join(hint_lines)
+            + "\n文件(按需 Read):\n"
+            + "\n".join(file_lines)
+        )
 
     def _upstream_changed(self, target, state, ts) -> bool:
         for dep in target.depends_on:
@@ -279,16 +332,21 @@ class ComposeRule:
                 for dep in target.depends_on
                 if (self.ws.root / dep).exists()
             ]
-            # 源分层(#13):每条 delta 的 class(corpus/stream)。仅当本批含 ≥2 类时
-            # 才打 ·标签 + 注入源分类前言,单类场景与今天逐字一致。
+            # 源分层(#13 v2):corpus(fold=False)作只读参考层,不进 context 折叠块;
+            # 经 read_dirs 授读 + persona 列出文件,agent 按需 Read 校正/锚定。
+            # 存在参考层时,fold 块(stream)标 ·观测 提示需对基线校准;无 corpus 时与今天一致。
+            corpus_refs = self._corpus_refs()
+            has_corpus = bool(corpus_refs)
             classes = self._delta_classes(delta)
-            mixed = len(set(classes.values())) >= 2
             digest_blocks = [
-                f"[来源:{p}{self._class_suffix(classes[p], mixed)}]\n"
+                f"[来源:{p}{self._fold_label(classes[p]) if has_corpus else ''}]\n"
                 f"{(self.ws.root / p).read_text()}"
                 for p in sorted(delta)
             ]
-            source_preamble = self._source_class_preamble(classes) if mixed else ""
+            reference_section = (
+                self._corpus_reference_section(corpus_refs) if has_corpus else ""
+            )
+            read_dirs = sorted({bp.parent for _, bp, _, _ in corpus_refs})
             context = (
                 f"---当前文档---\n{current}\n\n"
                 + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
@@ -298,11 +356,12 @@ class ComposeRule:
             content = _run_agent(
                 self.provider,
                 target.fold_protocol
-                + source_preamble
+                + reference_section
                 + _OUTPUT_DISCIPLINE
                 + _COMPOSE_DISCIPLINE,
                 context,
                 "doc.md",
+                read_dirs=read_dirs,
             )
             doc_path.write_text(content)
             ts = state.targets.get(key) or TargetState(depends_on=list(target.depends_on))
@@ -318,6 +377,7 @@ class ComposeRule:
             }
             ts.status = "ok"
             ts.reason = None
+            ts.corpus_stamp = self._corpus_stamp()  # 记 corpus 参考层版本戳(advisory)
             if ts0 is None:  # 全量重综合(A)→ 刷新漂移基线
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts

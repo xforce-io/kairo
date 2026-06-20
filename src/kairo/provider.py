@@ -27,6 +27,7 @@ class AgentConfig:
     schema: dict | None = None  # 结构化输出契约(api backend 用;CLI 可忽略)
     artifact: str | None = None  # schema/产物落到哪个文件名
     timeout_s: int | None = None
+    read_dirs: list[Path] = field(default_factory=list)  # 只读授权目录(corpus 参考层 → --add-dir)
 
 
 @dataclass
@@ -110,9 +111,14 @@ class ClaudeCodeProvider:
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
         (config.artifact_dir / "_prompt.md").write_text(prompt)  # 内部文件,不计 artifact
         stdout_file = config.artifact_dir / "_claude_stdout.json"
+        add_dir_args = []
+        for d in config.read_dirs:  # corpus 只读参考层 → 授 agent 读访问(写仍限 cwd)
+            add_dir_args += ["--add-dir", str(d)]
+        if config.read_dirs:  # 非交互预授只读工具,否则 -p 下读 corpus 会被拒
+            add_dir_args += ["--allowedTools", "Read", "Glob", "Grep"]
         self._runner(
             "claude",
-            ["-p", "--model", self.model, "--output-format", "json"],
+            ["-p", "--model", self.model, "--output-format", "json", *add_dir_args],
             cwd=config.artifact_dir,
             input=prompt,
             stdout_file=stdout_file,

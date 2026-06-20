@@ -9,12 +9,14 @@ DEFAULT_DIGEST_PROMPT = "为这条 reference 写一份忠实纪要,保留要点,
 DEFAULT_UNDERSTANDING_FOLD = (
     "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
     "维持一张去重的术语表;未确认的挂 ⚠️;每段标来源。只放中立事实,判断进 assessment。\n"
-    "仅对确实无关的部分不动。"
+    "仅对确实无关的部分不动。\n"
+    "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。"
 )
 
 DEFAULT_ASSESSMENT_FOLD = (
     "沉淀立场与判断,引用上游 understanding 的事实(标来源);随新材料演进、可推翻旧判断。\n"
-    "不与 understanding 的中立事实混。"
+    "不与 understanding 的中立事实混。\n"
+    "文末维护一节『未来待办』:列待验证/可被推翻的判断,与下一步该核实或推进的行动,随新材料更新。"
 )
 
 
@@ -71,18 +73,24 @@ def _default_transforms() -> list[Transform]:
 
 
 class SourceClass(BaseModel):
-    """一类源的认识论地位:显示标签 + fold 语义(由 constitution 声明,引擎不硬编码)。"""
+    """一类源的认识论地位:显示标签 + fold 语义(由 constitution 声明,引擎不硬编码)。
+
+    fold=True:作离散事件折叠进 target,内容 hash 驱动收敛(stream/观测)。
+    fold=False:作只读参考层,agent 按需 Read,不 digest、不进 fold-delta(corpus/基线)。
+    """
 
     label: str
     hint: str = ""
+    fold: bool = True
 
 
 def _default_source_classes() -> dict[str, SourceClass]:
-    # stream(观测):会议/事件流;corpus(基线):权威参考资料。
+    # stream(观测):会议/事件流,折叠;corpus(基线):权威参考资料,只读参考层不折叠。
     return {
         "stream": SourceClass(
             label="观测",
             hint="会议/事件流;逐条融入,判断随之演进、可推翻旧判断。",
+            fold=True,
         ),
         "corpus": SourceClass(
             label="基线",
@@ -90,6 +98,7 @@ def _default_source_classes() -> dict[str, SourceClass]:
                 "权威参考资料;与观测冲突时以基线为准,"
                 "用基线校正专名/术语(如 看医通→康医通),并作术语权威基线。"
             ),
+            fold=False,
         ),
     }
 
@@ -148,6 +157,7 @@ class TargetState(BaseModel):
     folded: dict[str, str] = Field(default_factory=dict)
     last_major_folded: dict[str, str] = Field(default_factory=dict)
     upstream_hash: dict[str, str] = Field(default_factory=dict)
+    corpus_stamp: str = ""  # 折叠时 corpus 参考层版本戳;漂移 → advisory 提示手动 recompute
     status: str = "ok"  # ok | blocked
     reason: str | None = None  # manual-edit | …
 

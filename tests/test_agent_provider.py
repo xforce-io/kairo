@@ -109,6 +109,73 @@ def test_claude_code_provider_invokes_cli_and_reads_stdout_result(tmp_path):
     assert "_prompt.md" not in names and "_claude_stdout.json" not in names
 
 
+def test_claude_code_provider_passes_read_dirs_as_add_dir(tmp_path):
+    """#13 v2:read_dirs(corpus 只读参考层)→ --add-dir,授 agent 只读访问。"""
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
+        calls.append((cmd, args, input))
+        Path(stdout_file).write_text(json.dumps({"result": "OK"}))
+
+    ref = tmp_path / "corpus_dir"
+    ref.mkdir()
+    p = ClaudeCodeProvider(model="opus", runner=fake_runner)
+    p.run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="opus",
+            artifact="doc.md",
+            read_dirs=[ref],
+        )
+    )
+    _, args, _ = calls[0]
+    assert "--add-dir" in args
+    assert str(ref) in args
+
+
+def test_claude_code_provider_allows_read_tools_for_corpus(tmp_path):
+    """#13 v2:有 read_dirs 时预授只读工具(Read/Glob/Grep),非交互下 agent 才能读 corpus。"""
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"result": "OK"}))
+
+    ref = tmp_path / "c"
+    ref.mkdir()
+    ClaudeCodeProvider(model="opus", runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="opus",
+            artifact="doc.md",
+            read_dirs=[ref],
+        )
+    )
+    args = calls[0]
+    assert "--allowedTools" in args
+    assert "Read" in args and "Glob" in args and "Grep" in args
+
+
+def test_claude_code_provider_no_allowed_tools_without_read_dirs(tmp_path):
+    """无 read_dirs(纯 stream)时不预授工具,保持收紧默认。"""
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"result": "OK"}))
+
+    ClaudeCodeProvider(model="opus", runner=fake_runner).run(
+        AgentConfig(
+            persona="P", context="C", artifact_dir=tmp_path, model="opus", artifact="d.md"
+        )
+    )
+    assert "--allowedTools" not in calls[0]
+
+
 def test_claude_code_provider_identity():
     p = ClaudeCodeProvider(model="opus")
     assert p.name == "claude-code"

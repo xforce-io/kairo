@@ -270,25 +270,26 @@ def test_digest_persona_carries_output_discipline(tmp_path):
 # ---- #13:源分层 corpus(基线)/ stream(观测),prompt 级 ----
 
 
-def test_compose_mixed_classes_labels_blocks_and_injects_hint(tmp_path):
-    """混合 corpus+stream:digest 块带 ·基线/·观测 标签 + persona 注入源分类 hint。"""
+def test_compose_corpus_is_reference_layer_not_folded_block(tmp_path):
+    """v2:corpus 不再折成 ·基线 块;改为 persona 注入基线 hint + 文件清单,stream 标 ·观测。"""
     ws = Workspace.init(tmp_path)
     sm = tmp_path / "meeting.txt"
     sm.write_text("会议x")
     rs = ws.add([sm])  # stream(默认)
     cp = tmp_path / "wp.md"
-    cp.write_text("白皮书x")
-    rc = ws.add([cp], source_class="corpus")  # corpus
+    cp.write_text("白皮书基线内容ZZZ")
+    ws.add([cp], source_class="corpus")  # corpus → 只读参考层
     _make_digest(ws, rs, "观测纪要")
-    _make_digest(ws, rc, "基线纪要")
     prov = _RunOnlyProvider()
     state = State()
     ComposeRule(ws, prov).discover(state)[0].run(state)  # [0]=understanding
     ctx = prov.calls[0].context
-    assert "·基线" in ctx and "·观测" in ctx  # 分区标注
+    assert "·观测" in ctx  # 有参考层时 stream 块标 ·观测
+    assert "白皮书基线内容ZZZ" not in ctx  # corpus 原文不进 context 折叠块
     persona = prov.calls[0].persona
-    assert "源分类" in persona  # 注入了源分类前言
+    assert "基线参考" in persona  # 注入了基线参考前言
     assert "校正" in persona  # corpus hint(术语权威/校正)流入
+    assert "wp.md" in persona  # 列出 corpus 文件供 Read
 
 
 def test_compose_single_class_keeps_today_behavior(tmp_path):
