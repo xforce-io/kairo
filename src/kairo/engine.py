@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from kairo.history import snapshot
 from kairo.rules import AsrRule, ComposeRule, DigestRule, _hash
+from kairo.stream_index import write_stream_index
 
 MAX_ITER = 100
 
@@ -32,6 +33,7 @@ def step(ws, provider) -> bool:
             break
         any_progress = True
     ws.write_state(state)
+    write_stream_index(ws)  # 派生导航索引(#16);不进调和循环,每次 step 后刷新
     if any_progress:
         snapshot(ws, state)
     return any_progress

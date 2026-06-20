@@ -114,3 +114,19 @@ def test_cli_status_lists_references(tmp_path, monkeypatch):
     result = runner.invoke(app, ["status"])
     assert result.exit_code == 0
     assert "meeting" in result.stdout
+
+
+def test_cli_index_command_writes_meetings(tmp_path, monkeypatch):
+    """#16:kairo index 手动重建 stream 导航索引(无需 step)。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    meeting = tmp_path / "会议实录.txt"
+    meeting.write_text("会议")
+    runner.invoke(app, ["add", str(meeting)])
+
+    result = runner.invoke(app, ["index"])
+
+    assert result.exit_code == 0
+    index = tmp_path / "references" / "MEETINGS.md"
+    assert index.is_file()
+    assert "会议实录" in index.read_text()
