@@ -13,6 +13,7 @@ from kairo.history import diff_worktree, list_snapshots
 from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
 from kairo.rules import ComposeRule
+from kairo.stream_index import write_stream_index
 from kairo.workspace import Workspace
 
 app = typer.Typer(help="step 驱动的增量知识构建引擎")
@@ -95,6 +96,14 @@ def status() -> None:
         typer.echo(
             f"target {target.path}: folded {len(ts.folded)};距上次 A 已 {drift} 条{flag}"
         )
+
+
+@app.command()
+def index() -> None:
+    """(重)生成 references/MEETINGS.md —— 按 class 列出 stream(观测)导航索引。"""
+    ws = Workspace(Path.cwd())
+    path = write_stream_index(ws)
+    typer.echo(f"wrote {path.relative_to(ws.root)}")
 
 
 @app.command()
