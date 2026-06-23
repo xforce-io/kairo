@@ -170,7 +170,12 @@ class DigestRule:
 
         def run(state: State) -> None:
             content = _run_agent(
-                self.provider, self.prompt + _OUTPUT_DISCIPLINE, body, "digest.md"
+                self.provider,
+                self.prompt
+                + self.ws.constitution.glossary_reference()
+                + _OUTPUT_DISCIPLINE,
+                body,
+                "digest.md",
             )
             (self.ws.root / key).write_text(content)
             state.products[key] = ProductState(
@@ -314,6 +319,7 @@ class ComposeRule:
             content = _run_agent(
                 self.provider,
                 target.fold_protocol
+                + self.ws.constitution.glossary_reference()
                 + reference_section
                 + _OUTPUT_DISCIPLINE
                 + _COMPOSE_DISCIPLINE,
