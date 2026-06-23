@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from kairo import corpus
 from kairo.models import Form, ProductState, State, TargetState
 from kairo.provider import AgentConfig
 
@@ -230,53 +231,10 @@ class ComposeRule:
         sc = self.ws.constitution.source_classes.get(cls)
         return f" ·{sc.label if sc else cls}"
 
-    def _body_path(self, man) -> Path | None:
-        """按 body_roles 优先序取该 reference 的正文文件绝对路径。"""
-        for role in self.ws.constitution.body_roles:
-            for f in man.forms:
-                if f.role == role:
-                    loc = Path(f.location)
-                    return loc if loc.is_absolute() else self.ws.root / loc
-        return None
-
-    def _corpus_refs(self) -> list[tuple[str, Path, str, str]]:
-        """非 fold 类(corpus)且有正文的 ref → (ref_id, body_path, title, class)。只读参考层。"""
-        out: list[tuple[str, Path, str, str]] = []
-        for ref_id in self.ws.list_reference_ids():
-            man = self.ws.read_manifest(ref_id)
-            if self._is_fold_class(man.source_class):
-                continue
-            bp = self._body_path(man)
-            if bp is not None:
-                out.append((ref_id, bp, man.title or ref_id, man.source_class))
-        return out
-
-    def _corpus_stamp(self) -> str:
-        """corpus 参考层的粗粒度版本戳(全 corpus 正文 hash)。空层 → 稳定常量。"""
-        bodies = sorted(
-            bp.read_text() for _, bp, _, _ in self._corpus_refs() if bp.exists()
-        )
-        return _hash("\n".join(bodies))
-
     def corpus_drifted(self, target_path: str, state: State) -> bool:
         """corpus 自该 target 上次折叠后是否变更(advisory;不进 staleness 循环)。"""
         ts = state.targets.get(target_path)
-        return ts is not None and ts.corpus_stamp != self._corpus_stamp()
-
-    def _corpus_reference_section(self, corpus_refs) -> str:
-        """组装基线参考前言:各 corpus 类的 hint + 文件清单(供 agent 按需 Read)。"""
-        hint_lines = []
-        for cls in sorted({c for _, _, _, c in corpus_refs}):
-            sc = self.ws.constitution.source_classes.get(cls)
-            if sc:
-                hint_lines.append(f"- {sc.label}:{sc.hint}")
-        file_lines = [f"- {title}:{bp}" for _, bp, title, _ in corpus_refs]
-        return (
-            "\n\n[基线参考资料](权威底座;按需 Read 校正专名/锚定事实,勿照搬原文)\n"
-            + "\n".join(hint_lines)
-            + "\n文件(按需 Read):\n"
-            + "\n".join(file_lines)
-        )
+        return ts is not None and ts.corpus_stamp != corpus.stamp(corpus.collect(self.ws))
 
     def _upstream_changed(self, target, state, ts) -> bool:
         for dep in target.depends_on:
@@ -340,7 +298,7 @@ class ComposeRule:
             # 源分层(#13 v2):corpus(fold=False)作只读参考层,不进 context 折叠块;
             # 经 read_dirs 授读 + persona 列出文件,agent 按需 Read 校正/锚定。
             # 存在参考层时,fold 块(stream)标 ·观测 提示需对基线校准;无 corpus 时与今天一致。
-            corpus_refs = self._corpus_refs()
+            corpus_refs = corpus.collect(self.ws)
             has_corpus = bool(corpus_refs)
             classes = self._delta_classes(delta)
             digest_blocks = [
@@ -349,9 +307,9 @@ class ComposeRule:
                 for p in sorted(delta)
             ]
             reference_section = (
-                self._corpus_reference_section(corpus_refs) if has_corpus else ""
+                corpus.reference_section(self.ws, corpus_refs) if has_corpus else ""
             )
-            read_dirs = sorted({bp.parent for _, bp, _, _ in corpus_refs})
+            read_dirs = corpus.read_dirs(corpus_refs)
             context = (
                 f"---当前文档---\n{current}\n\n"
                 + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
@@ -383,7 +341,7 @@ class ComposeRule:
             }
             ts.status = "ok"
             ts.reason = None
-            ts.corpus_stamp = self._corpus_stamp()  # 记 corpus 参考层版本戳(advisory)
+            ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
             if ts0 is None:  # 全量重综合(A)→ 刷新漂移基线
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts

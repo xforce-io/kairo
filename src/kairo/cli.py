@@ -14,7 +14,7 @@ from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
 from kairo.rules import ComposeRule
 from kairo.stream_index import write_stream_index
-from kairo.workspace import Workspace, WorkspaceNotFound
+from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
 _EPILOG = (
     '快速上手:kairo init "<topic>" → kairo add <file>'
@@ -55,11 +55,15 @@ def add(
         False, "--corpus", help="标为基线参考资料(corpus);默认会议流(stream)"
     ),
 ) -> None:
-    """登记一条 reference 的所有形态(指针)。"""
+    """登记一条 reference 的所有形态(指针)。目录 + --corpus 登记为目录指针。"""
     ws = _open_ws()
-    rid = ws.add(
-        files, ref_id=ref_id, role=role, source_class="corpus" if corpus else None
-    )
+    try:
+        rid = ws.add(
+            files, ref_id=ref_id, role=role, source_class="corpus" if corpus else None
+        )
+    except AddError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
     typer.echo(f"added {rid}")
 
 
