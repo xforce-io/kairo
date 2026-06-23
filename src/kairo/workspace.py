@@ -12,6 +12,11 @@ import yaml
 
 from kairo.models import Constitution, Form, Manifest, State
 
+
+class WorkspaceNotFound(Exception):
+    """当前目录不是 kairo 工作区(无 .kairo/state.json)。"""
+
+
 def _slug(text: str) -> str:
     # 保留中文/字母数字(unicode word),标点/空白 → -;全标点(空)回退内容 hash 保唯一
     s = re.sub(r"[^\w]+", "-", text.lower()).strip("-_")
@@ -21,6 +26,14 @@ def _slug(text: str) -> str:
 class Workspace:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
+
+    @classmethod
+    def open(cls, root: Path | str) -> "Workspace":
+        """打开既有工作区;非工作区抛 WorkspaceNotFound(供 CLI 转友好提示)。"""
+        ws = cls(root)
+        if not ws.state_path.exists():
+            raise WorkspaceNotFound(ws.root)
+        return ws
 
     @classmethod
     def init(cls, root: Path | str, topic: str = "main") -> "Workspace":

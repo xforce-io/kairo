@@ -1,10 +1,34 @@
 import json
 
+import pytest
 from typer.testing import CliRunner
 
 from kairo.cli import app
 
 runner = CliRunner()
+
+
+def test_cli_help_shows_quickstart():
+    """#22 ①:顶层 --help 带「快速上手」happy-path + 两层产出 + 心智 SSOT 指向。"""
+    out = runner.invoke(app, ["--help"]).output
+    assert "快速上手" in out
+    assert "init" in out and "add" in out and "step" in out
+    assert "understanding.md" in out and "assessment.md" in out
+    assert "constitution.yaml" in out
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [["status"], ["step"], ["add", "x.txt"], ["index"], ["history"], ["diff"]],
+)
+def test_cli_friendly_error_outside_workspace(tmp_path, monkeypatch, cmd):
+    """#22 ②:非工作区给友好错误,非零退出,不吐 traceback。"""
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, cmd)
+    assert result.exit_code != 0
+    assert "不是 kairo 工作区" in result.output
+    assert "Traceback" not in result.output
+    assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
 def test_cli_status_warns_on_corpus_drift(tmp_path, monkeypatch):
