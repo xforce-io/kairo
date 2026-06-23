@@ -130,3 +130,54 @@ def test_cli_index_command_writes_meetings(tmp_path, monkeypatch):
     index = tmp_path / "references" / "MEETINGS.md"
     assert index.is_file()
     assert "会议实录" in index.read_text()
+
+
+def test_cli_add_dir_without_corpus_friendly_error(tmp_path, monkeypatch):
+    """#24:add <dir> 无 --corpus → 友好错误 + 非零退出,不吐 traceback。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    d = tmp_path / "docs"
+    d.mkdir()
+    (d / "a.md").write_text("a")
+    result = runner.invoke(app, ["add", str(d)])
+    assert result.exit_code != 0
+    assert "corpus" in result.output
+    assert "Traceback" not in result.output
+
+
+def test_cli_add_dir_corpus_ok(tmp_path, monkeypatch):
+    """#24:add <dir> --corpus → 建一条 corpus_tree 引用。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    d = tmp_path / "corpus_docs"
+    (d / "sub").mkdir(parents=True)
+    (d / "sub" / "b.md").write_text("b")
+    result = runner.invoke(app, ["add", str(d), "--corpus"])
+    assert result.exit_code == 0
+    man = (tmp_path / "references").glob("*/manifest.yaml")
+    assert any("corpus_tree" in p.read_text() for p in man)
+
+
+def test_cli_e2e_corpus_dir_not_digested(tmp_path, monkeypatch):
+    """#24 e2e:corpus 目录不产 digest;stream 正常折叠出两层文档。"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    # corpus 目录
+    cdir = tmp_path / "corpus_docs"
+    (cdir / "平台").mkdir(parents=True)
+    (cdir / "平台" / "术语表.md").write_text("康医通=正式名")
+    # stream 文件
+    s = tmp_path / "会议.txt"
+    s.write_text("王强会议:落地优先级")
+    runner.invoke(app, ["add", str(cdir), "--corpus"])
+    runner.invoke(app, ["add", str(s)])
+    result = runner.invoke(app, ["step"])
+    assert result.exit_code == 0
+    # 两层文档生成
+    assert (tmp_path / "understanding.md").is_file()
+    assert (tmp_path / "assessment.md").is_file()
+    # corpus 目录引用没有 digest.md(不被 digest)
+    refs = tmp_path / "references"
+    corpus_ref = next(p for p in refs.iterdir() if "corpus_docs" in p.name)
+    assert not (corpus_ref / "digest.md").exists()

@@ -110,3 +110,43 @@ def test_legacy_manifest_without_class_defaults_stream(tmp_path):
     data.pop("class", None)  # 模拟旧版无该字段
     mpath.write_text(yaml.safe_dump(data, allow_unicode=True))
     assert ws.read_manifest(rid).source_class == "stream"
+
+
+# ---- #24:目录摄入(corpus 目录指针) ----
+
+
+def test_add_dir_corpus_creates_single_tree_form(tmp_path):
+    """add <dir> --corpus → 单条 reference,corpus_tree form,hash=tree_hash。"""
+    import datetime as _dt
+
+    from kairo import corpus
+
+    ws = Workspace.init(tmp_path)
+    d = tmp_path / "corpus_docs"
+    (d / "平台").mkdir(parents=True)
+    (d / "平台" / "术语表.md").write_text("康医通")
+    (d / "方法论.md").write_text("评估")
+    rid = ws.add([d], source_class="corpus")
+    assert rid == f"{_dt.date.today().isoformat()}-corpus_docs"
+    man = ws.read_manifest(rid)
+    assert man.source_class == "corpus"
+    assert len(man.forms) == 1
+    assert man.forms[0].role == "corpus_tree"
+    assert man.forms[0].hash == corpus.tree_hash(d)
+    assert man.forms[0].origin == "added"
+
+
+def test_add_dir_without_corpus_raises(tmp_path):
+    """add <dir> 无 --corpus → 友好错误(AddError),不崩 IsADirectoryError。"""
+    from kairo.workspace import AddError
+
+    ws = Workspace.init(tmp_path)
+    d = tmp_path / "docs"
+    d.mkdir()
+    (d / "a.md").write_text("a")
+    try:
+        ws.add([d])  # 默认 stream
+    except AddError as e:
+        assert "corpus" in str(e)
+    else:
+        raise AssertionError("应抛 AddError")

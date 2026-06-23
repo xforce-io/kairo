@@ -2,7 +2,7 @@
 
 - Issue: [#24](https://github.com/xforce-io/kairo/issues/24)
 - 分支:`feat/24-corpus-dir-ingest`
-- 状态:设计定稿(brainstorm 已与用户对齐),待实现
+- 状态:已实现(TDD;`corpus.py` + `workspace.add` 目录分支 + `ComposeRule` 委托收拢)
 
 ## 背景
 
