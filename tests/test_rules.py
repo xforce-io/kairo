@@ -2,9 +2,9 @@ import sys
 
 import yaml
 
-from kairo.models import State
+from kairo.models import State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import AsrRule, ComposeRule, DigestRule
+from kairo.rules import AsrRule, ComposeRule, DigestRule, _hash
 from kairo.workspace import Workspace
 
 
@@ -408,6 +408,86 @@ def test_compose_converges_after_folding(tmp_path):
         item.run(state)
     # 融完后无未融入 Δ、上游未变 → 收敛
     assert rule.discover(state) == []
+
+
+# ---- #28:compose 退化护栏(单次 LLM 退化输出不得静默销毁整篇文档)----
+
+
+class _FixedProvider:
+    """返回固定内容,模拟 agent 输出(可控,用于护栏断言)。"""
+
+    name = "fixed"
+    model = "fixed"
+
+    def __init__(self, content):
+        self.content = content
+        self.calls = 0
+
+    def run(self, config, signal=None):
+        self.calls += 1
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(self.content)
+        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
+
+
+def _seed_prior_understanding(ws, text):
+    """预置一份已记账(非手改)的 understanding,带未融 Δ → 触发重折叠。"""
+    (ws.root / "understanding.md").write_text(text)
+    return TargetState(depends_on=[], output_hash=_hash(text), folded={})
+
+
+def _understanding_item(ws, prov, state):
+    return next(
+        it for it in ComposeRule(ws, prov).discover(state) if it.key == "understanding.md"
+    )
+
+
+def test_compose_blocks_degraded_output_and_keeps_prior(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    _make_digest(ws, rid, "新纪要")
+    good = "完整的判断正文。" * 400  # 远超 _COMPOSE_MIN_PRIOR_LEN
+    state = State()
+    state.targets["understanding.md"] = _seed_prior_understanding(ws, good)
+    prov = _FixedProvider("本轮无需演进,理由如下:略。")  # 退化的变更说明
+    _understanding_item(ws, prov, state).run(state)
+    # 旧文档原样保留、未被覆盖
+    assert (ws.root / "understanding.md").read_text() == good
+    ts = state.targets["understanding.md"]
+    assert ts.status == "blocked" and ts.reason == "compose-degraded"
+    # 终态:不自动重试(否则 step 内对退化输出死循环)
+    assert _understanding_item(ws, prov, state).is_stale(state) is False
+
+
+def test_compose_allows_normal_sized_update(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    _make_digest(ws, rid, "新纪要")
+    good = "完整的判断正文。" * 400
+    state = State()
+    state.targets["understanding.md"] = _seed_prior_understanding(ws, good)
+    prov = _FixedProvider("完整的判断正文(已更新)。" * 380)  # 量级相当 → 不该拦
+    _understanding_item(ws, prov, state).run(state)
+    assert "已更新" in (ws.root / "understanding.md").read_text()
+    assert state.targets["understanding.md"].status == "ok"
+
+
+def test_compose_from_scratch_not_guarded(tmp_path):
+    """无上一版(从零综合 / re-step)时短输出也不该被护栏误拦。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    _make_digest(ws, rid, "新纪要")
+    state = State()  # understanding 无既有文档
+    prov = _FixedProvider("短小但合法的首版正文。")
+    _understanding_item(ws, prov, state).run(state)
+    assert (ws.root / "understanding.md").read_text() == "短小但合法的首版正文。"
+    assert state.targets["understanding.md"].status == "ok"
 
 
 # ---- rules 走 agent run 接口(#4),不再依赖 complete ----

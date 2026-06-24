@@ -207,8 +207,15 @@ _OUTPUT_DISCIPLINE = (
 _COMPOSE_DISCIPLINE = (
     "\n- 你只产出当前这一个文档,不要内联其它文档的内容"
     "(例如 understanding 中不要写 assessment 段落)。\n"
-    "- 正文中的 [来源:...] 是溯源标签,不是磁盘文件路径,无需也不应去读取。"
+    "- 正文中的 [来源:...] 是溯源标签,不是磁盘文件路径,无需也不应去读取。\n"
+    "- 你必须输出当前文档的**完整全文**(含未改动章节);即使本轮判断无需演进,"
+    "也要原样重述全文,禁止只输出「为何不改」的变更说明或差异摘要。"
 )
+
+# 退化护栏(#28):上一版充分长却被骤缩覆盖 → 极可能是 agent 吐了变更说明而非全文。
+# 阈值保守,仅拦灾难性缩水;正常的重组/修正/推翻不会触发。
+_COMPOSE_MIN_PRIOR_LEN = 2000
+_COMPOSE_DEGRADE_RATIO = 0.5
 
 
 class DigestRule:
@@ -404,6 +411,17 @@ class ComposeRule:
                 "doc.md",
                 read_dirs=read_dirs,
             )
+            # 退化护栏(#28):有充分长的上一版,新输出却骤缩 → 不覆盖,标 blocked,
+            # 保留旧文档(避免单次 LLM 退化输出静默销毁整篇)。需人工 re-step 重综合。
+            if (
+                len(current) > _COMPOSE_MIN_PRIOR_LEN
+                and len(content) < _COMPOSE_DEGRADE_RATIO * len(current)
+            ):
+                ts = ts0 or TargetState(depends_on=list(target.depends_on))
+                ts.status = "blocked"
+                ts.reason = "compose-degraded"
+                state.targets[key] = ts
+                return
             doc_path.write_text(content)
             ts = state.targets.get(key) or TargetState(depends_on=list(target.depends_on))
             ts.folded = dict(all_digests)
@@ -426,6 +444,9 @@ class ComposeRule:
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)
             doc_path = self.ws.root / key
+            # compose-degraded 视为终态:不自动重试(否则对退化输出死循环),手动 re-step 重综合。
+            if ts and ts.status == "blocked" and ts.reason == "compose-degraded":
+                return False
             if (
                 ts
                 and doc_path.exists()

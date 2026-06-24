@@ -53,7 +53,22 @@ kairo status                  # 看各 reference / 文档的融入状态
 - **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进文档、判断随之演进、可推翻旧判断；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
 - **两层产出**：`understanding.md`（事实层）与依赖它的 `assessment.md`（判断层）；中立事实与立场判断不混。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
-- **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）。
+- **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）/ `compose-degraded`（综合输出相对上一版骤缩，疑为退化输出，已拒绝覆盖以保护旧文档）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）；`asr-failed` 与 `compose-degraded` 视为终态，需手动 `re-step` 重算。
+
+## 领域真名册（glossary）
+
+`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Compose 时注入 agent 提示词（Issue [#20](https://github.com/xforce-io/kairo/issues/20)），用于纠正口语 / 转写产生的同音变体与别名——产出时一律用规范名，遇含糊提及按此锚定。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
+
+```yaml
+glossary:
+- name: 企业微信            # 规范名,各环节统一用它
+  note: 私域运营所用平台     # grounding,可选
+  aka: [企微, 起微, 球艺]    # 已知误识别/同音变体,可选
+- name: 康医通
+  note: 系统名（与 corpus 基线一致）
+```
+
+注：纠正发生在**纪要 / 综合阶段**，ASR 转写本身不受影响（whisper 仍按音产出）。空表（`glossary: []`，默认）时零行为变化；对已生成的 reference 改 glossary 后，需 `kairo re-step <id>` 重产 digest 才会重新校正。
 
 ## 本机 ASR 配置
 
