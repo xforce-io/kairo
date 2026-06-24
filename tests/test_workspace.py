@@ -29,6 +29,14 @@ def test_init_default_constitution_has_digest_prompt_and_two_layer_targets(tmp_p
     assert con.targets[1].depends_on == ["understanding.md"]  # 判断依赖事实
 
 
+def test_init_default_asr_transform_uses_whisper_backend(tmp_path):
+    """#26:默认 asr 转换声明 backend=whisper(真实意图),命令由本机配置解析。"""
+    con = Workspace.init(tmp_path).constitution
+    asr = next(t for t in con.transforms if t.name == "asr")
+    assert asr.consumes == ["audio"] and asr.produces == "transcript"
+    assert asr.backend == "whisper"
+
+
 def test_constitution_reloads_from_disk(tmp_path):
     Workspace.init(tmp_path, topic="kidney")
     # 重新打开同一目录,读到的 topic 一致

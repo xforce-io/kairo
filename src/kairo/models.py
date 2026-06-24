@@ -69,7 +69,12 @@ class Transform(BaseModel):
 
 
 def _default_transforms() -> list[Transform]:
-    return [Transform(name="asr", consumes=["audio"], produces="transcript")]
+    # backend=whisper:声明"用本机 whisper 转写";具体命令由本机配置(machine.resolve_asr)解析。
+    return [
+        Transform(
+            name="asr", consumes=["audio"], produces="transcript", backend="whisper"
+        )
+    ]
 
 
 class SourceClass(BaseModel):
