@@ -157,7 +157,7 @@ class AsrRule:
                 )
                 return
             # 真实模式:由本机配置(env / config.toml)解析转写命令
-            resolved = resolve_asr(default_origin=self.backend)
+            resolved = resolve_asr(self.backend)
             if resolved is None:
                 # 本机未配置 ASR 后端 → 挂起,不在假产物上往下跑
                 state.products[key] = ProductState(
@@ -190,7 +190,7 @@ class AsrRule:
                     return src_path.exists()
                 if ps.reason == "no-asr":
                     return bool(os.environ.get("KAIRO_STUB")) or (
-                        resolve_asr(default_origin=self.backend) is not None
+                        resolve_asr(self.backend) is not None
                     )
             return False
 

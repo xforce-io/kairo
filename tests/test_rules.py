@@ -193,8 +193,15 @@ def test_asr_stdout_mode_when_no_output_placeholder(tmp_path, monkeypatch):
     ).read_text() == "从stdout来的转写"
 
 
-def test_asr_resolves_cmd_from_config_toml(tmp_path, monkeypatch):
-    """无 env,$XDG_CONFIG_HOME/kairo/config.toml [asr] 提供命令与 origin。"""
+def _write_config(tmp_path, monkeypatch, body):
+    cfg_home = tmp_path / "xdg"
+    (cfg_home / "kairo").mkdir(parents=True, exist_ok=True)
+    (cfg_home / "kairo" / "config.toml").write_text(body)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
+
+
+def test_asr_resolves_cmd_from_config_toml_by_backend_name(tmp_path, monkeypatch):
+    """无 env,config.toml 的 [asr.<backend>] 节按 transform.backend 提供命令与 origin。"""
     _isolate_machine(monkeypatch, tmp_path)
     script = _write_script(
         tmp_path,
@@ -202,12 +209,12 @@ def test_asr_resolves_cmd_from_config_toml(tmp_path, monkeypatch):
         "import sys, pathlib\n"
         "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('来自config的转写')\n",
     )
-    cfg_home = tmp_path / "xdg"
-    (cfg_home / "kairo").mkdir(parents=True)
-    (cfg_home / "kairo" / "config.toml").write_text(
-        f'[asr]\ncmd = "{sys.executable} {script} {{outdir}}"\norigin = "whisper:cfg"\n'
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        f'[asr.whisper]\ncmd = "{sys.executable} {script} {{outdir}}"\n'
+        'origin = "whisper:cfg"\n',
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
@@ -219,6 +226,45 @@ def test_asr_resolves_cmd_from_config_toml(tmp_path, monkeypatch):
     assert forms["transcript"].origin == "whisper:cfg"
 
 
+def test_asr_config_routes_by_backend_among_multiple(tmp_path, monkeypatch):
+    """一台机器配多种 ASR 后端,resolve 按 transform.backend 选对应节。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    w = _write_script(
+        tmp_path,
+        "w.py",
+        "import sys, pathlib\n"
+        "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('whisper节')\n",
+    )
+    o = _write_script(
+        tmp_path,
+        "o.py",
+        "import sys, pathlib\n"
+        "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('other节')\n",
+    )
+    _write_config(
+        tmp_path,
+        monkeypatch,
+        f'[asr.whisper]\ncmd = "{sys.executable} {w} {{outdir}}"\n'
+        f'[asr.other]\ncmd = "{sys.executable} {o} {{outdir}}"\n',
+    )
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    AsrRule(ws, backend="other").discover()[0].run(State())
+    assert (ws.root / "references" / rid / "transcript.md").read_text() == "other节"
+
+
+def test_asr_no_asr_when_backend_section_absent(tmp_path, monkeypatch):
+    """config 有 [asr.whisper] 但 transform.backend 无对应节 → no-asr。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    _write_config(tmp_path, monkeypatch, '[asr.whisper]\ncmd = "true"\n')
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="missing").discover()[0].run(state)
+    ps = state.products[f"references/{rid}/transcript.md"]
+    assert ps.status == "blocked" and ps.reason == "no-asr"
+
+
 def test_asr_env_cmd_overrides_config_toml(tmp_path, monkeypatch):
     """优先级:env > config.toml。"""
     _isolate_machine(monkeypatch, tmp_path)
@@ -228,12 +274,9 @@ def test_asr_env_cmd_overrides_config_toml(tmp_path, monkeypatch):
         "import sys, pathlib\n"
         "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('ENV赢')\n",
     )
-    cfg_home = tmp_path / "xdg"
-    (cfg_home / "kairo").mkdir(parents=True)
-    (cfg_home / "kairo" / "config.toml").write_text(
-        '[asr]\ncmd = "false"\norigin = "whisper:cfg"\n'
+    _write_config(
+        tmp_path, monkeypatch, '[asr.whisper]\ncmd = "false"\norigin = "whisper:cfg"\n'
     )
-    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
     monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {env_script} {{outdir}}")
     monkeypatch.setenv("KAIRO_ASR_ORIGIN", "whisper:env")
     ws = Workspace.init(tmp_path)
