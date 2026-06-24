@@ -1,3 +1,5 @@
+import sys
+
 import yaml
 
 from kairo.models import State
@@ -95,6 +97,8 @@ def test_asr_skips_when_transcript_already_present(tmp_path):
 
 def test_asr_blocks_no_asr_in_real_mode(tmp_path, monkeypatch):
     monkeypatch.delenv("KAIRO_STUB", raising=False)  # 真实模式无 ASR 后端
+    monkeypatch.delenv("KAIRO_ASR_CMD", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg-none"))  # 无本机配置
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
@@ -115,6 +119,176 @@ def test_asr_blocks_missing_source_when_audio_gone(tmp_path, monkeypatch):
     AsrRule(ws).discover()[0].run(state)
     ps = state.products[f"references/{rid}/transcript.md"]
     assert ps.status == "blocked" and ps.reason == "missing-source"
+
+
+# ---- ASR 真实后端(#26):本机可配置转写命令 ----
+
+
+def _isolate_machine(monkeypatch, tmp_path):
+    """隔离本机配置:清 KAIRO_STUB / env cmd,XDG_CONFIG_HOME 指向空目录。"""
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.delenv("KAIRO_ASR_CMD", raising=False)
+    monkeypatch.delenv("KAIRO_ASR_ORIGIN", raising=False)
+    empty = tmp_path / "xdg-empty"
+    empty.mkdir()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(empty))
+
+
+def _write_script(tmp_path, name, body):
+    s = tmp_path / name
+    s.write_text(body)
+    return s
+
+
+def test_asr_env_cmd_transcribes_and_appends_form(tmp_path, monkeypatch):
+    """真实模式 + KAIRO_ASR_CMD:跑命令产 transcript.md + manifest form + origin。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    script = _write_script(
+        tmp_path,
+        "fake_asr.py",
+        "import sys, pathlib\n"
+        "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('券商会议转写文本')\n",
+    )
+    monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {script} {{outdir}}")
+    monkeypatch.setenv("KAIRO_ASR_ORIGIN", "whisper:test")
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    transcript = ws.root / "references" / rid / "transcript.md"
+    assert transcript.is_file()
+    assert transcript.read_text() == "券商会议转写文本"
+    forms = {f.role: f for f in ws.read_manifest(rid).forms}
+    assert "transcript" in forms
+    assert forms["transcript"].origin == "whisper:test"
+    assert state.products[f"references/{rid}/transcript.md"].status == "ok"
+
+
+def test_asr_blocks_asr_failed_when_command_fails(tmp_path, monkeypatch):
+    """命令非零退出 → blocked: asr-failed,不写假产物。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    script = _write_script(tmp_path, "fail.py", "import sys; sys.exit(3)")
+    monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {script} {{outdir}}")
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    ps = state.products[f"references/{rid}/transcript.md"]
+    assert ps.status == "blocked" and ps.reason == "asr-failed"
+    assert not (ws.root / "references" / rid / "transcript.md").exists()
+    assert "transcript" not in [f.role for f in ws.read_manifest(rid).forms]
+
+
+def test_asr_stdout_mode_when_no_output_placeholder(tmp_path, monkeypatch):
+    """模板不含 output 占位 → 捕获 stdout 作转写。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    script = _write_script(tmp_path, "echo.py", "print('从stdout来的转写')")
+    monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {script} {{input}}")
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    assert (
+        ws.root / "references" / rid / "transcript.md"
+    ).read_text() == "从stdout来的转写"
+
+
+def test_asr_resolves_cmd_from_config_toml(tmp_path, monkeypatch):
+    """无 env,$XDG_CONFIG_HOME/kairo/config.toml [asr] 提供命令与 origin。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    script = _write_script(
+        tmp_path,
+        "cfg_asr.py",
+        "import sys, pathlib\n"
+        "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('来自config的转写')\n",
+    )
+    cfg_home = tmp_path / "xdg"
+    (cfg_home / "kairo").mkdir(parents=True)
+    (cfg_home / "kairo" / "config.toml").write_text(
+        f'[asr]\ncmd = "{sys.executable} {script} {{outdir}}"\norigin = "whisper:cfg"\n'
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    assert (
+        ws.root / "references" / rid / "transcript.md"
+    ).read_text() == "来自config的转写"
+    forms = {f.role: f for f in ws.read_manifest(rid).forms}
+    assert forms["transcript"].origin == "whisper:cfg"
+
+
+def test_asr_env_cmd_overrides_config_toml(tmp_path, monkeypatch):
+    """优先级:env > config.toml。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    env_script = _write_script(
+        tmp_path,
+        "env_asr.py",
+        "import sys, pathlib\n"
+        "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('ENV赢')\n",
+    )
+    cfg_home = tmp_path / "xdg"
+    (cfg_home / "kairo").mkdir(parents=True)
+    (cfg_home / "kairo" / "config.toml").write_text(
+        '[asr]\ncmd = "false"\norigin = "whisper:cfg"\n'
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(cfg_home))
+    monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {env_script} {{outdir}}")
+    monkeypatch.setenv("KAIRO_ASR_ORIGIN", "whisper:env")
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    transcript = ws.root / "references" / rid / "transcript.md"
+    assert transcript.read_text() == "ENV赢"
+    forms = {f.role: f for f in ws.read_manifest(rid).forms}
+    assert forms["transcript"].origin == "whisper:env"
+
+
+def test_asr_blocks_no_asr_when_no_machine_config(tmp_path, monkeypatch):
+    """真实模式 + 无任何本机配置 → 维持 no-asr。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    ps = state.products[f"references/{rid}/transcript.md"]
+    assert ps.status == "blocked" and ps.reason == "no-asr"
+
+
+def test_asr_no_asr_block_retries_after_machine_config(tmp_path, monkeypatch):
+    """关键:此前 no-asr 挂起的音频,配好 ASR 后下次 step 应重试并转写成功。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    ws = Workspace.init(tmp_path)
+    rid = _add_audio(ws, tmp_path)
+    key = f"references/{rid}/transcript.md"
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)  # blocked: no-asr
+    assert state.products[key].reason == "no-asr"
+    # 现在本机配好 ASR → 同一产物应判为 stale 并重试成功
+    script = _write_script(
+        tmp_path,
+        "late.py",
+        "import sys, pathlib\n"
+        "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('补转写')\n",
+    )
+    monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {script} {{outdir}}")
+    item = AsrRule(ws, backend="whisper").discover()[0]
+    assert item.is_stale(state) is True
+    item.run(state)
+    assert (ws.root / "references" / rid / "transcript.md").read_text() == "补转写"
+    assert state.products[key].status == "ok"
+
+
+def test_asr_no_asr_block_not_stale_while_still_unconfigured(tmp_path, monkeypatch):
+    """收敛守卫:仍无 ASR 配置时 no-asr 产物不算 stale,step 才能收敛。"""
+    _isolate_machine(monkeypatch, tmp_path)
+    ws = Workspace.init(tmp_path)
+    _add_audio(ws, tmp_path)
+    state = State()
+    AsrRule(ws, backend="whisper").discover()[0].run(state)  # blocked: no-asr
+    assert AsrRule(ws, backend="whisper").discover()[0].is_stale(state) is False
 
 
 # ---- Digest ----

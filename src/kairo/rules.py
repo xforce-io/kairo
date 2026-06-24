@@ -8,17 +8,65 @@ from __future__ import annotations
 
 import hashlib
 import os
+import shlex
+import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
+from kairo.machine import resolve_asr
 from kairo.models import Form, ProductState, State, TargetState
 from kairo.provider import AgentConfig
+
+_ASR_OUTPUT_PLACEHOLDERS = ("{output}", "{outdir}", "{stem}")
+_ASR_TEXT_EXTS = (".txt", ".md", ".srt", ".vtt", ".json")
 
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _run_asr_cmd(template: str, input_path: Path) -> str | None:
+    """跑本机转写命令,返回转写文本;失败/空产物返回 None。
+
+    占位符:{input}=音频路径,{outdir}=临时输出目录,{stem}=输出名(transcript),
+    {output}={outdir}/{stem}.txt。模板含任一输出占位 → 从产物文件读;否则捕获 stdout。
+    """
+    with tempfile.TemporaryDirectory() as d:
+        outdir = Path(d)
+        stem = "transcript"
+        subs = {
+            "input": str(input_path),
+            "outdir": str(outdir),
+            "stem": stem,
+            "output": str(outdir / f"{stem}.txt"),
+        }
+        args = [_subst(tok, subs) for tok in shlex.split(template)]
+        uses_output = any(p in template for p in _ASR_OUTPUT_PLACEHOLDERS)
+        try:
+            proc = subprocess.run(args, capture_output=True, text=True)
+        except (OSError, ValueError):
+            return None
+        if proc.returncode != 0:
+            return None
+        if not uses_output:
+            return proc.stdout.strip() or None
+        preferred = outdir / f"{stem}.txt"
+        candidates = [preferred] if preferred.is_file() else []
+        for ext in _ASR_TEXT_EXTS:
+            candidates += sorted(p for p in outdir.glob(f"*{ext}") if p != preferred)
+        for c in candidates:
+            text = c.read_text().strip()
+            if text:
+                return text
+        return None
+
+
+def _subst(token: str, subs: dict[str, str]) -> str:
+    for key, value in subs.items():
+        token = token.replace("{" + key + "}", value)
+    return token
 
 
 def _run_agent(
@@ -51,8 +99,9 @@ class WorkItem:
 class AsrRule:
     """声明驱动的资源转换:有 consumes role、无 produces role → 用 backend 产 produces。
 
-    MVP backend=asr-stub:KAIRO_STUB 下产占位 produces;真实模式 blocked: no-asr;
-    源丢失 blocked: missing-source。consumes/produces 参数化 → 加 audio-like 资源只声明。
+    KAIRO_STUB 下产占位 produces;真实模式用本机配置(resolve_asr)的命令转写,
+    无配置 blocked: no-asr,命令失败 blocked: asr-failed,源丢失 blocked: missing-source。
+    consumes/produces 参数化 → 加 audio-like 资源只声明。
     """
 
     def __init__(
@@ -62,6 +111,15 @@ class AsrRule:
         self.consumes = list(consumes)
         self.produces = produces
         self.backend = backend
+
+    def _emit(self, ref_id: str, key: str, content: str, origin: str) -> None:
+        """写 produces 产物 + 给 manifest 追加 form。"""
+        (self.ws.root / key).write_text(content)
+        m = self.ws.read_manifest(ref_id)
+        m.forms.append(
+            Form(role=self.produces, location=key, hash=_hash(content), origin=origin)
+        )
+        self.ws.write_manifest(ref_id, m)
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
@@ -76,46 +134,65 @@ class AsrRule:
         src = next(f for f in man.forms if f.role in self.consumes)
         key = f"references/{ref_id}/{self.produces}.md"
         input_hash = src.hash
+        loc = Path(src.location)
+        src_path = loc if loc.is_absolute() else self.ws.root / loc
 
         def run(state: State) -> None:
-            loc = Path(src.location)
-            src_path = loc if loc.is_absolute() else self.ws.root / loc
             if not src_path.exists():
                 # 源不可达且需重派生(D-source)
                 state.products[key] = ProductState(
                     input_hash=input_hash, status="blocked", reason="missing-source"
                 )
                 return
-            if not os.environ.get("KAIRO_STUB"):
-                # 真实模式无转换后端(P4 接入);不在假产物上往下跑
+            if os.environ.get("KAIRO_STUB"):
+                content = (
+                    f"⚠️ STUB {self.produces.upper()}\n"
+                    f"(source: {src.location}, hash: {src.hash})\n"
+                    f"[stub 占位:无真实 {self.backend} 后端]\n"
+                )
+                self._emit(ref_id, key, content, f"{self.backend}-from:{src.hash}")
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    produced_by={"provider": self.backend, "model": "stub"},
+                )
+                return
+            # 真实模式:由本机配置(env / config.toml)解析转写命令
+            resolved = resolve_asr(default_origin=self.backend)
+            if resolved is None:
+                # 本机未配置 ASR 后端 → 挂起,不在假产物上往下跑
                 state.products[key] = ProductState(
                     input_hash=input_hash, status="blocked", reason="no-asr"
                 )
                 return
-            content = (
-                f"⚠️ STUB {self.produces.upper()}\n"
-                f"(source: {src.location}, hash: {src.hash})\n"
-                f"[stub 占位:无真实 {self.backend} 后端]\n"
-            )
-            (self.ws.root / key).write_text(content)
-            m = self.ws.read_manifest(ref_id)
-            m.forms.append(
-                Form(
-                    role=self.produces,
-                    location=key,
-                    hash=_hash(content),
-                    origin=f"{self.backend}-from:{src.hash}",
+            cmd_template, origin = resolved
+            text = _run_asr_cmd(cmd_template, src_path)
+            if not text:
+                # 命令失败/无产物 → 挂起,绝不写假转写
+                state.products[key] = ProductState(
+                    input_hash=input_hash, status="blocked", reason="asr-failed"
                 )
-            )
-            self.ws.write_manifest(ref_id, m)
+                return
+            self._emit(ref_id, key, text, origin)
             state.products[key] = ProductState(
                 input_hash=input_hash,
-                produced_by={"provider": self.backend, "model": "stub"},
+                produced_by={"provider": self.backend, "model": origin},
             )
 
         def is_stale(state: State) -> bool:
             ps = state.products.get(key)
-            return ps is None or ps.input_hash != input_hash
+            if ps is None or ps.input_hash != input_hash:
+                return True
+            # blocked 产物在其前置条件变化时才重试(否则保持收敛):
+            # missing-source → 源回来了;no-asr → 本机已配好 ASR(或 stub 模式)。
+            # asr-failed 视为终态,不自动重试(避免对持续失败的命令死循环;手动 re-step)。
+            if ps.status == "blocked":
+                if ps.reason == "missing-source":
+                    return src_path.exists()
+                if ps.reason == "no-asr":
+                    return bool(os.environ.get("KAIRO_STUB")) or (
+                        resolve_asr(default_origin=self.backend) is not None
+                    )
+            return False
 
         return WorkItem(key, input_hash, run, is_stale)
 
