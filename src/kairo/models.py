@@ -108,6 +108,14 @@ def _default_source_classes() -> dict[str, SourceClass]:
     }
 
 
+class GlossaryEntry(BaseModel):
+    """领域真名册的一条:真名 = 各环节参考的锚;note 给模型 grounding;aka 可选变体。"""
+
+    name: str
+    note: str = ""
+    aka: list[str] = Field(default_factory=list)  # 曾误识别/同音变体,纯参考
+
+
 class Constitution(BaseModel):
     topic: str = "main"
     pipeline: Pipeline = Field(default_factory=Pipeline)
@@ -122,6 +130,24 @@ class Constitution(BaseModel):
     )
     default_class: str = "stream"  # add 不指定时的兜底归类
     targets: list[Target] = Field(default_factory=_default_targets)
+    glossary: list[GlossaryEntry] = Field(default_factory=list)  # 领域真名册(#20)
+
+    def glossary_reference(self) -> str:
+        """真名册 → 一段权威参考(注入 Digest/Compose persona);空表返回空串(零行为变化)。"""
+        if not self.glossary:
+            return ""
+        lines = []
+        for e in self.glossary:
+            line = f"- {e.name}"
+            if e.note:
+                line += f" —— {e.note}"
+            if e.aka:
+                line += f"(亦作:{'/'.join(e.aka)})"
+            lines.append(line)
+        return (
+            "\n\n[领域真名册](权威参考;下列为本领域规范名,产出时一律用规范名,"
+            "勿用变体/别名;遇含糊提及按此锚定)\n" + "\n".join(lines)
+        )
 
 
 # ---- reference manifest (references/<id>/manifest.yaml) ----

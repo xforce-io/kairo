@@ -14,9 +14,29 @@ from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
 from kairo.rules import ComposeRule
 from kairo.stream_index import write_stream_index
-from kairo.workspace import Workspace
+from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
-app = typer.Typer(help="step 驱动的增量知识构建引擎")
+_EPILOG = (
+    '快速上手:kairo init "<topic>" → kairo add <file>'
+    "(--corpus 标基线,默认 stream 观测)→ kairo step(调和到收敛)。\n\n"
+    "产出两层:understanding.md(事实) / assessment.md(判断)。\n\n"
+    "心智与协议(两层产出、stream/corpus、fold)定义在 constitution.yaml。"
+)
+
+app = typer.Typer(help="step 驱动的增量知识构建引擎", epilog=_EPILOG)
+
+
+def _open_ws() -> Workspace:
+    """打开当前目录的工作区;非工作区给友好提示并非零退出(不吐 traceback)。"""
+    try:
+        return Workspace.open(Path.cwd())
+    except WorkspaceNotFound:
+        typer.secho(
+            '当前目录不是 kairo 工作区,先运行 kairo init "<topic>"',
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1) from None
 
 
 @app.command()
@@ -35,18 +55,22 @@ def add(
         False, "--corpus", help="标为基线参考资料(corpus);默认会议流(stream)"
     ),
 ) -> None:
-    """登记一条 reference 的所有形态(指针)。"""
-    ws = Workspace(Path.cwd())
-    rid = ws.add(
-        files, ref_id=ref_id, role=role, source_class="corpus" if corpus else None
-    )
+    """登记一条 reference 的所有形态(指针)。目录 + --corpus 登记为目录指针。"""
+    ws = _open_ws()
+    try:
+        rid = ws.add(
+            files, ref_id=ref_id, role=role, source_class="corpus" if corpus else None
+        )
+    except AddError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
     typer.echo(f"added {rid}")
 
 
 @app.command()
 def step() -> None:
     """跑调和循环到收敛(provider 自动选:有 key→Claude,否则 stub;KAIRO_STUB 强制 stub)。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     progressed = engine_step(ws, select_provider())
     typer.echo("stepped" if progressed else "no change")
 
@@ -56,7 +80,7 @@ def re_step(
     target: str = typer.Argument(None, help="文档 / reference id;省略=全量"),
 ) -> None:
     """强制重算(文档级=整篇重综合,丢手改)。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     engine_re_step(ws, select_provider(), target)
     typer.echo(f"re-stepped {target or '(all)'}")
 
@@ -64,7 +88,7 @@ def re_step(
 @app.command()
 def accept(doc: str = typer.Argument(..., help="要接受手改的文档")) -> None:
     """接受手改、钉为新基线,解除 blocked: manual-edit。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     engine_accept(ws, doc)
     typer.echo(f"accepted {doc}")
 
@@ -72,7 +96,7 @@ def accept(doc: str = typer.Argument(..., help="要接受手改的文档")) -> N
 @app.command()
 def status() -> None:
     """列 references / 各文档融入状态。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     state = ws.read_state()
     compose = ComposeRule(ws, None)  # 仅用于 corpus 漂移检测(不调 provider)
     for ref_id in ws.list_reference_ids():
@@ -101,7 +125,7 @@ def status() -> None:
 @app.command()
 def index() -> None:
     """(重)生成 references/MEETINGS.md —— 按 class 列出 stream(观测)导航索引。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     path = write_stream_index(ws)
     typer.echo(f"wrote {path.relative_to(ws.root)}")
 
@@ -109,7 +133,7 @@ def index() -> None:
 @app.command()
 def history() -> None:
     """列版本快照。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     for seq in list_snapshots(ws):
         typer.echo(seq)
 
@@ -117,7 +141,7 @@ def history() -> None:
 @app.command()
 def rollback(seq: str = typer.Argument(..., help="要回退到的快照 seq")) -> None:
     """回退文档 + targets 段到某版本(references/ 不动,下次 step 重融更晚 digest)。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     history_rollback(ws, seq)
     typer.echo(f"rolled back to {seq}")
 
@@ -125,5 +149,5 @@ def rollback(seq: str = typer.Argument(..., help="要回退到的快照 seq")) -
 @app.command()
 def diff(seq: str = typer.Argument(None, help="对比的快照;省略=最近")) -> None:
     """工作态 vs 版本文档差异(自带,不依赖 git)。"""
-    ws = Workspace(Path.cwd())
+    ws = _open_ws()
     typer.echo(diff_worktree(ws, seq) or "(no changes)")

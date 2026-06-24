@@ -10,7 +10,17 @@ from pathlib import Path
 
 import yaml
 
+from kairo import corpus
 from kairo.models import Constitution, Form, Manifest, State
+
+
+class AddError(Exception):
+    """add 的输入不合法(如目录摄入未加 --corpus);CLI 转友好提示。"""
+
+
+class WorkspaceNotFound(Exception):
+    """当前目录不是 kairo 工作区(无 .kairo/state.json)。"""
+
 
 def _slug(text: str) -> str:
     # 保留中文/字母数字(unicode word),标点/空白 → -;全标点(空)回退内容 hash 保唯一
@@ -21,6 +31,14 @@ def _slug(text: str) -> str:
 class Workspace:
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
+
+    @classmethod
+    def open(cls, root: Path | str) -> "Workspace":
+        """打开既有工作区;非工作区抛 WorkspaceNotFound(供 CLI 转友好提示)。"""
+        ws = cls(root)
+        if not ws.state_path.exists():
+            raise WorkspaceNotFound(ws.root)
+        return ws
 
     @classmethod
     def init(cls, root: Path | str, topic: str = "main") -> "Workspace":
@@ -73,6 +91,10 @@ class Workspace:
         source_class: str | None = None,
     ) -> str:
         files = [Path(f) for f in files]
+        if any(f.is_dir() for f in files):
+            return self._add_corpus_tree(
+                files, ref_id=ref_id, title=title, source_class=source_class
+            )
         if ref_id is None:
             today = datetime.date.today().isoformat()
             ref_id = f"{today}-{_slug(files[0].stem)}"
@@ -98,6 +120,42 @@ class Workspace:
                 man.model_dump(by_alias=True), allow_unicode=True, sort_keys=False
             )
         )
+        return ref_id
+
+    def _add_corpus_tree(
+        self,
+        files: list[Path],
+        ref_id: str | None,
+        title: str | None,
+        source_class: str | None,
+    ) -> str:
+        """目录指针式 corpus 摄入:整个目录登记为一条 corpus_tree reference。"""
+        if len(files) != 1:
+            raise AddError("目录摄入仅支持单个目录参数(不与文件混加)")
+        d = files[0]
+        if (source_class or self.constitution.default_class) != "corpus":
+            raise AddError(
+                f"目录摄入目前仅支持 corpus(加 --corpus);stream 请逐文件 add:{d}"
+            )
+        if ref_id is None:
+            today = datetime.date.today().isoformat()
+            ref_id = f"{today}-{_slug(d.name)}"
+        ref_dir = self.references_dir() / ref_id
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        man = Manifest(
+            id=ref_id,
+            title=title or d.name,
+            source_class="corpus",
+            forms=[
+                Form(
+                    role=corpus.CORPUS_TREE_ROLE,
+                    location=str(d),
+                    hash=corpus.tree_hash(d),
+                    origin="added",
+                )
+            ],
+        )
+        self.write_manifest(ref_id, man)
         return ref_id
 
     def read_manifest(self, ref_id: str) -> Manifest:
