@@ -8,66 +8,20 @@ from __future__ import annotations
 
 import hashlib
 import os
-import shlex
-import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 from kairo import corpus
+from kairo.backends import run_backend
 from kairo.machine import resolve_asr
 from kairo.models import Form, ProductState, State, TargetState
 from kairo.provider import AgentConfig
 
-_ASR_OUTPUT_PLACEHOLDERS = ("{output}", "{outdir}", "{stem}")
-_ASR_TEXT_EXTS = (".txt", ".md", ".srt", ".vtt", ".json")
-
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
-
-
-def _run_asr_cmd(template: str, input_path: Path) -> str | None:
-    """跑本机转写命令,返回转写文本;失败/空产物返回 None。
-
-    占位符:{input}=音频路径,{outdir}=临时输出目录,{stem}=输出名(transcript),
-    {output}={outdir}/{stem}.txt。模板含任一输出占位 → 从产物文件读;否则捕获 stdout。
-    """
-    with tempfile.TemporaryDirectory() as d:
-        outdir = Path(d)
-        stem = "transcript"
-        subs = {
-            "input": str(input_path),
-            "outdir": str(outdir),
-            "stem": stem,
-            "output": str(outdir / f"{stem}.txt"),
-        }
-        args = [_subst(tok, subs) for tok in shlex.split(template)]
-        uses_output = any(p in template for p in _ASR_OUTPUT_PLACEHOLDERS)
-        try:
-            proc = subprocess.run(args, capture_output=True, text=True)
-        except (OSError, ValueError):
-            return None
-        if proc.returncode != 0:
-            return None
-        if not uses_output:
-            return proc.stdout.strip() or None
-        preferred = outdir / f"{stem}.txt"
-        candidates = [preferred] if preferred.is_file() else []
-        for ext in _ASR_TEXT_EXTS:
-            candidates += sorted(p for p in outdir.glob(f"*{ext}") if p != preferred)
-        for c in candidates:
-            text = c.read_text().strip()
-            if text:
-                return text
-        return None
-
-
-def _subst(token: str, subs: dict[str, str]) -> str:
-    for key, value in subs.items():
-        token = token.replace("{" + key + "}", value)
-    return token
 
 
 def _run_agent(
@@ -97,12 +51,14 @@ class WorkItem:
     is_stale: Callable[[State], bool]
 
 
-class AsrRule:
+class TransformRule:
     """声明驱动的资源转换:有 consumes role、无 produces role → 用 backend 产 produces。
 
-    KAIRO_STUB 下产占位 produces;真实模式用本机配置(resolve_asr)的命令转写,
-    无配置 blocked: no-asr,命令失败 blocked: asr-failed,源丢失 blocked: missing-source。
-    consumes/produces 参数化 → 加 audio-like 资源只声明。
+    与 ASR 同构,格式无关:audio→transcript(whisper) / 二进制→source_text(markitdown)。
+    后端执行委托 backends.run_backend;KAIRO_STUB 下产占位 produces。
+    blocked:源丢失 missing-source、未配 asr 后端 no-asr、asr 命令失败 asr-failed、
+    markitdown 转换失败 convert-failed。corpus(fold=False)是只读参考层,不派生(跳过)。
+    consumes/produces/backend 参数化 → 加新转换只声明 Transform。
     """
 
     def __init__(
@@ -125,7 +81,13 @@ class AsrRule:
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
         for ref_id in self.ws.list_reference_ids():
-            roles = {f.role for f in self.ws.read_manifest(ref_id).forms}
+            man = self.ws.read_manifest(ref_id)
+            # corpus(fold=False)是只读参考层,不派生(与 Normalize/Digest 一致;
+            # 二进制不转 source_text——它经 read_dirs 直读,不进 digest/compose)。
+            sc = self.ws.constitution.source_classes.get(man.source_class)
+            if sc is not None and not sc.fold:
+                continue
+            roles = {f.role for f in man.forms}
             if any(c in roles for c in self.consumes) and self.produces not in roles:
                 items.append(self._make(ref_id))
         return items
@@ -157,22 +119,15 @@ class AsrRule:
                     produced_by={"provider": self.backend, "model": "stub"},
                 )
                 return
-            # 真实模式:由本机配置(env / config.toml)解析转写命令
-            resolved = resolve_asr(self.backend)
-            if resolved is None:
-                # 本机未配置 ASR 后端 → 挂起,不在假产物上往下跑
+            # 真实模式:由 backend 执行(markitdown 进程内 / asr 本机命令)
+            outcome = run_backend(self.backend, src_path, src.hash)
+            if outcome[0] == "blocked":
+                # 未配后端/转换失败 → 挂起,绝不写假产物
                 state.products[key] = ProductState(
-                    input_hash=input_hash, status="blocked", reason="no-asr"
+                    input_hash=input_hash, status="blocked", reason=outcome[1]
                 )
                 return
-            cmd_template, origin = resolved
-            text = _run_asr_cmd(cmd_template, src_path)
-            if not text:
-                # 命令失败/无产物 → 挂起,绝不写假转写
-                state.products[key] = ProductState(
-                    input_hash=input_hash, status="blocked", reason="asr-failed"
-                )
-                return
+            _, text, origin = outcome
             self._emit(ref_id, key, text, origin)
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -185,7 +140,7 @@ class AsrRule:
                 return True
             # blocked 产物在其前置条件变化时才重试(否则保持收敛):
             # missing-source → 源回来了;no-asr → 本机已配好 ASR(或 stub 模式)。
-            # asr-failed 视为终态,不自动重试(避免对持续失败的命令死循环;手动 re-step)。
+            # asr-failed / convert-failed 视为终态,不自动重试(避免死循环;手动 re-step)。
             if ps.status == "blocked":
                 if ps.reason == "missing-source":
                     return src_path.exists()

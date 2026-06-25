@@ -38,6 +38,28 @@ def test_step_runs_text_chain_to_convergence(tmp_path):
     assert "understanding.md" in state.targets
 
 
+def test_step_binary_chain_doc2text_digest_compose_in_one_step(tmp_path):
+    """二进制链(#15):docx --markitdown--> source_text → digest → understanding,一步到底。
+
+    transform 走真实 markitdown(进程内,无需 stub);agent 用 StubProvider。
+    source_text 不经 Normalize(只规范化机器转写的 transcript)。
+    """
+    from pathlib import Path
+
+    ws = Workspace.init(tmp_path)
+    fixture = Path(__file__).parent / "fixtures" / "sample.docx"
+    doc = tmp_path / "sample.docx"
+    doc.write_bytes(fixture.read_bytes())
+    ws.add([doc])
+    step(ws, StubProvider())
+    rid = ws.list_reference_ids()[0]
+    assert (ws.root / f"references/{rid}/source_text.md").exists()  # doc2text
+    assert not (ws.root / f"references/{rid}/prose.md").exists()  # 不规范化
+    assert (ws.root / f"references/{rid}/digest.md").exists()  # Digest
+    # 正文(docx 标题)流到 understanding
+    assert "康医通系统" in (ws.root / "understanding.md").read_text()
+
+
 def test_step_audio_chain_asr_digest_compose_in_one_step(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")  # stub ASR 才走通音频链
     ws = Workspace.init(tmp_path)

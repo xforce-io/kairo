@@ -4,7 +4,7 @@ import yaml
 
 from kairo.models import Form, GlossaryEntry, Manifest, State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import AsrRule, ComposeRule, DigestRule, NormalizeRule, _hash
+from kairo.rules import TransformRule, ComposeRule, DigestRule, NormalizeRule, _hash
 from kairo.workspace import Workspace
 
 
@@ -50,7 +50,7 @@ def _add_audio(ws, tmp_path, name="rec.m4a"):
 def test_asr_discovers_audio_without_transcript(tmp_path):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
-    items = AsrRule(ws).discover()
+    items = TransformRule(ws).discover()
     assert [it.key for it in items] == [f"references/{rid}/transcript.md"]
 
 
@@ -59,7 +59,7 @@ def test_asr_run_produces_marked_stub_transcript_and_appends_form(tmp_path, monk
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws).discover()[0].run(state)
+    TransformRule(ws).discover()[0].run(state)
     transcript = ws.root / "references" / rid / "transcript.md"
     assert transcript.is_file()
     assert "STUB TRANSCRIPT" in transcript.read_text()
@@ -71,14 +71,14 @@ def test_asr_run_produces_marked_stub_transcript_and_appends_form(tmp_path, monk
 
 
 def test_asr_rule_parametrized_consumes_produces(tmp_path, monkeypatch):
-    """#3:AsrRule 的 consumes/produces 可参数化(声明驱动,复用 stub/no-asr 占位逻辑)。"""
+    """#3:TransformRule 的 consumes/produces 可参数化(声明驱动,复用 stub/no-asr 占位逻辑)。"""
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = Workspace.init(tmp_path)
     v = tmp_path / "clip.mp4"
     v.write_bytes(b"fake video")
     rid = ws.add([v], role="video")
     state = State()
-    rule = AsrRule(ws, consumes=["video"], produces="transcript", backend="asr-stub")
+    rule = TransformRule(ws, consumes=["video"], produces="transcript", backend="asr-stub")
     assert [it.key for it in rule.discover()] == [f"references/{rid}/transcript.md"]
     rule.discover()[0].run(state)
     assert (ws.root / f"references/{rid}/transcript.md").exists()
@@ -92,7 +92,7 @@ def test_asr_skips_when_transcript_already_present(tmp_path):
     t = tmp_path / "rec.txt"
     t.write_text("用户给的真实转写稿")
     ws.add([a, t])  # roles: audio, transcript
-    assert AsrRule(ws).discover() == []
+    assert TransformRule(ws).discover() == []
 
 
 def test_asr_blocks_no_asr_in_real_mode(tmp_path, monkeypatch):
@@ -102,7 +102,7 @@ def test_asr_blocks_no_asr_in_real_mode(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws).discover()[0].run(state)
+    TransformRule(ws).discover()[0].run(state)
     ps = state.products[f"references/{rid}/transcript.md"]
     assert ps.status == "blocked" and ps.reason == "no-asr"
     assert not (ws.root / "references" / rid / "transcript.md").exists()
@@ -116,7 +116,7 @@ def test_asr_blocks_missing_source_when_audio_gone(tmp_path, monkeypatch):
     rid = ws.add([a])
     a.unlink()  # 源丢失
     state = State()
-    AsrRule(ws).discover()[0].run(state)
+    TransformRule(ws).discover()[0].run(state)
     ps = state.products[f"references/{rid}/transcript.md"]
     assert ps.status == "blocked" and ps.reason == "missing-source"
 
@@ -154,7 +154,7 @@ def test_asr_env_cmd_transcribes_and_appends_form(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    TransformRule(ws, backend="whisper").discover()[0].run(state)
     transcript = ws.root / "references" / rid / "transcript.md"
     assert transcript.is_file()
     assert transcript.read_text() == "券商会议转写文本"
@@ -172,7 +172,7 @@ def test_asr_blocks_asr_failed_when_command_fails(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    TransformRule(ws, backend="whisper").discover()[0].run(state)
     ps = state.products[f"references/{rid}/transcript.md"]
     assert ps.status == "blocked" and ps.reason == "asr-failed"
     assert not (ws.root / "references" / rid / "transcript.md").exists()
@@ -187,7 +187,7 @@ def test_asr_stdout_mode_when_no_output_placeholder(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    TransformRule(ws, backend="whisper").discover()[0].run(state)
     assert (
         ws.root / "references" / rid / "transcript.md"
     ).read_text() == "从stdout来的转写"
@@ -218,7 +218,7 @@ def test_asr_resolves_cmd_from_config_toml_by_backend_name(tmp_path, monkeypatch
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    TransformRule(ws, backend="whisper").discover()[0].run(state)
     assert (
         ws.root / "references" / rid / "transcript.md"
     ).read_text() == "来自config的转写"
@@ -249,7 +249,7 @@ def test_asr_config_routes_by_backend_among_multiple(tmp_path, monkeypatch):
     )
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
-    AsrRule(ws, backend="other").discover()[0].run(State())
+    TransformRule(ws, backend="other").discover()[0].run(State())
     assert (ws.root / "references" / rid / "transcript.md").read_text() == "other节"
 
 
@@ -260,7 +260,7 @@ def test_asr_no_asr_when_backend_section_absent(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="missing").discover()[0].run(state)
+    TransformRule(ws, backend="missing").discover()[0].run(state)
     ps = state.products[f"references/{rid}/transcript.md"]
     assert ps.status == "blocked" and ps.reason == "no-asr"
 
@@ -282,7 +282,7 @@ def test_asr_env_cmd_overrides_config_toml(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    TransformRule(ws, backend="whisper").discover()[0].run(state)
     transcript = ws.root / "references" / rid / "transcript.md"
     assert transcript.read_text() == "ENV赢"
     forms = {f.role: f for f in ws.read_manifest(rid).forms}
@@ -295,7 +295,7 @@ def test_asr_blocks_no_asr_when_no_machine_config(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path)
     rid = _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)
+    TransformRule(ws, backend="whisper").discover()[0].run(state)
     ps = state.products[f"references/{rid}/transcript.md"]
     assert ps.status == "blocked" and ps.reason == "no-asr"
 
@@ -307,7 +307,7 @@ def test_asr_no_asr_block_retries_after_machine_config(tmp_path, monkeypatch):
     rid = _add_audio(ws, tmp_path)
     key = f"references/{rid}/transcript.md"
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)  # blocked: no-asr
+    TransformRule(ws, backend="whisper").discover()[0].run(state)  # blocked: no-asr
     assert state.products[key].reason == "no-asr"
     # 现在本机配好 ASR → 同一产物应判为 stale 并重试成功
     script = _write_script(
@@ -317,7 +317,7 @@ def test_asr_no_asr_block_retries_after_machine_config(tmp_path, monkeypatch):
         "pathlib.Path(sys.argv[1], 'transcript.txt').write_text('补转写')\n",
     )
     monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {script} {{outdir}}")
-    item = AsrRule(ws, backend="whisper").discover()[0]
+    item = TransformRule(ws, backend="whisper").discover()[0]
     assert item.is_stale(state) is True
     item.run(state)
     assert (ws.root / "references" / rid / "transcript.md").read_text() == "补转写"
@@ -330,8 +330,8 @@ def test_asr_no_asr_block_not_stale_while_still_unconfigured(tmp_path, monkeypat
     ws = Workspace.init(tmp_path)
     _add_audio(ws, tmp_path)
     state = State()
-    AsrRule(ws, backend="whisper").discover()[0].run(state)  # blocked: no-asr
-    assert AsrRule(ws, backend="whisper").discover()[0].is_stale(state) is False
+    TransformRule(ws, backend="whisper").discover()[0].run(state)  # blocked: no-asr
+    assert TransformRule(ws, backend="whisper").discover()[0].is_stale(state) is False
 
 
 # ---- #30:Normalize(ASR 誊录规范化为 prose;只碰机器派生誊录)----
@@ -341,7 +341,7 @@ def _stub_asr_transcript(ws, tmp_path, monkeypatch):
     """造一个 ASR 派生的 transcript(origin≠added);返回 ref_id。"""
     monkeypatch.setenv("KAIRO_STUB", "1")
     rid = _add_audio(ws, tmp_path)
-    AsrRule(ws).discover()[0].run(State())
+    TransformRule(ws).discover()[0].run(State())
     return rid
 
 
