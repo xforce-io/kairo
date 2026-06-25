@@ -65,10 +65,15 @@ def _default_targets() -> list[Target]:
 
 
 _AUDIO_EXTS = (".m4a", ".wav", ".mp3", ".aac", ".flac", ".ogg")
+# 二进制/结构化文档(#15):markitdown 统吃 → 单一 document role,doc2text 转 source_text。
+_DOCUMENT_EXTS = (".docx", ".pptx", ".xlsx", ".pdf")
 
 
 def _default_roles_by_ext() -> dict[str, str]:
-    return {e: "audio" for e in _AUDIO_EXTS}
+    return {
+        **{e: "audio" for e in _AUDIO_EXTS},
+        **{e: "document" for e in _DOCUMENT_EXTS},
+    }
 
 
 class Transform(BaseModel):
@@ -82,10 +87,17 @@ class Transform(BaseModel):
 
 def _default_transforms() -> list[Transform]:
     # backend=whisper:声明"用本机 whisper 转写";具体命令由本机配置(machine.resolve_asr)解析。
+    # backend=markitdown:二进制(docx/pptx/xlsx/pdf)进程内转 source_text(#15),无需机器配置。
     return [
         Transform(
             name="asr", consumes=["audio"], produces="transcript", backend="whisper"
-        )
+        ),
+        Transform(
+            name="doc2text",
+            consumes=["document"],
+            produces="source_text",
+            backend="markitdown",
+        ),
     ]
 
 

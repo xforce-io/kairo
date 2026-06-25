@@ -29,8 +29,9 @@ uv run kairo --help
 ```bash
 kairo init "我的调研主题"      # 当前目录初始化为 topic-workspace + 默认宪法
 kairo add 录音.m4a            # 登记一条 reference（默认 stream/观测）
+kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
 kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
-kairo step                    # 调和到收敛:ASR → Normalize → Digest → Compose
+kairo step                    # 调和到收敛:ASR/doc2text → Normalize → Digest → Compose
 kairo status                  # 看各 reference / 文档的融入状态
 ```
 
@@ -57,7 +58,8 @@ kairo status                  # 看各 reference / 文档的融入状态
 - **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进文档、判断随之演进、可推翻旧判断；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
 - **两层产出**：`understanding.md`（事实层）与依赖它的 `assessment.md`（判断层）；中立事实与立场判断不混。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
-- **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）/ `compose-degraded`（综合输出相对上一版骤缩，疑为退化输出，已拒绝覆盖以保护旧文档）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）；`asr-failed` 与 `compose-degraded` 视为终态，需手动 `re-step` 重算。
+- **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
+- **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `convert-failed`（二进制转换失败/空产物）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）/ `compose-degraded`（综合输出相对上一版骤缩，疑为退化输出，已拒绝覆盖以保护旧文档）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）；`asr-failed` / `convert-failed` / `compose-degraded` 视为终态，需手动 `re-step` 重算。
 
 ## 领域真名册（glossary）
 

@@ -7,7 +7,7 @@ step 不懂规则干啥:扫规则 → 跑 stale 的 → 收敛即停。一次 st
 from __future__ import annotations
 
 from kairo.history import snapshot
-from kairo.rules import AsrRule, ComposeRule, DigestRule, NormalizeRule, _hash
+from kairo.rules import ComposeRule, DigestRule, NormalizeRule, TransformRule, _hash
 from kairo.stream_index import write_stream_index
 
 MAX_ITER = 100
@@ -17,7 +17,7 @@ def step(ws, provider) -> bool:
     """跑调和循环到收敛。返回是否有推进。"""
     state = ws.read_state()
     transform_rules = [
-        AsrRule(ws, t.consumes, t.produces, t.backend)
+        TransformRule(ws, t.consumes, t.produces, t.backend)
         for t in ws.constitution.transforms
     ]
     rules = [
