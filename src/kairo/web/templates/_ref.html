@@ -1,10 +1,12 @@
 <div class="ref">
-  <strong>{{ title }}</strong> <span class="muted">· {{ cls }} · {{ ref_id }}</span>
+  <h4>{{ title }}</h4>
+  <div class="ref-meta">{{ cls }} · {{ ref_id }}</div>
   <table>
     <tr><th>role</th><th>origin</th><th></th></tr>
     {% for f in forms %}
     <tr>
-      <td>{{ f.role }}</td><td class="muted">{{ f.origin }}</td>
+      <td class="role">{{ f.role }}</td>
+      <td class="origin">{{ f.origin }}</td>
       <td>{% if f.is_md %}<a href="#" hx-get="/w/{{ slug }}/doc?path={{ f.location | urlencode }}" hx-target="#reader">预览</a>{% endif %}</td>
     </tr>
     {% endfor %}

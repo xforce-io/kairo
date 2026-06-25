@@ -2,25 +2,35 @@
 {% block subtitle %}{{ topic }} · {{ slug }}{% endblock %}
 {% block body %}
 <div class="layout">
-  <aside class="nav">
-    <strong>产物</strong>
-    {% for t in targets %}
-    <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/doc?path={{ t.path | urlencode }}" hx-target="#reader">
-      <span class="dot {% if t.status == 'blocked' %}blocked{% elif t.status == 'missing' %}stale{% endif %}"></span>{{ t.path }}
-    </a>
-    {% endfor %}
-    <strong style="display:block;margin-top:12px">References</strong>
-    {% for r in refs %}
-    <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/ref/{{ r.id }}" hx-target="#refbox">
-      {{ r.title }} <span class="muted">· {{ r.cls }}</span>
-    </a>
-    {% endfor %}
+  <aside class="pane-nav">
+    <div class="nav-group">
+      <div class="nav-section">产物</div>
+      {% for t in targets %}
+      <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/doc?path={{ t.path | urlencode }}" hx-target="#reader">
+        <span class="dot {% if t.status == 'blocked' %}blocked{% elif t.status == 'missing' %}stale{% else %}ok{% endif %}"></span>
+        <span class="name">{{ t.path }}</span>
+      </a>
+      {% endfor %}
+    </div>
+    <div class="nav-group">
+      <div class="nav-section">参考</div>
+      {% for r in refs %}
+      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug }}/ref/{{ r.id }}" hx-target="#refbox">
+        <span class="name">{{ r.title }}</span>
+        <span class="tag {{ r.cls }}">{{ r.cls }}</span>
+      </a>
+      {% endfor %}
+    </div>
   </aside>
-  <main id="reader"><p class="muted">点左侧产物预览。</p></main>
-  <aside class="panel">
-    <button hx-post="/w/{{ slug }}/step" hx-target="#step-area" hx-swap="innerHTML">Step</button>
+
+  <main id="reader" class="pane-read"><p class="reader-empty">← 点左侧产物预览</p></main>
+
+  <aside class="pane-panel">
+    <div class="panel-title">操作</div>
+    <button class="btn btn-step" hx-post="/w/{{ slug }}/step" hx-target="#step-area" hx-swap="innerHTML">▶ Step</button>
     <div id="step-area"></div>
-    <div id="refbox" class="muted" style="margin-top:12px">选 reference 看详情。</div>
+    <div class="panel-title" style="margin-top:22px">Reference</div>
+    <div id="refbox"><p class="panel-hint">选 reference 看详情。</p></div>
   </aside>
 </div>
 {% endblock %}
