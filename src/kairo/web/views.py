@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
 from kairo.web.render import render_markdown
-from kairo.workspace import Workspace, WorkspaceNotFound
+from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
 router = APIRouter()
 
@@ -103,3 +104,62 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         "_ref.html",
         {"slug": slug, "ref_id": ref_id, "title": man.title, "cls": man.source_class, "forms": forms},
     )
+
+
+def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
+    refs = []
+    for ref_id in ws.list_reference_ids():
+        man = ws.read_manifest(ref_id)
+        refs.append({"id": ref_id, "title": man.title, "cls": man.source_class})
+    return request.app.state.templates.TemplateResponse(
+        request, "_refs_list.html", {"slug": slug, "refs": refs}
+    )
+
+
+def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
+    dest_dir = ws.root / ".kairo" / "uploads"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / Path(upload.filename or "upload.bin").name
+    dest.write_bytes(upload.file.read())
+    return dest
+
+
+@router.post("/w/{slug}/ref", response_class=HTMLResponse)
+def add_ref(
+    request: Request,
+    slug: str,
+    path: str = Form(None),
+    file: UploadFile = File(None),
+) -> HTMLResponse:
+    ws = _open(request, slug)
+    if file is not None:
+        src = _save_upload(ws, file)
+    elif path:
+        src = Path(path)
+    else:
+        raise HTTPException(status_code=400, detail="need file or path")
+    try:
+        ws.add([src])
+    except AddError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _refs_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/corpus", response_class=HTMLResponse)
+def add_corpus(request: Request, slug: str, path: str = Form(...)) -> HTMLResponse:
+    ws = _open(request, slug)
+    try:
+        ws.add([Path(path)], source_class="corpus")
+    except AddError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _refs_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/accept", response_class=HTMLResponse)
+def accept_doc(request: Request, slug: str, doc: str = Form(...)) -> HTMLResponse:
+    ws = _open(request, slug)
+    engine_accept(ws, doc)
+    state = ws.read_state()
+    ts = state.targets.get(doc)
+    status = ts.status if ts else "missing"
+    return HTMLResponse(f'<span class="dot {status}"></span>{doc}: {status}')
