@@ -22,7 +22,7 @@ def _build_rules(ws, provider) -> list:
     ]
     return [
         *transform_rules,
-        NormalizeRule(ws, provider),
+        NormalizeRule(ws, provider),  # ASR 誊录 → 规范化全文 prose(#30),插在 Digest 前
         DigestRule(ws, provider),
         ComposeRule(ws, provider),
     ]

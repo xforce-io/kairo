@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import threading
 import time
@@ -52,6 +54,7 @@ class TaskRegistry:
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
+                start_new_session=True,
             )
             task = StepTask(task_id=task_id, slug=slug, proc=proc)
             self._tasks[task_id] = task
@@ -79,12 +82,19 @@ class TaskRegistry:
         task = self._tasks.get(task_id)
         if task is None or task.proc is None or task.done:
             return False
-        task.proc.terminate()
+        try:
+            os.killpg(os.getpgid(task.proc.pid), signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            task.proc.terminate()  # fallback if group lookup fails
         return True
 
 
 def stream_events(task: StepTask) -> Iterator[str]:
-    """SSE:先回放已缓冲行,再 tail 新行,进程结束推 done(exit_code)。"""
+    """SSE:先回放已缓冲行,再 tail 新行,进程结束推 done(exit_code)。
+
+    客户端断开时生成器继续在 threadpool 线程中轮询直到 task.done(单用户本地可接受;
+    _pump 独立线程,无子进程泄漏)。
+    """
     idx = 0
     while True:
         with task.lock:

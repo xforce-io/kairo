@@ -5,7 +5,7 @@
   <aside class="nav">
     <strong>产物</strong>
     {% for t in targets %}
-    <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/doc?path={{ t.path }}" hx-target="#reader">
+    <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/doc?path={{ t.path | urlencode }}" hx-target="#reader">
       <span class="dot {% if t.status == 'blocked' %}blocked{% elif t.status == 'missing' %}stale{% endif %}"></span>{{ t.path }}
     </a>
     {% endfor %}

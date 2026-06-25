@@ -65,4 +65,4 @@ def test_ref_detail_shows_forms(tmp_path, monkeypatch):
     _ws_with_step(tmp_path, monkeypatch)
     ref_id = next(iter(__import__("os").listdir(tmp_path / "ws" / "references")))
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{ref_id}")
-    assert r.status_code == 200 and "transcript" in r.text or "digest" in r.text
+    assert r.status_code == 200 and ("transcript" in r.text or "digest" in r.text)

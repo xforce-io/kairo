@@ -76,6 +76,18 @@ def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
     assert (tmp_path / "ws" / "understanding.md").is_file()
 
 
+def test_cancel_kills_running_task(tmp_path):
+    reg = TaskRegistry()
+    slow = [sys.executable, "-c", "import time; time.sleep(30)"]
+    task = reg.start("ws", tmp_path, slow)
+    assert reg.cancel(task.task_id) is True
+    # _pump 线程在 EOF 后设 done=True,最多等 5s
+    end = time.time() + 5
+    while not task.done and time.time() < end:
+        time.sleep(0.1)
+    assert task.done, "task did not become done after cancel"
+
+
 def test_step_rejects_concurrent(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = Workspace.init(tmp_path / "ws", topic="t")
