@@ -345,9 +345,25 @@ def _stub_asr_transcript(ws, tmp_path, monkeypatch):
     return rid
 
 
-def test_normalize_discovers_asr_transcript(tmp_path, monkeypatch):
-    """ASR 派生的 transcript(origin≠added)且无 prose → 发现 prose 待办。"""
+def _ws_with_normalize(tmp_path):
+    """初始化并开启 normalize(默认是关的);返回开了开关的 Workspace。"""
     ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.pipeline.normalize.enabled = True
+    _save_constitution(ws, con)
+    return Workspace(ws.root)
+
+
+def test_normalize_disabled_by_default(tmp_path, monkeypatch):
+    """#33:normalize 默认关——有 ASR 誊录也不产 prose(prose 是可选的人读档案)。"""
+    ws = Workspace.init(tmp_path)
+    _stub_asr_transcript(ws, tmp_path, monkeypatch)
+    assert NormalizeRule(ws, StubProvider()).discover() == []
+
+
+def test_normalize_discovers_asr_transcript(tmp_path, monkeypatch):
+    """开启后:ASR 派生的 transcript(origin≠added)且无 prose → 发现 prose 待办。"""
+    ws = _ws_with_normalize(tmp_path)
     rid = _stub_asr_transcript(ws, tmp_path, monkeypatch)
     items = NormalizeRule(ws, StubProvider()).discover()
     assert [it.key for it in items] == [f"references/{rid}/prose.md"]
@@ -355,7 +371,7 @@ def test_normalize_discovers_asr_transcript(tmp_path, monkeypatch):
 
 def test_normalize_skips_human_text_source(tmp_path):
     """人给的文本源(transcript, origin=added)是权威原文,不规范化。"""
-    ws = Workspace.init(tmp_path)
+    ws = _ws_with_normalize(tmp_path)
     t = tmp_path / "meeting.txt"
     t.write_text("人给的原文,权威不动")
     ws.add([t])  # guess_role → transcript, origin=added
@@ -364,7 +380,7 @@ def test_normalize_skips_human_text_source(tmp_path):
 
 def test_normalize_skips_corpus(tmp_path):
     """corpus(只读参考层)不规范化,即便带派生 transcript(防御)。"""
-    ws = Workspace.init(tmp_path)
+    ws = _ws_with_normalize(tmp_path)
     rid = "c1"
     (ws.references_dir() / rid).mkdir(parents=True)
     (ws.root / f"references/{rid}/transcript.md").write_text("派生稿")
@@ -388,7 +404,7 @@ def test_normalize_skips_corpus(tmp_path):
 
 def test_normalize_skips_when_prose_already_present(tmp_path, monkeypatch):
     """已有 prose → 收敛,不再发现待办。"""
-    ws = Workspace.init(tmp_path)
+    ws = _ws_with_normalize(tmp_path)
     rid = _stub_asr_transcript(ws, tmp_path, monkeypatch)
     (ws.root / f"references/{rid}/prose.md").write_text("已规范化")
     assert NormalizeRule(ws, StubProvider()).discover() == []
@@ -396,7 +412,7 @@ def test_normalize_skips_when_prose_already_present(tmp_path, monkeypatch):
 
 def test_normalize_run_produces_prose_and_appends_form(tmp_path, monkeypatch):
     """run 产 prose.md(transcript 正文流过)+ 追加 prose form + 记账。"""
-    ws = Workspace.init(tmp_path)
+    ws = _ws_with_normalize(tmp_path)
     rid = _stub_asr_transcript(ws, tmp_path, monkeypatch)
     state = State()
     NormalizeRule(ws, StubProvider()).discover()[0].run(state)
@@ -411,17 +427,18 @@ def test_normalize_run_produces_prose_and_appends_form(tmp_path, monkeypatch):
 
 def test_normalize_converges_after_run(tmp_path, monkeypatch):
     """run 产 prose 后再 discover → 空(收敛)。"""
-    ws = Workspace.init(tmp_path)
+    ws = _ws_with_normalize(tmp_path)
     _stub_asr_transcript(ws, tmp_path, monkeypatch)
     rule = NormalizeRule(ws, StubProvider())
     rule.discover()[0].run(State())
     assert rule.discover() == []
 
 
-def test_normalize_persona_carries_iron_rule_discipline_and_glossary(tmp_path, monkeypatch):
-    """persona 携带铁律(只改形式不改信息量)+ 输出纪律 + 真名册(规范化阶段校正专名)。"""
+def test_normalize_persona_carries_readability_discipline_and_glossary(tmp_path, monkeypatch):
+    """#33:prose 供人通读 → persona 携带可读优化目标 + 输出纪律 + 真名册。"""
     ws = Workspace.init(tmp_path)
     con = ws.constitution
+    con.pipeline.normalize.enabled = True
     con.glossary = [GlossaryEntry(name="灵犀系统", aka=["灵西"])]
     _save_constitution(ws, con)
     ws2 = Workspace(ws.root)
@@ -429,7 +446,8 @@ def test_normalize_persona_carries_iron_rule_discipline_and_glossary(tmp_path, m
     prov = _RunOnlyProvider()
     NormalizeRule(ws2, prov).discover()[0].run(State())
     persona = prov.calls[0].persona
-    assert "只改形式,不改信息量" in persona  # 铁律:杜绝二次有损
+    assert "易读" in persona  # 可读优化目标(prose 供人通读)
+    assert "不是纪要" in persona  # 与 digest 区分:这是全文,不是摘要
     assert "只输出文档正文" in persona  # 输出纪律 P1
     assert "灵犀系统" in persona  # 真名册注入
 
@@ -459,12 +477,12 @@ def test_digest_run_produces_digest_carrying_body(tmp_path):
     assert f"references/{rid}/digest.md" in state.products
 
 
-def test_digest_prefers_prose_over_raw_transcript(tmp_path):
-    """#30:有 prose(规范化全文)时 digest 从 prose 派生,而非 raw transcript。"""
+def test_digest_always_from_transcript_ignoring_prose(tmp_path):
+    """#33:digest 恒从 transcript(信息上界);即便存在 prose 档案也不读它,杜绝二次有损。"""
     ws = Workspace.init(tmp_path)
     rid = "r1"
     (ws.references_dir() / rid).mkdir(parents=True)
-    (ws.root / f"references/{rid}/transcript.md").write_text("raw噪声誊录RAW")
+    (ws.root / f"references/{rid}/transcript.md").write_text("原始誊录RAW")
     (ws.root / f"references/{rid}/prose.md").write_text("规范化全文PROSE")
     ws.write_manifest(
         rid,
@@ -488,8 +506,8 @@ def test_digest_prefers_prose_over_raw_transcript(tmp_path):
     )
     DigestRule(ws, StubProvider()).discover()[0].run(State())
     digest = (ws.root / f"references/{rid}/digest.md").read_text()
-    assert "规范化全文PROSE" in digest  # 从 prose 派生
-    assert "raw噪声誊录RAW" not in digest  # 不从 raw transcript
+    assert "原始誊录RAW" in digest  # 恒从 transcript(信息上界)
+    assert "规范化全文PROSE" not in digest  # 永不读 prose(无二次有损)
 
 
 def test_digest_skips_when_no_body_available(tmp_path):

@@ -174,18 +174,22 @@ _COMPOSE_DEGRADE_RATIO = 0.5
 
 
 class NormalizeRule:
-    """ASR 派生的誊录(机器转写,有噪声)→ 规范化全文 prose(用 provider)。
+    """ASR 派生的誊录(机器转写,有噪声)→ 规范化可读全文 prose(用 provider)。
 
-    只碰机器派生的 transcript(origin≠added);人提供的原文是权威,不规范化。
-    corpus(只读参考层)不碰。契约:只去噪、不提炼(铁律见 prompt),有损只发生在 digest。
+    可选档案层(constitution.pipeline.normalize.enabled,默认关):prose 只给人读,
+    不进 digest 路径——digest 恒从 transcript(信息上界),故无二次有损、无需护栏(#33)。
+    只碰机器派生的 transcript(origin≠added);人提供的原文与 corpus 不碰。
     """
 
     def __init__(self, ws, provider) -> None:
         self.ws = ws
         self.provider = provider
+        self.enabled = ws.constitution.pipeline.normalize.enabled
         self.prompt = ws.constitution.pipeline.normalize.prompt
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
+        if not self.enabled:  # 默认关:不产 prose(可选档案)
+            return []
         items: list[WorkItem] = []
         for ref_id in self.ws.list_reference_ids():
             man = self.ws.read_manifest(ref_id)

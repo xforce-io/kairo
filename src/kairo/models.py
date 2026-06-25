@@ -6,11 +6,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_DIGEST_PROMPT = "为这条 reference 写一份忠实纪要,保留要点,可溯源。"
 
+# prose 是可选的人读档案(默认关),只服务可读性、不进 digest 路径,故按可读优化、不必无损。
 DEFAULT_NORMALIZE_PROMPT = (
-    "把这份机器转写的誊录规范化为忠实、可读的全文:补标点、合理分段、"
-    "纠正明显的同音/识别错误、去除口水词与重复。\n"
-    "铁律:只改形式,不改信息量——不得概括、删减要点、改写原意或增添内容;"
-    "逐句对应,保留全部信息(规范化不是摘要)。"
+    "把这份机器转写的誊录整理成忠实、流畅、易读的全文:补标点、合理分段、"
+    "纠正明显的同音/识别错误、合并重复的口水与寒暄。\n"
+    "忠实于原意,不增删事实、不加评论;这是供人通读的全文,不是纪要,不要概括成摘要。"
 )
 
 DEFAULT_UNDERSTANDING_FOLD = (
@@ -28,6 +28,8 @@ DEFAULT_ASSESSMENT_FOLD = (
 
 
 class NormalizeConfig(BaseModel):
+    # 默认关:prose 是可选的人读档案;digest 恒从 transcript(信息上界),不依赖 prose
+    enabled: bool = False
     prompt: str = DEFAULT_NORMALIZE_PROMPT
 
 
@@ -146,8 +148,8 @@ class Constitution(BaseModel):
     roles_by_ext: dict[str, str] = Field(default_factory=_default_roles_by_ext)
     default_role: str = "transcript"  # 无匹配扩展名时兜底
     body_roles: list[str] = Field(  # DigestRule 取正文的 role(优先序)
-        # prose(规范化全文,#30)优先;无 prose 退回 raw transcript / 文本源
-        default_factory=lambda: ["prose", "transcript", "source_text"]
+        # #33:digest 恒从 transcript(信息上界);prose 是旁挂的人读档案,不进 digest 路径
+        default_factory=lambda: ["transcript", "source_text"]
     )
     transforms: list[Transform] = Field(default_factory=_default_transforms)
     source_classes: dict[str, SourceClass] = Field(  # 源分层语义(corpus/stream)
