@@ -124,7 +124,7 @@ def test_add_dir_corpus_creates_single_tree_form(tmp_path):
     ws = Workspace.init(tmp_path)
     d = tmp_path / "corpus_docs"
     (d / "平台").mkdir(parents=True)
-    (d / "平台" / "术语表.md").write_text("康医通")
+    (d / "平台" / "术语表.md").write_text("灵犀系统")
     (d / "方法论.md").write_text("评估")
     rid = ws.add([d], source_class="corpus")
     assert rid == f"{_dt.date.today().isoformat()}-corpus_docs"

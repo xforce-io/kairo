@@ -190,7 +190,7 @@ def test_cli_e2e_corpus_dir_not_digested(tmp_path, monkeypatch):
     # corpus 目录
     cdir = tmp_path / "corpus_docs"
     (cdir / "平台").mkdir(parents=True)
-    (cdir / "平台" / "术语表.md").write_text("康医通=正式名")
+    (cdir / "平台" / "术语表.md").write_text("灵犀系统=正式名")
     # stream 文件
     s = tmp_path / "会议.txt"
     s.write_text("王强会议:落地优先级")

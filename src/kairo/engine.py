@@ -7,7 +7,7 @@ step 不懂规则干啥:扫规则 → 跑 stale 的 → 收敛即停。一次 st
 from __future__ import annotations
 
 from kairo.history import snapshot
-from kairo.rules import AsrRule, ComposeRule, DigestRule, _hash
+from kairo.rules import AsrRule, ComposeRule, DigestRule, NormalizeRule, _hash
 from kairo.stream_index import write_stream_index
 
 MAX_ITER = 100
@@ -20,7 +20,12 @@ def step(ws, provider) -> bool:
         AsrRule(ws, t.consumes, t.produces, t.backend)
         for t in ws.constitution.transforms
     ]
-    rules = [*transform_rules, DigestRule(ws, provider), ComposeRule(ws, provider)]
+    rules = [
+        *transform_rules,
+        NormalizeRule(ws, provider),  # ASR 誊录 → 规范化全文 prose(#30),插在 Digest 前
+        DigestRule(ws, provider),
+        ComposeRule(ws, provider),
+    ]
     any_progress = False
     for _ in range(MAX_ITER):
         progressed = False
