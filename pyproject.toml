@@ -32,3 +32,9 @@ packages = ["src/kairo"]
 
 [dependency-groups]
 dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # FastAPI TestClient 导入期的第三方过渡告警(httpx/httpx2);非本仓代码问题,过滤以保持输出 pristine
+    "ignore:Using .httpx. with .starlette.testclient.*",
+]
