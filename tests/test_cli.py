@@ -205,3 +205,20 @@ def test_cli_e2e_corpus_dir_not_digested(tmp_path, monkeypatch):
     refs = tmp_path / "references"
     corpus_ref = next(p for p in refs.iterdir() if "corpus_docs" in p.name)
     assert not (corpus_ref / "digest.md").exists()
+
+
+def test_cli_serve_missing_web_dep_friendly(monkeypatch):
+    """缺 kairo[web] 依赖时 serve 给友好提示、非零退出,不吐 traceback。"""
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **k):
+        if name.startswith("kairo.web"):
+            raise ImportError("no web")
+        return real_import(name, *a, **k)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    result = runner.invoke(app, ["serve", "--port", "0"])
+    assert result.exit_code != 0
+    assert "kairo[web]" in result.output
+    assert "Traceback" not in result.output
