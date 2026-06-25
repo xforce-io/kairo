@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
 from kairo.web.render import render_markdown
+from kairo.web.tasks import stream_events
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
 router = APIRouter()
@@ -163,3 +165,30 @@ def accept_doc(request: Request, slug: str, doc: str = Form(...)) -> HTMLRespons
     ts = state.targets.get(doc)
     status = ts.status if ts else "missing"
     return HTMLResponse(f'<span class="dot {status}"></span>{doc}: {status}')
+
+
+@router.post("/w/{slug}/step", response_class=HTMLResponse)
+def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLResponse:
+    ws = _open(request, slug)
+    reg = request.app.state.registry
+    if reg.is_running(slug):
+        return HTMLResponse('<p class="muted">⏳ 正在运行,请等待当前 step 结束。</p>')
+    argv = [sys.executable, "-m", "kairo"] + (["re-step", target] if target else ["step"])
+    task = reg.start(slug, ws.root, argv)
+    return request.app.state.templates.TemplateResponse(
+        request, "_step.html", {"slug": slug, "task_id": task.task_id}
+    )
+
+
+@router.get("/w/{slug}/step/{task_id}/stream")
+def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
+    task = request.app.state.registry.get(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="task not found")
+    return StreamingResponse(stream_events(task), media_type="text/event-stream")
+
+
+@router.post("/w/{slug}/step/{task_id}/cancel", response_class=HTMLResponse)
+def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
+    ok = request.app.state.registry.cancel(task_id)
+    return HTMLResponse('<p class="muted">已取消。</p>' if ok else '<p class="muted">无法取消(已结束)。</p>')

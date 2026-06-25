@@ -2,7 +2,11 @@
 import sys
 import time
 
+from fastapi.testclient import TestClient
+
+from kairo.web.server import create_app
 from kairo.web.tasks import StepTask, TaskRegistry, stream_events
+from kairo.workspace import Workspace
 
 
 def _wait(task, timeout=10):
@@ -49,3 +53,39 @@ def test_stream_events_replays_then_done():
     assert "data: line1\n\n" in out
     assert "data: line2\n\n" in out
     assert out[-1] == "event: done\ndata: 0\n\n"
+
+
+def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    c = TestClient(create_app(tmp_path))
+    r = c.post("/w/ws/step")
+    assert r.status_code == 200
+    # 片段含 SSE 容器 + task_id 指向 stream 端点
+    assert "/stream" in r.text
+    # 拉一次 SSE,应能读到 done 事件
+    import re
+    m = re.search(r"/w/ws/step/([0-9a-f]+)/stream", r.text)
+    assert m
+    tid = m.group(1)
+    body = c.get(f"/w/ws/step/{tid}/stream").text
+    assert "event: done" in body
+    # 收敛后产物生成
+    assert (tmp_path / "ws" / "understanding.md").is_file()
+
+
+def test_step_rejects_concurrent(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("x")
+    ws.add([tmp_path / "m.txt"])
+    c = TestClient(create_app(tmp_path))
+    # 直接占用该 slug 的串行锁(注入一个慢任务),再请求 step
+    import sys
+    app = c.app
+    app.state.registry.start("ws", tmp_path / "ws", [sys.executable, "-c", "import time; time.sleep(2)"])
+    r = c.post("/w/ws/step")
+    assert r.status_code == 200
+    assert "正在运行" in r.text

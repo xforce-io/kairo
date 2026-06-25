@@ -1,0 +1,11 @@
+<div hx-ext="sse" sse-connect="/w/{{ slug }}/step/{{ task_id }}/stream">
+  <div id="step-log" sse-swap="message" hx-swap="beforeend"></div>
+  <div sse-swap="done"
+       hx-get="/w/{{ slug }}"
+       hx-trigger="sse:done"
+       hx-target="body"
+       hx-select=".layout"
+       hx-swap="outerHTML"
+       class="muted">step 进行中…(完成后自动刷新状态)</div>
+  <button hx-post="/w/{{ slug }}/step/{{ task_id }}/cancel" hx-target="#step-area">取消</button>
+</div>
