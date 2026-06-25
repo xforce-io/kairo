@@ -170,4 +170,4 @@ manifest 元数据 + forms 表(role/origin/hash)+ 各派生物跳转。
 ## 10. 交叉链接
 
 - Issue: [#35](https://github.com/xforce-io/kairo/issues/35)
-- PR: 待创建后回填
+- PR: [#36](https://github.com/xforce-io/kairo/pull/36)
