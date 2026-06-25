@@ -47,9 +47,22 @@ def test_step_audio_chain_asr_digest_compose_in_one_step(tmp_path, monkeypatch):
     step(ws, StubProvider())
     rid = ws.list_reference_ids()[0]
     assert (ws.root / f"references/{rid}/transcript.md").exists()  # ASR
+    assert (ws.root / f"references/{rid}/prose.md").exists()  # Normalize(#30)
     assert (ws.root / f"references/{rid}/digest.md").exists()  # Digest
     # 整条骨牌链:STUB TRANSCRIPT 流到 understanding
     assert "STUB TRANSCRIPT" in (ws.root / "understanding.md").read_text()
+
+
+def test_step_text_chain_does_not_produce_prose(tmp_path):
+    """#30:人给的文本源(origin=added)不规范化,无 prose.md;直接 digest 原文。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "meeting.txt"
+    t.write_text("人给的原文")
+    ws.add([t])
+    step(ws, StubProvider())
+    rid = ws.list_reference_ids()[0]
+    assert not (ws.root / f"references/{rid}/prose.md").exists()
+    assert (ws.root / f"references/{rid}/digest.md").exists()
 
 
 def test_step_is_idempotent_after_convergence(tmp_path):
@@ -118,6 +131,21 @@ def test_re_step_document_discards_edit_and_recomposes(tmp_path):
     re_step(ws, StubProvider(), "understanding.md")
     # 文档级 re-step 丢弃手改、整篇重综合回规范内容
     assert (ws.root / "understanding.md").read_text() == canonical
+
+
+def test_re_step_reference_recomposes_digest_from_prose(tmp_path, monkeypatch):
+    """#30:re-step 单个 audio reference 从现有 prose 重产 digest;prose 是上游产物不重产。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path)
+    a = tmp_path / "rec.m4a"
+    a.write_bytes(b"audio")
+    ws.add([a])
+    step(ws, StubProvider())
+    rid = ws.list_reference_ids()[0]
+    prose_before = (ws.root / f"references/{rid}/prose.md").read_text()
+    re_step(ws, StubProvider(), rid)
+    assert (ws.root / f"references/{rid}/digest.md").exists()  # digest 重产
+    assert (ws.root / f"references/{rid}/prose.md").read_text() == prose_before  # prose 不动
 
 
 def test_re_step_all_recomposes_every_target(tmp_path):

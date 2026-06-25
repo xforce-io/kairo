@@ -218,6 +218,81 @@ _COMPOSE_MIN_PRIOR_LEN = 2000
 _COMPOSE_DEGRADE_RATIO = 0.5
 
 
+class NormalizeRule:
+    """ASR 派生的誊录(机器转写,有噪声)→ 规范化全文 prose(用 provider)。
+
+    只碰机器派生的 transcript(origin≠added);人提供的原文是权威,不规范化。
+    corpus(只读参考层)不碰。契约:只去噪、不提炼(铁律见 prompt),有损只发生在 digest。
+    """
+
+    def __init__(self, ws, provider) -> None:
+        self.ws = ws
+        self.provider = provider
+        self.prompt = ws.constitution.pipeline.normalize.prompt
+
+    def discover(self, state: State | None = None) -> list[WorkItem]:
+        items: list[WorkItem] = []
+        for ref_id in self.ws.list_reference_ids():
+            man = self.ws.read_manifest(ref_id)
+            # 源分层:corpus(fold=False)是只读参考层,不规范化(与不 digest 一致)。
+            sc = self.ws.constitution.source_classes.get(man.source_class)
+            if sc is not None and not sc.fold:
+                continue
+            roles = {f.role for f in man.forms}
+            if "prose" in roles:
+                continue
+            # 只规范化机器派生的誊录;origin=added 是人给的原文(权威),不碰。
+            tf = next(
+                (f for f in man.forms if f.role == "transcript" and f.origin != "added"),
+                None,
+            )
+            if tf is None:
+                continue
+            loc = Path(tf.location)
+            p = loc if loc.is_absolute() else self.ws.root / loc
+            key = f"references/{ref_id}/prose.md"
+            if not (self.ws.root / key).exists():
+                items.append(self._make(ref_id, key, p.read_text()))
+        return items
+
+    def _make(self, ref_id: str, key: str, body: str) -> WorkItem:
+        input_hash = _hash(f"{self.prompt}\n\n---誊录---\n{body}")
+
+        def run(state: State) -> None:
+            content = _run_agent(
+                self.provider,
+                self.prompt
+                + self.ws.constitution.glossary_reference()
+                + _OUTPUT_DISCIPLINE,
+                body,
+                "prose.md",
+            )
+            (self.ws.root / key).write_text(content)
+            m = self.ws.read_manifest(ref_id)
+            m.forms.append(
+                Form(
+                    role="prose",
+                    location=key,
+                    hash=_hash(content),
+                    origin=f"normalize-from:{_hash(body)}",
+                )
+            )
+            self.ws.write_manifest(ref_id, m)
+            state.products[key] = ProductState(
+                input_hash=input_hash,
+                produced_by={
+                    "provider": self.provider.name,
+                    "model": self.provider.model,
+                },
+            )
+
+        def is_stale(state: State) -> bool:
+            ps = state.products.get(key)
+            return ps is None or ps.input_hash != input_hash
+
+        return WorkItem(key, input_hash, run, is_stale)
+
+
 class DigestRule:
     """有正文(transcript/source_text)且无 digest → 产忠实纪要(用 provider)。"""
 

@@ -14,9 +14,9 @@ from kairo.workspace import Workspace
 
 def _tree(root: Path) -> None:
     """造一棵带隐藏项的目录树。"""
-    (root / "平台" / "康医通").mkdir(parents=True)
-    (root / "平台" / "康医通" / "术语表.md").write_text("康医通")
-    (root / "平台" / "康医通" / "接口说明.md").write_text("接口")
+    (root / "平台" / "灵犀系统").mkdir(parents=True)
+    (root / "平台" / "灵犀系统" / "术语表.md").write_text("灵犀系统")
+    (root / "平台" / "灵犀系统" / "接口说明.md").write_text("接口")
     (root / "方法论").mkdir()
     (root / "方法论" / "营养评估流程.md").write_text("评估")
     (root / ".DS_Store").write_text("junk")  # 隐藏文件
@@ -34,7 +34,7 @@ def test_walk_files_sorted_relative_skips_hidden(tmp_path):
     assert all(not p.is_absolute() for p in files)  # 相对 root
     names = {str(p) for p in files}
     assert "方法论/营养评估流程.md" in names
-    assert "平台/康医通/术语表.md" in names
+    assert "平台/灵犀系统/术语表.md" in names
     # 隐藏项跳过
     assert not any(".DS_Store" in str(p) or ".git" in str(p) for p in files)
 

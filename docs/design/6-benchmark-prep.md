@@ -1,7 +1,7 @@
 # #6 为跑真实基准做准备：subscription backend
 
 > 本文是 Issue [#6](https://github.com/xforce-io/kairo/issues/6) 的 single source of truth。
-> 关联 #1（MVP / §12 toc 回归基准）· #4（AgentProvider 缝）· #3（transform 声明化）。
+> 关联 #1（MVP / §12 前序项目 回归基准）· #4（AgentProvider 缝）· #3（transform 声明化）。
 
 ## 目标
 

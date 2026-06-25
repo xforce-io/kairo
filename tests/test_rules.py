@@ -2,9 +2,9 @@ import sys
 
 import yaml
 
-from kairo.models import State, TargetState
+from kairo.models import Form, GlossaryEntry, Manifest, State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import AsrRule, ComposeRule, DigestRule, _hash
+from kairo.rules import AsrRule, ComposeRule, DigestRule, NormalizeRule, _hash
 from kairo.workspace import Workspace
 
 
@@ -334,6 +334,106 @@ def test_asr_no_asr_block_not_stale_while_still_unconfigured(tmp_path, monkeypat
     assert AsrRule(ws, backend="whisper").discover()[0].is_stale(state) is False
 
 
+# ---- #30:Normalize(ASR 誊录规范化为 prose;只碰机器派生誊录)----
+
+
+def _stub_asr_transcript(ws, tmp_path, monkeypatch):
+    """造一个 ASR 派生的 transcript(origin≠added);返回 ref_id。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    rid = _add_audio(ws, tmp_path)
+    AsrRule(ws).discover()[0].run(State())
+    return rid
+
+
+def test_normalize_discovers_asr_transcript(tmp_path, monkeypatch):
+    """ASR 派生的 transcript(origin≠added)且无 prose → 发现 prose 待办。"""
+    ws = Workspace.init(tmp_path)
+    rid = _stub_asr_transcript(ws, tmp_path, monkeypatch)
+    items = NormalizeRule(ws, StubProvider()).discover()
+    assert [it.key for it in items] == [f"references/{rid}/prose.md"]
+
+
+def test_normalize_skips_human_text_source(tmp_path):
+    """人给的文本源(transcript, origin=added)是权威原文,不规范化。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "meeting.txt"
+    t.write_text("人给的原文,权威不动")
+    ws.add([t])  # guess_role → transcript, origin=added
+    assert NormalizeRule(ws, StubProvider()).discover() == []
+
+
+def test_normalize_skips_corpus(tmp_path):
+    """corpus(只读参考层)不规范化,即便带派生 transcript(防御)。"""
+    ws = Workspace.init(tmp_path)
+    rid = "c1"
+    (ws.references_dir() / rid).mkdir(parents=True)
+    (ws.root / f"references/{rid}/transcript.md").write_text("派生稿")
+    ws.write_manifest(
+        rid,
+        Manifest(
+            id=rid,
+            source_class="corpus",
+            forms=[
+                Form(
+                    role="transcript",
+                    location=f"references/{rid}/transcript.md",
+                    hash="h",
+                    origin="asr-stub-from:x",
+                )
+            ],
+        ),
+    )
+    assert NormalizeRule(ws, StubProvider()).discover() == []
+
+
+def test_normalize_skips_when_prose_already_present(tmp_path, monkeypatch):
+    """已有 prose → 收敛,不再发现待办。"""
+    ws = Workspace.init(tmp_path)
+    rid = _stub_asr_transcript(ws, tmp_path, monkeypatch)
+    (ws.root / f"references/{rid}/prose.md").write_text("已规范化")
+    assert NormalizeRule(ws, StubProvider()).discover() == []
+
+
+def test_normalize_run_produces_prose_and_appends_form(tmp_path, monkeypatch):
+    """run 产 prose.md(transcript 正文流过)+ 追加 prose form + 记账。"""
+    ws = Workspace.init(tmp_path)
+    rid = _stub_asr_transcript(ws, tmp_path, monkeypatch)
+    state = State()
+    NormalizeRule(ws, StubProvider()).discover()[0].run(state)
+    prose = ws.root / "references" / rid / "prose.md"
+    assert prose.is_file()
+    assert "STUB TRANSCRIPT" in prose.read_text()  # transcript 正文流过规范化
+    forms = {f.role: f for f in ws.read_manifest(rid).forms}
+    assert "prose" in forms
+    assert forms["prose"].origin.startswith("normalize-from:")  # 派生溯源
+    assert state.products[f"references/{rid}/prose.md"].input_hash  # 锚输入记账
+
+
+def test_normalize_converges_after_run(tmp_path, monkeypatch):
+    """run 产 prose 后再 discover → 空(收敛)。"""
+    ws = Workspace.init(tmp_path)
+    _stub_asr_transcript(ws, tmp_path, monkeypatch)
+    rule = NormalizeRule(ws, StubProvider())
+    rule.discover()[0].run(State())
+    assert rule.discover() == []
+
+
+def test_normalize_persona_carries_iron_rule_discipline_and_glossary(tmp_path, monkeypatch):
+    """persona 携带铁律(只改形式不改信息量)+ 输出纪律 + 真名册(规范化阶段校正专名)。"""
+    ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.glossary = [GlossaryEntry(name="灵犀系统", aka=["灵西"])]
+    _save_constitution(ws, con)
+    ws2 = Workspace(ws.root)
+    _stub_asr_transcript(ws2, tmp_path, monkeypatch)
+    prov = _RunOnlyProvider()
+    NormalizeRule(ws2, prov).discover()[0].run(State())
+    persona = prov.calls[0].persona
+    assert "只改形式,不改信息量" in persona  # 铁律:杜绝二次有损
+    assert "只输出文档正文" in persona  # 输出纪律 P1
+    assert "灵犀系统" in persona  # 真名册注入
+
+
 # ---- Digest ----
 
 
@@ -357,6 +457,39 @@ def test_digest_run_produces_digest_carrying_body(tmp_path):
     assert digest.is_file()
     assert "会议正文内容ABC" in digest.read_text()  # 正文流过 digest
     assert f"references/{rid}/digest.md" in state.products
+
+
+def test_digest_prefers_prose_over_raw_transcript(tmp_path):
+    """#30:有 prose(规范化全文)时 digest 从 prose 派生,而非 raw transcript。"""
+    ws = Workspace.init(tmp_path)
+    rid = "r1"
+    (ws.references_dir() / rid).mkdir(parents=True)
+    (ws.root / f"references/{rid}/transcript.md").write_text("raw噪声誊录RAW")
+    (ws.root / f"references/{rid}/prose.md").write_text("规范化全文PROSE")
+    ws.write_manifest(
+        rid,
+        Manifest(
+            id=rid,
+            forms=[
+                Form(
+                    role="transcript",
+                    location=f"references/{rid}/transcript.md",
+                    hash="h1",
+                    origin="asr-stub-from:x",
+                ),
+                Form(
+                    role="prose",
+                    location=f"references/{rid}/prose.md",
+                    hash="h2",
+                    origin="normalize-from:x",
+                ),
+            ],
+        ),
+    )
+    DigestRule(ws, StubProvider()).discover()[0].run(State())
+    digest = (ws.root / f"references/{rid}/digest.md").read_text()
+    assert "规范化全文PROSE" in digest  # 从 prose 派生
+    assert "raw噪声誊录RAW" not in digest  # 不从 raw transcript
 
 
 def test_digest_skips_when_no_body_available(tmp_path):

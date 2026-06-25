@@ -6,6 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field
 
 DEFAULT_DIGEST_PROMPT = "为这条 reference 写一份忠实纪要,保留要点,可溯源。"
 
+DEFAULT_NORMALIZE_PROMPT = (
+    "把这份机器转写的誊录规范化为忠实、可读的全文:补标点、合理分段、"
+    "纠正明显的同音/识别错误、去除口水词与重复。\n"
+    "铁律:只改形式,不改信息量——不得概括、删减要点、改写原意或增添内容;"
+    "逐句对应,保留全部信息(规范化不是摘要)。"
+)
+
 DEFAULT_UNDERSTANDING_FOLD = (
     "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
     "维持一张去重的术语表;未确认的挂 ⚠️;每段标来源。只放中立事实,判断进 assessment。\n"
@@ -20,11 +27,16 @@ DEFAULT_ASSESSMENT_FOLD = (
 )
 
 
+class NormalizeConfig(BaseModel):
+    prompt: str = DEFAULT_NORMALIZE_PROMPT
+
+
 class DigestConfig(BaseModel):
     prompt: str = DEFAULT_DIGEST_PROMPT
 
 
 class Pipeline(BaseModel):
+    normalize: NormalizeConfig = Field(default_factory=NormalizeConfig)
     digest: DigestConfig = Field(default_factory=DigestConfig)
 
 
@@ -101,7 +113,7 @@ def _default_source_classes() -> dict[str, SourceClass]:
             label="基线",
             hint=(
                 "权威参考资料;与观测冲突时以基线为准,"
-                "用基线校正专名/术语(如 看医通→康医通),并作术语权威基线。"
+                "用基线校正专名/术语(同音变体回归规范名),并作术语权威基线。"
             ),
             fold=False,
         ),
@@ -122,7 +134,8 @@ class Constitution(BaseModel):
     roles_by_ext: dict[str, str] = Field(default_factory=_default_roles_by_ext)
     default_role: str = "transcript"  # 无匹配扩展名时兜底
     body_roles: list[str] = Field(  # DigestRule 取正文的 role(优先序)
-        default_factory=lambda: ["transcript", "source_text"]
+        # prose(规范化全文,#30)优先;无 prose 退回 raw transcript / 文本源
+        default_factory=lambda: ["prose", "transcript", "source_text"]
     )
     transforms: list[Transform] = Field(default_factory=_default_transforms)
     source_classes: dict[str, SourceClass] = Field(  # 源分层语义(corpus/stream)
