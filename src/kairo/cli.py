@@ -151,3 +151,22 @@ def diff(seq: str = typer.Argument(None, help="对比的快照;省略=最近")) 
     """工作态 vs 版本文档差异(自带,不依赖 git)。"""
     ws = _open_ws()
     typer.echo(diff_worktree(ws, seq) or "(no changes)")
+
+
+@app.command()
+def serve(
+    root: Path = typer.Argument(Path.cwd, help="包含多个 workspace 的根目录"),
+    port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
+) -> None:
+    """启动本地 Web Console,浏览器统管 root 下的多个 workspace。"""
+    try:
+        from kairo.web.server import run as web_run
+    except ImportError:
+        typer.secho(
+            "未安装 web 依赖。请运行:pip install 'kairo[web]'",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1) from None
+    typer.echo(f"kairo console: http://127.0.0.1:{port}  (root={root})")
+    web_run(root, port=port)

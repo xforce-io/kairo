@@ -1,0 +1,6 @@
+<!-- src/kairo/web/templates/_refs_list.html -->
+{% for r in refs %}
+<a class="nav-doc" href="#" hx-get="/w/{{ slug }}/ref/{{ r.id }}" hx-target="#refbox">
+  {{ r.title }} <span class="muted">· {{ r.cls }}</span>
+</a>
+{% endfor %}

@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}kairo console{% endblock %}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js"></script>
+  <script src="/static/sse.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a href="/">kairo console</a>
+    <span class="muted">{% block subtitle %}{% endblock %}</span>
+  </header>
+  {% block body %}{% endblock %}
+</body>
+</html>

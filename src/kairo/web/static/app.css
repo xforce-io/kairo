@@ -1,0 +1,20 @@
+:root { --fg:#1a1a1a; --muted:#777; --line:#e3e3e3; --warn:#c0392b; --accent:#2d6cdf; }
+* { box-sizing: border-box; }
+body { font: 15px/1.6 -apple-system, "Segoe UI", sans-serif; color: var(--fg); margin: 0; }
+header.top { padding: 12px 20px; border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: baseline; }
+header.top a { color: inherit; text-decoration: none; font-weight: 600; }
+.muted { color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; padding: 20px; }
+.card { border: 1px solid var(--line); border-radius: 10px; padding: 14px; text-decoration: none; color: inherit; }
+.card:hover { border-color: var(--accent); }
+.card h3 { margin: 0 0 6px; }
+.badge { display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px; background: #f0f0f0; margin-right: 6px; }
+.badge.warn { background: #fdecea; color: var(--warn); }
+.layout { display: grid; grid-template-columns: 240px 1fr 280px; height: calc(100vh - 49px); }
+.layout > * { overflow: auto; padding: 14px; }
+.nav-doc { display: block; padding: 4px 6px; border-radius: 6px; color: inherit; text-decoration: none; }
+.nav-doc:hover { background: #f4f4f4; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: #bbb; }
+.dot.stale { background: #e0a200; } .dot.blocked { background: var(--warn); }
+.panel button { display: block; width: 100%; margin: 6px 0; padding: 8px; cursor: pointer; }
+#step-log { background: #111; color: #c8e6c9; font: 12px/1.5 monospace; padding: 10px; border-radius: 8px; white-space: pre-wrap; max-height: 320px; overflow: auto; }

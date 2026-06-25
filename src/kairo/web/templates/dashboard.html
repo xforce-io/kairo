@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ root }} · {{ items|length }} workspaces{% endblock %}
+{% block body %}
+<div class="grid">
+  {% for s in items %}
+  <a class="card" href="/w/{{ s.slug }}">
+    <h3>{{ s.topic }}</h3>
+    <div class="muted">{{ s.slug }}</div>
+    <div style="margin-top:8px">
+      <span class="badge">{{ s.stream_count }} 观测</span>
+      <span class="badge">{{ s.corpus_count }} 基线</span>
+      {% if s.stale_count %}<span class="badge warn">{{ s.stale_count }} 待 step</span>{% endif %}
+      {% if s.blocked_count %}<span class="badge warn">⚠ {{ s.blocked_count }}</span>{% endif %}
+    </div>
+  </a>
+  {% else %}
+  <p class="muted">该目录下没有 workspace(子目录需含 constitution.yaml)。</p>
+  {% endfor %}
+</div>
+{% endblock %}

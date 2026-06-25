@@ -92,6 +92,13 @@ origin = "whisper:large-v3-turbo"
 
 Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub / claude / claude-code / codex），无 audit。详见 Issue [#4](https://github.com/xforce-io/kairo/issues/4)。
 
+## Web Console（可选）
+
+    pip install 'kairo[web]'
+    kairo serve <包含多个 workspace 的根目录>
+
+浏览器统管本地 workspace：dashboard 总览、产物预览、reference/corpus 登记、从界面触发 step 看实时进度。
+
 ## 设计与决策轨迹
 
 可用的 CLI 工具（`init`/`add`/`step`/… 全部就绪，105+ 测试）。各特性的设计稿按 issue 编号存于 [`docs/design/`](docs/design)，是对应决策的 single source of truth：MVP [#1](https://github.com/xforce-io/kairo/issues/1)、AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4)、源分层 [#13](https://github.com/xforce-io/kairo/issues/13) 等。
