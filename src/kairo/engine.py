@@ -13,19 +13,34 @@ from kairo.stream_index import write_stream_index
 MAX_ITER = 100
 
 
-def step(ws, provider) -> bool:
-    """跑调和循环到收敛。返回是否有推进。"""
-    state = ws.read_state()
+def _build_rules(ws, provider) -> list:
+    """构造调和规则列表(transform 声明驱动 + Normalize/Digest/Compose)。
+    discover/is_stale 不碰 provider,故 pending() 可传 provider=None 只读枚举。"""
     transform_rules = [
         TransformRule(ws, t.consumes, t.produces, t.backend)
         for t in ws.constitution.transforms
     ]
-    rules = [
+    return [
         *transform_rules,
-        NormalizeRule(ws, provider),  # ASR 誊录 → 规范化全文 prose(#30),插在 Digest 前
+        NormalizeRule(ws, provider),
         DigestRule(ws, provider),
         ComposeRule(ws, provider),
     ]
+
+
+def pending(ws) -> list:
+    """当前 stale 的 WorkItem(只读:不跑 provider、不写 state)。dashboard 算待办数用。"""
+    state = ws.read_state()
+    items = []
+    for rule in _build_rules(ws, None):
+        items.extend(item for item in rule.discover(state) if item.is_stale(state))
+    return items
+
+
+def step(ws, provider) -> bool:
+    """跑调和循环到收敛。返回是否有推进。"""
+    state = ws.read_state()
+    rules = _build_rules(ws, provider)
     any_progress = False
     for _ in range(MAX_ITER):
         progressed = False
