@@ -61,6 +61,7 @@ def test_step_binary_chain_doc2text_digest_compose_in_one_step(tmp_path):
 
 
 def test_step_audio_chain_asr_digest_compose_in_one_step(tmp_path, monkeypatch):
+    """默认(normalize 关):audio → transcript → digest → compose,不产 prose。"""
     monkeypatch.setenv("KAIRO_STUB", "1")  # stub ASR 才走通音频链
     ws = Workspace.init(tmp_path)
     a = tmp_path / "rec.m4a"
@@ -69,9 +70,29 @@ def test_step_audio_chain_asr_digest_compose_in_one_step(tmp_path, monkeypatch):
     step(ws, StubProvider())
     rid = ws.list_reference_ids()[0]
     assert (ws.root / f"references/{rid}/transcript.md").exists()  # ASR
-    assert (ws.root / f"references/{rid}/prose.md").exists()  # Normalize(#30)
-    assert (ws.root / f"references/{rid}/digest.md").exists()  # Digest
+    assert not (ws.root / f"references/{rid}/prose.md").exists()  # normalize 默认关
+    assert (ws.root / f"references/{rid}/digest.md").exists()  # Digest(从 transcript)
     # 整条骨牌链:STUB TRANSCRIPT 流到 understanding
+    assert "STUB TRANSCRIPT" in (ws.root / "understanding.md").read_text()
+
+
+def test_step_audio_chain_with_normalize_enabled_produces_prose(tmp_path, monkeypatch):
+    """#33:开启 normalize 后旁挂产 prose 作人读档案;digest 仍从 transcript(不依赖 prose)。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.pipeline.normalize.enabled = True
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
+    ws = Workspace(ws.root)
+    a = tmp_path / "rec.m4a"
+    a.write_bytes(b"audio")
+    ws.add([a])
+    step(ws, StubProvider())
+    rid = ws.list_reference_ids()[0]
+    assert (ws.root / f"references/{rid}/prose.md").exists()  # 开启后产 prose 档案
+    assert (ws.root / f"references/{rid}/digest.md").exists()
     assert "STUB TRANSCRIPT" in (ws.root / "understanding.md").read_text()
 
 
@@ -155,8 +176,8 @@ def test_re_step_document_discards_edit_and_recomposes(tmp_path):
     assert (ws.root / "understanding.md").read_text() == canonical
 
 
-def test_re_step_reference_recomposes_digest_from_prose(tmp_path, monkeypatch):
-    """#30:re-step 单个 audio reference 从现有 prose 重产 digest;prose 是上游产物不重产。"""
+def test_re_step_reference_recomposes_digest_from_transcript(tmp_path, monkeypatch):
+    """#33:re-step 单个 audio reference 从 transcript 重产 digest(默认无 prose 介入)。"""
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = Workspace.init(tmp_path)
     a = tmp_path / "rec.m4a"
@@ -164,10 +185,10 @@ def test_re_step_reference_recomposes_digest_from_prose(tmp_path, monkeypatch):
     ws.add([a])
     step(ws, StubProvider())
     rid = ws.list_reference_ids()[0]
-    prose_before = (ws.root / f"references/{rid}/prose.md").read_text()
     re_step(ws, StubProvider(), rid)
-    assert (ws.root / f"references/{rid}/digest.md").exists()  # digest 重产
-    assert (ws.root / f"references/{rid}/prose.md").read_text() == prose_before  # prose 不动
+    digest = ws.root / f"references/{rid}/digest.md"
+    assert digest.exists()  # digest 重产
+    assert "STUB TRANSCRIPT" in digest.read_text()  # 从 transcript 派生
 
 
 def test_re_step_all_recomposes_every_target(tmp_path):

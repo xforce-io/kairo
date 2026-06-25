@@ -6,11 +6,9 @@
 
 ## 核心心智
 
-一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR → Normalize（把机器誊录规范化为忠实可读全文 `prose.md`）→ Digest（忠实纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md` 事实层 / `assessment.md` 判断层）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
+一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（忠实纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md` 事实层 / `assessment.md` 判断层）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
 
-> **规范化（Normalize, [#30](https://github.com/xforce-io/kairo/issues/30)）**：raw ASR 噪声大（无标点、口语化、同音错字），直接 digest 会一边消化噪声一边提炼。故在 ASR 与 Digest 间插一层「只去噪、不提炼」的规范化，产物 `prose.md`，digest 改从它派生。铁律是**只改形式不改信息量**——有损只发生在 digest 这一步。只规范化机器派生的誊录（`origin≠added`）；人提供的文本原文是权威，不碰；raw `transcript.md` 保留作档案。
->
-> **既有 workspace 迁移**：新建的 workspace 自动启用；升级前已有的 workspace，其 `constitution.yaml` 里的 `body_roles` 仍是旧值（无 `prose`），需手动在最前补上 `prose`（即 `["prose", "transcript", "source_text"]`），否则 prose 会照常生成、但 digest 仍读 raw `transcript`。
+> **可读全文 prose（可选，[#33](https://github.com/xforce-io/kairo/issues/33)）**：raw ASR 噪声大（无标点、口语化、同音错字），不便人通读。开启 `normalize` 后，旁挂生成一份规范化的可读全文 `prose.md` 作**人读档案**——补标点、分段、纠错、合并口水。关键是它**只给人读、不进 digest 路径**：digest 恒从 raw `transcript` 派生（信息上界），所以 prose 怎么精简都不影响纪要质量、也不存在「二次有损」，无需任何护栏。默认**关**，在 `constitution.yaml` 设 `pipeline.normalize.enabled: true` 开启；只对机器派生的誊录（`origin≠added`）生成，人给的文本原文与 corpus 不碰。
 
 ## 安装
 
@@ -31,7 +29,7 @@ kairo init "我的调研主题"      # 当前目录初始化为 topic-workspace 
 kairo add 录音.m4a            # 登记一条 reference（默认 stream/观测）
 kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
 kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
-kairo step                    # 调和到收敛:ASR/doc2text → Normalize → Digest → Compose
+kairo step                    # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)
 kairo status                  # 看各 reference / 文档的融入状态
 ```
 
@@ -63,7 +61,7 @@ kairo status                  # 看各 reference / 文档的融入状态
 
 ## 领域真名册（glossary）
 
-`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Normalize / Digest / Compose 时注入 agent 提示词（Issue [#20](https://github.com/xforce-io/kairo/issues/20)），用于纠正口语 / 转写产生的同音变体与别名——产出时一律用规范名，遇含糊提及按此锚定。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
+`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Compose（及开启的 Normalize）时注入 agent 提示词（Issue [#20](https://github.com/xforce-io/kairo/issues/20)），用于纠正口语 / 转写产生的同音变体与别名——产出时一律用规范名，遇含糊提及按此锚定。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
 
 ```yaml
 glossary:
