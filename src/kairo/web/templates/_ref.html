@@ -1,0 +1,12 @@
+<div class="ref">
+  <strong>{{ title }}</strong> <span class="muted">· {{ cls }} · {{ ref_id }}</span>
+  <table>
+    <tr><th>role</th><th>origin</th><th></th></tr>
+    {% for f in forms %}
+    <tr>
+      <td>{{ f.role }}</td><td class="muted">{{ f.origin }}</td>
+      <td>{% if f.is_md %}<a href="#" hx-get="/w/{{ slug }}/doc?path={{ f.location }}" hx-target="#reader">预览</a>{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>

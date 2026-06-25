@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ topic }} · {{ slug }}{% endblock %}
+{% block body %}
+<div class="layout">
+  <aside class="nav">
+    <strong>产物</strong>
+    {% for t in targets %}
+    <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/doc?path={{ t.path }}" hx-target="#reader">
+      <span class="dot {% if t.status == 'blocked' %}blocked{% elif t.status == 'missing' %}stale{% endif %}"></span>{{ t.path }}
+    </a>
+    {% endfor %}
+    <strong style="display:block;margin-top:12px">References</strong>
+    {% for r in refs %}
+    <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/ref/{{ r.id }}" hx-target="#refbox">
+      {{ r.title }} <span class="muted">· {{ r.cls }}</span>
+    </a>
+    {% endfor %}
+  </aside>
+  <main id="reader"><p class="muted">点左侧产物预览。</p></main>
+  <aside class="panel">
+    <button hx-post="/w/{{ slug }}/step" hx-target="#step-area" hx-swap="innerHTML">Step</button>
+    <div id="step-area"></div>
+    <div id="refbox" class="muted" style="margin-top:12px">选 reference 看详情。</div>
+  </aside>
+</div>
+{% endblock %}
