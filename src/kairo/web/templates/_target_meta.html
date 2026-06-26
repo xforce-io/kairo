@@ -3,18 +3,19 @@
   <h3 class="meta-title">{{ path }}</h3>
   {% if reason %}<p class="meta-hint">原因:{{ reason }}</p>{% endif %}
   <div class="meta-label">形态</div>
-  <ul class="form-list">
+  <table class="meta-forms">
+    <thead><tr><th>role</th><th>location</th><th></th></tr></thead>
+    <tbody>
     {% if has_doc %}
-    <li class="form-item is-prev on" hx-get="/w/{{ slug | urlencode }}/doc?path={{ path | urlencode }}" hx-target="#reader">
-      <div class="form-top">
-        <span class="form-role">document</span>
-        <span class="form-prev">预览 →</span>
-      </div>
-      <div class="form-loc">{{ path }}</div>
-    </li>
+    <tr class="is-prev on" hx-get="/w/{{ slug | urlencode }}/doc?path={{ path | urlencode }}" hx-target="#reader">
+      <td class="mf-role">document</td>
+      <td class="mf-loc">{{ path }}</td>
+      <td class="mf-act">预览 →</td>
+    </tr>
     {% else %}
-    <li class="form-item form-empty">尚未生成</li>
+    <tr><td class="mf-empty" colspan="3">尚未生成</td></tr>
     {% endif %}
-  </ul>
+    </tbody>
+  </table>
 </div>
 {% include "_reader_oob.html" %}

@@ -3,18 +3,19 @@
   <h3 class="meta-title">{{ title }}</h3>
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
   <div class="meta-label">形态</div>
-  <ul class="form-list">
+  <table class="meta-forms">
+    <thead><tr><th>role</th><th>origin</th><th>location</th><th></th></tr></thead>
+    <tbody>
     {% for f in forms %}
-    <li class="form-item{% if f.previewable %} is-prev{% endif %}{% if f.location == preview_title %} on{% endif %}"
+    <tr class="{% if f.previewable %}is-prev{% endif %}{% if f.location == preview_title %} on{% endif %}"
         {% if f.previewable %}hx-get="/w/{{ slug | urlencode }}/doc?path={{ f.location | urlencode }}" hx-target="#reader"{% endif %}>
-      <div class="form-top">
-        <span class="form-role">{{ f.role }}</span>
-        {% if f.previewable %}<span class="form-prev">预览 →</span>{% endif %}
-      </div>
-      <div class="form-origin">{{ f.origin }}</div>
-      <div class="form-loc">{{ f.location }}</div>
-    </li>
+      <td class="mf-role">{{ f.role }}</td>
+      <td class="mf-origin">{{ f.origin }}</td>
+      <td class="mf-loc">{{ f.location }}</td>
+      <td class="mf-act">{% if f.previewable %}预览 →{% endif %}</td>
+    </tr>
     {% endfor %}
-  </ul>
+    </tbody>
+  </table>
 </div>
 {% include "_reader_oob.html" %}
