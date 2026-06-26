@@ -1,84 +1,86 @@
 # kairo
 
-> step 驱动的增量知识构建引擎 —— 丢一个 reference，step 一下，知识往前长一格。
+English | [简体中文](README.zh-CN.md)
 
-把「录音 → 转写 → 纪要 → 理解/判断」这条手工活，变成 `step` 驱动的增量知识构建引擎。它秉持工程纪律（可追溯、派生物可重生），是**编排 LLM** 的增量构建系统。
+> A step-driven incremental knowledge-construction engine — drop in a reference, run a `step`, and knowledge grows one notch.
 
-## 核心心智
+Turns the manual chain of "recording → transcription → minutes → understanding/judgment" into a `step`-driven incremental knowledge-construction engine. It upholds engineering discipline (traceable; derivatives are regenerable) and is an incremental construction system that **orchestrates LLMs**.
 
-一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（忠实纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md` 事实层 / `assessment.md` 判断层）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
+## Core mental model
 
-> **可读全文 prose（可选，[#33](https://github.com/xforce-io/kairo/issues/33)）**：raw ASR 噪声大（无标点、口语化、同音错字），不便人通读。开启 `normalize` 后，旁挂生成一份规范化的可读全文 `prose.md` 作**人读档案**——补标点、分段、纠错、合并口水。关键是它**只给人读、不进 digest 路径**：digest 恒从 raw `transcript` 派生（信息上界），所以 prose 怎么精简都不影响纪要质量、也不存在「二次有损」，无需任何护栏。默认**关**，在 `constitution.yaml` 设 `pipeline.normalize.enabled: true` 开启；只对机器派生的誊录（`origin≠added`）生成，人给的文本原文与 corpus 不碰。
+One `kairo step` topples the dominoes all the way down: `add` a reference → ASR/doc2text → Digest (faithful minutes = this reference's memory) → Compose (incrementally synthesize into the fact layer `understanding.md` / the judgment layer `assessment.md`). Like `make`: it doesn't run commands, it **reconciles** toward the state declared in the constitution, running until convergence.
 
-## 安装
+> **Readable full-text prose (optional, [#33](https://github.com/xforce-io/kairo/issues/33))**: raw ASR is noisy (no punctuation, colloquial, homophone errors) and hard to read through. With `normalize` enabled, a normalized readable full text `prose.md` is generated alongside as a **human-reading archive** — adding punctuation, paragraphing, fixing errors, merging filler. The key point: it is **for human reading only and never enters the digest path**: the digest is always derived from the raw `transcript` (the information upper bound), so no matter how much prose is trimmed it never affects minutes quality, and there is no "second lossy pass" — so no guardrails are needed. Off by default; enable by setting `pipeline.normalize.enabled: true` in `constitution.yaml`; generated only for machine-derived transcriptions (`origin≠added`) — human-provided text stays verbatim and corpus is untouched.
+
+## Installation
 
 ```bash
-# 全局安装控制台命令 kairo（需要 uv）
+# Install the kairo console command globally (requires uv)
 uv tool install .
 
-# 或在仓库内开发态运行
+# Or run in-repo in development mode
 uv run kairo --help
 ```
 
-需要 Python ≥ 3.11。音频转写依赖本机 whisper，见下方「本机 ASR 配置」。
+Requires Python ≥ 3.11. Audio transcription depends on a local whisper — see "Local ASR configuration" below.
 
-## 快速上手
+## Quick start
 
 ```bash
-kairo init "我的调研主题"      # 当前目录初始化为 topic-workspace + 默认宪法
-kairo add 录音.m4a            # 登记一条 reference（默认 stream/观测）
-kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
-kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
-kairo step                    # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)
-kairo status                  # 看各 reference / 文档的融入状态
+kairo init "My research topic"   # initialize the current directory as a topic-workspace + default constitution
+kairo add recording.m4a          # register a reference (stream/observation by default)
+kairo add report.docx            # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
+kairo add whitepaper.md --corpus # register as corpus/baseline (authoritative reference material)
+kairo step                       # reconcile to convergence: ASR/doc2text → Digest → Compose (prose alongside when normalize is on)
+kairo status                     # see the fold status of each reference / document
 ```
 
-产出两层文档：`understanding.md`（中立事实）与 `assessment.md`（立场判断）。
+Produces two layers of documents: `understanding.md` (neutral facts) and `assessment.md` (stance/judgment).
 
-## 命令
+## Commands
 
-| 命令 | 作用 |
+| Command | Purpose |
 | --- | --- |
-| `init` | 初始化 topic-workspace + 默认宪法 |
-| `add` | 登记一条 reference 的所有形态（`--corpus` 标基线，默认 stream 观测） |
-| `step` | 跑调和循环到收敛（有 key→Claude，否则 stub；`KAIRO_STUB` 强制 stub） |
-| `re-step` | 强制重算（文档级=整篇重综合，丢手改） |
-| `accept` | 接受手改、钉为新基线，解除 `blocked: manual-edit` |
-| `status` | 列 references / 各文档融入状态 |
-| `index` | 重生成 `references/MEETINGS.md` 导航索引 |
-| `history` | 列版本快照 |
-| `rollback` | 回退文档到某版本 |
-| `diff` | 工作态 vs 版本文档差异（自带，不依赖 git） |
+| `init` | Initialize a topic-workspace + default constitution |
+| `add` | Register all forms of one reference (`--corpus` marks baseline; stream observation by default) |
+| `step` | Run the reconciliation loop to convergence (with a key → Claude, otherwise stub; `KAIRO_STUB` forces stub) |
+| `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
+| `accept` | Accept manual edits, pin as the new baseline, clear `blocked: manual-edit` |
+| `status` | List references / fold status of each document |
+| `index` | Regenerate the `references/MEETINGS.md` navigation index |
+| `history` | List version snapshots |
+| `rollback` | Roll a document back to a version |
+| `diff` | Working-state vs versioned-document diff (built in, no git needed) |
 
-## 核心概念
+## Core concepts
 
-- **constitution.yaml**：本 workspace 的宪法——心智与协议（两层产出、stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
-- **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进文档、判断随之演进、可推翻旧判断；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
-- **两层产出**：`understanding.md`（事实层）与依赖它的 `assessment.md`（判断层）；中立事实与立场判断不混。
-- **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
-- **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
-- **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `convert-failed`（二进制转换失败/空产物）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）/ `compose-degraded`（综合输出相对上一版骤缩，疑为退化输出，已拒绝覆盖以保护旧文档）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）；`asr-failed` / `convert-failed` / `compose-degraded` 视为终态，需手动 `re-step` 重算。
+- **constitution.yaml**: this workspace's constitution — the mental model and protocol (two output layers, stream/corpus, fold, extension→role, conversion declarations) are all declared here; the engine hardcodes none of it.
+- **stream (observation) / corpus (baseline)**: the epistemic classification of a reference. A stream is folded into documents one by one, judgments evolve with it and can overturn earlier ones; a corpus is a read-only reference layer for the agent — not digested, not in the fold loop — and corrects proper nouns/terminology against the baseline when it conflicts with observations.
+- **Two output layers**: `understanding.md` (fact layer) and the `assessment.md` (judgment layer) that depends on it; neutral facts and stance judgments are not mixed.
+- **Convergence**: `step` is like `make` — it reconciles toward the state declared in the constitution, judging staleness by content hash, running until no further progress is made.
+- **Binary ingestion** ([#15](https://github.com/xforce-io/kairo/issues/15)): `add file.docx` (docx/pptx/xlsx/pdf) goes through `doc2text` (in-process conversion via [markitdown](https://github.com/microsoft/markitdown)) to produce `source_text`, isomorphic to ASR (`audio→transcript` ↔ `binary→source_text`), with zero downstream changes; xlsx converts to GFM tables, preserving header semantics. No machine configuration needed (markitdown is a project dependency). Stream-type processing only; corpus binaries are not converted (the baseline is read directly, read-only, not derived).
+- **blocked states**: `no-asr` (no local ASR backend configured) / `asr-failed` (transcription command failed) / `convert-failed` (binary conversion failed/empty output) / `missing-source` (source unreachable) / `manual-edit` (manual edit awaiting `accept`) / `compose-degraded` (synthesis output shrank sharply versus the previous version, suspected degraded output — the overwrite was rejected to protect the old document). After preconditions change, the next `step` retries automatically (e.g. once ASR is configured, old audio is re-transcribed); `asr-failed` / `convert-failed` / `compose-degraded` are treated as terminal and need a manual `re-step` to recompute.
 
-## 领域真名册（glossary）
+## Domain glossary
 
-`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Compose（及开启的 Normalize）时注入 agent 提示词（Issue [#20](https://github.com/xforce-io/kairo/issues/20)），用于纠正口语 / 转写产生的同音变体与别名——产出时一律用规范名，遇含糊提及按此锚定。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
+`constitution.yaml` can declare a `glossary` that pins down this domain's canonical proper nouns. It is injected into the agent prompt at every Digest / Compose (and the optional Normalize) (Issue [#20](https://github.com/xforce-io/kairo/issues/20)), to correct homophone variants and aliases produced by speech/transcription — output always uses the canonical name, and ambiguous mentions are anchored accordingly. Each entry has three keys: `name` (canonical name, the anchor), `note` (grounding for the model, optional), `aka` (known variants/aliases, reference only, optional).
 
 ```yaml
 glossary:
-- name: 灵犀系统            # 规范名(示例),各环节统一用它
-  note: 本项目所研究的系统    # grounding,可选
-  aka: [灵西, 凌犀, 灵息]    # 已知误识别/同音变体,可选
+- name: 灵犀系统            # canonical name (example), used consistently everywhere
+  note: 本项目所研究的系统    # grounding, optional
+  aka: [灵西, 凌犀, 灵息]    # known mis-recognitions/homophone variants, optional
 - name: 星图平台
   note: 平台名（与 corpus 基线一致）
 ```
 
-注：纠正发生在**规范化 / 纪要 / 综合阶段**，ASR 转写本身不受影响（whisper 仍按音产出）。空表（`glossary: []`，默认）时零行为变化；对已生成的 reference 改 glossary 后，需 `kairo re-step <id>` 重产 digest 才会重新校正。
+Note: correction happens in the **normalize / digest / compose stages**; ASR transcription itself is unaffected (whisper still outputs by sound). An empty table (`glossary: []`, the default) means zero behavior change; after editing the glossary for an already-generated reference, run `kairo re-step <id>` to regenerate the digest before it is re-corrected.
 
-## 本机 ASR 配置
+## Local ASR configuration
 
-音频转写命令是**机器相关**的，不写进会被共享的 `constitution.yaml`（它只声明 `backend: whisper`）。在本机配一次即可，之后任何 workspace `kairo add 音频 && kairo step` 自动转写（Issue [#26](https://github.com/xforce-io/kairo/issues/26)）。
+The audio-transcription command is **machine-specific** and is not written into the shared `constitution.yaml` (which only declares `backend: whisper`). Configure it once on the local machine, after which any workspace's `kairo add audio && kairo step` transcribes automatically (Issue [#26](https://github.com/xforce-io/kairo/issues/26)).
 
-`~/.config/kairo/config.toml`，按 transform 的 `backend` 名分节（`[asr.<backend>]`）：
+`~/.config/kairo/config.toml`, sectioned by the transform's `backend` name (`[asr.<backend>]`):
 
 ```toml
 [asr.whisper]
@@ -86,23 +88,23 @@ cmd = "mlx_whisper {input} --model mlx-community/whisper-large-v3-turbo --langua
 origin = "whisper:large-v3-turbo"
 ```
 
-`kairo step` 按 `constitution.yaml` 里 transform 的 `backend`（默认 `whisper`）查对应节——故一台机器可并存多种后端（`[asr.whisper]`、`[asr.xxx]`），按 workspace 声明的 backend 路由。占位符：`{input}` 音频路径、`{outdir}` 临时输出目录、`{stem}` 输出名、`{output}`=`{outdir}/{stem}.txt`。模板含任一输出占位 → kairo 从产物文件读转写；否则捕获 stdout。环境变量 `KAIRO_ASR_CMD`（及 `KAIRO_ASR_ORIGIN`）全局覆盖。命令失败 → `blocked: asr-failed`（绝不写假转写）；无对应配置 → `blocked: no-asr`。
+`kairo step` looks up the matching section by the transform's `backend` in `constitution.yaml` (default `whisper`) — so one machine can host multiple backends (`[asr.whisper]`, `[asr.xxx]`), routed by the workspace's declared backend. Placeholders: `{input}` audio path, `{outdir}` temp output dir, `{stem}` output name, `{output}`=`{outdir}/{stem}.txt`. If the template contains any output placeholder → kairo reads the transcription from the output file; otherwise it captures stdout. Environment variables `KAIRO_ASR_CMD` (and `KAIRO_ASR_ORIGIN`) override globally. Command failure → `blocked: asr-failed` (a fake transcription is never written); no matching config → `blocked: no-asr`.
 
-## 技术栈
+## Tech stack
 
-Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub / claude / claude-code / codex），无 audit。详见 Issue [#4](https://github.com/xforce-io/kairo/issues/4)。
+Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub / claude / claude-code / codex), no audit. See Issue [#4](https://github.com/xforce-io/kairo/issues/4) for details.
 
-## Web Console（可选）
+## Web Console (optional)
 
     pip install 'kairo[web]'
-    kairo serve <包含多个 workspace 的根目录> [--port 8000]
+    kairo serve <root directory containing multiple workspaces> [--port 8000]
 
-浏览器（默认 `http://127.0.0.1:8000`，仅本机）统管 root 下的多个 workspace：
+In the browser (default `http://127.0.0.1:8000`, local only), manage the multiple workspaces under `root`. The UI is bilingual (English by default; switch to Chinese with the `EN | 中` toggle in the top bar, or via your browser's `Accept-Language`):
 
-- **总览（dashboard）**：列出各 workspace（观测/基线计数、待 step / blocked 状态）；支持**单字段新建 workspace**——填 topic 即在 root 下建目录并 `init`。
-- **详情页**：左栏分 `产物 / 参考(观测) / 基线`；选中条目 → 右栏常驻元信息（各形态可选预览、一键复制路径），中间为预览画布。transcript / digest 等形态即点即看（含 workspace 外的 `.txt` 转写，`.md` 渲染、纯文本保留换行），顶部可返回总览。
-- **运行**：界面触发 `step`，实时看进度日志。
+- **Dashboard**: lists each workspace (observation/baseline counts, to-step / blocked status); supports **single-field workspace creation** — type a topic to create a directory under `root` and `init` it.
+- **Detail page**: the left column splits into `Targets / References (observations) / Corpus`; selecting an item → a persistent metadata column on the right (per-form optional preview, one-click path copy), with a preview canvas in the middle. Forms like transcript / digest preview on click (including `.txt` transcriptions outside the workspace — `.md` is rendered, plain text keeps line breaks); the top bar returns to the dashboard.
+- **Run**: trigger `step` from the UI and watch the progress log live.
 
-## 设计与决策轨迹
+## Design & decision trail
 
-可用的 CLI 工具（`init`/`add`/`step`/… 全部就绪，105+ 测试）。各特性的设计稿按 issue 编号存于 [`docs/design/`](docs/design)，是对应决策的 single source of truth：MVP [#1](https://github.com/xforce-io/kairo/issues/1)、AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4)、源分层 [#13](https://github.com/xforce-io/kairo/issues/13) 等。
+The CLI tools are usable (`init`/`add`/`step`/… all ready, 105+ tests). Each feature's design doc is stored by issue number under [`docs/design/`](docs/design) and is the single source of truth for that decision: MVP [#1](https://github.com/xforce-io/kairo/issues/1), AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4), source layering [#13](https://github.com/xforce-io/kairo/issues/13), Web Console i18n [#41](https://github.com/xforce-io/kairo/issues/41), etc.
