@@ -43,6 +43,41 @@ def test_add_corpus_dir(tmp_path):
     assert man.source_class == "corpus"
 
 
+def test_create_workspace(tmp_path):
+    from urllib.parse import quote
+
+    r = _client(tmp_path).post(
+        "/workspaces", data={"topic": "产品规划"}, follow_redirects=False
+    )
+    assert r.status_code == 200
+    assert r.headers.get("HX-Redirect") == "/w/" + quote("产品规划")
+    ws = Workspace.open(tmp_path / "产品规划")
+    assert ws.constitution.topic == "产品规划"
+
+
+def test_create_workspace_rejects_bad_topic(tmp_path):
+    for bad in ["../escape", "a/b", "..", ".", ".hidden", "", "  "]:
+        r = _client(tmp_path).post("/workspaces", data={"topic": bad})
+        assert r.status_code == 400, bad
+
+
+def test_create_workspace_rejects_too_long(tmp_path):
+    r = _client(tmp_path).post("/workspaces", data={"topic": "长" * 65})
+    assert r.status_code == 400
+
+
+def test_create_workspace_rejects_control_chars(tmp_path):
+    for bad in ["a\nb", "a\tb", "a\x00b"]:
+        r = _client(tmp_path).post("/workspaces", data={"topic": bad})
+        assert r.status_code == 400, repr(bad)
+
+
+def test_create_workspace_rejects_existing(tmp_path):
+    Workspace.init(tmp_path / "产品规划", topic="产品规划")
+    r = _client(tmp_path).post("/workspaces", data={"topic": "产品规划"})
+    assert r.status_code == 400
+
+
 def test_accept_clears_blocked(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     from kairo.engine import step

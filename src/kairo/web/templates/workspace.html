@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block subtitle %}{{ topic }} · {{ slug }}{% endblock %}
+{% block topnav %}<a class="back" href="/" title="返回总览">← 总览</a>{% endblock %}
 {% block body %}
 <div class="layout">
   <aside class="pane-nav">
     <div class="nav-group">
       <div class="nav-section">产物</div>
       {% for t in targets %}
-      <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/doc?path={{ t.path | urlencode }}" hx-target="#reader">
+      <a class="nav-doc" href="#" hx-get="/w/{{ slug | urlencode }}/target?path={{ t.path | urlencode }}" hx-target="#meta">
         <span class="dot {% if t.status == 'blocked' %}blocked{% elif t.status == 'missing' %}stale{% else %}ok{% endif %}"></span>
         <span class="name">{{ t.path }}</span>
       </a>
@@ -14,23 +15,56 @@
     </div>
     <div class="nav-group">
       <div class="nav-section">参考</div>
-      {% for r in refs %}
-      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug }}/ref/{{ r.id }}" hx-target="#refbox">
+      {% for r in streams %}
+      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
+        <span class="name">{{ r.title }}</span>
+        <span class="tag {{ r.cls }}">{{ r.cls }}</span>
+      </a>
+      {% else %}
+      <p class="nav-empty">暂无观测</p>
+      {% endfor %}
+    </div>
+    {% if corpus %}
+    <div class="nav-group nav-group-corpus">
+      <div class="nav-section">基线</div>
+      {% for r in corpus %}
+      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
         <span class="name">{{ r.title }}</span>
         <span class="tag {{ r.cls }}">{{ r.cls }}</span>
       </a>
       {% endfor %}
     </div>
+    {% endif %}
   </aside>
 
-  <main id="reader" class="pane-read"><p class="reader-empty">← 点左侧产物预览</p></main>
+  <main id="reader" class="pane-read"><p class="reader-empty">← 选左侧条目预览</p></main>
 
   <aside class="pane-panel">
     <div class="panel-title">操作</div>
-    <button class="btn btn-step" hx-post="/w/{{ slug }}/step" hx-target="#step-area" hx-swap="innerHTML">▶ Step</button>
+    <button class="btn btn-step" hx-post="/w/{{ slug | urlencode }}/step" hx-target="#step-area" hx-swap="innerHTML">▶ Step</button>
     <div id="step-area"></div>
-    <div class="panel-title" style="margin-top:22px">Reference</div>
-    <div id="refbox"><p class="panel-hint">选 reference 看详情。</p></div>
+    <div class="panel-title" style="margin-top:24px">元信息</div>
+    <div id="meta"><p class="panel-hint">选左侧条目查看元信息与可预览形态。</p></div>
   </aside>
 </div>
+<script>
+  // 复制路径:捕获阶段拦截,阻止冒泡到整行的 htmx 预览
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('.copy-btn');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText(btn.dataset.copy).then(function () {
+      btn.classList.add('copied');
+      setTimeout(function () { btn.classList.remove('copied'); }, 1200);
+    });
+  }, true);
+  // 点整行(可预览)→ 高亮;预览本身由该行 hx-get 触发
+  document.addEventListener('click', function (e) {
+    var tr = e.target.closest('.meta-forms tr.is-prev');
+    if (!tr) return;
+    tr.parentElement.querySelectorAll('tr').forEach(function (x) { x.classList.remove('on'); });
+    tr.classList.add('on');
+  });
+</script>
 {% endblock %}

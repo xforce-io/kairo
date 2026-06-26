@@ -1,9 +1,14 @@
 {% extends "base.html" %}
 {% block subtitle %}{{ root }} · {{ items|length }} workspaces{% endblock %}
 {% block body %}
+<form class="new-ws" hx-post="/workspaces" hx-swap="none">
+  <input name="topic" placeholder="新 workspace 的 topic(如 产品规划)" required>
+  <button type="submit">新建 workspace</button>
+  <span id="ws-error" class="ws-error"></span>
+</form>
 <div class="grid">
   {% for s in items %}
-  <a class="card" href="/w/{{ s.slug }}">
+  <a class="card" href="/w/{{ s.slug | urlencode }}">
     <h3>{{ s.topic }}</h3>
     <div class="slug">{{ s.slug }}</div>
     <div class="badges">
@@ -17,4 +22,11 @@
   <p class="empty">该目录下没有 workspace(子目录需含 constitution.yaml)。</p>
   {% endfor %}
 </div>
+<script>
+  document.querySelector('.new-ws').addEventListener('htmx:responseError', function (e) {
+    var box = document.getElementById('ws-error');
+    try { box.textContent = JSON.parse(e.detail.xhr.responseText).detail; }
+    catch (_) { box.textContent = '创建失败'; }
+  });
+</script>
 {% endblock %}

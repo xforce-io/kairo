@@ -1,0 +1,24 @@
+<div class="meta">
+  <p class="meta-kicker">产物 · <span class="meta-st {{ status }}">{{ status }}</span></p>
+  <h3 class="meta-title">{{ path }}</h3>
+  {% if reason %}<p class="meta-hint">原因:{{ reason }}</p>{% endif %}
+  <div class="meta-label">形态</div>
+  <table class="meta-forms">
+    <tbody>
+    {% if has_doc %}
+    <tr class="is-prev on" hx-get="/w/{{ slug | urlencode }}/doc?path={{ path | urlencode }}" hx-target="#reader">
+      <td class="mf-role">正文</td>
+      <td class="mf-actions">
+        <button type="button" class="copy-btn" data-copy="{{ path }}" title="{{ path }}" aria-label="复制路径">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+        <span class="mf-prev">预览</span>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td class="mf-empty" colspan="3">尚未生成</td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+</div>
+{% include "_reader_oob.html" %}

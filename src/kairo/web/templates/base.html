@@ -11,6 +11,7 @@
 <body>
   <header class="top">
     <a class="brand" href="/"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    {% block topnav %}{% endblock %}
     <span class="crumb">{% block subtitle %}{% endblock %}</span>
   </header>
   {% block body %}{% endblock %}

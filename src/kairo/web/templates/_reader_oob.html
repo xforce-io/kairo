@@ -1,0 +1,5 @@
+{# OOB:选中条目时顺带刷新中间预览画布(#reader) #}
+<main id="reader" class="pane-read" hx-swap-oob="true">
+  {% if preview_html %}<article class="doc"><p class="doc-kicker">{{ preview_title }}</p>{{ preview_html|safe }}</article>
+  {% else %}<p class="reader-empty">{{ empty_hint }}</p>{% endif %}
+</main>
