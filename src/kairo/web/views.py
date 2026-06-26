@@ -168,7 +168,9 @@ def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
 
 
 def _role_label(role: str, t) -> str:
-    return t(f"role.{role}") if t(f"role.{role}") != f"role.{role}" else role
+    key = f"role.{role}"
+    label = t(key)
+    return label if label != key else role
 
 
 def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
