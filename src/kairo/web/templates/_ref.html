@@ -1,14 +1,24 @@
-<div class="ref">
-  <h4>{{ title }}</h4>
-  <div class="ref-meta">{{ cls }} · {{ ref_id }}</div>
-  <table>
-    <tr><th>role</th><th>origin</th><th></th></tr>
+<article class="doc ref-doc">
+  <p class="doc-kicker">参考 · {{ cls }}{% if label %} · {{ label }}{% endif %}</p>
+  <h1>{{ title }}</h1>
+  {% if hint %}<p class="ref-hint">{{ hint }}</p>{% endif %}
+  <table class="ref-forms">
+    <thead><tr><th>role</th><th>origin</th><th>location</th><th></th></tr></thead>
+    <tbody>
     {% for f in forms %}
     <tr>
       <td class="role">{{ f.role }}</td>
       <td class="origin">{{ f.origin }}</td>
-      <td>{% if f.is_md %}<a href="#" hx-get="/w/{{ slug }}/doc?path={{ f.location | urlencode }}" hx-target="#reader">预览</a>{% endif %}</td>
+      <td class="loc">{{ f.location }}</td>
+      <td>{% if f.is_md %}<a href="#" hx-get="/w/{{ slug | urlencode }}/doc?path={{ f.location | urlencode }}" hx-target="#reader">预览</a>{% endif %}</td>
     </tr>
     {% endfor %}
+    </tbody>
   </table>
-</div>
+  {% if preview_html %}
+  <hr>
+  <div class="ref-preview">{{ preview_html|safe }}</div>
+  {% else %}
+  <p class="ref-noprev">此参考无可内联预览的 Markdown 形态（如 corpus 目录、音频）。</p>
+  {% endif %}
+</article>

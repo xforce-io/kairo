@@ -83,3 +83,56 @@ def test_ref_detail_shows_forms(tmp_path, monkeypatch):
     ref_id = next(iter(__import__("os").listdir(tmp_path / "ws" / "references")))
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{ref_id}")
     assert r.status_code == 200 and ("transcript" in r.text or "digest" in r.text)
+
+
+def _add_corpus_dir(root, ws):
+    cdir = root / "baseline"
+    cdir.mkdir()
+    (cdir / "a.md").write_text("# 基线文档")
+    ws.add([cdir], source_class="corpus")
+
+
+def test_workspace_view_splits_stream_and_corpus(tmp_path, monkeypatch):
+    # 参考组只放 stream;corpus 单独成『基线』组置底,且不混进参考段
+    ws = _ws_with_step(tmp_path, monkeypatch)
+    _add_corpus_dir(tmp_path, ws)
+    r = TestClient(create_app(tmp_path)).get("/w/ws")
+    assert r.status_code == 200
+    assert "返回总览" in r.text  # 顶部返回总览组件
+    assert ">参考<" in r.text and ">基线<" in r.text
+    assert "nav-group-corpus" in r.text
+    ref_seg, corpus_seg = r.text.split("基线", 1)
+    assert "baseline" in corpus_seg  # corpus 在基线组
+    assert "baseline" not in ref_seg.split(">参考<", 1)[-1]  # 不出现在参考组
+
+
+def test_stream_ref_inlines_markdown_transcript(tmp_path, monkeypatch):
+    # whisper 式 stream:transcript.md 在 workspace 内 → 详情页内联渲染正文
+    ws = _ws_with_step(tmp_path, monkeypatch)
+    rid = "2026-06-26-voice"
+    refdir = tmp_path / "ws" / "references" / rid
+    refdir.mkdir(parents=True)
+    (refdir / "transcript.md").write_text("# 语音纪要\n\n落地优先级讨论")
+    (refdir / "manifest.yaml").write_text(
+        "id: 2026-06-26-voice\n"
+        "title: 语音\n"
+        "class: stream\n"
+        "forms:\n"
+        "- role: transcript\n"
+        f"  location: references/{rid}/transcript.md\n"
+        "  hash: deadbeef\n"
+        "  origin: whisper\n"
+    )
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "ref-preview" in r.text and "落地优先级讨论" in r.text
+
+
+def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):
+    # corpus 形态为目录/外部路径,无可内联的 md → 给出提示而非空白
+    ws = _ws_with_step(tmp_path, monkeypatch)
+    _add_corpus_dir(tmp_path, ws)
+    rid = next(r for r in ws.list_reference_ids() if "baseline" in r)
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "无可内联预览" in r.text and "ref-preview" not in r.text

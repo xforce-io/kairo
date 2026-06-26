@@ -80,13 +80,20 @@ def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
 
+def _split_refs(ws: Workspace):
+    """参考分两层:stream(观测,进『参考』组)/ corpus(基线,单独置底)。"""
+    streams, corpus = [], []
+    for ref_id in ws.list_reference_ids():
+        man = ws.read_manifest(ref_id)
+        item = {"id": ref_id, "title": man.title, "cls": man.source_class}
+        (corpus if man.source_class == "corpus" else streams).append(item)
+    return streams, corpus
+
+
 @router.get("/w/{slug}", response_class=HTMLResponse)
 def workspace_view(request: Request, slug: str) -> HTMLResponse:
     ws = _open(request, slug)
-    refs = []
-    for ref_id in ws.list_reference_ids():
-        man = ws.read_manifest(ref_id)
-        refs.append({"id": ref_id, "title": man.title, "cls": man.source_class})
+    streams, corpus = _split_refs(ws)
     return request.app.state.templates.TemplateResponse(
         request,
         "workspace.html",
@@ -94,7 +101,8 @@ def workspace_view(request: Request, slug: str) -> HTMLResponse:
             "slug": slug,
             "topic": ws.constitution.topic,
             "targets": _target_states(ws),
-            "refs": refs,
+            "streams": streams,
+            "corpus": corpus,
         },
     )
 
@@ -123,10 +131,30 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         }
         for f in man.forms
     ]
+    # 主 Markdown 形态(优先 transcript,否则首个 .md)→ 在阅读区内联预览
+    primary = next((f for f in forms if f["role"] == "transcript" and f["is_md"]), None)
+    primary = primary or next((f for f in forms if f["is_md"]), None)
+    preview_html = None
+    if primary:
+        try:
+            target = _safe_doc(ws, primary["location"])
+            preview_html = render_markdown(target.read_text())
+        except HTTPException:
+            preview_html = None
+    sc = ws.constitution.source_classes.get(man.source_class)
     return request.app.state.templates.TemplateResponse(
         request,
         "_ref.html",
-        {"slug": slug, "ref_id": ref_id, "title": man.title, "cls": man.source_class, "forms": forms},
+        {
+            "slug": slug,
+            "ref_id": ref_id,
+            "title": man.title,
+            "cls": man.source_class,
+            "label": sc.label if sc else man.source_class,
+            "hint": sc.hint if sc else "",
+            "forms": forms,
+            "preview_html": preview_html,
+        },
     )
 
 
