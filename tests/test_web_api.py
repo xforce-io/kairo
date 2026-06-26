@@ -29,6 +29,17 @@ def test_dashboard_shows_create_workspace_entry(tmp_path):
     assert "新建 workspace" in r.text
 
 
+def test_dashboard_card_link_is_url_encoded(tmp_path):
+    # topic 允许空格 → 目录名含空格;卡片链接必须 url-encode,否则点击 404
+    Workspace.init(tmp_path / "v1 draft", topic="v1 draft")
+    c = _client(tmp_path)
+    r = c.get("/")
+    assert 'href="/w/v1%20draft"' in r.text
+    assert 'href="/w/v1 draft"' not in r.text
+    # 编码后的路径可正常打开
+    assert c.get("/w/v1 draft").status_code == 200
+
+
 def _ws_with_step(root, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     from kairo.engine import step

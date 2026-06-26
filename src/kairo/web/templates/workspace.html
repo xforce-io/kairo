@@ -6,7 +6,7 @@
     <div class="nav-group">
       <div class="nav-section">产物</div>
       {% for t in targets %}
-      <a class="nav-doc" href="#" hx-get="/w/{{ slug }}/doc?path={{ t.path | urlencode }}" hx-target="#reader">
+      <a class="nav-doc" href="#" hx-get="/w/{{ slug | urlencode }}/doc?path={{ t.path | urlencode }}" hx-target="#reader">
         <span class="dot {% if t.status == 'blocked' %}blocked{% elif t.status == 'missing' %}stale{% else %}ok{% endif %}"></span>
         <span class="name">{{ t.path }}</span>
       </a>
@@ -15,7 +15,7 @@
     <div class="nav-group">
       <div class="nav-section">参考</div>
       {% for r in refs %}
-      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug }}/ref/{{ r.id }}" hx-target="#refbox">
+      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#refbox">
         <span class="name">{{ r.title }}</span>
         <span class="tag {{ r.cls }}">{{ r.cls }}</span>
       </a>
@@ -27,7 +27,7 @@
 
   <aside class="pane-panel">
     <div class="panel-title">操作</div>
-    <button class="btn btn-step" hx-post="/w/{{ slug }}/step" hx-target="#step-area" hx-swap="innerHTML">▶ Step</button>
+    <button class="btn btn-step" hx-post="/w/{{ slug | urlencode }}/step" hx-target="#step-area" hx-swap="innerHTML">▶ Step</button>
     <div id="step-area"></div>
     <div class="panel-title" style="margin-top:22px">Reference</div>
     <div id="refbox"><p class="panel-hint">选 reference 看详情。</p></div>

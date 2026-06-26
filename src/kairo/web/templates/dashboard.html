@@ -8,7 +8,7 @@
 </form>
 <div class="grid">
   {% for s in items %}
-  <a class="card" href="/w/{{ s.slug }}">
+  <a class="card" href="/w/{{ s.slug | urlencode }}">
     <h3>{{ s.topic }}</h3>
     <div class="slug">{{ s.slug }}</div>
     <div class="badges">
