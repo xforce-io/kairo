@@ -1,0 +1,135 @@
+"""轻量 i18n:集中字符串表 + 语言解析 + translator。无框架。"""
+
+from __future__ import annotations
+
+from typing import Callable
+
+DEFAULT_LANG = "en"
+SUPPORTED: tuple[str, ...] = ("en", "zh")
+
+CATALOG: dict[str, dict[str, str]] = {
+    "en": {
+        "nav.targets": "Targets",
+        "nav.references": "References",
+        "nav.corpus": "Corpus",
+        "nav.empty_streams": "No observations yet",
+        "header.back_label": "← Overview",
+        "header.back_title": "Back to overview",
+        "dash.new_ws_btn": "New workspace",
+        "dash.topic_placeholder": "Topic of the new workspace (e.g. Product planning)",
+        "dash.workspaces_suffix": "workspaces",
+        "dash.badge_stream": "obs",
+        "dash.badge_corpus": "baseline",
+        "dash.badge_stale": "to step",
+        "dash.empty": "No workspace here (a subdirectory must contain constitution.yaml).",
+        "dash.create_failed": "Create failed",
+        "panel.actions": "Actions",
+        "panel.metadata": "Metadata",
+        "panel.hint": "Select an item on the left to view its metadata and previewable forms.",
+        "reader.empty": "← Select an item to preview",
+        "forms.label": "Forms",
+        "forms.preview": "Preview",
+        "forms.copy_path": "Copy path",
+        "ref.kicker": "Reference",
+        "ref.empty_hint": "This reference has no inline-previewable text form (e.g. corpus tree, audio).",
+        "target.kicker_prefix": "Target",
+        "target.reason_prefix": "Reason",
+        "target.body": "Body",
+        "target.not_generated": "Not generated yet",
+        "target.empty_hint": "This target isn't generated yet. Click ▶ Step (top-right) to run, then view.",
+        "step.btn": "▶ Step",
+        "step.running": "Step running… (auto-refreshes when done)",
+        "step.cancel": "Cancel",
+        "step.busy": "⏳ Running — wait for the current step to finish.",
+        "step.canceled": "Canceled.",
+        "step.cannot_cancel": "Cannot cancel (already finished).",
+        "role.transcript": "Transcript",
+        "role.digest": "Digest",
+        "role.audio": "Audio",
+        "role.corpus_tree": "Corpus tree",
+        "role.source_text": "Body",
+        "role.note": "Note",
+        "role.prose": "Prose",
+        "err.topic_empty": "Topic cannot be empty",
+        "err.topic_too_long": "Topic too long (max 64 characters)",
+        "err.topic_control": "Topic cannot contain control characters",
+        "err.topic_illegal": "Topic contains illegal characters (no /, \\, or leading .)",
+        "err.topic_invalid": "Invalid topic",
+        "err.topic_exists": "Workspace already exists: {topic}",
+    },
+    "zh": {
+        "nav.targets": "产物",
+        "nav.references": "参考",
+        "nav.corpus": "基线",
+        "nav.empty_streams": "暂无观测",
+        "header.back_label": "← 总览",
+        "header.back_title": "返回总览",
+        "dash.new_ws_btn": "新建 workspace",
+        "dash.topic_placeholder": "新 workspace 的 topic(如 产品规划)",
+        "dash.workspaces_suffix": "workspaces",
+        "dash.badge_stream": "观测",
+        "dash.badge_corpus": "基线",
+        "dash.badge_stale": "待 step",
+        "dash.empty": "该目录下没有 workspace(子目录需含 constitution.yaml)。",
+        "dash.create_failed": "创建失败",
+        "panel.actions": "操作",
+        "panel.metadata": "元信息",
+        "panel.hint": "选左侧条目查看元信息与可预览形态。",
+        "reader.empty": "← 选左侧条目预览",
+        "forms.label": "形态",
+        "forms.preview": "预览",
+        "forms.copy_path": "复制路径",
+        "ref.kicker": "参考",
+        "ref.empty_hint": "此参考无可内联预览的文本形态（如 资料目录、音频）。",
+        "target.kicker_prefix": "产物",
+        "target.reason_prefix": "原因",
+        "target.body": "正文",
+        "target.not_generated": "尚未生成",
+        "target.empty_hint": "该产物尚未生成,点右上 ▶ Step 运行后查看。",
+        "step.btn": "▶ Step",
+        "step.running": "step 进行中…(完成后自动刷新状态)",
+        "step.cancel": "取消",
+        "step.busy": "⏳ 正在运行,请等待当前 step 结束。",
+        "step.canceled": "已取消。",
+        "step.cannot_cancel": "无法取消(已结束)。",
+        "role.transcript": "转写",
+        "role.digest": "摘要",
+        "role.audio": "音频",
+        "role.corpus_tree": "资料目录",
+        "role.source_text": "正文",
+        "role.note": "笔记",
+        "role.prose": "文稿",
+        "err.topic_empty": "topic 不能为空",
+        "err.topic_too_long": "topic 过长(最多 64 字符)",
+        "err.topic_control": "topic 不能含控制字符",
+        "err.topic_illegal": "topic 含非法字符(不能含 / \\ 或以 . 开头)",
+        "err.topic_invalid": "非法 topic",
+        "err.topic_exists": "已存在同名 workspace:{topic}",
+    },
+}
+
+
+def resolve_lang(request) -> str:
+    """cookie 'lang'(若 ∈ SUPPORTED) → Accept-Language(zh*→zh, en*→en) → DEFAULT_LANG。"""
+    cookie = request.cookies.get("lang")
+    if cookie in SUPPORTED:
+        return cookie
+    accept = request.headers.get("accept-language", "") or ""
+    for part in accept.split(","):
+        code = part.split(";")[0].strip().lower()
+        if code.startswith("zh"):
+            return "zh"
+        if code.startswith("en"):
+            return "en"
+    return DEFAULT_LANG
+
+
+def translator(lang: str) -> Callable[[str], str]:
+    """返回 t(key):当前语言 → en 回退 → key 本身。永不抛。"""
+    table = CATALOG.get(lang, CATALOG[DEFAULT_LANG])
+    fallback = CATALOG[DEFAULT_LANG]
+
+    def t(key: str) -> str:
+        return table.get(key) or fallback.get(key) or key
+
+    return t
