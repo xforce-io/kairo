@@ -253,7 +253,7 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 
 /* 形态表(窄栏:role + 复制路径 + 预览) */
 .meta-forms { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: 13px; }
-.meta-forms td { padding: 9px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+.meta-forms td { padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .meta-forms td:first-child { padding-left: 11px; }
 .meta-forms tr.is-prev { cursor: pointer; transition: background .12s ease; }
 .meta-forms tr.is-prev:hover { background: #ece5d6; }
@@ -261,20 +261,20 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .meta-forms tr.on.is-prev:hover { background: var(--pine-soft); }
 .meta-forms tr.on td:first-child { box-shadow: inset 3px 0 0 var(--pine); }
 .meta-forms td.mf-role { font-family: var(--mono); color: var(--pine-deep); white-space: nowrap; width: 99%; }
-.meta-forms td.mf-copy { width: 1%; white-space: nowrap; text-align: center; }
-.meta-forms td.mf-act { width: 1%; white-space: nowrap; text-align: right; padding-right: 2px; }
+.meta-forms td.mf-actions { width: 1%; white-space: nowrap; text-align: right; padding-right: 4px; }
 .meta-forms td.mf-empty { color: var(--muted); font-style: italic; }
+/* 复制:无边框 ghost,默认低调、hover 点亮(次级动作,不抢眼) */
 .copy-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 26px; height: 26px; padding: 0; cursor: pointer;
-  color: var(--muted); background: transparent;
-  border: 1px solid var(--line-2); border-radius: 7px;
-  transition: color .12s ease, border-color .12s ease, background .12s ease;
+  width: 22px; height: 22px; padding: 0; vertical-align: middle; cursor: pointer;
+  color: var(--muted); background: none; border: none; border-radius: 6px; opacity: .5;
+  transition: opacity .12s ease, color .12s ease, background .12s ease;
 }
-.copy-btn:hover { color: var(--pine-deep); border-color: #cfe0d6; background: var(--card); }
-.copy-btn.copied { color: var(--pine); border-color: var(--pine); background: var(--pine-soft); }
-.mf-prev { color: var(--pine-deep); font-weight: 600; font-size: 12.5px; text-decoration: none; white-space: nowrap; cursor: pointer; }
-.mf-prev:hover { text-decoration: underline; }
+.copy-btn:hover { opacity: 1; color: var(--pine-deep); background: rgba(47,93,80,.08); }
+.copy-btn.copied { opacity: 1; color: var(--pine); }
+/* 预览:轻提示(整行本就可点),非主按钮 */
+.mf-prev { vertical-align: middle; margin-left: 8px; font-size: 12px; font-weight: 500; color: var(--pine-deep); white-space: nowrap; }
+.meta-forms tr.is-prev:hover .mf-prev { text-decoration: underline; }
 
 /* 细滚动条 */
 .layout > *::-webkit-scrollbar, #step-log::-webkit-scrollbar { width: 9px; height: 9px; }
