@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -56,6 +57,27 @@ def dashboard(request: Request) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(
         request, "dashboard.html", {"items": items, "root": str(root)}
     )
+
+
+@router.post("/workspaces", response_class=HTMLResponse)
+def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
+    root = Path(request.app.state.root)
+    topic = topic.strip()
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic 不能为空")
+    if len(topic) > 64:
+        raise HTTPException(status_code=400, detail="topic 过长(最多 64 字符)")
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in topic):
+        raise HTTPException(status_code=400, detail="topic 不能含控制字符")
+    if "/" in topic or "\\" in topic or topic.startswith(".") or topic in (".", ".."):
+        raise HTTPException(status_code=400, detail="topic 含非法字符(不能含 / \\ 或以 . 开头)")
+    dest = (root / topic).resolve()
+    if dest.parent != root.resolve():
+        raise HTTPException(status_code=400, detail="非法 topic")
+    if dest.exists():
+        raise HTTPException(status_code=400, detail=f"已存在同名 workspace:{topic}")
+    Workspace.init(dest, topic=topic)
+    return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)

@@ -64,6 +64,27 @@ header.top .brand .sub { color: var(--muted); font-weight: 500; }
 header.top .crumb { color: var(--muted); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---- Dashboard ---- */
+.new-ws {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 24px 28px 0;
+  max-width: 1200px;
+}
+.new-ws input {
+  font-family: var(--sans); font-size: 14px;
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--line-2); background: var(--card); color: var(--ink);
+  min-width: 180px;
+}
+.new-ws input:focus { outline: none; border-color: var(--pine); }
+.new-ws button {
+  font-family: var(--sans); font-size: 14px; font-weight: 600;
+  padding: 8px 16px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--pine); background: var(--pine); color: #fff;
+  transition: background .15s ease;
+}
+.new-ws button:hover { background: var(--pine-deep); }
+.new-ws .ws-error { color: var(--clay); font-size: 13px; }
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

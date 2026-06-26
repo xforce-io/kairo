@@ -1,4 +1,3 @@
-import pytest
 from fastapi.testclient import TestClient
 
 from kairo.web.server import create_app
@@ -21,6 +20,13 @@ def test_dashboard_lists_workspaces(tmp_path):
     assert r.status_code == 200
     assert "alpha-ws" in r.text and "beta-ws" in r.text
     assert "阿尔法" in r.text
+
+
+def test_dashboard_shows_create_workspace_entry(tmp_path):
+    r = _client(tmp_path).get("/")
+    assert r.status_code == 200
+    assert 'hx-post="/workspaces"' in r.text
+    assert "新建 workspace" in r.text
 
 
 def _ws_with_step(root, monkeypatch):
