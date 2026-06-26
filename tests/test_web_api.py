@@ -143,6 +143,17 @@ def test_stream_ref_meta_and_oob_preview(tmp_path, monkeypatch):
     assert "落地优先级讨论" in r.text
 
 
+def test_ref_meta_has_copy_button_no_origin(tmp_path, monkeypatch):
+    # 形态表:去掉 origin 列,location 改为可复制按钮,预览不带箭头
+    _ws_with_step(tmp_path, monkeypatch)
+    rid = _make_voice_ref(tmp_path)
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "copy-btn" in r.text and "data-copy=" in r.text  # 复制路径按钮
+    assert "mf-origin" not in r.text  # 不再有 origin 列
+    assert "预览 →" not in r.text and ">预览</a>" in r.text  # 预览无箭头
+
+
 def test_stream_ref_surfaces_digest(tmp_path, monkeypatch):
     # digest.md 不在 manifest.forms,但磁盘存在 → 作为可预览形态补入元信息
     _ws_with_step(tmp_path, monkeypatch)
