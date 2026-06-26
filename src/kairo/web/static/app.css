@@ -255,7 +255,10 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .meta-forms { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: 13px; }
 .meta-forms td { padding: 9px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .meta-forms td:first-child { padding-left: 11px; }
-.meta-forms tr.on { background: var(--pine-soft); }
+.meta-forms tr.is-prev { cursor: pointer; transition: background .12s ease; }
+.meta-forms tr.is-prev:hover { background: #ece5d6; }
+.meta-forms tr.on,
+.meta-forms tr.on.is-prev:hover { background: var(--pine-soft); }
 .meta-forms tr.on td:first-child { box-shadow: inset 3px 0 0 var(--pine); }
 .meta-forms td.mf-role { font-family: var(--mono); color: var(--pine-deep); white-space: nowrap; width: 99%; }
 .meta-forms td.mf-copy { width: 1%; white-space: nowrap; text-align: center; }

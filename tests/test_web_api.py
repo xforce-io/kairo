@@ -131,27 +131,28 @@ def _make_voice_ref(root, rid="2026-06-26-voice", with_digest=False):
 
 
 def test_stream_ref_meta_and_oob_preview(tmp_path, monkeypatch):
-    # 选 stream → 右栏元信息列形态;OOB 把主形态 transcript 渲染进中间 #reader
+    # 选 stream(无 digest)→ 右栏列形态(人读标签);OOB 把主形态 transcript 渲染进 #reader
     _ws_with_step(tmp_path, monkeypatch)
     rid = _make_voice_ref(tmp_path)
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    # 右栏元信息:列出 audio / transcript 形态
-    assert 'class="meta"' in r.text and "transcript" in r.text and "audio" in r.text
+    # 右栏元信息:人读标签 转写 / 音频
+    assert 'class="meta"' in r.text and "转写" in r.text and "音频" in r.text
     # OOB:中间预览画布带正文
     assert 'id="reader"' in r.text and 'hx-swap-oob="true"' in r.text
     assert "落地优先级讨论" in r.text
 
 
 def test_ref_meta_has_copy_button_no_origin(tmp_path, monkeypatch):
-    # 形态表:去掉 origin 列,location 改为可复制按钮,预览不带箭头
+    # 形态表:去掉 origin 列,location 改为可复制按钮,预览不带箭头,整行可点
     _ws_with_step(tmp_path, monkeypatch)
     rid = _make_voice_ref(tmp_path)
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
     assert "copy-btn" in r.text and "data-copy=" in r.text  # 复制路径按钮
     assert "mf-origin" not in r.text  # 不再有 origin 列
-    assert "预览 →" not in r.text and ">预览</a>" in r.text  # 预览无箭头
+    assert "预览 →" not in r.text and ">预览</span>" in r.text  # 预览无箭头(span)
+    assert 'class="is-prev ' in r.text or 'is-prev"' in r.text  # 整行可点
 
 
 def test_external_txt_transcript_previewable(tmp_path, monkeypatch):
@@ -177,7 +178,7 @@ def test_external_txt_transcript_previewable(tmp_path, monkeypatch):
     c = TestClient(create_app(tmp_path))
     r = c.get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    assert ">预览</a>" in r.text  # 外部 txt 可预览
+    assert ">预览</span>" in r.text  # 外部 txt 可预览
     assert "第一句话" in r.text  # OOB 自动预览主形态
     # form 端点直取正文(纯文本 → doc-plain 保留换行)
     fr = c.get(f"/w/ws/ref/{rid}/form/0")
@@ -198,12 +199,25 @@ def test_ref_form_endpoint_guards(tmp_path, monkeypatch):
 
 
 def test_stream_ref_surfaces_digest(tmp_path, monkeypatch):
-    # digest.md 不在 manifest.forms,但磁盘存在 → 作为可预览形态补入元信息
+    # digest.md 不在 manifest.forms,但磁盘存在 → 补入元信息(标签 摘要)
     _ws_with_step(tmp_path, monkeypatch)
     rid = _make_voice_ref(tmp_path, with_digest=True)
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    assert "digest" in r.text and "digest.md" in r.text
+    assert "摘要" in r.text and "digest.md" in r.text
+
+
+def test_digest_is_default_preview(tmp_path, monkeypatch):
+    # 有 digest 时,默认主预览是 digest(而非 transcript)
+    _ws_with_step(tmp_path, monkeypatch)
+    rid = _make_voice_ref(tmp_path, with_digest=True)
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    # OOB 阅读区渲染的是 digest 正文,而非 transcript
+    assert "核心结论一二三" in r.text  # digest 内容
+    assert "落地优先级讨论" not in r.text  # transcript 未被默认渲染
+    # digest 行高亮(预览 key=digest)
+    assert 'hx-get="/w/ws/ref/' + rid + '/form/digest" hx-target="#reader"' in r.text
 
 
 def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):

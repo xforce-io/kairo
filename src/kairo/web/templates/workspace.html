@@ -48,25 +48,23 @@
   </aside>
 </div>
 <script>
-  // 委托监听(htmx 换入 #meta 后仍生效)
+  // 复制路径:捕获阶段拦截,阻止冒泡到整行的 htmx 预览
   document.addEventListener('click', function (e) {
-    // 复制路径
     var btn = e.target.closest('.copy-btn');
-    if (btn) {
-      e.preventDefault();
-      navigator.clipboard.writeText(btn.dataset.copy).then(function () {
-        btn.classList.add('copied');
-        setTimeout(function () { btn.classList.remove('copied'); }, 1200);
-      });
-      return;
-    }
-    // 点预览 → 高亮当前行
-    var prev = e.target.closest('.mf-prev');
-    if (prev) {
-      var tr = prev.closest('tr');
-      tr.parentElement.querySelectorAll('tr').forEach(function (x) { x.classList.remove('on'); });
-      tr.classList.add('on');
-    }
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    navigator.clipboard.writeText(btn.dataset.copy).then(function () {
+      btn.classList.add('copied');
+      setTimeout(function () { btn.classList.remove('copied'); }, 1200);
+    });
+  }, true);
+  // 点整行(可预览)→ 高亮;预览本身由该行 hx-get 触发
+  document.addEventListener('click', function (e) {
+    var tr = e.target.closest('.meta-forms tr.is-prev');
+    if (!tr) return;
+    tr.parentElement.querySelectorAll('tr').forEach(function (x) { x.classList.remove('on'); });
+    tr.classList.add('on');
   });
 </script>
 {% endblock %}

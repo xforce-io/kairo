@@ -147,13 +147,30 @@ def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     )
 
 
+# 角色 → 人读标签(内部英文 role 不直接示人)
+_ROLE_LABELS = {
+    "transcript": "转写",
+    "digest": "摘要",
+    "audio": "音频",
+    "corpus_tree": "资料目录",
+    "source_text": "正文",
+    "note": "笔记",
+    "prose": "文稿",
+}
+
+
+def _role_label(role: str) -> str:
+    return _ROLE_LABELS.get(role, role)
+
+
 def _ref_forms(ws: Workspace, ref_id: str, man) -> list[dict]:
-    """form 列表(标注可预览 + 预览 key);digest 为派生产物按磁盘补入。"""
+    """form 列表(标注可预览 + 预览 key + 人读标签);digest 为派生产物按磁盘补入。"""
     forms = []
     for i, f in enumerate(man.forms):
         forms.append(
             {
                 "role": f.role,
+                "role_label": _role_label(f.role),
                 "location": f.location,
                 "previewable": _is_text_file(_form_path(ws, f.location)),
                 "key": str(i),
@@ -163,6 +180,7 @@ def _ref_forms(ws: Workspace, ref_id: str, man) -> list[dict]:
         forms.append(
             {
                 "role": "digest",
+                "role_label": _role_label("digest"),
                 "location": f"references/{ref_id}/digest.md",
                 "previewable": True,
                 "key": "digest",
@@ -173,15 +191,19 @@ def _ref_forms(ws: Workspace, ref_id: str, man) -> list[dict]:
 
 @router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
 def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
-    """右栏元信息 + (OOB)中间预览主形态(transcript 优先)。"""
+    """右栏元信息 + (OOB)中间预览主形态(默认 digest 摘要 → 否则 transcript → 首个可预览)。"""
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
     man = ws.read_manifest(ref_id)
     forms = _ref_forms(ws, ref_id, man)
-    primary = next((f for f in forms if f["role"] == "transcript" and f["previewable"]), None)
-    primary = primary or next((f for f in forms if f["previewable"]), None)
+    primary = (
+        next((f for f in forms if f["role"] == "digest" and f["previewable"]), None)
+        or next((f for f in forms if f["role"] == "transcript" and f["previewable"]), None)
+        or next((f for f in forms if f["previewable"]), None)
+    )
     sc = ws.constitution.source_classes.get(man.source_class)
+    preview_title = f"{man.title} · {primary['role_label']}" if primary else ""
     return request.app.state.templates.TemplateResponse(
         request,
         "_ref_meta.html",
@@ -189,14 +211,13 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "slug": slug,
             "ref_id": ref_id,
             "title": man.title,
-            "cls": man.source_class,
             "label": sc.label if sc else man.source_class,
             "hint": sc.hint if sc else "",
             "forms": forms,
             "preview_key": primary["key"] if primary else "",
-            "preview_title": primary["location"] if primary else "",
+            "preview_title": preview_title,
             "preview_html": _render_doc(_form_path(ws, primary["location"])) if primary else None,
-            "empty_hint": "此参考无可内联预览的文本形态（如 corpus 目录、音频）。",
+            "empty_hint": "此参考无可内联预览的文本形态（如 资料目录、音频）。",
         },
     )
 
@@ -207,22 +228,21 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
+    man = ws.read_manifest(ref_id)
     if key == "digest":
-        path, title = ws.references_dir() / ref_id / "digest.md", f"references/{ref_id}/digest.md"
+        path, role = ws.references_dir() / ref_id / "digest.md", "digest"
     else:
-        man = ws.read_manifest(ref_id)
         try:
             idx = int(key)
         except ValueError:
             raise HTTPException(status_code=404, detail="form not found")
         if not 0 <= idx < len(man.forms):
             raise HTTPException(status_code=404, detail="form not found")
-        title = man.forms[idx].location
-        path = _form_path(ws, title)
+        path, role = _form_path(ws, man.forms[idx].location), man.forms[idx].role
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
     return request.app.state.templates.TemplateResponse(
-        request, "_doc.html", {"title": title, "html": _render_doc(path)}
+        request, "_doc.html", {"title": f"{man.title} · {_role_label(role)}", "html": _render_doc(path)}
     )
 
 
