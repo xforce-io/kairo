@@ -1,5 +1,5 @@
 {% for r in refs %}
-<a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug }}/ref/{{ r.id }}" hx-target="#refbox">
+<a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
   <span class="name">{{ r.title }}</span>
   <span class="tag {{ r.cls }}">{{ r.cls }}</span>
 </a>

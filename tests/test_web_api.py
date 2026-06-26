@@ -106,33 +106,73 @@ def test_workspace_view_splits_stream_and_corpus(tmp_path, monkeypatch):
     assert "baseline" not in ref_seg.split(">参考<", 1)[-1]  # 不出现在参考组
 
 
-def test_stream_ref_inlines_markdown_transcript(tmp_path, monkeypatch):
-    # whisper 式 stream:transcript.md 在 workspace 内 → 详情页内联渲染正文
-    ws = _ws_with_step(tmp_path, monkeypatch)
-    rid = "2026-06-26-voice"
-    refdir = tmp_path / "ws" / "references" / rid
+def _make_voice_ref(root, rid="2026-06-26-voice", with_digest=False):
+    """造一条 whisper 式 stream:transcript.md(+可选 digest.md)在 workspace 内。"""
+    refdir = root / "ws" / "references" / rid
     refdir.mkdir(parents=True)
     (refdir / "transcript.md").write_text("# 语音纪要\n\n落地优先级讨论")
+    if with_digest:
+        (refdir / "digest.md").write_text("# 折叠摘要\n\n核心结论一二三")
     (refdir / "manifest.yaml").write_text(
-        "id: 2026-06-26-voice\n"
+        f"id: {rid}\n"
         "title: 语音\n"
         "class: stream\n"
         "forms:\n"
+        "- role: audio\n"
+        "  location: data/语音.m4a\n"
+        "  hash: aa\n"
+        "  origin: added\n"
         "- role: transcript\n"
         f"  location: references/{rid}/transcript.md\n"
-        "  hash: deadbeef\n"
+        "  hash: bb\n"
         "  origin: whisper\n"
     )
+    return rid
+
+
+def test_stream_ref_meta_and_oob_preview(tmp_path, monkeypatch):
+    # 选 stream → 右栏元信息列形态;OOB 把主形态 transcript 渲染进中间 #reader
+    _ws_with_step(tmp_path, monkeypatch)
+    rid = _make_voice_ref(tmp_path)
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    assert "ref-preview" in r.text and "落地优先级讨论" in r.text
+    # 右栏元信息:列出 audio / transcript 形态
+    assert 'class="meta"' in r.text and "transcript" in r.text and "audio" in r.text
+    # OOB:中间预览画布带正文
+    assert 'id="reader"' in r.text and 'hx-swap-oob="true"' in r.text
+    assert "落地优先级讨论" in r.text
+
+
+def test_stream_ref_surfaces_digest(tmp_path, monkeypatch):
+    # digest.md 不在 manifest.forms,但磁盘存在 → 作为可预览形态补入元信息
+    _ws_with_step(tmp_path, monkeypatch)
+    rid = _make_voice_ref(tmp_path, with_digest=True)
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "digest" in r.text and "digest.md" in r.text
 
 
 def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):
-    # corpus 形态为目录/外部路径,无可内联的 md → 给出提示而非空白
+    # corpus 形态为目录/外部路径,无可内联的 md → 中间给提示而非空白
     ws = _ws_with_step(tmp_path, monkeypatch)
     _add_corpus_dir(tmp_path, ws)
     rid = next(r for r in ws.list_reference_ids() if "baseline" in r)
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    assert "无可内联预览" in r.text and "ref-preview" not in r.text
+    assert 'class="meta"' in r.text and "无可内联预览" in r.text
+
+
+def test_target_meta_shows_status_and_previews(tmp_path, monkeypatch):
+    # 选产物 → 右栏出状态元信息;OOB 预览正文进 #reader
+    _ws_with_step(tmp_path, monkeypatch)
+    r = TestClient(create_app(tmp_path)).get("/w/ws/target", params={"path": "understanding.md"})
+    assert r.status_code == 200
+    assert "understanding.md" in r.text
+    assert 'id="reader"' in r.text and 'hx-swap-oob="true"' in r.text
+    assert "落地优先级" in r.text  # stub 正文进 understanding
+
+
+def test_target_meta_404_for_unknown(tmp_path, monkeypatch):
+    _ws_with_step(tmp_path, monkeypatch)
+    r = TestClient(create_app(tmp_path)).get("/w/ws/target", params={"path": "nope.md"})
+    assert r.status_code == 404

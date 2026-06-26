@@ -34,6 +34,14 @@ def _safe_doc(ws: Workspace, relpath: str) -> Path:
     return target
 
 
+def _preview_html(ws: Workspace, location: str) -> str | None:
+    """把 workspace 内的 .md 渲染成 HTML;越界/缺失 → None(右栏给提示,不报错)。"""
+    try:
+        return render_markdown(_safe_doc(ws, location).read_text())
+    except HTTPException:
+        return None
+
+
 def _target_states(ws: Workspace):
     """各 target 的 (path, status) —— 给左栏状态点。"""
     state = ws.read_state()
@@ -118,6 +126,7 @@ def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
 
 @router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
 def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
+    """右栏元信息 + (OOB)中间预览主形态。digest 为派生产物,manifest 不记,按磁盘补入。"""
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
@@ -127,24 +136,27 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "role": f.role,
             "location": f.location,
             "origin": f.origin,
-            "is_md": f.location.endswith(".md"),
+            # 可内联预览 = workspace 内的 .md(corpus 外部目录/音频不可预览)
+            "previewable": f.location.endswith(".md") and not f.location.startswith("/"),
         }
         for f in man.forms
     ]
-    # 主 Markdown 形态(优先 transcript,否则首个 .md)→ 在阅读区内联预览
-    primary = next((f for f in forms if f["role"] == "transcript" and f["is_md"]), None)
-    primary = primary or next((f for f in forms if f["is_md"]), None)
-    preview_html = None
-    if primary:
-        try:
-            target = _safe_doc(ws, primary["location"])
-            preview_html = render_markdown(target.read_text())
-        except HTTPException:
-            preview_html = None
+    if (ws.references_dir() / ref_id / "digest.md").is_file():
+        forms.append(
+            {
+                "role": "digest",
+                "location": f"references/{ref_id}/digest.md",
+                "origin": "folded",
+                "previewable": True,
+            }
+        )
+    # 主预览:transcript 优先 → 首个可预览
+    primary = next((f for f in forms if f["role"] == "transcript" and f["previewable"]), None)
+    primary = primary or next((f for f in forms if f["previewable"]), None)
     sc = ws.constitution.source_classes.get(man.source_class)
     return request.app.state.templates.TemplateResponse(
         request,
-        "_ref.html",
+        "_ref_meta.html",
         {
             "slug": slug,
             "ref_id": ref_id,
@@ -153,7 +165,34 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "label": sc.label if sc else man.source_class,
             "hint": sc.hint if sc else "",
             "forms": forms,
-            "preview_html": preview_html,
+            "preview_title": primary["location"] if primary else "",
+            "preview_html": _preview_html(ws, primary["location"]) if primary else None,
+            "empty_hint": "此参考无可内联预览的 Markdown 形态（如 corpus 目录、音频）。",
+        },
+    )
+
+
+@router.get("/w/{slug}/target", response_class=HTMLResponse)
+def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
+    """右栏产物元信息(状态/blocked 原因) + (OOB)中间预览正文。"""
+    ws = _open(request, slug)
+    if path not in {t.path for t in ws.constitution.targets}:
+        raise HTTPException(status_code=404, detail="target not found")
+    ts = ws.read_state().targets.get(path)
+    status = ts.status if ts else "missing"
+    has_doc = (ws.root / path).is_file()
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "_target_meta.html",
+        {
+            "slug": slug,
+            "path": path,
+            "status": status,
+            "reason": ts.reason if ts else None,
+            "has_doc": has_doc,
+            "preview_title": path,
+            "preview_html": _preview_html(ws, path) if has_doc else None,
+            "empty_hint": "该产物尚未生成,点右上 ▶ Step 运行后查看。",
         },
     )
 
