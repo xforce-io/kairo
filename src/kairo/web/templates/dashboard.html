@@ -2,8 +2,8 @@
 {% block subtitle %}{{ root }} · {{ items|length }} workspaces{% endblock %}
 {% block body %}
 <form class="new-ws" hx-post="/workspaces" hx-swap="none">
-  <input name="topic" placeholder="新 workspace 的 topic(如 产品规划)" required>
-  <button type="submit">新建 workspace</button>
+  <input name="topic" placeholder="{{ t('dash.topic_placeholder') }}" required>
+  <button type="submit">{{ t('dash.new_ws_btn') }}</button>
   <span id="ws-error" class="ws-error"></span>
 </form>
 <div class="grid">
@@ -12,21 +12,21 @@
     <h3>{{ s.topic }}</h3>
     <div class="slug">{{ s.slug }}</div>
     <div class="badges">
-      <span class="badge stream">{{ s.stream_count }} 观测</span>
-      <span class="badge corpus">{{ s.corpus_count }} 基线</span>
-      {% if s.stale_count %}<span class="badge stale">{{ s.stale_count }} 待 step</span>{% endif %}
+      <span class="badge stream">{{ s.stream_count }} {{ t('dash.badge_stream') }}</span>
+      <span class="badge corpus">{{ s.corpus_count }} {{ t('dash.badge_corpus') }}</span>
+      {% if s.stale_count %}<span class="badge stale">{{ s.stale_count }} {{ t('dash.badge_stale') }}</span>{% endif %}
       {% if s.blocked_count %}<span class="badge blocked">⚠ {{ s.blocked_count }}</span>{% endif %}
     </div>
   </a>
   {% else %}
-  <p class="empty">该目录下没有 workspace(子目录需含 constitution.yaml)。</p>
+  <p class="empty">{{ t('dash.empty') }}</p>
   {% endfor %}
 </div>
 <script>
   document.querySelector('.new-ws').addEventListener('htmx:responseError', function (e) {
     var box = document.getElementById('ws-error');
     try { box.textContent = JSON.parse(e.detail.xhr.responseText).detail; }
-    catch (_) { box.textContent = '创建失败'; }
+    catch (_) { box.textContent = '{{ t("dash.create_failed") }}'; }
   });
 </script>
 {% endblock %}

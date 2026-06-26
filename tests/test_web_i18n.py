@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
+from fastapi.testclient import TestClient
+
 from kairo.web.i18n import CATALOG, DEFAULT_LANG, SUPPORTED, resolve_lang, translator
+from kairo.web.server import create_app
 
 
 def _req(cookies=None, accept=None):
@@ -50,11 +53,6 @@ def test_supported_contains_default():
     assert DEFAULT_LANG in SUPPORTED
 
 
-from fastapi.testclient import TestClient
-
-from kairo.web.server import create_app
-
-
 def _client(root):
     return TestClient(create_app(root))
 
@@ -94,3 +92,19 @@ def test_cookie_lang_drives_html_lang(tmp_path):
 def test_language_toggle_present(tmp_path):
     r = _client(tmp_path).get("/")
     assert 'href="/set-lang/en"' in r.text and 'href="/set-lang/zh"' in r.text
+
+
+def test_chrome_translates_under_zh(tmp_path):
+    c = _client(tmp_path)
+    en = c.get("/").text
+    assert "New workspace" in en
+    zh = c.get("/", headers={"Accept-Language": "zh-CN"}).text
+    assert "新建 workspace" in zh
+
+
+def test_create_workspace_error_is_localized(tmp_path):
+    c = _client(tmp_path)
+    r_en = c.post("/workspaces", data={"topic": ""})
+    assert r_en.status_code == 400 and "Topic cannot be empty" in r_en.text
+    r_zh = c.post("/workspaces", data={"topic": ""}, headers={"Accept-Language": "zh-CN"})
+    assert r_zh.status_code == 400 and "topic 不能为空" in r_zh.text

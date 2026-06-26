@@ -6,6 +6,6 @@
        hx-trigger="sse:done"
        hx-target="body"
        hx-select=".layout"
-       hx-swap="outerHTML">step 进行中…(完成后自动刷新状态)</div>
-  <button class="btn btn-ghost" hx-post="/w/{{ slug }}/step/{{ task_id }}/cancel" hx-target="#step-area">取消</button>
+       hx-swap="outerHTML">{{ t('step.running') }}</div>
+  <button class="btn btn-ghost" hx-post="/w/{{ slug }}/step/{{ task_id }}/cancel" hx-target="#step-area">{{ t('step.cancel') }}</button>
 </div>

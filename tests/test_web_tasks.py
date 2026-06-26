@@ -100,4 +100,4 @@ def test_step_rejects_concurrent(tmp_path, monkeypatch):
     app.state.registry.start("ws", tmp_path / "ws", [sys.executable, "-c", "import time; time.sleep(2)"])
     r = c.post("/w/ws/step")
     assert r.status_code == 200
-    assert "正在运行" in r.text
+    assert "Running" in r.text

@@ -1,22 +1,22 @@
 <div class="meta">
-  <p class="meta-kicker">产物 · <span class="meta-st {{ status }}">{{ status }}</span></p>
+  <p class="meta-kicker">{{ t('target.kicker_prefix') }} · <span class="meta-st {{ status }}">{{ status }}</span></p>
   <h3 class="meta-title">{{ path }}</h3>
-  {% if reason %}<p class="meta-hint">原因:{{ reason }}</p>{% endif %}
-  <div class="meta-label">形态</div>
+  {% if reason %}<p class="meta-hint">{{ t('target.reason_prefix') }}:{{ reason }}</p>{% endif %}
+  <div class="meta-label">{{ t('forms.label') }}</div>
   <table class="meta-forms">
     <tbody>
     {% if has_doc %}
     <tr class="is-prev on" hx-get="/w/{{ slug | urlencode }}/doc?path={{ path | urlencode }}" hx-target="#reader">
-      <td class="mf-role">正文</td>
+      <td class="mf-role">{{ t('target.body') }}</td>
       <td class="mf-actions">
-        <button type="button" class="copy-btn" data-copy="{{ path }}" title="{{ path }}" aria-label="复制路径">
+        <button type="button" class="copy-btn" data-copy="{{ path }}" title="{{ path }}" aria-label="{{ t('forms.copy_path') }}">
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
-        <span class="mf-prev">预览</span>
+        <span class="mf-prev">{{ t('forms.preview') }}</span>
       </td>
     </tr>
     {% else %}
-    <tr><td class="mf-empty" colspan="3">尚未生成</td></tr>
+    <tr><td class="mf-empty" colspan="3">{{ t('target.not_generated') }}</td></tr>
     {% endif %}
     </tbody>
   </table>

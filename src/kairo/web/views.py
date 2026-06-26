@@ -113,21 +113,22 @@ def set_lang(request: Request, code: str) -> RedirectResponse:
 
 @router.post("/workspaces", response_class=HTMLResponse)
 def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
+    t = _t(request)
     root = Path(request.app.state.root)
     topic = topic.strip()
     if not topic:
-        raise HTTPException(status_code=400, detail="topic 不能为空")
+        raise HTTPException(status_code=400, detail=t("err.topic_empty"))
     if len(topic) > 64:
-        raise HTTPException(status_code=400, detail="topic 过长(最多 64 字符)")
+        raise HTTPException(status_code=400, detail=t("err.topic_too_long"))
     if any(ord(c) < 0x20 or ord(c) == 0x7F for c in topic):
-        raise HTTPException(status_code=400, detail="topic 不能含控制字符")
+        raise HTTPException(status_code=400, detail=t("err.topic_control"))
     if "/" in topic or "\\" in topic or topic.startswith(".") or topic in (".", ".."):
-        raise HTTPException(status_code=400, detail="topic 含非法字符(不能含 / \\ 或以 . 开头)")
+        raise HTTPException(status_code=400, detail=t("err.topic_illegal"))
     dest = (root / topic).resolve()
     if dest.parent != root.resolve():
-        raise HTTPException(status_code=400, detail="非法 topic")
+        raise HTTPException(status_code=400, detail=t("err.topic_invalid"))
     if dest.exists():
-        raise HTTPException(status_code=400, detail=f"已存在同名 workspace:{topic}")
+        raise HTTPException(status_code=400, detail=t("err.topic_exists").format(topic=topic))
     Workspace.init(dest, topic=topic)
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
@@ -166,30 +167,18 @@ def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     return _render(request, "_doc.html", {"title": path, "html": render_markdown(target.read_text())})
 
 
-# 角色 → 人读标签(内部英文 role 不直接示人)
-_ROLE_LABELS = {
-    "transcript": "转写",
-    "digest": "摘要",
-    "audio": "音频",
-    "corpus_tree": "资料目录",
-    "source_text": "正文",
-    "note": "笔记",
-    "prose": "文稿",
-}
+def _role_label(role: str, t) -> str:
+    return t(f"role.{role}") if t(f"role.{role}") != f"role.{role}" else role
 
 
-def _role_label(role: str) -> str:
-    return _ROLE_LABELS.get(role, role)
-
-
-def _ref_forms(ws: Workspace, ref_id: str, man) -> list[dict]:
+def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
     """form 列表(标注可预览 + 预览 key + 人读标签);digest 为派生产物按磁盘补入。"""
     forms = []
     for i, f in enumerate(man.forms):
         forms.append(
             {
                 "role": f.role,
-                "role_label": _role_label(f.role),
+                "role_label": _role_label(f.role, t),
                 "location": f.location,
                 "previewable": _is_text_file(_form_path(ws, f.location)),
                 "key": str(i),
@@ -199,7 +188,7 @@ def _ref_forms(ws: Workspace, ref_id: str, man) -> list[dict]:
         forms.append(
             {
                 "role": "digest",
-                "role_label": _role_label("digest"),
+                "role_label": _role_label("digest", t),
                 "location": f"references/{ref_id}/digest.md",
                 "previewable": True,
                 "key": "digest",
@@ -214,8 +203,9 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
+    t = _t(request)
     man = ws.read_manifest(ref_id)
-    forms = _ref_forms(ws, ref_id, man)
+    forms = _ref_forms(ws, ref_id, man, t)
     primary = (
         next((f for f in forms if f["role"] == "digest" and f["previewable"]), None)
         or next((f for f in forms if f["role"] == "transcript" and f["previewable"]), None)
@@ -236,7 +226,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "preview_key": primary["key"] if primary else "",
             "preview_title": preview_title,
             "preview_html": _render_doc(_form_path(ws, primary["location"])) if primary else None,
-            "empty_hint": "此参考无可内联预览的文本形态（如 资料目录、音频）。",
+            "empty_hint": t("ref.empty_hint"),
         },
     )
 
@@ -260,7 +250,10 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
         path, role = _form_path(ws, man.forms[idx].location), man.forms[idx].role
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
-    return _render(request, "_doc.html", {"title": f"{man.title} · {_role_label(role)}", "html": _render_doc(path)})
+    t = _t(request)
+    return _render(
+        request, "_doc.html", {"title": f"{man.title} · {_role_label(role, t)}", "html": _render_doc(path)}
+    )
 
 
 @router.get("/w/{slug}/target", response_class=HTMLResponse)
@@ -283,7 +276,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
             "has_doc": has_doc,
             "preview_title": path,
             "preview_html": _preview_html(ws, path) if has_doc else None,
-            "empty_hint": "该产物尚未生成,点右上 ▶ Step 运行后查看。",
+            "empty_hint": _t(request)("target.empty_hint"),
         },
     )
 
@@ -350,7 +343,7 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
     ws = _open(request, slug)
     reg = request.app.state.registry
     if reg.is_running(slug):
-        return HTMLResponse('<p class="muted">⏳ 正在运行,请等待当前 step 结束。</p>')
+        return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
     argv = [sys.executable, "-m", "kairo"] + (["re-step", target] if target else ["step"])
     task = reg.start(slug, ws.root, argv)
     return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
@@ -367,4 +360,6 @@ def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
 @router.post("/w/{slug}/step/{task_id}/cancel", response_class=HTMLResponse)
 def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
     ok = request.app.state.registry.cancel(task_id)
-    return HTMLResponse('<p class="muted">已取消。</p>' if ok else '<p class="muted">无法取消(已结束)。</p>')
+    t = _t(request)
+    msg = t("step.canceled") if ok else t("step.cannot_cancel")
+    return HTMLResponse(f'<p class="muted">{msg}</p>')

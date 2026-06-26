@@ -26,7 +26,7 @@ def test_dashboard_shows_create_workspace_entry(tmp_path):
     r = _client(tmp_path).get("/")
     assert r.status_code == 200
     assert 'hx-post="/workspaces"' in r.text
-    assert "新建 workspace" in r.text
+    assert "New workspace" in r.text
 
 
 def test_dashboard_card_link_is_url_encoded(tmp_path):
@@ -98,12 +98,12 @@ def test_workspace_view_splits_stream_and_corpus(tmp_path, monkeypatch):
     _add_corpus_dir(tmp_path, ws)
     r = TestClient(create_app(tmp_path)).get("/w/ws")
     assert r.status_code == 200
-    assert "返回总览" in r.text  # 顶部返回总览组件
-    assert ">参考<" in r.text and ">基线<" in r.text
+    assert "Overview" in r.text  # 顶部返回总览组件
+    assert ">References<" in r.text and ">Corpus<" in r.text
     assert "nav-group-corpus" in r.text
-    ref_seg, corpus_seg = r.text.split("基线", 1)
+    ref_seg, corpus_seg = r.text.split(">Corpus<", 1)
     assert "baseline" in corpus_seg  # corpus 在基线组
-    assert "baseline" not in ref_seg.split(">参考<", 1)[-1]  # 不出现在参考组
+    assert "baseline" not in ref_seg.split(">References<", 1)[-1]
 
 
 def _make_voice_ref(root, rid="2026-06-26-voice", with_digest=False):
@@ -137,7 +137,7 @@ def test_stream_ref_meta_and_oob_preview(tmp_path, monkeypatch):
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
     # 右栏元信息:人读标签 转写 / 音频
-    assert 'class="meta"' in r.text and "转写" in r.text and "音频" in r.text
+    assert 'class="meta"' in r.text and "Transcript" in r.text and "Audio" in r.text
     # OOB:中间预览画布带正文
     assert 'id="reader"' in r.text and 'hx-swap-oob="true"' in r.text
     assert "落地优先级讨论" in r.text
@@ -151,7 +151,7 @@ def test_ref_meta_has_copy_button_no_origin(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "copy-btn" in r.text and "data-copy=" in r.text  # 复制路径按钮
     assert "mf-origin" not in r.text  # 不再有 origin 列
-    assert "预览 →" not in r.text and ">预览</span>" in r.text  # 预览无箭头(span)
+    assert "Preview →" not in r.text and ">Preview</span>" in r.text  # 预览无箭头(span)
     assert 'class="is-prev ' in r.text or 'is-prev"' in r.text  # 整行可点
 
 
@@ -178,7 +178,7 @@ def test_external_txt_transcript_previewable(tmp_path, monkeypatch):
     c = TestClient(create_app(tmp_path))
     r = c.get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    assert ">预览</span>" in r.text  # 外部 txt 可预览
+    assert ">Preview</span>" in r.text  # 外部 txt 可预览
     assert "第一句话" in r.text  # OOB 自动预览主形态
     # form 端点直取正文(纯文本 → doc-plain 保留换行)
     fr = c.get(f"/w/ws/ref/{rid}/form/0")
@@ -204,7 +204,7 @@ def test_stream_ref_surfaces_digest(tmp_path, monkeypatch):
     rid = _make_voice_ref(tmp_path, with_digest=True)
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    assert "摘要" in r.text and "digest.md" in r.text
+    assert "Digest" in r.text and "digest.md" in r.text
 
 
 def test_digest_is_default_preview(tmp_path, monkeypatch):
@@ -227,7 +227,7 @@ def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):
     rid = next(r for r in ws.list_reference_ids() if "baseline" in r)
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
-    assert 'class="meta"' in r.text and "无可内联预览" in r.text
+    assert 'class="meta"' in r.text and "no inline-previewable" in r.text
 
 
 def test_target_meta_shows_status_and_previews(tmp_path, monkeypatch):
