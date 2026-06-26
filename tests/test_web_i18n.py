@@ -75,6 +75,12 @@ def test_set_lang_sets_cookie_and_redirects(tmp_path):
     assert c.cookies.get("lang") == "zh"
 
 
+def test_set_lang_without_referer_redirects_to_root(tmp_path):
+    r = _client(tmp_path).get("/set-lang/zh", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
+
+
 def test_set_lang_ignores_unknown_code(tmp_path):
     c = _client(tmp_path)
     r = c.get("/set-lang/fr", follow_redirects=False)

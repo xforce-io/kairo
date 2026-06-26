@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block subtitle %}{{ root }} · {{ items|length }} workspaces{% endblock %}
+{% block subtitle %}{{ root }} · {{ items|length }} {{ t('dash.workspaces_suffix') }}{% endblock %}
 {% block body %}
 <form class="new-ws" hx-post="/workspaces" hx-swap="none">
   <input name="topic" placeholder="{{ t('dash.topic_placeholder') }}" required>
