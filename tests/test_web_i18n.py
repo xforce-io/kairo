@@ -48,3 +48,49 @@ def test_every_en_key_exists_in_zh():
 
 def test_supported_contains_default():
     assert DEFAULT_LANG in SUPPORTED
+
+
+from fastapi.testclient import TestClient
+
+from kairo.web.server import create_app
+
+
+def _client(root):
+    return TestClient(create_app(root))
+
+
+def test_html_lang_defaults_to_en(tmp_path):
+    r = _client(tmp_path).get("/")
+    assert '<html lang="en">' in r.text
+
+
+def test_html_lang_follows_accept_language(tmp_path):
+    r = _client(tmp_path).get("/", headers={"Accept-Language": "zh-CN,zh;q=0.9"})
+    assert '<html lang="zh">' in r.text
+
+
+def test_set_lang_sets_cookie_and_redirects(tmp_path):
+    c = _client(tmp_path)
+    r = c.get("/set-lang/zh", headers={"Referer": "/"}, follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/"
+    assert c.cookies.get("lang") == "zh"
+
+
+def test_set_lang_ignores_unknown_code(tmp_path):
+    c = _client(tmp_path)
+    r = c.get("/set-lang/fr", follow_redirects=False)
+    assert r.status_code == 303
+    assert c.cookies.get("lang") is None
+
+
+def test_cookie_lang_drives_html_lang(tmp_path):
+    c = _client(tmp_path)
+    c.cookies.set("lang", "zh")
+    r = c.get("/")
+    assert '<html lang="zh">' in r.text
+
+
+def test_language_toggle_present(tmp_path):
+    r = _client(tmp_path).get("/")
+    assert 'href="/set-lang/en"' in r.text and 'href="/set-lang/zh"' in r.text

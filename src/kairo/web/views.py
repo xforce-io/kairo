@@ -8,15 +8,29 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 
 from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
+from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
 from kairo.web.tasks import stream_events
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
 router = APIRouter()
+
+
+def _t(request: Request):
+    """请求语言 → translator t(key)。"""
+    return translator(resolve_lang(request))
+
+
+def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
+    """统一渲染:注入 lang + t。所有 TemplateResponse 走这里。"""
+    lang = resolve_lang(request)
+    return request.app.state.templates.TemplateResponse(
+        request, name, {**ctx, "lang": lang, "t": translator(lang)}
+    )
 
 
 def _open(request: Request, slug: str) -> Workspace:
@@ -85,9 +99,16 @@ def healthz() -> JSONResponse:
 def dashboard(request: Request) -> HTMLResponse:
     root = request.app.state.root
     items = scan_workspaces(root)
-    return request.app.state.templates.TemplateResponse(
-        request, "dashboard.html", {"items": items, "root": str(root)}
-    )
+    return _render(request, "dashboard.html", {"items": items, "root": str(root)})
+
+
+@router.get("/set-lang/{code}")
+def set_lang(request: Request, code: str) -> RedirectResponse:
+    nxt = request.headers.get("referer") or "/"
+    resp = RedirectResponse(nxt, status_code=303)
+    if code in SUPPORTED:
+        resp.set_cookie("lang", code, max_age=31_536_000, samesite="lax")
+    return resp
 
 
 @router.post("/workspaces", response_class=HTMLResponse)
@@ -125,7 +146,7 @@ def _split_refs(ws: Workspace):
 def workspace_view(request: Request, slug: str) -> HTMLResponse:
     ws = _open(request, slug)
     streams, corpus = _split_refs(ws)
-    return request.app.state.templates.TemplateResponse(
+    return _render(
         request,
         "workspace.html",
         {
@@ -142,9 +163,7 @@ def workspace_view(request: Request, slug: str) -> HTMLResponse:
 def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ws = _open(request, slug)
     target = _safe_doc(ws, path)
-    return request.app.state.templates.TemplateResponse(
-        request, "_doc.html", {"title": path, "html": render_markdown(target.read_text())}
-    )
+    return _render(request, "_doc.html", {"title": path, "html": render_markdown(target.read_text())})
 
 
 # 角色 → 人读标签(内部英文 role 不直接示人)
@@ -204,7 +223,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     )
     sc = ws.constitution.source_classes.get(man.source_class)
     preview_title = f"{man.title} · {primary['role_label']}" if primary else ""
-    return request.app.state.templates.TemplateResponse(
+    return _render(
         request,
         "_ref_meta.html",
         {
@@ -241,9 +260,7 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
         path, role = _form_path(ws, man.forms[idx].location), man.forms[idx].role
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
-    return request.app.state.templates.TemplateResponse(
-        request, "_doc.html", {"title": f"{man.title} · {_role_label(role)}", "html": _render_doc(path)}
-    )
+    return _render(request, "_doc.html", {"title": f"{man.title} · {_role_label(role)}", "html": _render_doc(path)})
 
 
 @router.get("/w/{slug}/target", response_class=HTMLResponse)
@@ -255,7 +272,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ts = ws.read_state().targets.get(path)
     status = ts.status if ts else "missing"
     has_doc = (ws.root / path).is_file()
-    return request.app.state.templates.TemplateResponse(
+    return _render(
         request,
         "_target_meta.html",
         {
@@ -276,9 +293,7 @@ def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
     for ref_id in ws.list_reference_ids():
         man = ws.read_manifest(ref_id)
         refs.append({"id": ref_id, "title": man.title, "cls": man.source_class})
-    return request.app.state.templates.TemplateResponse(
-        request, "_refs_list.html", {"slug": slug, "refs": refs}
-    )
+    return _render(request, "_refs_list.html", {"slug": slug, "refs": refs})
 
 
 def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
@@ -338,9 +353,7 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
         return HTMLResponse('<p class="muted">⏳ 正在运行,请等待当前 step 结束。</p>')
     argv = [sys.executable, "-m", "kairo"] + (["re-step", target] if target else ["step"])
     task = reg.start(slug, ws.root, argv)
-    return request.app.state.templates.TemplateResponse(
-        request, "_step.html", {"slug": slug, "task_id": task.task_id}
-    )
+    return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
 
 
 @router.get("/w/{slug}/step/{task_id}/stream")

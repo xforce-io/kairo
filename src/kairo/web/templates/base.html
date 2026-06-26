@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="zh">
+<html lang="{{ lang | default('en') }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -13,6 +13,10 @@
     <a class="brand" href="/"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
     {% block topnav %}{% endblock %}
     <span class="crumb">{% block subtitle %}{% endblock %}</span>
+    <span class="lang-switch">
+      <a href="/set-lang/en" class="{% if lang == 'en' %}on{% endif %}">EN</a>
+      <a href="/set-lang/zh" class="{% if lang == 'zh' %}on{% endif %}">中</a>
+    </span>
   </header>
   {% block body %}{% endblock %}
 </body>

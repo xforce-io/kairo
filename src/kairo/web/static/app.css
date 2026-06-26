@@ -291,3 +291,7 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   .card, .btn { animation: none !important; transition: none !important; }
   .step-status::before { animation: none; }
 }
+
+.lang-switch { margin-left: auto; display: inline-flex; gap: 6px; font-size: 12px; }
+.lang-switch a { color: #888; text-decoration: none; padding: 2px 6px; border-radius: 4px; }
+.lang-switch a.on { color: #fff; background: #444; }
