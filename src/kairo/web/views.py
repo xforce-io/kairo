@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from html import escape
 from pathlib import Path
 from urllib.parse import quote
 
@@ -40,6 +41,28 @@ def _preview_html(ws: Workspace, location: str) -> str | None:
         return render_markdown(_safe_doc(ws, location).read_text())
     except HTTPException:
         return None
+
+
+# 可内联预览的文本后缀(.md 走 markdown,其余按纯文本保留换行)
+_TEXT_SUFFIXES = {".md", ".markdown", ".txt", ".text", ".vtt", ".srt", ".log"}
+
+
+def _form_path(ws: Workspace, location: str) -> Path:
+    """form.location 解析为绝对路径:相对 → ws 内;绝对 → 原样(均为 manifest 登记的可信路径)。"""
+    p = Path(location)
+    return p if p.is_absolute() else ws.root / location
+
+
+def _is_text_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _TEXT_SUFFIXES
+
+
+def _render_doc(path: Path) -> str:
+    """.md → markdown;其余文本 → 保留换行的 <pre>(转义)。"""
+    text = path.read_text(errors="replace")
+    if path.suffix.lower() in (".md", ".markdown"):
+        return render_markdown(text)
+    return f'<pre class="doc-plain">{escape(text)}</pre>'
 
 
 def _target_states(ws: Workspace):
@@ -124,33 +147,38 @@ def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     )
 
 
-@router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
-def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
-    """右栏元信息 + (OOB)中间预览主形态。digest 为派生产物,manifest 不记,按磁盘补入。"""
-    ws = _open(request, slug)
-    if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
-    man = ws.read_manifest(ref_id)
-    forms = [
-        {
-            "role": f.role,
-            "location": f.location,
-            "origin": f.origin,
-            # 可内联预览 = workspace 内的 .md(corpus 外部目录/音频不可预览)
-            "previewable": f.location.endswith(".md") and not f.location.startswith("/"),
-        }
-        for f in man.forms
-    ]
+def _ref_forms(ws: Workspace, ref_id: str, man) -> list[dict]:
+    """form 列表(标注可预览 + 预览 key);digest 为派生产物按磁盘补入。"""
+    forms = []
+    for i, f in enumerate(man.forms):
+        forms.append(
+            {
+                "role": f.role,
+                "location": f.location,
+                "previewable": _is_text_file(_form_path(ws, f.location)),
+                "key": str(i),
+            }
+        )
     if (ws.references_dir() / ref_id / "digest.md").is_file():
         forms.append(
             {
                 "role": "digest",
                 "location": f"references/{ref_id}/digest.md",
-                "origin": "folded",
                 "previewable": True,
+                "key": "digest",
             }
         )
-    # 主预览:transcript 优先 → 首个可预览
+    return forms
+
+
+@router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
+def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
+    """右栏元信息 + (OOB)中间预览主形态(transcript 优先)。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    man = ws.read_manifest(ref_id)
+    forms = _ref_forms(ws, ref_id, man)
     primary = next((f for f in forms if f["role"] == "transcript" and f["previewable"]), None)
     primary = primary or next((f for f in forms if f["previewable"]), None)
     sc = ws.constitution.source_classes.get(man.source_class)
@@ -165,10 +193,36 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "label": sc.label if sc else man.source_class,
             "hint": sc.hint if sc else "",
             "forms": forms,
+            "preview_key": primary["key"] if primary else "",
             "preview_title": primary["location"] if primary else "",
-            "preview_html": _preview_html(ws, primary["location"]) if primary else None,
-            "empty_hint": "此参考无可内联预览的 Markdown 形态（如 corpus 目录、音频）。",
+            "preview_html": _render_doc(_form_path(ws, primary["location"])) if primary else None,
+            "empty_hint": "此参考无可内联预览的文本形态（如 corpus 目录、音频）。",
         },
+    )
+
+
+@router.get("/w/{slug}/ref/{ref_id}/form/{key}", response_class=HTMLResponse)
+def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLResponse:
+    """预览某 form 正文。路径由服务端从 manifest 解析(可信),客户端只给受校验的 ref_id + key。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    if key == "digest":
+        path, title = ws.references_dir() / ref_id / "digest.md", f"references/{ref_id}/digest.md"
+    else:
+        man = ws.read_manifest(ref_id)
+        try:
+            idx = int(key)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="form not found")
+        if not 0 <= idx < len(man.forms):
+            raise HTTPException(status_code=404, detail="form not found")
+        title = man.forms[idx].location
+        path = _form_path(ws, title)
+    if not _is_text_file(path):
+        raise HTTPException(status_code=404, detail="not previewable")
+    return request.app.state.templates.TemplateResponse(
+        request, "_doc.html", {"title": title, "html": _render_doc(path)}
     )
 
 

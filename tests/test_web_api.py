@@ -154,6 +154,49 @@ def test_ref_meta_has_copy_button_no_origin(tmp_path, monkeypatch):
     assert "预览 →" not in r.text and ">预览</a>" in r.text  # 预览无箭头
 
 
+def test_external_txt_transcript_previewable(tmp_path, monkeypatch):
+    # transcript 是 workspace 外的绝对路径 .txt → 仍可预览(纯文本保留换行)
+    _ws_with_step(tmp_path, monkeypatch)
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    txt = ext / "260617.txt"
+    txt.write_text("第一句话\n第二句话")
+    rid = "2026-06-26-ext"
+    refdir = tmp_path / "ws" / "references" / rid
+    refdir.mkdir(parents=True)
+    (refdir / "manifest.yaml").write_text(
+        f"id: {rid}\n"
+        "title: 外部转写\n"
+        "class: stream\n"
+        "forms:\n"
+        "- role: transcript\n"
+        f"  location: {txt}\n"
+        "  hash: aa\n"
+        "  origin: added\n"
+    )
+    c = TestClient(create_app(tmp_path))
+    r = c.get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert ">预览</a>" in r.text  # 外部 txt 可预览
+    assert "第一句话" in r.text  # OOB 自动预览主形态
+    # form 端点直取正文(纯文本 → doc-plain 保留换行)
+    fr = c.get(f"/w/ws/ref/{rid}/form/0")
+    assert fr.status_code == 200 and "doc-plain" in fr.text
+    assert "第一句话" in fr.text and "第二句话" in fr.text
+
+
+def test_ref_form_endpoint_guards(tmp_path, monkeypatch):
+    # form key 越界 / 非法 → 404;不可借此读任意路径
+    _ws_with_step(tmp_path, monkeypatch)
+    rid = _make_voice_ref(tmp_path)
+    c = TestClient(create_app(tmp_path))
+    assert c.get(f"/w/ws/ref/{rid}/form/0").status_code == 404  # audio(.m4a)不可预览
+    assert c.get(f"/w/ws/ref/{rid}/form/1").status_code == 200  # transcript(.md)
+    assert c.get(f"/w/ws/ref/{rid}/form/9").status_code == 404  # 越界
+    assert c.get(f"/w/ws/ref/{rid}/form/x").status_code == 404  # 非整数
+    assert c.get(f"/w/ws/ref/nope/form/0").status_code == 404  # ref 不存在
+
+
 def test_stream_ref_surfaces_digest(tmp_path, monkeypatch):
     # digest.md 不在 manifest.forms,但磁盘存在 → 作为可预览形态补入元信息
     _ws_with_step(tmp_path, monkeypatch)

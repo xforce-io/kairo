@@ -6,14 +6,14 @@
   <table class="meta-forms">
     <tbody>
     {% for f in forms %}
-    <tr class="{% if f.location == preview_title %}on{% endif %}">
+    <tr class="{% if f.key == preview_key %}on{% endif %}">
       <td class="mf-role">{{ f.role }}</td>
       <td class="mf-copy">
         <button type="button" class="copy-btn" data-copy="{{ f.location }}" title="{{ f.location }}" aria-label="复制路径">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
       </td>
-      <td class="mf-act">{% if f.previewable %}<a href="#" class="mf-prev" hx-get="/w/{{ slug | urlencode }}/doc?path={{ f.location | urlencode }}" hx-target="#reader">预览</a>{% endif %}</td>
+      <td class="mf-act">{% if f.previewable %}<a href="#" class="mf-prev" hx-get="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ f.key }}" hx-target="#reader">预览</a>{% endif %}</td>
     </tr>
     {% endfor %}
     </tbody>

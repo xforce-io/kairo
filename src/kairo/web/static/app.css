@@ -199,6 +199,8 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .doc code { font-family: var(--mono); font-size: .86em; background: #f0ebdf; padding: 1px 6px; border-radius: 5px; }
 .doc pre { background: #2a2620; color: #ece4d3; padding: 16px; border-radius: 10px; overflow: auto; }
 .doc pre code { background: none; padding: 0; color: inherit; }
+/* 纯文本形态(.txt 转写等):非代码,保留换行、可读字体 */
+.doc pre.doc-plain { background: none; color: var(--ink); padding: 0; margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.78; white-space: pre-wrap; word-break: break-word; }
 .doc table { border-collapse: collapse; width: 100%; margin: 18px 0; font-family: var(--sans); font-size: 14px; }
 .doc th, .doc td { border: 1px solid var(--line-2); padding: 7px 11px; text-align: left; }
 .doc th { background: var(--paper-2); font-weight: 600; }
