@@ -85,11 +85,27 @@ def test_target_doc_has_export_button(tmp_path, monkeypatch):
     assert "doc-export" in r.text and "kairoPrintDoc()" in r.text
 
 
-def test_ref_doc_has_no_export_button(tmp_path, monkeypatch):
-    # 参考(非产物)不显示导出按钮:导出仅面向 understanding/assessment
+def test_ref_digest_preview_has_export_button(tmp_path, monkeypatch):
+    # digest(摘要)预览支持导出 PDF —— 两条渲染路径都要有
     _ws_with_step(tmp_path, monkeypatch)
     rid = _make_voice_ref(tmp_path, with_digest=True)
-    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    c = TestClient(create_app(tmp_path))
+    # 路径一:选中参考 → ref_view 的 OOB 预览(主形态=digest)
+    r = c.get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "doc-export" in r.text and "kairoPrintDoc()" in r.text
+    # 路径二:点 digest 行 → ref_form_view
+    r = c.get(f"/w/ws/ref/{rid}/form/digest")
+    assert r.status_code == 200
+    assert "doc-export" in r.text and "kairoPrintDoc()" in r.text
+
+
+def test_ref_nondigest_form_has_no_export_button(tmp_path, monkeypatch):
+    # 非 digest 形态(transcript/音频/附件)仍不显示导出按钮:导出仅面向产物 + digest
+    _ws_with_step(tmp_path, monkeypatch)
+    rid = _make_voice_ref(tmp_path, with_digest=True)
+    # forms: audio(key=0) / transcript(key=1);取 transcript 预览
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}/form/1")
     assert r.status_code == 200
     assert "doc-export" not in r.text
 
