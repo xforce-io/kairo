@@ -152,7 +152,7 @@ def _split_refs(ws: Workspace):
     streams, corpus = [], []
     for ref_id in ws.list_reference_ids():
         man = ws.read_manifest(ref_id)
-        item = {"id": ref_id, "title": man.title, "cls": man.source_class}
+        item = {"id": ref_id, "title": man.title}
         (corpus if man.source_class == "corpus" else streams).append(item)
     return streams, corpus
 
@@ -397,6 +397,22 @@ def attach_to_ref(
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # 复用 ref 详情渲染,刷新右栏元信息
+    return ref_view(request, slug, ref_id)
+
+
+@router.post("/w/{slug}/ref/{ref_id}/title", response_class=HTMLResponse)
+def rename_ref(
+    request: Request, slug: str, ref_id: str, title: str = Form(...)
+) -> HTMLResponse:
+    """重命名一条 reference 的展示名。title 仅供人读,不动 id/目录/产物溯源。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    try:
+        ws.set_title(ref_id, title)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # 复用 ref 详情渲染,刷新右栏元信息(含新标题)
     return ref_view(request, slug, ref_id)
 
 
