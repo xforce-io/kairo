@@ -116,3 +116,24 @@ def test_step_rejects_concurrent(tmp_path, monkeypatch):
     r = c.post("/w/ws/step")
     assert r.status_code == 200
     assert "Running" in r.text
+
+
+def test_step_with_target_triggers_restep(tmp_path, monkeypatch):
+    # POST /step 带 target → re-step:整篇重综合该产物(区别于普通 step 对手改的 blocked)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    from kairo.engine import step
+    from kairo.provider import select_provider
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    step(ws, select_provider())  # 先产出 understanding.md
+    (tmp_path / "ws" / "understanding.md").write_text("STALE-手改")
+    c = TestClient(create_app(tmp_path))
+    r = c.post("/w/ws/step", data={"target": "understanding.md"})
+    assert r.status_code == 200
+    import re
+    m = re.search(r"/w/ws/step/([0-9a-f]+)/stream", r.text)
+    assert m
+    c.get(f"/w/ws/step/{m.group(1)}/stream")  # 阻塞到 done
+    # re-step 删旧产物 + 重综合 → 覆盖手改内容
+    assert (tmp_path / "ws" / "understanding.md").read_text() != "STALE-手改"

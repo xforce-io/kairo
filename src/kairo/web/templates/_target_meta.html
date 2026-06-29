@@ -2,6 +2,13 @@
   <p class="meta-kicker">{{ t('target.kicker_prefix') }} · <span class="meta-st {{ status }}">{{ status }}</span></p>
   <h3 class="meta-title">{{ path }}</h3>
   {% if reason %}<p class="meta-hint">{{ t('target.reason_prefix') }}:{{ reason }}</p>{% endif %}
+  {% if has_doc %}
+  <button type="button" class="btn btn-ghost btn-regen"
+          hx-post="/w/{{ slug | urlencode }}/step"
+          hx-vals='{"target": "{{ path }}"}'
+          hx-target="#step-area" hx-swap="innerHTML"
+          hx-confirm="{{ t('target.regen_confirm') }}">{{ t('target.regen') }}</button>
+  {% endif %}
   <div class="meta-label">{{ t('forms.label') }}</div>
   <table class="meta-forms">
     <tbody>

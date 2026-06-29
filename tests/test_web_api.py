@@ -334,3 +334,23 @@ def test_digest_listed_first_and_emphasized(tmp_path, monkeypatch):
     assert "/form/digest" in html and "/form/0" in html
     assert html.index("/form/digest") < html.index("/form/0")
     assert "is-primary" in html
+
+
+def test_target_meta_has_regenerate_button(tmp_path, monkeypatch):
+    # 产物面板有「重新生成」按钮:POST /step 带 target=产物路径(re-step),且有破坏性确认
+    _ws_with_step(tmp_path, monkeypatch)
+    r = TestClient(create_app(tmp_path)).get("/w/ws/target", params={"path": "understanding.md"})
+    assert r.status_code == 200
+    assert 'hx-post="/w/ws/step"' in r.text
+    assert '{"target": "understanding.md"}' in r.text  # hx-vals 带产物路径
+    assert "hx-confirm" in r.text
+    assert "btn-regen" in r.text
+
+
+def test_missing_target_has_no_regenerate_button(tmp_path, monkeypatch):
+    # 尚未生成的产物不显示「重新生成」(此时用全局 Step 即可)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = TestClient(create_app(tmp_path)).get("/w/ws/target", params={"path": "understanding.md"})
+    assert r.status_code == 200
+    assert "btn-regen" not in r.text

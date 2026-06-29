@@ -170,6 +170,9 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .nav-empty { color: var(--muted); font-size: 12.5px; font-style: italic; padding: 2px 9px; }
 /* 参考组底部的添加入口:step 同款按钮 → 弹框 */
 .btn-add-ref { margin-top: 12px; }
+/* 产物「重新生成」:破坏性次级操作,克制描边,hover 透出警示红 */
+.btn-regen { width: auto; margin: 2px 0 14px; padding: 7px 12px; font-size: 12.5px; font-weight: 500; }
+.btn-regen:hover { color: #9a3b3b; border-color: #d8b0b0; background: #f7ecec; }
 
 /* 添加参考弹框 */
 .ref-dialog { width: min(440px, 92vw); padding: 22px 24px 26px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); color: var(--ink); box-shadow: 0 30px 70px -24px rgba(20,16,10,.55); }
