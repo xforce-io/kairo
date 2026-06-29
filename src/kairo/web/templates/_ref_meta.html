@@ -31,7 +31,7 @@
   <table class="meta-forms">
     <tbody>
     {% for f in forms %}
-    <tr class="{% if f.previewable %}is-prev {% endif %}{% if f.key == preview_key %}on{% endif %}"
+    <tr class="{% if f.previewable %}is-prev {% endif %}{% if f.role == 'digest' %}is-primary {% endif %}{% if f.key == preview_key %}on{% endif %}"
         {% if f.previewable %}hx-get="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ f.key }}" hx-target="#reader"{% endif %}>
       <td class="mf-role" title="{{ f.role }}">{{ f.role_label }}</td>
       <td class="mf-actions">

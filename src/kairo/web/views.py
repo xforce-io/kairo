@@ -188,8 +188,19 @@ def _role_label(role: str, t) -> str:
 
 
 def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
-    """form 列表(标注可预览 + 预览 key + 人读标签);digest 为派生产物按磁盘补入。"""
+    """form 列表(标注可预览 + 预览 key + 人读标签)。digest 是这条 reference 的目的产物,
+    置顶以示主次;其余形态(音频/转写/附件等)按 manifest 顺序随后。"""
     forms = []
+    if (ws.references_dir() / ref_id / "digest.md").is_file():
+        forms.append(
+            {
+                "role": "digest",
+                "role_label": _role_label("digest", t),
+                "location": f"references/{ref_id}/digest.md",
+                "previewable": True,
+                "key": "digest",
+            }
+        )
     for i, f in enumerate(man.forms):
         p = _form_path(ws, f.location)
         forms.append(
@@ -199,16 +210,6 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
                 "location": f.location,
                 "previewable": _is_text_file(p) or _is_image_file(p),
                 "key": str(i),
-            }
-        )
-    if (ws.references_dir() / ref_id / "digest.md").is_file():
-        forms.append(
-            {
-                "role": "digest",
-                "role_label": _role_label("digest", t),
-                "location": f"references/{ref_id}/digest.md",
-                "previewable": True,
-                "key": "digest",
             }
         )
     return forms

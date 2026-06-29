@@ -285,6 +285,10 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .meta-forms tr.on.is-prev:hover { background: var(--pine-soft); }
 .meta-forms tr.on td:first-child { box-shadow: inset 3px 0 0 var(--pine); }
 .meta-forms td.mf-role { font-family: var(--mono); color: var(--pine-deep); white-space: nowrap; width: 99%; }
+/* digest 是目的产物:置顶 + 持久加粗 + 左侧 pine 标记(即使未选中也突出) */
+.meta-forms tr.is-primary td.mf-role { font-weight: 700; }
+.meta-forms tr.is-primary td:first-child { box-shadow: inset 3px 0 0 var(--pine); }
+.meta-forms tr.is-primary .mf-prev { font-weight: 600; }
 .meta-forms td.mf-actions { width: 1%; white-space: nowrap; text-align: right; padding-right: 4px; }
 .meta-forms td.mf-empty { color: var(--muted); font-style: italic; }
 /* 复制:无边框 ghost,默认低调、hover 点亮(次级动作,不抢眼) */

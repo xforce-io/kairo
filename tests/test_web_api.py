@@ -293,3 +293,21 @@ def test_ref_form_file_rejects_bad_key(tmp_path):
     c = TestClient(create_app(tmp_path))
     assert c.get(f"/w/ws/ref/{rid}/file/99").status_code == 404
     assert c.get(f"/w/ws/ref/{rid}/file/abc").status_code == 404
+
+
+def test_digest_listed_first_and_emphasized(tmp_path, monkeypatch):
+    # digest 是目的产物:应排在 forms 最前,并带 is-primary 强调类
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    from kairo.engine import step
+    from kairo.provider import select_provider
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    step(ws, select_provider())  # 产出 transcript + digest
+    rid = ws.list_reference_ids()[0]
+    html = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}").text
+    # digest 行(/form/digest)出现在第一个普通 form(/form/0)之前
+    assert "/form/digest" in html and "/form/0" in html
+    assert html.index("/form/digest") < html.index("/form/0")
+    assert "is-primary" in html
