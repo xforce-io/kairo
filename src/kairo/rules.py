@@ -16,8 +16,9 @@ from typing import Callable
 from kairo import corpus
 from kairo.backends import run_backend
 from kairo.machine import resolve_asr
-from kairo.models import Form, ProductState, State, TargetState
+from kairo.models import Form, Manifest, ProductState, State, TargetState
 from kairo.provider import AgentConfig
+from kairo.workspace import _slug
 
 
 def _hash(text: str) -> str:
@@ -82,27 +83,37 @@ class TransformRule:
         items: list[WorkItem] = []
         for ref_id in self.ws.list_reference_ids():
             man = self.ws.read_manifest(ref_id)
-            # corpus(fold=False)是只读参考层,不派生(与 Normalize/Digest 一致;
-            # 二进制不转 source_text——它经 read_dirs 直读,不进 digest/compose)。
             sc = self.ws.constitution.source_classes.get(man.source_class)
             if sc is not None and not sc.fold:
                 continue
+            srcs = [f for f in man.forms if f.role in self.consumes]
+            if not srcs:
+                continue
             roles = {f.role for f in man.forms}
-            if any(c in roles for c in self.consumes) and self.produces not in roles:
-                items.append(self._make(ref_id))
+            produced_locs = {f.location for f in man.forms if f.role == self.produces}
+            legacy = f"references/{ref_id}/{self.produces}.md"
+            if len(srcs) == 1:
+                # 单源:与原逻辑一致——produces role 已存在(不论来源)则跳过
+                if self.produces not in roles:
+                    items.append(self._make(ref_id, srcs[0], legacy))
+            else:
+                # 多源:每源独立派生,用 keyed 格式
+                for i, src in enumerate(srcs):
+                    keyed = f"references/{ref_id}/{self.produces}.{_slug(Path(src.location).name)}.md"
+                    done = keyed in produced_locs
+                    if not done and i == 0 and legacy in produced_locs:
+                        done = True  # 迁移:legacy {produces}.md 归属第一个源
+                    if not done:
+                        items.append(self._make(ref_id, src, keyed))
         return items
 
-    def _make(self, ref_id: str) -> WorkItem:
-        man = self.ws.read_manifest(ref_id)
-        src = next(f for f in man.forms if f.role in self.consumes)
-        key = f"references/{ref_id}/{self.produces}.md"
+    def _make(self, ref_id: str, src: Form, key: str) -> WorkItem:
         input_hash = src.hash
         loc = Path(src.location)
         src_path = loc if loc.is_absolute() else self.ws.root / loc
 
         def run(state: State) -> None:
             if not src_path.exists():
-                # 源不可达且需重派生(D-source)
                 state.products[key] = ProductState(
                     input_hash=input_hash, status="blocked", reason="missing-source"
                 )
@@ -119,10 +130,8 @@ class TransformRule:
                     produced_by={"provider": self.backend, "model": "stub"},
                 )
                 return
-            # 真实模式:由 backend 执行(markitdown 进程内 / asr 本机命令)
             outcome = run_backend(self.backend, src_path, src.hash)
             if outcome[0] == "blocked":
-                # 未配后端/转换失败 → 挂起,绝不写假产物
                 state.products[key] = ProductState(
                     input_hash=input_hash, status="blocked", reason=outcome[1]
                 )
@@ -138,9 +147,7 @@ class TransformRule:
             ps = state.products.get(key)
             if ps is None or ps.input_hash != input_hash:
                 return True
-            # blocked 产物在其前置条件变化时才重试(否则保持收敛):
-            # missing-source → 源回来了;no-asr → 本机已配好 ASR(或 stub 模式)。
-            # asr-failed / convert-failed 视为终态,不自动重试(避免死循环;手动 re-step)。
+            # blocked 产物在其前置条件变化时才重试(否则保持收敛)
             if ps.status == "blocked":
                 if ps.reason == "missing-source":
                     return src_path.exists()
@@ -261,13 +268,23 @@ class DigestRule:
         self.prompt = ws.constitution.pipeline.digest.prompt
 
     def _read_body(self, man) -> str | None:
+        chunks: list[str] = []
         for role in self.ws.constitution.body_roles:
-            for f in man.forms:
-                if f.role == role:
-                    loc = Path(f.location)
-                    p = loc if loc.is_absolute() else self.ws.root / loc
-                    return p.read_text()
-        return None
+            forms = sorted(
+                (f for f in man.forms if f.role == role),
+                key=lambda f: f.location,
+            )
+            for f in forms:
+                loc = Path(f.location)
+                p = loc if loc.is_absolute() else self.ws.root / loc
+                if not p.is_file():
+                    continue
+                try:
+                    text = p.read_text()
+                except UnicodeDecodeError:
+                    continue  # 误标为正文的二进制(如图片)不进 digest 正文,且不崩整条管线
+                chunks.append(f"# {p.name}\n\n{text}")
+        return "\n\n".join(chunks) if chunks else None
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
@@ -279,21 +296,39 @@ class DigestRule:
                 continue
             body = self._read_body(man)
             key = f"references/{ref_id}/digest.md"
-            if body is not None and not (self.ws.root / key).exists():
-                items.append(self._make(key, body))
+            if body is not None:
+                items.append(self._make(ref_id, key, man, body))
         return items
 
-    def _make(self, key: str, body: str) -> WorkItem:
-        input_hash = _hash(f"{self.prompt}\n\n---正文---\n{body}")
+    def _make(self, ref_id: str, key: str, man: Manifest, body: str) -> WorkItem:
+        atts = sorted(
+            (f for f in man.forms if f.role == "attachment"),
+            key=lambda f: f.location,
+        )
+        fingerprint = f"{self.prompt}\n\n---正文---\n{body}" + "".join(f.hash for f in atts)
+        input_hash = _hash(fingerprint)
+        ref_dir = self.ws.references_dir() / ref_id
+        img_lines = []
+        for f in atts:
+            loc = Path(f.location)
+            p = loc if loc.is_absolute() else self.ws.root / loc
+            img_lines.append(str(p))
 
         def run(state: State) -> None:
+            persona = self.prompt + self.ws.constitution.glossary_reference()
+            if img_lines:
+                persona += (
+                    "\n\n[现场图片]本会议另有以下图片,请用 Read 工具逐一查看,"
+                    "把其中与会议相关的信息(白板/幻灯/截图)并入纪要:\n"
+                    + "\n".join(f"- {p}" for p in img_lines)
+                )
+            persona += _OUTPUT_DISCIPLINE
             content = _run_agent(
                 self.provider,
-                self.prompt
-                + self.ws.constitution.glossary_reference()
-                + _OUTPUT_DISCIPLINE,
+                persona,
                 body,
                 "digest.md",
+                read_dirs=[ref_dir] if img_lines else None,
             )
             (self.ws.root / key).write_text(content)
             state.products[key] = ProductState(

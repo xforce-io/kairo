@@ -69,12 +69,15 @@ def _default_targets() -> list[Target]:
 _AUDIO_EXTS = (".m4a", ".wav", ".mp3", ".aac", ".flac", ".ogg")
 # 二进制/结构化文档(#15):markitdown 统吃 → 单一 document role,doc2text 转 source_text。
 _DOCUMENT_EXTS = (".docx", ".pptx", ".xlsx", ".pdf")
+# 图片:作附件 form 挂在会议下,不转文本、由多模态 agent 在 digest 时 Read 看图(#44)。
+_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".heic")
 
 
 def _default_roles_by_ext() -> dict[str, str]:
     return {
         **{e: "audio" for e in _AUDIO_EXTS},
         **{e: "document" for e in _DOCUMENT_EXTS},
+        **{e: "attachment" for e in _IMAGE_EXTS},
     }
 
 

@@ -8,7 +8,13 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 
 from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
@@ -69,6 +75,14 @@ def _form_path(ws: Workspace, location: str) -> Path:
 
 def _is_text_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in _TEXT_SUFFIXES
+
+
+# 可内联预览的图片后缀(附件:点击在阅读区显示原图)
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic"}
+
+
+def _is_image_file(path: Path) -> bool:
+    return path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
 
 
 def _render_doc(path: Path) -> str:
@@ -174,18 +188,9 @@ def _role_label(role: str, t) -> str:
 
 
 def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
-    """form 列表(标注可预览 + 预览 key + 人读标签);digest 为派生产物按磁盘补入。"""
+    """form 列表(标注可预览 + 预览 key + 人读标签)。digest 是这条 reference 的目的产物,
+    置顶以示主次;其余形态(音频/转写/附件等)按 manifest 顺序随后。"""
     forms = []
-    for i, f in enumerate(man.forms):
-        forms.append(
-            {
-                "role": f.role,
-                "role_label": _role_label(f.role, t),
-                "location": f.location,
-                "previewable": _is_text_file(_form_path(ws, f.location)),
-                "key": str(i),
-            }
-        )
     if (ws.references_dir() / ref_id / "digest.md").is_file():
         forms.append(
             {
@@ -194,6 +199,17 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
                 "location": f"references/{ref_id}/digest.md",
                 "previewable": True,
                 "key": "digest",
+            }
+        )
+    for i, f in enumerate(man.forms):
+        p = _form_path(ws, f.location)
+        forms.append(
+            {
+                "role": f.role,
+                "role_label": _role_label(f.role, t),
+                "location": f.location,
+                "previewable": _is_text_file(p) or _is_image_file(p),
+                "key": str(i),
             }
         )
     return forms
@@ -250,12 +266,37 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
         if not 0 <= idx < len(man.forms):
             raise HTTPException(status_code=404, detail="form not found")
         path, role = _form_path(ws, man.forms[idx].location), man.forms[idx].role
+    t = _t(request)
+    title = f"{man.title} · {_role_label(role, t)}"
+    if _is_image_file(path):
+        img = (
+            f'<img class="doc-img" src="/w/{quote(slug)}/ref/{ref_id}/file/{quote(key)}"'
+            f' alt="{escape(path.name)}">'
+        )
+        return _render(request, "_doc.html", {"title": title, "html": img})
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
-    t = _t(request)
-    return _render(
-        request, "_doc.html", {"title": f"{man.title} · {_role_label(role, t)}", "html": _render_doc(path)}
-    )
+    return _render(request, "_doc.html", {"title": title, "html": _render_doc(path)})
+
+
+@router.get("/w/{slug}/ref/{ref_id}/file/{key}")
+def ref_form_file(request: Request, slug: str, ref_id: str, key: str) -> FileResponse:
+    """直供某 form 的原始文件字节(图片预览用)。路径由服务端从 manifest 解析(可信),
+    再校验落在 workspace 内,杜绝越界。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    man = ws.read_manifest(ref_id)
+    try:
+        idx = int(key)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="form not found")
+    if not 0 <= idx < len(man.forms):
+        raise HTTPException(status_code=404, detail="form not found")
+    path = _form_path(ws, man.forms[idx].location).resolve()
+    if ws.root.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path)
 
 
 @router.get("/w/{slug}/target", response_class=HTMLResponse)
@@ -289,12 +330,15 @@ def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
     return _render(request, "_refs_list.html", {"slug": slug, "refs": streams})
 
 
-def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
-    dest_dir = ws.root / ".kairo" / "uploads"
+def _save_upload_to(dest_dir: Path, upload: UploadFile) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / Path(upload.filename or "upload.bin").name
     dest.write_bytes(upload.file.read())
     return dest
+
+
+def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
+    return _save_upload_to(ws.root / ".kairo" / "uploads", upload)
 
 
 @router.post("/w/{slug}/ref", response_class=HTMLResponse)
@@ -316,6 +360,38 @@ def add_ref(
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _refs_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/ref/{ref_id}/attach", response_class=HTMLResponse)
+def attach_to_ref(
+    request: Request,
+    slug: str,
+    ref_id: str,
+    path: str = Form(None),
+    files: list[UploadFile] = File(None),
+) -> HTMLResponse:
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    ref_dir = ws.references_dir() / ref_id
+    uploads = [f for f in (files or []) if f.filename]
+    if uploads:
+        srcs = [_save_upload_to(ref_dir, f) for f in uploads]  # 可一次多张
+    elif path:
+        p = Path(path)
+        if not p.exists():
+            raise HTTPException(status_code=400, detail=f"路径不存在:{p}")
+        dest = ref_dir / p.name
+        dest.write_bytes(p.read_bytes())  # 复制进 ref 目录(自包含)
+        srcs = [dest]
+    else:
+        raise HTTPException(status_code=400, detail="need file or path")
+    try:
+        ws.add(srcs, ref_id=ref_id)
+    except AddError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # 复用 ref 详情渲染,刷新右栏元信息
+    return ref_view(request, slug, ref_id)
 
 
 @router.post("/w/{slug}/corpus", response_class=HTMLResponse)

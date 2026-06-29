@@ -195,7 +195,7 @@ def test_ref_form_endpoint_guards(tmp_path, monkeypatch):
     assert c.get(f"/w/ws/ref/{rid}/form/1").status_code == 200  # transcript(.md)
     assert c.get(f"/w/ws/ref/{rid}/form/9").status_code == 404  # 越界
     assert c.get(f"/w/ws/ref/{rid}/form/x").status_code == 404  # 非整数
-    assert c.get(f"/w/ws/ref/nope/form/0").status_code == 404  # ref 不存在
+    assert c.get("/w/ws/ref/nope/form/0").status_code == 404  # ref 不存在
 
 
 def test_stream_ref_surfaces_digest(tmp_path, monkeypatch):
@@ -244,3 +244,70 @@ def test_target_meta_404_for_unknown(tmp_path, monkeypatch):
     _ws_with_step(tmp_path, monkeypatch)
     r = TestClient(create_app(tmp_path)).get("/w/ws/target", params={"path": "nope.md"})
     assert r.status_code == 404
+
+
+def test_ref_view_has_attach_entry(tmp_path):
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.txt"
+    a.write_text("x")
+    rid = ws.add([a])
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert f'/w/ws/ref/{rid}/attach' in r.text
+    assert 'type="file"' in r.text
+
+
+def test_image_attachment_is_previewable_and_served(tmp_path):
+    # 图片附件应可预览:form 端点返回 <img>,file 端点供原始字节
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.txt"
+    a.write_text("转写")
+    rid = ws.add([a])
+    # 真实 attach 会把图片拷进 ref 目录(相对 location,落在 workspace 内)
+    img = ws.references_dir() / rid / "board.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\nfakepng")
+    ws.add([img], ref_id=rid)
+    c = TestClient(create_app(tmp_path))
+    # 该图片 form 在元信息里标为可预览
+    r = c.get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    # 找到图片 form 的 key(audio/transcript 之后,这里 a.txt=0, board.png=1)
+    img_key = "1"
+    fr = c.get(f"/w/ws/ref/{rid}/form/{img_key}")
+    assert fr.status_code == 200
+    assert "<img" in fr.text and f"/ref/{rid}/file/{img_key}" in fr.text
+    # file 端点返回原始字节
+    fb = c.get(f"/w/ws/ref/{rid}/file/{img_key}")
+    assert fb.status_code == 200
+    assert fb.content.startswith(b"\x89PNG")
+
+
+def test_ref_form_file_rejects_bad_key(tmp_path):
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.txt"
+    a.write_text("x")
+    rid = ws.add([a])
+    c = TestClient(create_app(tmp_path))
+    assert c.get(f"/w/ws/ref/{rid}/file/99").status_code == 404
+    assert c.get(f"/w/ws/ref/{rid}/file/abc").status_code == 404
+
+
+def test_digest_listed_first_and_emphasized(tmp_path, monkeypatch):
+    # digest 是目的产物:应排在 forms 最前,并带 is-primary 强调类
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    from kairo.engine import step
+    from kairo.provider import select_provider
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    step(ws, select_provider())  # 产出 transcript + digest
+    rid = ws.list_reference_ids()[0]
+    html = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}").text
+    # digest 行(/form/digest)出现在第一个普通 form(/form/0)之前
+    assert "/form/digest" in html and "/form/0" in html
+    assert html.index("/form/digest") < html.index("/form/0")
+    assert "is-primary" in html
