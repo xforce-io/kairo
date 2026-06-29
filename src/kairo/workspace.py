@@ -102,8 +102,8 @@ class Workspace:
             today = datetime.date.today().isoformat()
             ref_id = f"{today}-{_slug(files[0].stem)}"
         ref_dir = self.references_dir() / ref_id
-        ref_dir.mkdir(parents=True, exist_ok=True)
-        forms = [
+        existing = ref_dir / "manifest.yaml"
+        new_forms = [
             Form(
                 role=role or self.guess_role(f),
                 location=str(f),
@@ -112,17 +112,20 @@ class Workspace:
             )
             for f in files
         ]
-        man = Manifest(
-            id=ref_id,
-            title=title or files[0].stem,
-            source_class=source_class or self.constitution.default_class,
-            forms=forms,
-        )
-        (ref_dir / "manifest.yaml").write_text(
-            yaml.safe_dump(
-                man.model_dump(by_alias=True), allow_unicode=True, sort_keys=False
+        if existing.is_file():
+            # 追加到已有 ref:保留既有 forms,按 location 去重
+            man = self.read_manifest(ref_id)
+            have = {fm.location for fm in man.forms}
+            man.forms.extend(fm for fm in new_forms if fm.location not in have)
+        else:
+            ref_dir.mkdir(parents=True, exist_ok=True)
+            man = Manifest(
+                id=ref_id,
+                title=title or files[0].stem,
+                source_class=source_class or self.constitution.default_class,
+                forms=new_forms,
             )
-        )
+        self.write_manifest(ref_id, man)
         return ref_id
 
     def _add_corpus_tree(
