@@ -256,3 +256,40 @@ def test_ref_view_has_attach_entry(tmp_path):
     assert r.status_code == 200
     assert f'/w/ws/ref/{rid}/attach' in r.text
     assert 'type="file"' in r.text
+
+
+def test_image_attachment_is_previewable_and_served(tmp_path):
+    # 图片附件应可预览:form 端点返回 <img>,file 端点供原始字节
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.txt"
+    a.write_text("转写")
+    rid = ws.add([a])
+    # 真实 attach 会把图片拷进 ref 目录(相对 location,落在 workspace 内)
+    img = ws.references_dir() / rid / "board.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\nfakepng")
+    ws.add([img], ref_id=rid)
+    c = TestClient(create_app(tmp_path))
+    # 该图片 form 在元信息里标为可预览
+    r = c.get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    # 找到图片 form 的 key(audio/transcript 之后,这里 a.txt=0, board.png=1)
+    img_key = "1"
+    fr = c.get(f"/w/ws/ref/{rid}/form/{img_key}")
+    assert fr.status_code == 200
+    assert "<img" in fr.text and f"/ref/{rid}/file/{img_key}" in fr.text
+    # file 端点返回原始字节
+    fb = c.get(f"/w/ws/ref/{rid}/file/{img_key}")
+    assert fb.status_code == 200
+    assert fb.content.startswith(b"\x89PNG")
+
+
+def test_ref_form_file_rejects_bad_key(tmp_path):
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.txt"
+    a.write_text("x")
+    rid = ws.add([a])
+    c = TestClient(create_app(tmp_path))
+    assert c.get(f"/w/ws/ref/{rid}/file/99").status_code == 404
+    assert c.get(f"/w/ws/ref/{rid}/file/abc").status_code == 404

@@ -224,6 +224,7 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .doc pre code { background: none; padding: 0; color: inherit; }
 /* 纯文本形态(.txt 转写等):非代码,保留换行、可读字体 */
 .doc pre.doc-plain { background: none; color: var(--ink); padding: 0; margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.78; white-space: pre-wrap; word-break: break-word; }
+.doc-img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 8px 24px -12px rgba(20,16,10,.4); }
 .doc table { border-collapse: collapse; width: 100%; margin: 18px 0; font-family: var(--sans); font-size: 14px; }
 .doc th, .doc td { border: 1px solid var(--line-2); padding: 7px 11px; text-align: left; }
 .doc th { background: var(--paper-2); font-weight: 600; }
