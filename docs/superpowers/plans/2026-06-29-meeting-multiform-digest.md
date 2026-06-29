@@ -249,17 +249,28 @@ from kairo.workspace import _slug
             sc = self.ws.constitution.source_classes.get(man.source_class)
             if sc is not None and not sc.fold:
                 continue
-            produced_locs = {f.location for f in man.forms if f.role == self.produces}
             srcs = [f for f in man.forms if f.role in self.consumes]
+            if not srcs:
+                continue
+            roles = {f.role for f in man.forms}
+            produced_locs = {f.location for f in man.forms if f.role == self.produces}
             legacy = f"references/{ref_id}/{self.produces}.md"
-            for src in srcs:
-                keyed = f"references/{ref_id}/{self.produces}.{_slug(Path(src.location).stem)}.md"
-                done = keyed in produced_locs
-                if not done and len(srcs) == 1 and legacy in produced_locs:
-                    done = True  # 兼容旧单源产物 {produces}.md
-                if not done:
-                    items.append(self._make(ref_id, src, keyed))
+            if len(srcs) == 1:
+                # 单源:与原逻辑一致——produces role 已存在(不论来源)则跳过,产 legacy 名
+                if self.produces not in roles:
+                    items.append(self._make(ref_id, srcs[0], legacy))
+            else:
+                # 多源:每源独立派生,用 keyed 名;legacy(若存在)归属第一个源
+                for i, src in enumerate(srcs):
+                    keyed = f"references/{ref_id}/{self.produces}.{_slug(Path(src.location).stem)}.md"
+                    done = keyed in produced_locs
+                    if not done and i == 0 and legacy in produced_locs:
+                        done = True  # 迁移:legacy {produces}.md 归属第一个源
+                    if not done:
+                        items.append(self._make(ref_id, src, keyed))
         return items
+
+> **实现修正(commit 5728bb5)**:单源必须沿用 legacy `{produces}.md`(否则破坏既有 transcript.md 与 ~17 个测试);多源分支的 legacy 识别须加 `i == 0` guard,否则单→多迁移会把第二个源静默丢弃或重复第一个源。`_make(ref_id, src: Form, key)` 签名亦随之调整。
 ```
 
 `_make` 改为接收具体 src 与目标 key(替换原 `_make(self, ref_id)`):
@@ -463,7 +474,7 @@ Expected: FAIL（指纹只含 body，加图不变）
             (f for f in man.forms if f.role == "attachment"),
             key=lambda f: f.location,
         )
-        fingerprint = self.prompt + "\n" + body + "\n" + "".join(f.hash for f in atts)
+        fingerprint = f"{self.prompt}\n\n---正文---\n{body}" + "".join(f.hash for f in atts)
         input_hash = _hash(fingerprint)
         ref_dir = self.ws.references_dir() / ref_id
         img_lines = []
