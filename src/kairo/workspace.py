@@ -106,7 +106,7 @@ class Workspace:
         new_forms = [
             Form(
                 role=role or self.guess_role(f),
-                location=str(f),
+                location=str(f.relative_to(self.root)) if f.is_relative_to(self.root) else str(f),
                 hash=hashlib.sha256(f.read_bytes()).hexdigest()[:12],
                 origin="added",
             )

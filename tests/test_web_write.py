@@ -152,6 +152,32 @@ def test_create_workspace_rejects_existing(tmp_path):
     assert r.status_code == 400
 
 
+def test_attach_to_existing_ref_by_path(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.txt"; a.write_text("转写")
+    rid = ws.add([a])
+    img = tmp_path / "board.png"; img.write_bytes(b"\x89PNG\r\n")
+    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/attach", data={"path": str(img)})
+    assert r.status_code == 200
+    man = Workspace.open(tmp_path / "ws").read_manifest(rid)
+    atts = [f for f in man.forms if f.role == "attachment"]
+    assert len(atts) == 1
+    # 复制进 ref 目录(自包含)
+    assert atts[0].location.startswith(f"references/{rid}/")
+    assert (tmp_path / "ws" / atts[0].location).is_file()
+
+def test_attach_unknown_ref_404(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).post("/w/ws/ref/nope/attach", data={"path": "/x"})
+    assert r.status_code == 404
+
+def test_attach_bad_path_400(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    rid = ws.add([(lambda p: (p.write_text('x'), p)[1])(tmp_path / "a.txt")])
+    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/attach", data={"path": str(tmp_path / "no.png")})
+    assert r.status_code == 400
+
+
 def test_accept_clears_blocked(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     from kairo.engine import step

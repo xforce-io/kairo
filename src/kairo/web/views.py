@@ -297,6 +297,13 @@ def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
     return dest
 
 
+def _save_upload_to(dest_dir: Path, upload: UploadFile) -> Path:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / Path(upload.filename or "upload.bin").name
+    dest.write_bytes(upload.file.read())
+    return dest
+
+
 @router.post("/w/{slug}/ref", response_class=HTMLResponse)
 def add_ref(
     request: Request,
@@ -316,6 +323,36 @@ def add_ref(
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _refs_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/ref/{ref_id}/attach", response_class=HTMLResponse)
+def attach_to_ref(
+    request: Request,
+    slug: str,
+    ref_id: str,
+    path: str = Form(None),
+    file: UploadFile = File(None),
+) -> HTMLResponse:
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    ref_dir = ws.references_dir() / ref_id
+    if file is not None and file.filename:
+        src = _save_upload_to(ref_dir, file)
+    elif path:
+        p = Path(path)
+        if not p.exists():
+            raise HTTPException(status_code=400, detail=f"路径不存在:{p}")
+        src = ref_dir / p.name
+        src.write_bytes(p.read_bytes())  # 复制进 ref 目录(自包含)
+    else:
+        raise HTTPException(status_code=400, detail="need file or path")
+    try:
+        ws.add([src], ref_id=ref_id)
+    except AddError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    # 复用 ref 详情渲染,刷新右栏元信息
+    return ref_view(request, slug, ref_id)
 
 
 @router.post("/w/{slug}/corpus", response_class=HTMLResponse)
