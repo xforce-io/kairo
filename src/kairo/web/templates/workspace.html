@@ -118,5 +118,17 @@
     tr.parentElement.querySelectorAll('tr').forEach(function (x) { x.classList.remove('on'); });
     tr.classList.add('on');
   });
+  // 导出 PDF:复用浏览器打印(@media print 只留阅读区正文)。
+  // 临时把阅读区标题写入 document.title,使另存 PDF 的默认文件名即产物标题。
+  function kairoPrintDoc() {
+    var k = document.querySelector('#reader .doc-kicker .dk-title');
+    var prev = document.title;
+    if (k) document.title = k.textContent.trim();
+    window.addEventListener('afterprint', function restore() {
+      document.title = prev;
+      window.removeEventListener('afterprint', restore);
+    });
+    window.print();
+  }
 </script>
 {% endblock %}

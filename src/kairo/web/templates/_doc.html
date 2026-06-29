@@ -1,4 +1,7 @@
 <article class="doc">
-  <p class="doc-kicker">{{ title }}</p>
+  <p class="doc-kicker">
+    <span class="dk-title">{{ title }}</span>
+    {% if exportable %}<button type="button" class="doc-export" onclick="kairoPrintDoc()">{{ t('doc.export_pdf') }}</button>{% endif %}
+  </p>
   {{ html|safe }}
 </article>
