@@ -15,14 +15,66 @@
     </div>
     <div class="nav-group">
       <div class="nav-section">{{ t('nav.references') }}</div>
-      {% for r in streams %}
-      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
-        <span class="name">{{ r.title }}</span>
-        <span class="tag {{ r.cls }}">{{ r.cls }}</span>
-      </a>
-      {% else %}
-      <p class="nav-empty">{{ t('nav.empty_streams') }}</p>
-      {% endfor %}
+      <div id="refs-list">
+        {% for r in streams %}
+        <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
+          <span class="name">{{ r.title }}</span>
+          <span class="tag {{ r.cls }}">{{ r.cls }}</span>
+        </a>
+        {% else %}
+        <p class="nav-empty">{{ t('nav.empty_streams') }}</p>
+        {% endfor %}
+      </div>
+      <button type="button" class="btn btn-step btn-add-ref"
+              onclick="document.getElementById('add-ref-dlg').showModal()">{{ t('ref.add_btn') }}</button>
+
+      <dialog id="add-ref-dlg" class="ref-dialog"
+              onclick="if(event.target===this)this.close()">
+        <div class="dlg-head">
+          <h3 class="dlg-title">{{ t('ref.add_title') }}</h3>
+          <button type="button" class="dlg-x" aria-label="close"
+                  onclick="this.closest('dialog').close()">×</button>
+        </div>
+        <p class="dlg-err" id="add-ref-err" role="alert" hidden
+           data-fallback="{{ t('ref.add_failed') }}"></p>
+        <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref"
+              hx-target="#refs-list" hx-swap="innerHTML"
+              hx-on::after-request="if(event.detail.successful){this.reset();this.closest('dialog').close();}">
+          <label class="dlg-label">{{ t('ref.path_label') }}</label>
+          <div class="dlg-row">
+            <input type="text" name="path" placeholder="{{ t('ref.path_placeholder') }}" required>
+            <button type="submit" class="btn btn-step dlg-go">{{ t('ref.add_path_btn') }}</button>
+          </div>
+        </form>
+        <div class="dlg-or"><span>{{ t('ref.or') }}</span></div>
+        <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref" hx-encoding="multipart/form-data"
+              hx-target="#refs-list" hx-swap="innerHTML"
+              hx-on::after-request="if(event.detail.successful){this.reset();this.closest('dialog').close();}">
+          <label class="dlg-label">{{ t('ref.upload_label') }}</label>
+          <div class="dlg-row">
+            <input type="file" name="file" required>
+            <button type="submit" class="btn btn-step dlg-go">{{ t('ref.upload_btn') }}</button>
+          </div>
+        </form>
+        <script>
+          // 集中处理弹框内两表单的错误回显:htmx 默认不渲染非 2xx,需手动取 detail
+          (function () {
+            var dlg = document.getElementById('add-ref-dlg');
+            var err = document.getElementById('add-ref-err');
+            if (!dlg || !err || dlg.dataset.errWired) return;
+            dlg.dataset.errWired = '1';
+            function clear() { err.hidden = true; err.textContent = ''; }
+            dlg.addEventListener('htmx:beforeRequest', clear);
+            dlg.addEventListener('htmx:afterRequest', function (e) { if (e.detail.successful) clear(); });
+            dlg.addEventListener('htmx:responseError', function (e) {
+              var msg;
+              try { msg = JSON.parse(e.detail.xhr.responseText).detail; } catch (_) {}
+              err.textContent = msg || err.dataset.fallback;
+              err.hidden = false;
+            });
+          })();
+        </script>
+      </dialog>
     </div>
     {% if corpus %}
     <div class="nav-group nav-group-corpus">

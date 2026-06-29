@@ -91,6 +91,9 @@ class Workspace:
         source_class: str | None = None,
     ) -> str:
         files = [Path(f) for f in files]
+        missing = [f for f in files if not f.exists()]
+        if missing:
+            raise AddError(f"路径不存在:{missing[0]}")
         if any(f.is_dir() for f in files):
             return self._add_corpus_tree(
                 files, ref_id=ref_id, title=title, source_class=source_class

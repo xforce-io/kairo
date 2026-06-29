@@ -284,11 +284,9 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
 
 
 def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
-    refs = []
-    for ref_id in ws.list_reference_ids():
-        man = ws.read_manifest(ref_id)
-        refs.append({"id": ref_id, "title": man.title, "cls": man.source_class})
-    return _render(request, "_refs_list.html", {"slug": slug, "refs": refs})
+    # 仅 stream:该片段唯一的注入点是参考组的上传表单;corpus 自成一组,不混入
+    streams, _ = _split_refs(ws)
+    return _render(request, "_refs_list.html", {"slug": slug, "refs": streams})
 
 
 def _save_upload(ws: Workspace, upload: UploadFile) -> Path:

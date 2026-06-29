@@ -76,6 +76,21 @@ def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
     assert (tmp_path / "ws" / "understanding.md").is_file()
 
 
+def test_step_partial_reloads_layout_not_body(tmp_path, monkeypatch):
+    # 回归:done 后必须原地替换 .layout(保留 header),不能 outerHTML 整个 <body>;
+    # 也不能 sse-swap="done"(否则把退出码"0"灌进页面,整页变成一个"0")。
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    c = TestClient(create_app(tmp_path))
+    r = c.post("/w/ws/step")
+    assert r.status_code == 200
+    assert 'sse-swap="done"' not in r.text
+    assert 'hx-target="body"' not in r.text
+    assert 'hx-target=".layout"' in r.text
+
+
 def test_cancel_kills_running_task(tmp_path):
     reg = TaskRegistry()
     slow = [sys.executable, "-c", "import time; time.sleep(30)"]

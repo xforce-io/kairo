@@ -31,6 +31,80 @@ def test_add_ref_by_upload(tmp_path):
     assert len(ws.list_reference_ids()) == 1
 
 
+def test_workspace_view_has_add_ref_upload_form(tmp_path):
+    # 参考组应暴露一个上传表单(file 入口)指向 /ref,否则页面上无法添加 reference
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).get("/w/ws")
+    assert r.status_code == 200
+    assert 'hx-post="/w/ws/ref"' in r.text
+    assert 'type="file"' in r.text
+    assert 'multipart/form-data' in r.text
+
+
+def test_workspace_view_has_add_ref_path_input(tmp_path):
+    # 参考组除上传外,还应暴露一个路径输入入口(name=path)指向 /ref
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).get("/w/ws")
+    assert r.status_code == 200
+    assert 'name="path"' in r.text
+
+
+def test_add_ref_nonexistent_path_returns_400(tmp_path):
+    # 路径不存在应返回 400(可读错误),而非 500;且不残留半成品 ref 目录
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).post("/w/ws/ref", data={"path": str(tmp_path / "nope.txt")})
+    assert r.status_code == 400
+    assert Workspace.open(tmp_path / "ws").list_reference_ids() == []
+
+
+def test_dialog_has_error_slot(tmp_path):
+    # 弹框需有错误展示位,否则前端无处回显后端报错
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).get("/w/ws")
+    assert 'id="add-ref-err"' in r.text
+
+
+def test_add_ref_uses_dialog_trigger(tmp_path):
+    # 添加入口收敛为一个 step 同款按钮 + 弹框,两种方式都在弹框内
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).get("/w/ws")
+    assert r.status_code == 200
+    assert 'btn-step btn-add-ref' in r.text  # 触发按钮沿用 step 样式
+    assert "showModal()" in r.text
+    assert '<dialog id="add-ref-dlg"' in r.text
+
+
+def test_add_ref_path_with_empty_file_field(tmp_path):
+    # 合并表单:填了 path、file 域留空时,应按 path 添加而非误存空上传
+    Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("一条笔记")
+    r = _client(tmp_path).post(
+        "/w/ws/ref",
+        data={"path": str(src)},
+        files={"file": ("", b"", "application/octet-stream")},
+    )
+    assert r.status_code == 200
+    ws = Workspace.open(tmp_path / "ws")
+    ids = ws.list_reference_ids()
+    assert len(ids) == 1
+    assert "note" in ws.read_manifest(ids[0]).title  # 来自 path 的文件名,不是 upload.bin
+
+
+def test_add_ref_fragment_excludes_corpus(tmp_path):
+    # 上传后刷新的列表片段只含 stream,不混入 corpus(否则参考组会重复显示基线)
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    cdir = tmp_path / "baseline"
+    cdir.mkdir()
+    (cdir / "a.md").write_text("基线文档")
+    ws.add([cdir], source_class="corpus")
+    files = {"file": ("meeting.txt", io.BytesIO("上传内容".encode()), "text/plain")}
+    r = _client(tmp_path).post("/w/ws/ref", files=files)
+    assert r.status_code == 200
+    assert "meeting" in r.text  # 新 stream 在片段里
+    assert "baseline" not in r.text  # corpus 目录名不应出现在参考片段
+
+
 def test_add_corpus_dir(tmp_path):
     Workspace.init(tmp_path / "ws", topic="t")
     cdir = tmp_path / "baseline"
