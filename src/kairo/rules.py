@@ -268,13 +268,18 @@ class DigestRule:
         self.prompt = ws.constitution.pipeline.digest.prompt
 
     def _read_body(self, man) -> str | None:
+        chunks: list[str] = []
         for role in self.ws.constitution.body_roles:
-            for f in man.forms:
-                if f.role == role:
-                    loc = Path(f.location)
-                    p = loc if loc.is_absolute() else self.ws.root / loc
-                    return p.read_text()
-        return None
+            forms = sorted(
+                (f for f in man.forms if f.role == role),
+                key=lambda f: f.location,
+            )
+            for f in forms:
+                loc = Path(f.location)
+                p = loc if loc.is_absolute() else self.ws.root / loc
+                if p.is_file():
+                    chunks.append(f"# {p.name}\n\n{p.read_text()}")
+        return "\n\n".join(chunks) if chunks else None
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
