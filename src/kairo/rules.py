@@ -99,7 +99,7 @@ class TransformRule:
             else:
                 # 多源:每源独立派生,用 keyed 格式
                 for i, src in enumerate(srcs):
-                    keyed = f"references/{ref_id}/{self.produces}.{_slug(Path(src.location).stem)}.md"
+                    keyed = f"references/{ref_id}/{self.produces}.{_slug(Path(src.location).name)}.md"
                     done = keyed in produced_locs
                     if not done and i == 0 and legacy in produced_locs:
                         done = True  # 迁移:legacy {produces}.md 归属第一个源
@@ -291,7 +291,7 @@ class DigestRule:
                 continue
             body = self._read_body(man)
             key = f"references/{ref_id}/digest.md"
-            if body is not None and not (self.ws.root / key).exists():
+            if body is not None:
                 items.append(self._make(ref_id, key, man, body))
         return items
 

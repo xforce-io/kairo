@@ -289,19 +289,15 @@ def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
     return _render(request, "_refs_list.html", {"slug": slug, "refs": streams})
 
 
-def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
-    dest_dir = ws.root / ".kairo" / "uploads"
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest = dest_dir / Path(upload.filename or "upload.bin").name
-    dest.write_bytes(upload.file.read())
-    return dest
-
-
 def _save_upload_to(dest_dir: Path, upload: UploadFile) -> Path:
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / Path(upload.filename or "upload.bin").name
     dest.write_bytes(upload.file.read())
     return dest
+
+
+def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
+    return _save_upload_to(ws.root / ".kairo" / "uploads", upload)
 
 
 @router.post("/w/{slug}/ref", response_class=HTMLResponse)

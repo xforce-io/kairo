@@ -5,6 +5,36 @@ from kairo.provider import StubProvider
 from kairo.rules import DigestRule
 
 
+def test_step_regenerates_digest_when_attachment_added(tmp_path, monkeypatch):
+    """headline: digest 生成后追加图片 → 再 step 应重算 digest(input_hash 变化);不变则不重算(幂等)。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    from kairo.engine import step
+    from kairo.provider import select_provider
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    audio = tmp_path / "talk.m4a"
+    audio.write_bytes(b"\x00\x01")
+    rid = ws.add([audio])
+    prov = select_provider()
+    step(ws, prov)                                   # 产 transcript + digest
+    key = f"references/{rid}/digest.md"
+    assert (ws.root / key).is_file(), "第一次 step 应产 digest.md"
+    h1 = ws.read_state().products[key].input_hash
+    # 不变 → 幂等,无重算
+    changed = step(ws, prov)
+    assert changed is False, "素材未变 → step 应返回 False(无推进)"
+    h_same = ws.read_state().products[key].input_hash
+    assert h_same == h1, "幂等:input_hash 不应改变"
+    # 追加图片 → 应重算 digest
+    img = tmp_path / "board.png"
+    img.write_bytes(b"\x89PNG\r\n")
+    ws.add([img], ref_id=rid)
+    changed2 = step(ws, prov)
+    assert changed2 is True, "加素材后 step 应返回 True(有推进)"
+    h2 = ws.read_state().products[key].input_hash
+    assert h2 != h1, "追加 attachment 后 digest input_hash 应改变"
+    assert (ws.root / key).is_file()
+
+
 def _wi_hash(ws, man):
     # discover 出该 ref 的 digest WorkItem,取其 input_hash
     items = DigestRule(ws, StubProvider()).discover()
