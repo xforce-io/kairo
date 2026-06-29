@@ -19,3 +19,24 @@ def test_read_body_concatenates_all_body_forms(tmp_path):
     body = DigestRule(ws, StubProvider())._read_body(man)
     assert "会议口语转写" in body and "PPT 正文要点" in body
     assert body.index("会议口语转写") < body.index("PPT 正文要点")  # transcript 在前
+
+
+def test_read_body_skips_non_text_binary(tmp_path):
+    # 误标为 transcript 的二进制(图片)不应让 _read_body 崩,应跳过并返回其余正文
+    from kairo.workspace import Workspace
+    from kairo.models import Manifest, Form
+    from kairo.provider import StubProvider
+    from kairo.rules import DigestRule
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    rdir = ws.references_dir() / "m"
+    rdir.mkdir(parents=True)
+    (rdir / "transcript.md").write_text("正常转写文本")
+    (rdir / "board.jpg").write_bytes(b"\xff\xd8\xff\xe0binary-not-utf8")  # jpeg 头,非 UTF-8
+    man = Manifest(id="m", title="m", forms=[
+        Form(role="transcript", location="references/m/transcript.md", hash="t1"),
+        Form(role="transcript", location="references/m/board.jpg", hash="img"),
+    ])
+    body = DigestRule(ws, StubProvider())._read_body(man)
+    assert body is not None
+    assert "正常转写文本" in body          # 文本仍在
+    assert "board.jpg" not in body         # 二进制被跳过,不进正文

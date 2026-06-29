@@ -277,8 +277,13 @@ class DigestRule:
             for f in forms:
                 loc = Path(f.location)
                 p = loc if loc.is_absolute() else self.ws.root / loc
-                if p.is_file():
-                    chunks.append(f"# {p.name}\n\n{p.read_text()}")
+                if not p.is_file():
+                    continue
+                try:
+                    text = p.read_text()
+                except UnicodeDecodeError:
+                    continue  # 误标为正文的二进制(如图片)不进 digest 正文,且不崩整条管线
+                chunks.append(f"# {p.name}\n\n{text}")
         return "\n\n".join(chunks) if chunks else None
 
     def discover(self, state: State | None = None) -> list[WorkItem]:

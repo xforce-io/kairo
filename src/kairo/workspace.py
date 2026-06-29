@@ -11,7 +11,7 @@ from pathlib import Path
 import yaml
 
 from kairo import corpus
-from kairo.models import Constitution, Form, Manifest, State
+from kairo.models import Constitution, Form, Manifest, State, _default_roles_by_ext
 
 
 class AddError(Exception):
@@ -77,10 +77,14 @@ class Workspace:
         return self.root / "references"
 
     def guess_role(self, path: Path) -> str:
-        """按扩展名猜 role(读 constitution.roles_by_ext);此后以 manifest 为准(可 --role 覆盖)。"""
-        return self.constitution.roles_by_ext.get(
-            path.suffix.lower(), self.constitution.default_role
-        )
+        """按扩展名猜 role:constitution.roles_by_ext(用户/旧 workspace 配置)优先,缺失则
+        回退内置默认映射(音频/文档/图片),再退 default_role。旧 workspace 的 constitution
+        冻结了旧映射,内置回退确保新增内置类型(如图片→attachment)对既有 workspace 也生效。"""
+        ext = path.suffix.lower()
+        rbe = self.constitution.roles_by_ext
+        if ext in rbe:
+            return rbe[ext]
+        return _default_roles_by_ext().get(ext, self.constitution.default_role)
 
     def add(
         self,
