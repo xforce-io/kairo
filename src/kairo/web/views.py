@@ -327,24 +327,26 @@ def attach_to_ref(
     slug: str,
     ref_id: str,
     path: str = Form(None),
-    file: UploadFile = File(None),
+    files: list[UploadFile] = File(None),
 ) -> HTMLResponse:
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
     ref_dir = ws.references_dir() / ref_id
-    if file is not None and file.filename:
-        src = _save_upload_to(ref_dir, file)
+    uploads = [f for f in (files or []) if f.filename]
+    if uploads:
+        srcs = [_save_upload_to(ref_dir, f) for f in uploads]  # 可一次多张
     elif path:
         p = Path(path)
         if not p.exists():
             raise HTTPException(status_code=400, detail=f"路径不存在:{p}")
-        src = ref_dir / p.name
-        src.write_bytes(p.read_bytes())  # 复制进 ref 目录(自包含)
+        dest = ref_dir / p.name
+        dest.write_bytes(p.read_bytes())  # 复制进 ref 目录(自包含)
+        srcs = [dest]
     else:
         raise HTTPException(status_code=400, detail="need file or path")
     try:
-        ws.add([src], ref_id=ref_id)
+        ws.add(srcs, ref_id=ref_id)
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # 复用 ref 详情渲染,刷新右栏元信息
