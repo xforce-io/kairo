@@ -178,7 +178,12 @@ def workspace_view(request: Request, slug: str) -> HTMLResponse:
 def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ws = _open(request, slug)
     target = _safe_doc(ws, path)
-    return _render(request, "_doc.html", {"title": path, "html": render_markdown(target.read_text())})
+    exportable = path in {t.path for t in ws.constitution.targets}
+    return _render(
+        request,
+        "_doc.html",
+        {"title": path, "html": render_markdown(target.read_text()), "exportable": exportable},
+    )
 
 
 def _role_label(role: str, t) -> str:
@@ -319,6 +324,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
             "has_doc": has_doc,
             "preview_title": path,
             "preview_html": _preview_html(ws, path) if has_doc else None,
+            "exportable": True,
             "empty_hint": _t(request)("target.empty_hint"),
         },
     )

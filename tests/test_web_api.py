@@ -71,6 +71,29 @@ def test_doc_renders_markdown(tmp_path, monkeypatch):
     assert "落地优先级" in r.text  # stub 把正文带进 understanding
 
 
+def test_target_doc_has_export_button(tmp_path, monkeypatch):
+    # 产物文档(target)阅读区头部带导出 PDF 按钮 —— 两条渲染路径都要有
+    _ws_with_step(tmp_path, monkeypatch)
+    c = TestClient(create_app(tmp_path))
+    # 路径一:点正文行 → /doc
+    r = c.get("/w/ws/doc", params={"path": "understanding.md"})
+    assert r.status_code == 200
+    assert "doc-export" in r.text and "kairoPrintDoc()" in r.text
+    # 路径二:选中产物 → /target 的 OOB 预览
+    r = c.get("/w/ws/target", params={"path": "assessment.md"})
+    assert r.status_code == 200
+    assert "doc-export" in r.text and "kairoPrintDoc()" in r.text
+
+
+def test_ref_doc_has_no_export_button(tmp_path, monkeypatch):
+    # 参考(非产物)不显示导出按钮:导出仅面向 understanding/assessment
+    _ws_with_step(tmp_path, monkeypatch)
+    rid = _make_voice_ref(tmp_path, with_digest=True)
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "doc-export" not in r.text
+
+
 def test_doc_rejects_path_traversal(tmp_path, monkeypatch):
     _ws_with_step(tmp_path, monkeypatch)
     c = TestClient(create_app(tmp_path))
