@@ -1,6 +1,13 @@
 <div class="meta">
   <p class="meta-kicker">{{ t('ref.kicker') }}{% if label %} · {{ label }}{% endif %}</p>
-  <h3 class="meta-title">{{ title }}</h3>
+  <form class="meta-rename" hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/title"
+        hx-target="#meta" hx-swap="innerHTML">
+    <input class="meta-title-input" name="title" value="{{ title }}"
+           aria-label="{{ t('ref.rename_label') }}" required
+           hx-on:focus="this.dataset.orig=this.value"
+           hx-on:keydown="if(event.key==='Escape'){this.value=this.dataset.orig;this.blur();}">
+    <button type="submit" class="meta-rename-save" title="{{ t('ref.rename_save') }}">{{ t('ref.rename_save') }}</button>
+  </form>
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
   <button type="button" class="btn btn-step btn-add-ref"
           onclick="document.getElementById('attach-dlg').showModal()">{{ t('ref.attach_btn') }}</button>

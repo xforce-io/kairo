@@ -213,3 +213,65 @@ def test_attach_multiple_files_at_once(tmp_path):
     man = Workspace.open(tmp_path / "ws").read_manifest(rid)
     atts = [f for f in man.forms if f.role == "attachment"]
     assert len(atts) == 3, [f.location for f in atts]
+
+
+def test_rename_ref_title(tmp_path):
+    # 详情面板改名:POST title → manifest 更新,返回刷新后的详情面板含新标题
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "260629_110439.txt"
+    src.write_text("内容")
+    rid = ws.add([src])
+    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/title", data={"title": "数字员工架构对齐"})
+    assert r.status_code == 200
+    assert "数字员工架构对齐" in r.text  # 刷新的详情面板含新标题
+    assert Workspace.open(tmp_path / "ws").read_manifest(rid).title == "数字员工架构对齐"
+
+
+def test_rename_ref_empty_returns_400_and_keeps_old(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "260629_110439.txt"
+    src.write_text("内容")
+    rid = ws.add([src])
+    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/title", data={"title": "   "})
+    assert r.status_code == 400
+    assert Workspace.open(tmp_path / "ws").read_manifest(rid).title == "260629_110439"
+
+
+def test_rename_unknown_ref_404(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).post("/w/ws/ref/nope/title", data={"title": "x"})
+    assert r.status_code == 404
+
+
+def test_ref_meta_has_rename_form(tmp_path):
+    # 详情面板标题可改名:含指向 title 路由的表单 + 预填当前标题的输入
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "260629_110439.txt"
+    src.write_text("内容")
+    rid = ws.add([src])
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert f"/w/ws/ref/{rid}/title" in r.text
+    assert 'name="title"' in r.text
+    assert "260629_110439" in r.text  # 输入预填当前标题
+
+
+def test_nav_has_no_source_class_tag(tmp_path):
+    # 去掉冗余的 stream/corpus 英文标签(分组已表达分类),参考仍正常显示
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "260629_110439.txt"
+    src.write_text("内容")
+    ws.add([src])
+    r = _client(tmp_path).get("/w/ws")
+    assert r.status_code == 200
+    assert "260629_110439" in r.text
+    assert 'class="tag' not in r.text
+
+
+def test_refs_fragment_has_no_source_class_tag(tmp_path):
+    # 上传后刷新的列表片段同样不再渲染 source_class 标签
+    Workspace.init(tmp_path / "ws", topic="t")
+    files = {"file": ("260629_110439.txt", io.BytesIO("x".encode()), "text/plain")}
+    r = _client(tmp_path).post("/w/ws/ref", files=files)
+    assert r.status_code == 200
+    assert 'class="tag' not in r.text

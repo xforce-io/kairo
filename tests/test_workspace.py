@@ -67,3 +67,38 @@ def test_state_roundtrip(tmp_path):
     ws.write_state(state)
     again = Workspace(tmp_path).read_state()
     assert again.products["references/x/digest.md"].input_hash == "abc"
+
+
+def test_set_title_persists_and_preserves_other_fields(tmp_path):
+    # 重命名只改 title:id / source_class / forms 不变(title 是展示名,非身份)
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "260629_110439.txt"
+    src.write_text("内容")
+    rid = ws.add([src])
+    before = ws.read_manifest(rid)
+    ws.set_title(rid, "数字员工架构对齐")
+    man = ws.read_manifest(rid)
+    assert man.title == "数字员工架构对齐"
+    assert man.id == before.id
+    assert man.source_class == before.source_class
+    assert man.forms == before.forms
+
+
+def test_set_title_strips_whitespace(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "a.txt"
+    src.write_text("x")
+    rid = ws.add([src])
+    ws.set_title(rid, "  名字  ")
+    assert ws.read_manifest(rid).title == "名字"
+
+
+def test_set_title_rejects_empty(tmp_path):
+    import pytest
+
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "a.txt"
+    src.write_text("x")
+    rid = ws.add([src])
+    with pytest.raises(ValueError):
+        ws.set_title(rid, "   ")

@@ -168,6 +168,16 @@ class Workspace:
         self.write_manifest(ref_id, man)
         return ref_id
 
+    def set_title(self, ref_id: str, title: str) -> None:
+        """重命名一条 reference 的展示名(title)。title 仅供人读,非身份/非溯源链:
+        ref_id、目录、产物来源标记都不依赖它,故改名安全无副作用。空标题拒绝。"""
+        title = title.strip()
+        if not title:
+            raise ValueError("title 不能为空")
+        man = self.read_manifest(ref_id)
+        man.title = title
+        self.write_manifest(ref_id, man)
+
     def read_manifest(self, ref_id: str) -> Manifest:
         path = self.references_dir() / ref_id / "manifest.yaml"
         return Manifest.model_validate(yaml.safe_load(path.read_text()))
