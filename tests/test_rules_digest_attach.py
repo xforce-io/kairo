@@ -25,3 +25,24 @@ def test_attachment_changes_digest_fingerprint(tmp_path):
     ws.write_manifest("m", man)
     h2 = _wi_hash(ws, ws.read_manifest("m"))
     assert h1 != h2
+
+
+def test_no_attachment_fingerprint_matches_legacy_formula(tmp_path):
+    # 无附件时 digest 指纹必须与历史公式一致,避免部署后全量 spurious 重算
+    from kairo.workspace import Workspace
+    from kairo.models import Manifest, Form
+    from kairo.provider import StubProvider
+    from kairo.rules import DigestRule, _hash
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    rdir = ws.references_dir() / "m"; rdir.mkdir(parents=True)
+    (rdir / "transcript.md").write_text("转写正文")
+    ws.write_manifest("m", Manifest(id="m", title="m", forms=[
+        Form(role="transcript", location="references/m/transcript.md", hash="t1"),
+    ]))
+    rule = DigestRule(ws, StubProvider())
+    man = ws.read_manifest("m")
+    body = rule._read_body(man)
+    items = rule.discover()
+    wi = next(i for i in items if i.key == "references/m/digest.md")
+    legacy = _hash(f"{rule.prompt}\n\n---正文---\n{body}")
+    assert wi.input_hash == legacy

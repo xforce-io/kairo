@@ -295,12 +295,12 @@ class DigestRule:
                 items.append(self._make(ref_id, key, man, body))
         return items
 
-    def _make(self, ref_id: str, key: str, man, body: str) -> WorkItem:
+    def _make(self, ref_id: str, key: str, man: "Manifest", body: str) -> WorkItem:
         atts = sorted(
             (f for f in man.forms if f.role == "attachment"),
             key=lambda f: f.location,
         )
-        fingerprint = self.prompt + "\n" + body + "\n" + "".join(f.hash for f in atts)
+        fingerprint = f"{self.prompt}\n\n---正文---\n{body}" + "".join(f.hash for f in atts)
         input_hash = _hash(fingerprint)
         ref_dir = self.ws.references_dir() / ref_id
         img_lines = []
