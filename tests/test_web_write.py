@@ -154,9 +154,11 @@ def test_create_workspace_rejects_existing(tmp_path):
 
 def test_attach_to_existing_ref_by_path(tmp_path):
     ws = Workspace.init(tmp_path / "ws", topic="t")
-    a = tmp_path / "a.txt"; a.write_text("转写")
+    a = tmp_path / "a.txt"
+    a.write_text("转写")
     rid = ws.add([a])
-    img = tmp_path / "board.png"; img.write_bytes(b"\x89PNG\r\n")
+    img = tmp_path / "board.png"
+    img.write_bytes(b"\x89PNG\r\n")
     r = _client(tmp_path).post(f"/w/ws/ref/{rid}/attach", data={"path": str(img)})
     assert r.status_code == 200
     man = Workspace.open(tmp_path / "ws").read_manifest(rid)

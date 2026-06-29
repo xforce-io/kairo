@@ -195,7 +195,7 @@ def test_ref_form_endpoint_guards(tmp_path, monkeypatch):
     assert c.get(f"/w/ws/ref/{rid}/form/1").status_code == 200  # transcript(.md)
     assert c.get(f"/w/ws/ref/{rid}/form/9").status_code == 404  # 越界
     assert c.get(f"/w/ws/ref/{rid}/form/x").status_code == 404  # 非整数
-    assert c.get(f"/w/ws/ref/nope/form/0").status_code == 404  # ref 不存在
+    assert c.get("/w/ws/ref/nope/form/0").status_code == 404  # ref 不存在
 
 
 def test_stream_ref_surfaces_digest(tmp_path, monkeypatch):
@@ -249,7 +249,8 @@ def test_target_meta_404_for_unknown(tmp_path, monkeypatch):
 def test_ref_view_has_attach_entry(tmp_path):
     from kairo.workspace import Workspace
     ws = Workspace.init(tmp_path / "ws", topic="t")
-    a = tmp_path / "a.txt"; a.write_text("x")
+    a = tmp_path / "a.txt"
+    a.write_text("x")
     rid = ws.add([a])
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200

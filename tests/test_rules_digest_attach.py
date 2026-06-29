@@ -43,7 +43,8 @@ def _wi_hash(ws, man):
 
 def test_attachment_changes_digest_fingerprint(tmp_path):
     ws = Workspace.init(tmp_path / "ws", topic="t")
-    rdir = ws.references_dir() / "m"; rdir.mkdir(parents=True)
+    rdir = ws.references_dir() / "m"
+    rdir.mkdir(parents=True)
     (rdir / "transcript.md").write_text("转写正文")
     ws.write_manifest("m", Manifest(id="m", title="m", forms=[
         Form(role="transcript", location="references/m/transcript.md", hash="t1"),
@@ -64,7 +65,8 @@ def test_no_attachment_fingerprint_matches_legacy_formula(tmp_path):
     from kairo.provider import StubProvider
     from kairo.rules import DigestRule, _hash
     ws = Workspace.init(tmp_path / "ws", topic="t")
-    rdir = ws.references_dir() / "m"; rdir.mkdir(parents=True)
+    rdir = ws.references_dir() / "m"
+    rdir.mkdir(parents=True)
     (rdir / "transcript.md").write_text("转写正文")
     ws.write_manifest("m", Manifest(id="m", title="m", forms=[
         Form(role="transcript", location="references/m/transcript.md", hash="t1"),

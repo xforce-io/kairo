@@ -16,7 +16,7 @@ from typing import Callable
 from kairo import corpus
 from kairo.backends import run_backend
 from kairo.machine import resolve_asr
-from kairo.models import Form, ProductState, State, TargetState
+from kairo.models import Form, Manifest, ProductState, State, TargetState
 from kairo.provider import AgentConfig
 from kairo.workspace import _slug
 
@@ -295,7 +295,7 @@ class DigestRule:
                 items.append(self._make(ref_id, key, man, body))
         return items
 
-    def _make(self, ref_id: str, key: str, man: "Manifest", body: str) -> WorkItem:
+    def _make(self, ref_id: str, key: str, man: Manifest, body: str) -> WorkItem:
         atts = sorted(
             (f for f in man.forms if f.role == "attachment"),
             key=lambda f: f.location,
