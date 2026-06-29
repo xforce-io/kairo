@@ -292,20 +292,38 @@ class DigestRule:
             body = self._read_body(man)
             key = f"references/{ref_id}/digest.md"
             if body is not None and not (self.ws.root / key).exists():
-                items.append(self._make(key, body))
+                items.append(self._make(ref_id, key, man, body))
         return items
 
-    def _make(self, key: str, body: str) -> WorkItem:
-        input_hash = _hash(f"{self.prompt}\n\n---正文---\n{body}")
+    def _make(self, ref_id: str, key: str, man, body: str) -> WorkItem:
+        atts = sorted(
+            (f for f in man.forms if f.role == "attachment"),
+            key=lambda f: f.location,
+        )
+        fingerprint = self.prompt + "\n" + body + "\n" + "".join(f.hash for f in atts)
+        input_hash = _hash(fingerprint)
+        ref_dir = self.ws.references_dir() / ref_id
+        img_lines = []
+        for f in atts:
+            loc = Path(f.location)
+            p = loc if loc.is_absolute() else self.ws.root / loc
+            img_lines.append(str(p))
 
         def run(state: State) -> None:
+            persona = self.prompt + self.ws.constitution.glossary_reference()
+            if img_lines:
+                persona += (
+                    "\n\n[现场图片]本会议另有以下图片,请用 Read 工具逐一查看,"
+                    "把其中与会议相关的信息(白板/幻灯/截图)并入纪要:\n"
+                    + "\n".join(f"- {p}" for p in img_lines)
+                )
+            persona += _OUTPUT_DISCIPLINE
             content = _run_agent(
                 self.provider,
-                self.prompt
-                + self.ws.constitution.glossary_reference()
-                + _OUTPUT_DISCIPLINE,
+                persona,
                 body,
                 "digest.md",
+                read_dirs=[ref_dir] if img_lines else None,
             )
             (self.ws.root / key).write_text(content)
             state.products[key] = ProductState(
