@@ -66,12 +66,16 @@
 - **`DigestRule._read_body` 改为拼接**:遍历 `body_roles`,收集**所有**命中的 form,按 `# <文件名>` 小标题拼成一段正文(顺序:transcript 优先,其后 source_text 按文件名排序,保证确定性)。
 - **`DigestRule` 看附件**:该 ref 有 `attachment` form 时,`read_dirs` 传 attachment 所在目录,persona 追加一段「本会议另有以下现场图片,请用 Read 逐一查看并把其中与会议相关的信息并入纪要:<文件名列表>」。
 
-### 3.5 增量重总结(核心诉求)
+### 3.5 重算触发:指纹驱动的全量重算(核心诉求)
 
-- digest 的 `input_hash` 从 `hash(prompt + body)` 扩为
-  **`hash(prompt + 拼接正文 + 所有 attachment 图片内容 hash(按文件名排序))`**。
-- 任意新增 / 替换 form(文本或图片)→ 拼接正文或图片 hash 变 → `input_hash` 变 → `DigestRule.is_stale` 为真 → 下次 step 自动重出 digest。
-- digest 变化产生 Δdigest → `ComposeRule` 自动把增量折叠进 understanding。**全自动,无需手动 re-step 指定 target**。
+digest **不做增量合并**——每次都从整条会议的全部素材**重新生成整份** `digest.md`(见 3.4)。是否需要重算,由一个**指纹**决定:
+
+- digest 的 `input_hash` 定义为对**该会议当前全部输入**的指纹:
+  **`hash(prompt + 当前全部正文拼接 + 所有 attachment 字节 hash(按文件名排序))`**。
+- `DigestRule.is_stale`:磁盘上记录的 `input_hash` 与当前指纹**相同 → 没变 → 跳过**(`step` 显示 no change,幂等);**不同 → 全量重算**整份 digest。
+- 任意素材增 / 删 / 改(文本或图片)都会改变指纹 → 触发一次全量重算;不改则永不重算。统一指纹、无文本/图片特例。
+
+digest 变化产生 Δdigest → `ComposeRule` 自动把增量折叠进 understanding(understanding 这一层才是增量;digest 这层始终全量)。**全自动,无需手动 re-step 指定 target**。
 
 ### 3.6 Web(`views.py` / 模板)
 
@@ -95,7 +99,7 @@
 
 - 一条 ref 多个 document → 各产一份 `source_text.<stem>.md`(不再只转第一个)。
 - `DigestRule` 拼接 transcript + 多份 source_text 进同一份 digest。
-- 新增 attachment 使 digest `input_hash` 变化 → 重新 stale(增量重总结)。
+- 新增 attachment 使 digest 指纹变化 → stale → 全量重算;指纹不变则跳过(幂等)。
 - `add(ref_id=已存在)` 追加而非覆盖;按 location 去重。
 - `attach` 路由:按扩展名归 role;图片 copy-in;坏路径沿用 #42 的 400+报错。
 - 多模态缺位(stub provider)时降级为仅文本、不报错。
