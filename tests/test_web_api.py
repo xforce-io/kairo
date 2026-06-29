@@ -244,3 +244,14 @@ def test_target_meta_404_for_unknown(tmp_path, monkeypatch):
     _ws_with_step(tmp_path, monkeypatch)
     r = TestClient(create_app(tmp_path)).get("/w/ws/target", params={"path": "nope.md"})
     assert r.status_code == 404
+
+
+def test_ref_view_has_attach_entry(tmp_path):
+    from kairo.workspace import Workspace
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.txt"; a.write_text("x")
+    rid = ws.add([a])
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert f'/w/ws/ref/{rid}/attach' in r.text
+    assert 'type="file"' in r.text
