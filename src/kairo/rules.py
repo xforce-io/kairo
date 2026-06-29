@@ -98,16 +98,16 @@ class TransformRule:
                     items.append(self._make(ref_id, srcs[0], legacy))
             else:
                 # 多源:每源独立派生,用 keyed 格式
-                for src in srcs:
+                for i, src in enumerate(srcs):
                     keyed = f"references/{ref_id}/{self.produces}.{_slug(Path(src.location).stem)}.md"
                     done = keyed in produced_locs
-                    if not done and legacy in produced_locs:
-                        done = True  # 兼容旧单源产物 {produces}.md
+                    if not done and i == 0 and legacy in produced_locs:
+                        done = True  # 迁移:legacy {produces}.md 归属第一个源
                     if not done:
                         items.append(self._make(ref_id, src, keyed))
         return items
 
-    def _make(self, ref_id: str, src, key: str) -> WorkItem:
+    def _make(self, ref_id: str, src: Form, key: str) -> WorkItem:
         input_hash = src.hash
         loc = Path(src.location)
         src_path = loc if loc.is_absolute() else self.ws.root / loc
