@@ -249,6 +249,8 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "preview_key": primary["key"] if primary else "",
             "preview_title": preview_title,
             "preview_html": _render_doc(_form_path(ws, primary["location"])) if primary else None,
+            # 主预览是 digest 时,OOB 画布与 target 同款可导出 PDF
+            "exportable": bool(primary and primary["role"] == "digest"),
             "empty_hint": t("ref.empty_hint"),
         },
     )
@@ -281,7 +283,12 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
         return _render(request, "_doc.html", {"title": title, "html": img})
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
-    return _render(request, "_doc.html", {"title": title, "html": _render_doc(path)})
+    # digest 是这条 reference 的目的产物,与 target 同款可导出 PDF;其它形态(转写/音频)不导出
+    return _render(
+        request,
+        "_doc.html",
+        {"title": title, "html": _render_doc(path), "exportable": key == "digest"},
+    )
 
 
 @router.get("/w/{slug}/ref/{ref_id}/file/{key}")
