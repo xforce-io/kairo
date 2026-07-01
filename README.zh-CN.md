@@ -43,7 +43,7 @@ kairo status                  # 看各 reference / 文档的融入状态
 | --- | --- |
 | `init` | 初始化 topic-workspace + 默认宪法 |
 | `add` | 登记一条 reference 的所有形态（`--corpus` 标基线，默认 stream 观测） |
-| `step` | 跑调和循环到收敛（有 key→Claude，否则 stub；`KAIRO_STUB` 强制 stub） |
+| `step` | 跑调和循环到收敛（endpoint 配置→Claude CLI→stub；`KAIRO_STUB` 强制 stub） |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |
 | `accept` | 接受手改、钉为新基线，解除 `blocked: manual-edit` |
 | `status` | 列 references / 各文档融入状态 |
@@ -90,9 +90,24 @@ origin = "whisper:large-v3-turbo"
 
 `kairo step` 按 `constitution.yaml` 里 transform 的 `backend`（默认 `whisper`）查对应节——故一台机器可并存多种后端（`[asr.whisper]`、`[asr.xxx]`），按 workspace 声明的 backend 路由。占位符：`{input}` 音频路径、`{outdir}` 临时输出目录、`{stem}` 输出名、`{output}`=`{outdir}/{stem}.txt`。模板含任一输出占位 → kairo 从产物文件读转写；否则捕获 stdout。环境变量 `KAIRO_ASR_CMD`（及 `KAIRO_ASR_ORIGIN`）全局覆盖。命令失败 → `blocked: asr-failed`（绝不写假转写）；无对应配置 → `blocked: no-asr`。
 
+## 本机 LLM endpoint 配置
+
+Kairo 可以把本机配置的 OpenAI-compatible Chat Completions endpoint 作为默认真实 provider。该配置不写进 `constitution.yaml`；凭据只从环境变量读取。
+
+`~/.config/kairo/config.toml`：
+
+```toml
+[provider.openai]
+base_url_env = "OPENAI_API_BASE"
+model_env = "OPENAI_MODEL"
+api_key_env = "OPENAI_API_KEY"
+```
+
+Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → 已配置 `[provider.openai]` → 可用的 `claude` CLI → stub。设置 `KAIRO_PROVIDER=openai` 可强制要求使用 endpoint provider。
+
 ## 技术栈
 
-Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub / claude / claude-code / codex），无 audit。详见 Issue [#4](https://github.com/xforce-io/kairo/issues/4)。
+Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub / openai-compatible / claude-code / codex），无 audit。详见 Issue [#4](https://github.com/xforce-io/kairo/issues/4) 与 [#54](https://github.com/xforce-io/kairo/issues/54)。
 
 ## Web Console（可选）
 

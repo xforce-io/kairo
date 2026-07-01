@@ -2,8 +2,8 @@
 
 #4:从「`complete(prompt)->str` 模型缝」升级为「`run(config)->artifacts` agent 缝」。
 agent 靠往 `artifact_dir` 写文件来通信;外壳(rules/engine)只编排与记账。
-backend:StubProvider(测试)/ ClaudeCodeProvider / CodexProvider(CLI,subscription)。
-真实 LLM 只走 subscription(claude-code),不支持直连 API。
+backend:StubProvider(测试)/ OpenAICompatibleProvider / ClaudeCodeProvider / CodexProvider。
+默认真实 LLM 优先走 machine-local OpenAI-compatible endpoint 配置,否则回退 CLI subscription。
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -74,6 +75,95 @@ class StubProvider:
         (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
         return AgentResult(
             artifacts=_scan_artifacts(config.artifact_dir), result_text=content
+        )
+
+
+def _config_path() -> Path:
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return Path(base) / "kairo" / "config.toml"
+
+
+def resolve_openai_provider_config() -> dict | None:
+    """解析 machine-local OpenAI-compatible endpoint 配置。
+
+    密钥只从环境变量取,避免落入 workspace 或配置样例中。
+    """
+    path = _config_path()
+    if not path.is_file():
+        return None
+    section = (tomllib.loads(path.read_text()).get("provider") or {}).get("openai") or {}
+
+    def _value(key: str, default_env: str | None = None) -> str:
+        env_name = str(section.get(f"{key}_env") or default_env or "").strip()
+        if env_name:
+            env_value = os.environ.get(env_name)
+            if env_value:
+                return env_value.strip()
+        return str(section.get(key) or "").strip()
+
+    base_url = _value("base_url")
+    model = _value("model")
+    api_key_env = str(section.get("api_key_env") or "OPENAI_API_KEY").strip()
+    api_key = os.environ.get(api_key_env) if api_key_env else None
+    if not (base_url and model and api_key):
+        return None
+    return {"base_url": base_url, "model": model, "api_key": api_key}
+
+
+class OpenAICompatibleProvider:
+    """OpenAI-compatible Chat Completions endpoint provider。
+
+    这是薄 LLM adapter,不是工具型 agent:它只把 persona/context 发给 endpoint,
+    再把最终文本写回 artifact。
+    """
+
+    name = "openai"
+
+    def __init__(
+        self, *, base_url: str, api_key: str, model: str, client=None
+    ) -> None:
+        self.base_url = base_url
+        self.api_key = api_key
+        self.model = model
+        self._client = client
+
+    def _get_client(self):
+        if self._client is not None:
+            return self._client
+        try:
+            from openai import OpenAI
+        except ImportError as e:
+            raise RuntimeError("openai provider 需要安装 openai Python SDK") from e
+        self._client = OpenAI(base_url=self.base_url, api_key=self.api_key)
+        return self._client
+
+    def run(self, config: AgentConfig, signal=None) -> AgentResult:
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        prompt = f"{config.persona}\n\n---\n\n{config.context}"
+        (config.artifact_dir / "_prompt.md").write_text(prompt)
+        kwargs = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": config.persona},
+                {"role": "user", "content": config.context},
+            ],
+        }
+        if config.timeout_s is not None:
+            kwargs["timeout"] = config.timeout_s
+        resp = self._get_client().chat.completions.create(**kwargs)
+        choices = getattr(resp, "choices", None) or []
+        message = getattr(choices[0], "message", None) if choices else None
+        result = getattr(message, "content", None)
+        if isinstance(result, list):
+            result = "".join(
+                part.get("text", "") if isinstance(part, dict) else str(part)
+                for part in result
+            )
+        if not isinstance(result, str) or not result.strip():
+            raise RuntimeError("openai provider 返回空响应")
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(result)
+        return AgentResult(
+            artifacts=_scan_artifacts(config.artifact_dir), result_text=result
         )
 
 
@@ -191,6 +281,13 @@ _BACKENDS = {
 }
 
 
+def _openai_provider_from_config() -> OpenAICompatibleProvider | None:
+    cfg = resolve_openai_provider_config()
+    if cfg is None:
+        return None
+    return OpenAICompatibleProvider(**cfg)
+
+
 def _cli_available(cmd: str) -> bool:
     """探活:`<cmd> --version` exit 0 → True;异常 / 非 0 → False。"""
     import subprocess
@@ -207,13 +304,22 @@ def _cli_available(cmd: str) -> bool:
 def select_provider():
     """选 backend:KAIRO_STUB(测试隔离,最高)> KAIRO_PROVIDER(显式)> auto。
 
-    auto 只走 subscription:claude CLI 可用 → ClaudeCodeProvider;否则 StubProvider。
+    auto:配置了 OpenAI-compatible endpoint → OpenAICompatibleProvider;
+    否则 claude CLI 可用 → ClaudeCodeProvider;否则 StubProvider。
     """
     if os.environ.get("KAIRO_STUB"):
         return StubProvider()
     explicit = os.environ.get("KAIRO_PROVIDER")
     if explicit:
+        if explicit == "openai":
+            provider = _openai_provider_from_config()
+            if provider is None:
+                raise RuntimeError("KAIRO_PROVIDER=openai 但缺少 provider.openai 配置或 API key")
+            return provider
         return _BACKENDS.get(explicit, StubProvider)()
+    provider = _openai_provider_from_config()
+    if provider is not None:
+        return provider
     if _cli_available("claude"):
         return ClaudeCodeProvider()
     return StubProvider()

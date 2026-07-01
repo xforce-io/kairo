@@ -8,6 +8,7 @@ dependencies = [
     "typer>=0.12",
     "pydantic>=2.6",
     "pyyaml>=6.0",
+    "openai>=1.0",
     "markitdown[docx,pdf,pptx,xlsx]>=0.1.6",
 ]
 

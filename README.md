@@ -43,7 +43,7 @@ Produces two layers of documents: `understanding.md` (neutral facts) and `assess
 | --- | --- |
 | `init` | Initialize a topic-workspace + default constitution |
 | `add` | Register all forms of one reference (`--corpus` marks baseline; stream observation by default) |
-| `step` | Run the reconciliation loop to convergence (with a key → Claude, otherwise stub; `KAIRO_STUB` forces stub) |
+| `step` | Run the reconciliation loop to convergence (configured endpoint → Claude CLI → stub; `KAIRO_STUB` forces stub) |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
 | `accept` | Accept manual edits, pin as the new baseline, clear `blocked: manual-edit` |
 | `status` | List references / fold status of each document |
@@ -90,9 +90,24 @@ origin = "whisper:large-v3-turbo"
 
 `kairo step` looks up the matching section by the transform's `backend` in `constitution.yaml` (default `whisper`) — so one machine can host multiple backends (`[asr.whisper]`, `[asr.xxx]`), routed by the workspace's declared backend. Placeholders: `{input}` audio path, `{outdir}` temp output dir, `{stem}` output name, `{output}`=`{outdir}/{stem}.txt`. If the template contains any output placeholder → kairo reads the transcription from the output file; otherwise it captures stdout. Environment variables `KAIRO_ASR_CMD` (and `KAIRO_ASR_ORIGIN`) override globally. Command failure → `blocked: asr-failed` (a fake transcription is never written); no matching config → `blocked: no-asr`.
 
+## Local LLM endpoint configuration
+
+Kairo can use a machine-local OpenAI-compatible Chat Completions endpoint as the default real provider. This stays outside `constitution.yaml`; credentials are read from the environment.
+
+`~/.config/kairo/config.toml`:
+
+```toml
+[provider.openai]
+base_url_env = "OPENAI_API_BASE"
+model_env = "OPENAI_MODEL"
+api_key_env = "OPENAI_API_KEY"
+```
+
+Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → configured `[provider.openai]` → available `claude` CLI → stub. Set `KAIRO_PROVIDER=openai` to require the endpoint provider explicitly.
+
 ## Tech stack
 
-Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub / claude / claude-code / codex), no audit. See Issue [#4](https://github.com/xforce-io/kairo/issues/4) for details.
+Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub / openai-compatible / claude-code / codex), no audit. See Issue [#4](https://github.com/xforce-io/kairo/issues/4) and [#54](https://github.com/xforce-io/kairo/issues/54) for details.
 
 ## Web Console (optional)
 
