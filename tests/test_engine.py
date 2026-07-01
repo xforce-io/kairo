@@ -2,7 +2,12 @@ import yaml
 
 from kairo.engine import accept, re_step, step
 from kairo.models import Transform
-from kairo.provider import AgentResult, StubProvider, _scan_artifacts
+from kairo.provider import (
+    AgentResult,
+    OpenAICompatibleProvider,
+    StubProvider,
+    _scan_artifacts,
+)
 from kairo.workspace import Workspace
 
 
@@ -21,6 +26,65 @@ class _NonDeterministicProvider:
         content = f"OUTPUT #{self.n}\n{config.context}"  # 每次内容不同
         (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
+
+
+class _EndpointMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _EndpointChoice:
+    def __init__(self, content):
+        self.message = _EndpointMessage(content)
+
+
+class _EndpointCompletion:
+    def __init__(self, content):
+        self.choices = [_EndpointChoice(content)]
+
+
+class _EndpointCompletions:
+    def __init__(self):
+        self.n = 0
+
+    def create(self, **kwargs):
+        self.n += 1
+        user = kwargs["messages"][1]["content"]
+        return _EndpointCompletion(f"ENDPOINT #{self.n}\n{user}")
+
+
+class _EndpointChat:
+    def __init__(self):
+        self.completions = _EndpointCompletions()
+
+
+class _EndpointClient:
+    def __init__(self):
+        self.chat = _EndpointChat()
+
+
+def test_step_runs_text_chain_with_openai_compatible_provider(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "meeting.txt"
+    t.write_text("endpoint 原始材料")
+    ws.add([t])
+    provider = OpenAICompatibleProvider(
+        base_url="https://llm.example/v1",
+        api_key="secret",
+        model="endpoint-model",
+        client=_EndpointClient(),
+    )
+    step(ws, provider)
+    rid = ws.list_reference_ids()[0]
+    digest = ws.root / f"references/{rid}/digest.md"
+    assert digest.exists()
+    assert "ENDPOINT #1" in digest.read_text()
+    assert "endpoint 原始材料" in (ws.root / "understanding.md").read_text()
+    state = ws.read_state()
+    assert state.products[f"references/{rid}/digest.md"].produced_by == {
+        "provider": "openai",
+        "model": "endpoint-model",
+    }
 
 
 def test_step_runs_text_chain_to_convergence(tmp_path):

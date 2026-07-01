@@ -14,6 +14,7 @@ from kairo.provider import (
     AgentResult,
     ClaudeCodeProvider,
     CodexProvider,
+    OpenAICompatibleProvider,
     StubProvider,
 )
 
@@ -218,6 +219,118 @@ def test_codex_provider_invokes_cli_and_reads_last_message(tmp_path):
 
 def test_codex_provider_identity():
     assert CodexProvider().name == "codex"
+
+
+# ---- OpenAICompatibleProvider(configured endpoint via official SDK seam)----
+
+
+class _FakeMessage:
+    def __init__(self, content):
+        self.content = content
+
+
+class _FakeChoice:
+    def __init__(self, content):
+        self.message = _FakeMessage(content)
+
+
+class _FakeCompletion:
+    def __init__(self, content):
+        self.choices = [_FakeChoice(content)]
+
+
+class _FakeCompletions:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return _FakeCompletion("endpoint 纪要")
+
+
+class _FakeChat:
+    def __init__(self, calls):
+        self.completions = _FakeCompletions(calls)
+
+
+class _FakeOpenAIClient:
+    def __init__(self, calls):
+        self.chat = _FakeChat(calls)
+
+
+def test_openai_compatible_provider_invokes_chat_completion_and_writes_artifact(tmp_path):
+    calls = []
+    p = OpenAICompatibleProvider(
+        base_url="https://llm.example/v1",
+        api_key="secret",
+        model="endpoint-model",
+        client=_FakeOpenAIClient(calls),
+    )
+    res = p.run(
+        AgentConfig(
+            persona="你是X",
+            context="材料Y",
+            artifact_dir=tmp_path,
+            model="endpoint-model",
+            artifact="digest.md",
+            timeout_s=12,
+        )
+    )
+    assert calls == [
+        {
+            "model": "endpoint-model",
+            "messages": [
+                {"role": "system", "content": "你是X"},
+                {"role": "user", "content": "材料Y"},
+            ],
+            "timeout": 12,
+        }
+    ]
+    out = tmp_path / "digest.md"
+    assert out in res.artifacts
+    assert out.read_text() == "endpoint 纪要"
+    assert res.result_text == "endpoint 纪要"
+
+
+def test_openai_compatible_provider_identity():
+    p = OpenAICompatibleProvider(
+        base_url="https://llm.example/v1",
+        api_key="secret",
+        model="endpoint-model",
+        client=_FakeOpenAIClient([]),
+    )
+    assert p.name == "openai"
+    assert p.model == "endpoint-model"
+
+
+def test_openai_compatible_provider_raises_on_empty_response(tmp_path):
+    class _EmptyCompletions:
+        def create(self, **kwargs):
+            return _FakeCompletion("")
+
+    class _EmptyChat:
+        completions = _EmptyCompletions()
+
+    class _EmptyClient:
+        chat = _EmptyChat()
+
+    p = OpenAICompatibleProvider(
+        base_url="https://llm.example/v1",
+        api_key="secret",
+        model="endpoint-model",
+        client=_EmptyClient(),
+    )
+    with pytest.raises(RuntimeError):
+        p.run(
+            AgentConfig(
+                persona="P",
+                context="C",
+                artifact_dir=tmp_path,
+                model="endpoint-model",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()
 
 
 # ---- #8:错误响应须抛错,不写坏产物、不记账 ----
