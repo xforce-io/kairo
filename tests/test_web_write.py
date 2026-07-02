@@ -112,9 +112,19 @@ def test_add_corpus_dir(tmp_path):
     (cdir / "x.md").write_text("基线")
     r = _client(tmp_path).post("/w/ws/corpus", data={"path": str(cdir)})
     assert r.status_code == 200
+    assert r.headers.get("HX-Refresh") == "true"
     ws = Workspace.open(tmp_path / "ws")
     man = ws.read_manifest(ws.list_reference_ids()[0])
     assert man.source_class == "corpus"
+
+
+def test_workspace_view_has_add_corpus_path_input(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).get("/w/ws")
+    assert r.status_code == 200
+    assert 'id="add-corpus-dlg"' in r.text
+    assert 'hx-post="/w/ws/corpus"' in r.text
+    assert "corpus.add_failed" not in r.text
 
 
 def test_create_workspace(tmp_path):
