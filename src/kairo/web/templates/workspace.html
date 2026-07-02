@@ -75,16 +75,54 @@
         </script>
       </dialog>
     </div>
-    {% if corpus %}
     <div class="nav-group nav-group-corpus">
       <div class="nav-section">{{ t('nav.corpus') }}</div>
+      {% if corpus %}
       {% for r in corpus %}
       <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
         <span class="name">{{ r.title }}</span>
       </a>
       {% endfor %}
+      {% endif %}
+      <button type="button" class="btn btn-step btn-add-ref"
+              onclick="document.getElementById('add-corpus-dlg').showModal()">{{ t('corpus.add_btn') }}</button>
+
+      <dialog id="add-corpus-dlg" class="ref-dialog"
+              onclick="if(event.target===this)this.close()">
+        <div class="dlg-head">
+          <h3 class="dlg-title">{{ t('corpus.add_title') }}</h3>
+          <button type="button" class="dlg-x" aria-label="close"
+                  onclick="this.closest('dialog').close()">×</button>
+        </div>
+        <p class="dlg-err" id="add-corpus-err" role="alert" hidden
+           data-fallback="{{ t('corpus.add_failed') }}"></p>
+        <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/corpus"
+              hx-on::after-request="if(event.detail.successful){this.reset();this.closest('dialog').close();}">
+          <label class="dlg-label">{{ t('corpus.path_label') }}</label>
+          <div class="dlg-row">
+            <input type="text" name="path" placeholder="{{ t('corpus.path_placeholder') }}" required>
+            <button type="submit" class="btn btn-step dlg-go">{{ t('corpus.add_path_btn') }}</button>
+          </div>
+        </form>
+        <script>
+          (function () {
+            var dlg = document.getElementById('add-corpus-dlg');
+            var err = document.getElementById('add-corpus-err');
+            if (!dlg || !err || dlg.dataset.errWired) return;
+            dlg.dataset.errWired = '1';
+            function clear() { err.hidden = true; err.textContent = ''; }
+            dlg.addEventListener('htmx:beforeRequest', clear);
+            dlg.addEventListener('htmx:afterRequest', function (e) { if (e.detail.successful) clear(); });
+            dlg.addEventListener('htmx:responseError', function (e) {
+              var msg;
+              try { msg = JSON.parse(e.detail.xhr.responseText).detail; } catch (_) {}
+              err.textContent = msg || err.dataset.fallback;
+              err.hidden = false;
+            });
+          })();
+        </script>
+      </dialog>
     </div>
-    {% endif %}
   </aside>
 
   <main id="reader" class="pane-read"><p class="reader-empty">{{ t('reader.empty') }}</p></main>

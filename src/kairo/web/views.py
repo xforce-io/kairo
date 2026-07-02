@@ -430,7 +430,7 @@ def add_corpus(request: Request, slug: str, path: str = Form(...)) -> HTMLRespon
         ws.add([Path(path)], source_class="corpus")
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return _refs_fragment(request, ws, slug)
+    return HTMLResponse("", headers={"HX-Refresh": "true"})
 
 
 @router.post("/w/{slug}/accept", response_class=HTMLResponse)
