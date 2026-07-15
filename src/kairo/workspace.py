@@ -12,7 +12,14 @@ from pathlib import Path
 import yaml
 
 from kairo import corpus
-from kairo.models import Constitution, Form, Manifest, State, _default_roles_by_ext
+from kairo.models import (
+    Constitution,
+    Form,
+    GlossaryEntry,
+    Manifest,
+    State,
+    _default_roles_by_ext,
+)
 
 
 class AddError(Exception):
@@ -277,6 +284,39 @@ class Workspace:
         man = self.read_manifest(ref_id)
         man.title = title
         self.write_manifest(ref_id, man)
+
+    # ---- constitution / glossary (#69) ----
+
+    def write_constitution(self, con: Constitution) -> None:
+        """整表写回 constitution.yaml(pydantic round-trip)。"""
+        (self.root / "constitution.yaml").write_text(
+            yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+        )
+
+    def add_glossary_entry(
+        self, name: str, note: str = "", aka: list[str] | None = None
+    ) -> GlossaryEntry:
+        """追加一条真名册;name 必填;重名拒绝。"""
+        name = name.strip()
+        if not name:
+            raise ValueError("name 不能为空")
+        note = (note or "").strip()
+        aka_list = [a.strip() for a in (aka or []) if a and a.strip()]
+        con = self.constitution
+        if any(e.name == name for e in con.glossary):
+            raise ValueError(f"真名册已有同名条目:{name}")
+        entry = GlossaryEntry(name=name, note=note, aka=aka_list)
+        con.glossary.append(entry)
+        self.write_constitution(con)
+        return entry
+
+    def remove_glossary_entry(self, index: int) -> None:
+        """按索引删除一条真名册。"""
+        con = self.constitution
+        if not 0 <= index < len(con.glossary):
+            raise IndexError(f"glossary 索引越界:{index}")
+        con.glossary.pop(index)
+        self.write_constitution(con)
 
     def read_manifest(self, ref_id: str) -> Manifest:
         path = self.references_dir() / ref_id / "manifest.yaml"

@@ -1,0 +1,38 @@
+<div class="meta glossary-meta">
+  <p class="meta-kicker">{{ t('glossary.kicker') }} · {{ count }}</p>
+  <h3 class="meta-title">{{ t('glossary.title') }}</h3>
+  <p class="meta-hint">{{ hint }}</p>
+
+  {% if entries %}
+  <table class="meta-forms glossary-table">
+    <tbody>
+    {% for e in entries %}
+    <tr>
+      <td class="mf-role" title="{{ e.note }}">
+        <strong>{{ e.name }}</strong>
+        {% if e.note %}<div class="gl-note">{{ e.note }}</div>{% endif %}
+        {% if e.aka %}<div class="gl-aka">{{ t('glossary.aka_prefix') }}{{ e.aka }}</div>{% endif %}
+      </td>
+      <td class="mf-actions">
+        <button type="button" class="btn btn-ghost btn-regen"
+                hx-post="/w/{{ slug | urlencode }}/glossary/{{ loop.index0 }}/delete"
+                hx-target="#meta" hx-swap="innerHTML"
+                hx-confirm="{{ t('glossary.delete_confirm') }}">{{ t('glossary.delete') }}</button>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="panel-hint">{{ t('glossary.empty') }}</p>
+  {% endif %}
+
+  <form class="dlg-form glossary-add" hx-post="/w/{{ slug | urlencode }}/glossary"
+        hx-target="#meta" hx-swap="innerHTML">
+    <label class="dlg-label">{{ t('glossary.add_title') }}</label>
+    <input type="text" name="name" placeholder="{{ t('glossary.name_ph') }}" required>
+    <input type="text" name="note" placeholder="{{ t('glossary.note_ph') }}">
+    <input type="text" name="aka" placeholder="{{ t('glossary.aka_ph') }}">
+    <button type="submit" class="btn btn-step dlg-go">{{ t('glossary.add_btn') }}</button>
+  </form>
+</div>

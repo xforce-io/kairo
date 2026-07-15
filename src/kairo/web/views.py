@@ -433,6 +433,58 @@ def rename_ref(
     return ref_view(request, slug, ref_id)
 
 
+def _glossary_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
+    t = _t(request)
+    entries = [
+        {"name": e.name, "note": e.note, "aka": ", ".join(e.aka)}
+        for e in ws.constitution.glossary
+    ]
+    return _render(
+        request,
+        "_glossary.html",
+        {
+            "slug": slug,
+            "entries": entries,
+            "count": len(entries),
+            "hint": t("glossary.restep_hint"),
+        },
+    )
+
+
+@router.get("/w/{slug}/glossary", response_class=HTMLResponse)
+def glossary_view(request: Request, slug: str) -> HTMLResponse:
+    """#69:右栏真名册面板。"""
+    return _glossary_fragment(request, _open(request, slug), slug)
+
+
+@router.post("/w/{slug}/glossary", response_class=HTMLResponse)
+def glossary_add(
+    request: Request,
+    slug: str,
+    name: str = Form(...),
+    note: str = Form(""),
+    aka: str = Form(""),
+) -> HTMLResponse:
+    """追加一条 glossary;aka 支持中英文逗号分隔。"""
+    ws = _open(request, slug)
+    parts = [p.strip() for p in aka.replace("，", ",").split(",") if p.strip()]
+    try:
+        ws.add_glossary_entry(name, note=note, aka=parts)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return _glossary_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/glossary/{index}/delete", response_class=HTMLResponse)
+def glossary_delete(request: Request, slug: str, index: int) -> HTMLResponse:
+    ws = _open(request, slug)
+    try:
+        ws.remove_glossary_entry(index)
+    except IndexError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
+    return _glossary_fragment(request, ws, slug)
+
+
 @router.post("/w/{slug}/corpus", response_class=HTMLResponse)
 def add_corpus(request: Request, slug: str, path: str = Form(...)) -> HTMLResponse:
     ws = _open(request, slug)
