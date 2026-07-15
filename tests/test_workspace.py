@@ -22,7 +22,9 @@ def test_init_default_constitution_has_digest_prompt_and_two_layer_targets(tmp_p
     ws = Workspace.init(tmp_path)
     con = ws.constitution
     assert con.topic == "main"
-    assert con.pipeline.digest.prompt.strip()  # 非空默认 prompt
+    # #58:默认 digest 是高密度记忆纪要,不是一页纸周报
+    assert "高密度" in con.pipeline.digest.prompt
+    assert "宁详勿略" in con.pipeline.digest.prompt
     assert [t.path for t in con.targets] == ["understanding.md", "assessment.md"]
     assert con.targets[0].layer == "fact"
     assert con.targets[1].layer == "judgment"

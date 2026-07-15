@@ -8,7 +8,7 @@
 
 ## 核心心智
 
-一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（忠实纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md` 事实层 / `assessment.md` 判断层）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
+一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（高密度记忆纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md` 事实层 / `assessment.md` 判断层）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
 
 > **可读全文 prose（可选，[#33](https://github.com/xforce-io/kairo/issues/33)）**：raw ASR 噪声大（无标点、口语化、同音错字），不便人通读。开启 `normalize` 后，旁挂生成一份规范化的可读全文 `prose.md` 作**人读档案**——补标点、分段、纠错、合并口水。关键是它**只给人读、不进 digest 路径**：digest 恒从 raw `transcript` 派生（信息上界），所以 prose 怎么精简都不影响纪要质量、也不存在「二次有损」，无需任何护栏。默认**关**，在 `constitution.yaml` 设 `pipeline.normalize.enabled: true` 开启；只对机器派生的誊录（`origin≠added`）生成，人给的文本原文与 corpus 不碰。
 
