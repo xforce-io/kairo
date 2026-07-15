@@ -30,6 +30,7 @@ Requires Python ≥ 3.11. Audio transcription depends on a local whisper — see
 kairo init "My research topic"   # initialize the current directory as a topic-workspace + default constitution
 kairo add recording.m4a          # register a path pointer (stream/observation by default)
 kairo add recording.m4a --copy   # copy into workspace first, then register
+kairo add ./meeting-folder       # directory → one multi-form reference (audio/docs/images inside)
 kairo add report.docx            # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
 kairo add whitepaper.md --corpus # register as corpus/baseline (authoritative reference material)
 kairo step                       # reconcile to convergence: ASR/doc2text → Digest → Compose (prose alongside when normalize is on)

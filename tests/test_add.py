@@ -136,17 +136,62 @@ def test_add_dir_corpus_creates_single_tree_form(tmp_path):
     assert man.forms[0].origin == "added"
 
 
-def test_add_dir_without_corpus_raises(tmp_path):
-    """add <dir> 无 --corpus → 友好错误(AddError),不崩 IsADirectoryError。"""
+def test_add_dir_stream_creates_multiform_ref(tmp_path):
+    """#67:add <dir> 默认 stream → 一条多形态 ref(非报错、非 corpus_tree)。"""
+    import datetime as _dt
+    from pathlib import Path
+
+    ws = Workspace.init(tmp_path / "ws")
+    d = tmp_path / "能源讨论"  # 在 workspace 外,模拟 Downloads 夹
+    d.mkdir()
+    (d / "语音A.m4a").write_bytes(b"audio-a")
+    (d / "语音B.m4a").write_bytes(b"audio-b")
+    (d / "board.png").write_bytes(b"\x89PNG")
+    (d / ".DS_Store").write_bytes(b"skip")
+    (d / "readme.unknownext").write_text("skip unknown")
+    rid = ws.add([d])
+    assert rid == f"{_dt.date.today().isoformat()}-能源讨论"
+    man = ws.read_manifest(rid)
+    assert man.source_class == "stream"
+    assert man.title == "能源讨论"
+    roles = sorted(f.role for f in man.forms)
+    assert roles == ["attachment", "audio", "audio"]
+    assert len(man.forms) == 3
+    # 外置指针
+    assert all(Path(f.location).is_absolute() for f in man.forms)
+
+
+def test_add_dir_stream_copy_into_ref(tmp_path):
+    """#67:目录 + copy → 逐文件进 references/<id>/。"""
+    ws = Workspace.init(tmp_path / "ws")
+    d = tmp_path / "pack"
+    d.mkdir()
+    (d / "a.m4a").write_bytes(b"a")
+    (d / "b.png").write_bytes(b"b")
+    rid = ws.add([d], copy=True)
+    man = ws.read_manifest(rid)
+    assert man.source_class == "stream"
+    assert len(man.forms) == 2
+    for f in man.forms:
+        p = ws.root / f.location
+        assert p.is_file()
+        assert p.parent == ws.references_dir() / rid
+    # title 改名不改 location
+    before = [f.location for f in man.forms]
+    ws.set_title(rid, "新名")
+    assert [f.location for f in ws.read_manifest(rid).forms] == before
+
+
+def test_add_dir_stream_empty_errors(tmp_path):
     from kairo.workspace import AddError
 
     ws = Workspace.init(tmp_path)
-    d = tmp_path / "docs"
+    d = tmp_path / "empty"
     d.mkdir()
-    (d / "a.md").write_text("a")
+    (d / ".DS_Store").write_bytes(b"x")
     try:
-        ws.add([d])  # 默认 stream
+        ws.add([d])
     except AddError as e:
-        assert "corpus" in str(e)
+        assert "没有可添加" in str(e)
     else:
         raise AssertionError("应抛 AddError")

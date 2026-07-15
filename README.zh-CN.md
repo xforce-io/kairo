@@ -30,6 +30,7 @@ uv run kairo --help
 kairo init "我的调研主题"      # 当前目录初始化为 topic-workspace + 默认宪法
 kairo add 录音.m4a            # 登记路径指针（默认 stream/观测）
 kairo add 录音.m4a --copy     # 先复制进工作区再登记（源删除仍可用）
+kairo add ./会议夹            # 目录→一条多形态参考(夹内音频/文档/图)
 kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
 kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
 kairo step                    # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)

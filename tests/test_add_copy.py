@@ -58,28 +58,26 @@ def test_add_copy_into_existing_ref_dir(tmp_path):
     assert cp.parent == ws.references_dir() / rid
 
 
-def test_add_copy_dir_rejected(tmp_path):
+def test_add_copy_corpus_dir_still_rejected(tmp_path):
+    """基线目录仍禁止整树 copy;#67 只放开 stream 目录多形态。"""
     ws = Workspace.init(tmp_path / "ws")
     d = tmp_path / "corpus"
     d.mkdir()
     (d / "x.md").write_text("x")
-    with pytest.raises(AddError, match="目录不能复制|观测参考"):
-        ws.add([d], copy=True)  # 添加参考语境(默认 stream)+copy+目录
-    with pytest.raises(AddError, match="目录不能复制|观测参考"):
+    with pytest.raises(AddError, match="基线目录不支持|勿勾选复制"):
         ws.add([d], source_class="corpus", copy=True)
 
 
-def test_add_dir_as_stream_explains_not_corpus_only_jargon(tmp_path):
-    """目录当观测参考:错误应说清「不能整夹当参考」,而非只甩 CLI --corpus。"""
+def test_add_stream_dir_with_copy_is_multiform(tmp_path):
+    """#67:stream 目录 + copy → 成功,一条 ref。"""
     ws = Workspace.init(tmp_path / "ws")
     d = tmp_path / "能源讨论"
     d.mkdir()
     (d / "a.txt").write_text("a")
-    with pytest.raises(AddError, match="观测参考") as ei:
-        ws.add([d])  # 默认 stream,与 Web「添加参考」一致
-    msg = str(ei.value)
-    assert "逐文件" in msg
-    assert "添加基线" in msg or "--corpus" in msg
+    rid = ws.add([d], copy=True)
+    man = ws.read_manifest(rid)
+    assert man.source_class == "stream"
+    assert len(man.forms) == 1
 
 
 def test_set_title_does_not_change_location_after_copy(tmp_path):

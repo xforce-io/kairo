@@ -409,3 +409,35 @@ def test_rename_does_not_change_location_after_web_copy(tmp_path):
     man = Workspace.open(tmp_path / "ws").read_manifest(rid)
     assert man.title == "新显示名"
     assert [f.location for f in man.forms] == before
+
+
+def test_add_ref_directory_creates_one_multiform(tmp_path):
+    """#67:Web 添加参考 + 目录 → 一条 stream,多 forms。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    d = tmp_path / "能源讨论"
+    d.mkdir()
+    (d / "a.m4a").write_bytes(b"a")
+    (d / "b.png").write_bytes(b"b")
+    r = _client(tmp_path).post("/w/ws/ref", data={"path": str(d)})
+    assert r.status_code == 200
+    ws = Workspace.open(tmp_path / "ws")
+    ids = ws.list_reference_ids()
+    assert len(ids) == 1
+    man = ws.read_manifest(ids[0])
+    assert man.source_class == "stream"
+    assert man.title == "能源讨论"
+    assert len(man.forms) == 2
+
+
+def test_add_ref_directory_with_copy(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    d = tmp_path / "pack"
+    d.mkdir()
+    (d / "x.txt").write_text("hello")
+    r = _client(tmp_path).post("/w/ws/ref", data={"path": str(d), "copy": "1"})
+    assert r.status_code == 200
+    ws = Workspace.open(tmp_path / "ws")
+    rid = ws.list_reference_ids()[0]
+    loc = ws.read_manifest(rid).forms[0].location
+    assert loc.startswith(f"references/{rid}/")
+    assert (ws.root / loc).read_text() == "hello"
