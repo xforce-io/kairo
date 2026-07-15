@@ -62,7 +62,7 @@ def add(
         help="先复制进工作区(.kairo/uploads 或既有 ref 目录)再登记;默认只记路径指针",
     ),
 ) -> None:
-    """登记一条 reference 的所有形态(默认路径指针;--copy 物化)。目录 + --corpus 为目录指针。"""
+    """登记 reference。文件=指针/可选 copy;目录 stream=一条多形态;目录 --corpus=基线树指针。"""
     ws = _open_ws()
     try:
         rid = ws.add(

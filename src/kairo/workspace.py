@@ -103,6 +103,63 @@ class Workspace:
         shutil.copy2(src, dest)
         return dest
 
+    def _known_role_exts(self) -> set[str]:
+        """可摄入扩展名:constitution 声明 ∪ 内置默认(音频/文档/图片)。"""
+        return set(self.constitution.roles_by_ext) | set(_default_roles_by_ext())
+
+    # 未进 roles_by_ext 但仍常作正文的扩展(走 default_role=transcript)
+    _TEXT_FALLBACK_EXTS = frozenset({".txt", ".md", ".markdown", ".text"})
+
+    def _list_stream_dir_files(self, d: Path) -> list[Path]:
+        """目录一层内可作 stream form 的文件(稳定按名排序)。"""
+        known = self._known_role_exts() | self._TEXT_FALLBACK_EXTS
+        out: list[Path] = []
+        for p in sorted(d.iterdir(), key=lambda x: x.name.lower()):
+            if not p.is_file():
+                continue
+            if p.name.startswith(".") or p.name == ".DS_Store":
+                continue
+            if p.suffix.lower() not in known:
+                continue
+            out.append(p)
+        return out
+
+    def _form_location(self, f: Path) -> str:
+        return str(f.relative_to(self.root)) if f.is_relative_to(self.root) else str(f)
+
+    def _add_stream_dir(
+        self,
+        d: Path,
+        *,
+        ref_id: str | None,
+        title: str | None,
+        role: str | None,
+        copy: bool,
+    ) -> str:
+        """#67:目录 → 一条 stream 多形态 reference(夹内文件全部挂 forms)。"""
+        members = self._list_stream_dir_files(d)
+        if not members:
+            raise AddError(
+                f"目录内没有可添加为参考的文件:{d}"
+                "(仅识别音频/文档/图片/文本等已知扩展名,且不递归子目录)"
+            )
+        if ref_id is None:
+            today = datetime.date.today().isoformat()
+            ref_id = f"{today}-{_slug(d.name)}"
+        ref_dir = self.references_dir() / ref_id
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        if copy:
+            members = [self._copy_into(f, ref_dir) for f in members]
+        # 复用文件 add;copy 已处理
+        return self.add(
+            members,
+            ref_id=ref_id,
+            role=role,
+            title=title or d.name,
+            source_class="stream",
+            copy=False,
+        )
+
     def add(
         self,
         files: list[Path | str],
@@ -112,28 +169,41 @@ class Workspace:
         source_class: str | None = None,
         copy: bool = False,
     ) -> str:
-        """登记 reference 形态。copy=True 时先物化到 workspace 再登记副本路径(#64)。"""
+        """登记 reference 形态。
+
+        - 文件:默认路径指针;copy=True 物化(#64)
+        - 目录 + stream:一条多形态 ref(#67)
+        - 目录 + corpus:目录树指针(#24);不支持 copy
+        """
         files = [Path(f).expanduser() for f in files]
         missing = [f for f in files if not f.exists()]
         if missing:
             raise AddError(f"路径不存在:{missing[0]}")
-        if copy:
-            if any(f.is_dir() for f in files):
-                # 与 corpus 无关:目录既不能 copy,也不能整夹当 stream 参考
-                raise AddError(
-                    "目录不能复制进工作区,也不能整夹添加为观测参考。"
-                    "请改为添加目录内的具体文件;"
-                    "若要把整个目录当基线资料库,请用「添加基线」(仅登记路径,勿勾选复制)。"
+
+        dirs = [f for f in files if f.is_dir()]
+        if dirs:
+            if len(files) != 1:
+                raise AddError("目录摄入仅支持单个目录参数(不与文件混加)")
+            d = dirs[0]
+            cls = source_class or self.constitution.default_class
+            if cls == "corpus":
+                if copy:
+                    raise AddError(
+                        "基线目录不支持复制整树;请用目录指针(添加基线 / add --corpus,勿勾选复制)"
+                    )
+                return self._add_corpus_tree(
+                    [d], ref_id=ref_id, title=title, source_class="corpus"
                 )
+            return self._add_stream_dir(
+                d, ref_id=ref_id, title=title, role=role, copy=copy
+            )
+
+        if copy:
             if ref_id is not None and (self.references_dir() / ref_id).is_dir():
                 dest_dir = self.references_dir() / ref_id
             else:
                 dest_dir = self.root / ".kairo" / "uploads"
             files = [self._copy_into(f, dest_dir) for f in files]
-        if any(f.is_dir() for f in files):
-            return self._add_corpus_tree(
-                files, ref_id=ref_id, title=title, source_class=source_class
-            )
         if ref_id is None:
             today = datetime.date.today().isoformat()
             ref_id = f"{today}-{_slug(files[0].stem)}"
@@ -142,7 +212,7 @@ class Workspace:
         new_forms = [
             Form(
                 role=role or self.guess_role(f),
-                location=str(f.relative_to(self.root)) if f.is_relative_to(self.root) else str(f),
+                location=self._form_location(f),
                 hash=hashlib.sha256(f.read_bytes()).hexdigest()[:12],
                 origin="added",
             )
@@ -176,11 +246,7 @@ class Workspace:
             raise AddError("目录摄入仅支持单个目录参数(不与文件混加)")
         d = files[0]
         if (source_class or self.constitution.default_class) != "corpus":
-            # Web「添加参考」默认 stream:目录整夹不能当观测参考
-            raise AddError(
-                f"目录不能整夹添加为观测参考,请逐文件添加:{d}。"
-                "若要把整个目录当基线资料库,请用「添加基线」/ add --corpus(仅登记路径指针)。"
-            )
+            raise AddError(f"内部错误:非 corpus 目录应走多形态 stream 路径:{d}")
         if ref_id is None:
             today = datetime.date.today().isoformat()
             ref_id = f"{today}-{_slug(d.name)}"

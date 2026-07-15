@@ -45,6 +45,7 @@
             <button type="submit" class="btn btn-step dlg-go">{{ t('ref.add_path_btn') }}</button>
           </div>
           <label class="dlg-check"><input type="checkbox" name="copy" value="1"> {{ t('ref.copy_label') }}</label>
+          <p class="dlg-hint">{{ t('ref.dir_hint') }}</p>
         </form>
         <div class="dlg-or"><span>{{ t('ref.or') }}</span></div>
         <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref" hx-encoding="multipart/form-data"

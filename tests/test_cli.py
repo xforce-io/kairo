@@ -183,17 +183,22 @@ def test_cli_index_command_writes_meetings(tmp_path, monkeypatch):
     assert "会议实录" in index.read_text()
 
 
-def test_cli_add_dir_without_corpus_friendly_error(tmp_path, monkeypatch):
-    """#24:add <dir> 无 --corpus → 友好错误 + 非零退出,不吐 traceback。"""
+def test_cli_add_dir_stream_multiform(tmp_path, monkeypatch):
+    """#67:add <dir> 无 --corpus → 一条 stream 多形态 ref。"""
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["init"])
     d = tmp_path / "docs"
     d.mkdir()
     (d / "a.md").write_text("a")
+    (d / "b.m4a").write_bytes(b"x")
     result = runner.invoke(app, ["add", str(d)])
-    assert result.exit_code != 0
-    assert "corpus" in result.output
-    assert "Traceback" not in result.output
+    assert result.exit_code == 0
+    assert "added" in result.output
+    mans = list((tmp_path / "references").glob("*/manifest.yaml"))
+    assert len(mans) == 1
+    text = mans[0].read_text()
+    assert "class: stream" in text
+    assert text.count("role:") >= 2
 
 
 def test_cli_add_copy_materializes(tmp_path, monkeypatch):
@@ -209,7 +214,18 @@ def test_cli_add_copy_materializes(tmp_path, monkeypatch):
     assert any(uploads.iterdir())
 
 
-def test_cli_add_copy_dir_friendly_error(tmp_path, monkeypatch):
+def test_cli_add_copy_dir_stream_ok(tmp_path, monkeypatch):
+    """#67:add <dir> --copy → stream 多形态并物化。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    d = tmp_path / "lib"
+    d.mkdir()
+    (d / "a.md").write_text("a")
+    result = runner.invoke(app, ["add", str(d), "--copy"])
+    assert result.exit_code == 0
+
+
+def test_cli_add_copy_corpus_dir_friendly_error(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["init"])
     d = tmp_path / "lib"
@@ -217,7 +233,7 @@ def test_cli_add_copy_dir_friendly_error(tmp_path, monkeypatch):
     (d / "a.md").write_text("a")
     result = runner.invoke(app, ["add", str(d), "--corpus", "--copy"])
     assert result.exit_code != 0
-    assert "copy" in result.output.lower() or "目录" in result.output
+    assert "基线" in result.output or "copy" in result.output.lower() or "目录" in result.output
 
 
 def test_cli_add_dir_corpus_ok(tmp_path, monkeypatch):
