@@ -103,11 +103,11 @@ model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → 已配置 `[provider.openai]` → 可用的 `claude` CLI → stub。设置 `KAIRO_PROVIDER=openai` 可强制要求使用 endpoint provider。
+Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → 可用的 `grok` CLI → 已配置 `[provider.openai]` → 可用的 `claude` CLI → stub。本机已登录 Grok 时，直接 `kairo step` 默认走 `GrokProvider`。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` 强制指定。注意：Grok 无 `--add-dir`；依赖 corpus / 图片 `read_dirs` 的场景请用 `claude-code`（见 [#61](https://github.com/xforce-io/kairo/issues/61)）。
 
 ## 技术栈
 
-Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub / openai-compatible / claude-code / codex），无 audit。详见 Issue [#4](https://github.com/xforce-io/kairo/issues/4) 与 [#54](https://github.com/xforce-io/kairo/issues/54)。
+Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub / grok / openai-compatible / claude-code / codex），无 audit。详见 Issue [#4](https://github.com/xforce-io/kairo/issues/4)、[#54](https://github.com/xforce-io/kairo/issues/54) 与 [#61](https://github.com/xforce-io/kairo/issues/61)。
 
 ## Web Console（可选）
 
@@ -122,4 +122,4 @@ Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub /
 
 ## 设计与决策轨迹
 
-可用的 CLI 工具（`init`/`add`/`step`/… 全部就绪，105+ 测试）。各特性的设计稿按 issue 编号存于 [`docs/design/`](docs/design)，是对应决策的 single source of truth：MVP [#1](https://github.com/xforce-io/kairo/issues/1)、AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4)、源分层 [#13](https://github.com/xforce-io/kairo/issues/13) 等。
+可用的 CLI 工具（`init`/`add`/`step`/… 全部就绪，105+ 测试）。各特性的设计稿按 issue 编号存于 [`docs/design/`](docs/design)，是对应决策的 single source of truth：MVP [#1](https://github.com/xforce-io/kairo/issues/1)、AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4)、源分层 [#13](https://github.com/xforce-io/kairo/issues/13)、Grok provider [#61](https://github.com/xforce-io/kairo/issues/61) 等。

@@ -14,6 +14,7 @@ from kairo.provider import (
     AgentResult,
     ClaudeCodeProvider,
     CodexProvider,
+    GrokProvider,
     OpenAICompatibleProvider,
     StubProvider,
 )
@@ -219,6 +220,151 @@ def test_codex_provider_invokes_cli_and_reads_last_message(tmp_path):
 
 def test_codex_provider_identity():
     assert CodexProvider().name == "codex"
+
+
+# ---- GrokProvider(driving `grok -p`,注入 runner)----
+
+
+def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append((cmd, args, input, timeout))
+        Path(stdout_file).write_text(
+            json.dumps({"text": "GROK 纪要", "stopReason": "EndTurn"})
+        )
+
+    p = GrokProvider(model="grok-4.5", runner=fake_runner)
+    res = p.run(
+        AgentConfig(
+            persona="你是X",
+            context="材料Y",
+            artifact_dir=tmp_path,
+            model="grok-4.5",
+            artifact="digest.md",
+            timeout_s=30,
+        )
+    )
+    cmd, args, sent, timeout = calls[0]
+    assert cmd == "grok"
+    assert "-p" in args
+    assert "--output-format" in args and "json" in args
+    assert "-m" in args and "grok-4.5" in args
+    assert timeout == 30
+    # prompt 进 -p 参数或 input（与 runner 签名对齐）
+    prompt_blob = " ".join(args) + "\n" + (sent or "")
+    assert "你是X" in prompt_blob and "材料Y" in prompt_blob
+    out = tmp_path / "digest.md"
+    assert out in res.artifacts
+    assert out.read_text() == "GROK 纪要"
+    assert res.result_text == "GROK 纪要"
+    names = {Path(a).name for a in res.artifacts}
+    assert "_prompt.md" not in names and "_grok_stdout.json" not in names
+
+
+def test_grok_provider_omits_model_flag_when_empty(tmp_path):
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"text": "OK"}))
+
+    GrokProvider(model="", runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+        )
+    )
+    assert "-m" not in calls[0]
+
+
+def test_grok_provider_ignores_read_dirs(tmp_path):
+    """#61:Grok 无 --add-dir；有 read_dirs 时不伪造授权旗标。"""
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"text": "OK"}))
+
+    ref = tmp_path / "corpus"
+    ref.mkdir()
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+            read_dirs=[ref],
+        )
+    )
+    args = calls[0]
+    assert "--add-dir" not in args
+    assert "--allowedTools" not in args
+    assert str(ref) not in args
+
+
+def test_grok_provider_identity():
+    p = GrokProvider(model="")
+    assert p.name == "grok"
+    assert p.model == ""
+
+
+def test_grok_provider_raises_on_error_type(tmp_path):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        Path(stdout_file).write_text(
+            json.dumps({"type": "error", "message": "Couldn't set model"})
+        )
+
+    p = GrokProvider(runner=fake_runner)
+    with pytest.raises(RuntimeError):
+        p.run(
+            AgentConfig(
+                persona="X",
+                context="Y",
+                artifact_dir=tmp_path,
+                model="",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_grok_provider_raises_on_missing_text(tmp_path):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        Path(stdout_file).write_text(json.dumps({"stopReason": "EndTurn"}))
+
+    with pytest.raises(RuntimeError):
+        GrokProvider(runner=fake_runner).run(
+            AgentConfig(
+                persona="X",
+                context="Y",
+                artifact_dir=tmp_path,
+                model="",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_grok_provider_raises_when_no_stdout(tmp_path):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        pass
+
+    with pytest.raises(RuntimeError):
+        GrokProvider(runner=fake_runner).run(
+            AgentConfig(
+                persona="X",
+                context="Y",
+                artifact_dir=tmp_path,
+                model="",
+                artifact="out.md",
+            )
+        )
+    assert not (tmp_path / "out.md").exists()
 
 
 # ---- OpenAICompatibleProvider(configured endpoint via official SDK seam)----
