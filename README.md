@@ -28,7 +28,8 @@ Requires Python ≥ 3.11. Audio transcription depends on a local whisper — see
 
 ```bash
 kairo init "My research topic"   # initialize the current directory as a topic-workspace + default constitution
-kairo add recording.m4a          # register a reference (stream/observation by default)
+kairo add recording.m4a          # register a path pointer (stream/observation by default)
+kairo add recording.m4a --copy   # copy into workspace first, then register
 kairo add report.docx            # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
 kairo add whitepaper.md --corpus # register as corpus/baseline (authoritative reference material)
 kairo step                       # reconcile to convergence: ASR/doc2text → Digest → Compose (prose alongside when normalize is on)
@@ -42,7 +43,7 @@ Produces two layers of documents: `understanding.md` (neutral facts) and `assess
 | Command | Purpose |
 | --- | --- |
 | `init` | Initialize a topic-workspace + default constitution |
-| `add` | Register all forms of one reference (`--corpus` marks baseline; stream observation by default) |
+| `add` | Register a reference (path pointer by default; `--copy` materializes into workspace; `--corpus` marks baseline) |
 | `step` | Run the reconciliation loop to convergence (configured endpoint → Claude CLI → stub; `KAIRO_STUB` forces stub) |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
 | `accept` | Accept manual edits, pin as the new baseline, clear `blocked: manual-edit` |

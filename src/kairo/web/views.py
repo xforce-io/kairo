@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 from html import escape
 from pathlib import Path
+from typing import Annotated
 from urllib.parse import quote
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
@@ -362,16 +363,27 @@ def add_ref(
     slug: str,
     path: str = Form(None),
     file: UploadFile = File(None),
+    # 表单字段名仍为 copy;参数名避开 pydantic BaseModel.copy 阴影
+    copy_flag: Annotated[str | None, Form(alias="copy")] = None,
 ) -> HTMLResponse:
+    """统一摄入:路径(+可选 copy)或浏览器文件(必物化到 uploads)。"""
     ws = _open(request, slug)
-    if file is not None:
-        src = _save_upload(ws, file)
-    elif path:
-        src = Path(path)
-    else:
-        raise HTTPException(status_code=400, detail="need file or path")
+    # 空 file 域(合并表单)视为未上传
+    has_file = file is not None and bool(file.filename)
     try:
-        ws.add([src])
+        if has_file:
+            src = _save_upload(ws, file)  # 浏览器无稳定 path → 必 copy
+            ws.add([src])
+        elif path:
+            # checkbox 未勾选时字段缺失;勾选时常为 "1" / "on"
+            do_copy = bool(copy_flag) and str(copy_flag).lower() not in (
+                "0",
+                "false",
+                "off",
+            )
+            ws.add([Path(path)], copy=do_copy)
+        else:
+            raise HTTPException(status_code=400, detail="need file or path")
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return _refs_fragment(request, ws, slug)
@@ -390,19 +402,15 @@ def attach_to_ref(
         raise HTTPException(status_code=404, detail="reference not found")
     ref_dir = ws.references_dir() / ref_id
     uploads = [f for f in (files or []) if f.filename]
-    if uploads:
-        srcs = [_save_upload_to(ref_dir, f) for f in uploads]  # 可一次多张
-    elif path:
-        p = Path(path)
-        if not p.exists():
-            raise HTTPException(status_code=400, detail=f"路径不存在:{p}")
-        dest = ref_dir / p.name
-        dest.write_bytes(p.read_bytes())  # 复制进 ref 目录(自包含)
-        srcs = [dest]
-    else:
-        raise HTTPException(status_code=400, detail="need file or path")
     try:
-        ws.add(srcs, ref_id=ref_id)
+        if uploads:
+            srcs = [_save_upload_to(ref_dir, f) for f in uploads]  # 浏览器 → 必 copy 进 ref
+            ws.add(srcs, ref_id=ref_id)
+        elif path:
+            # 路径 attach:统一走 copy=True 物化进 ref 目录(自包含,#44/#64)
+            ws.add([Path(path)], ref_id=ref_id, copy=True)
+        else:
+            raise HTTPException(status_code=400, detail="need file or path")
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     # 复用 ref 详情渲染,刷新右栏元信息

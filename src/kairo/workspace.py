@@ -6,6 +6,7 @@ import datetime
 import hashlib
 import json
 import re
+import shutil
 from pathlib import Path
 
 import yaml
@@ -86,6 +87,22 @@ class Workspace:
             return rbe[ext]
         return _default_roles_by_ext().get(ext, self.constitution.default_role)
 
+    def _copy_into(self, src: Path, dest_dir: Path) -> Path:
+        """把源文件拷进 dest_dir;同名则 stem-1/stem-2…。返回副本路径。
+
+        文件名取自源 basename,不依赖 title(#64:title ⊥ 副本名)。
+        """
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest = dest_dir / src.name
+        if dest.exists():
+            stem, suffix = src.stem, src.suffix
+            n = 1
+            while dest.exists():
+                dest = dest_dir / f"{stem}-{n}{suffix}"
+                n += 1
+        shutil.copy2(src, dest)
+        return dest
+
     def add(
         self,
         files: list[Path | str],
@@ -93,11 +110,23 @@ class Workspace:
         role: str | None = None,
         title: str | None = None,
         source_class: str | None = None,
+        copy: bool = False,
     ) -> str:
-        files = [Path(f) for f in files]
+        """登记 reference 形态。copy=True 时先物化到 workspace 再登记副本路径(#64)。"""
+        files = [Path(f).expanduser() for f in files]
         missing = [f for f in files if not f.exists()]
         if missing:
             raise AddError(f"路径不存在:{missing[0]}")
+        if copy:
+            if any(f.is_dir() for f in files):
+                raise AddError(
+                    "目录不支持 copy;基线请用目录指针(add <dir> --corpus,勿加 --copy)"
+                )
+            if ref_id is not None and (self.references_dir() / ref_id).is_dir():
+                dest_dir = self.references_dir() / ref_id
+            else:
+                dest_dir = self.root / ".kairo" / "uploads"
+            files = [self._copy_into(f, dest_dir) for f in files]
         if any(f.is_dir() for f in files):
             return self._add_corpus_tree(
                 files, ref_id=ref_id, title=title, source_class=source_class

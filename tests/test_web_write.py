@@ -368,3 +368,44 @@ def test_post_prose_rejects_ineligible(tmp_path):
     rid = Workspace.open(tmp_path / "ws").add([src])
     r = _client(tmp_path).post(f"/w/ws/ref/{rid}/prose")
     assert r.status_code == 400
+
+
+def test_workspace_view_has_copy_checkbox(tmp_path):
+    """#64:添加参考对话框暴露 copy 选项。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = _client(tmp_path).get("/w/ws")
+    assert r.status_code == 200
+    assert 'name="copy"' in r.text
+    assert "复制到工作区" in r.text or "Copy into workspace" in r.text
+
+
+def test_add_ref_by_path_with_copy(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("要拷贝的内容")
+    r = _client(tmp_path).post("/w/ws/ref", data={"path": str(src), "copy": "1"})
+    assert r.status_code == 200
+    ws = Workspace.open(tmp_path / "ws")
+    rid = ws.list_reference_ids()[0]
+    loc = ws.read_manifest(rid).forms[0].location
+    assert "uploads" in loc
+    p = ws.root / loc
+    assert p.is_file()
+    assert p.read_text() == "要拷贝的内容"
+
+
+def test_rename_does_not_change_location_after_web_copy(tmp_path):
+    """#64:改显示名不动 form.location。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("x")
+    _client(tmp_path).post("/w/ws/ref", data={"path": str(src), "copy": "1"})
+    ws = Workspace.open(tmp_path / "ws")
+    rid = ws.list_reference_ids()[0]
+    before = [f.location for f in ws.read_manifest(rid).forms]
+    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/title", data={"title": "新显示名"})
+    assert r.status_code == 200
+    assert "新显示名" in r.text
+    man = Workspace.open(tmp_path / "ws").read_manifest(rid)
+    assert man.title == "新显示名"
+    assert [f.location for f in man.forms] == before

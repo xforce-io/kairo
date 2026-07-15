@@ -44,6 +44,7 @@
             <input type="text" name="path" placeholder="{{ t('ref.path_placeholder') }}" required>
             <button type="submit" class="btn btn-step dlg-go">{{ t('ref.add_path_btn') }}</button>
           </div>
+          <label class="dlg-check"><input type="checkbox" name="copy" value="1"> {{ t('ref.copy_label') }}</label>
         </form>
         <div class="dlg-or"><span>{{ t('ref.or') }}</span></div>
         <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref" hx-encoding="multipart/form-data"
@@ -54,6 +55,7 @@
             <input type="file" name="file" required>
             <button type="submit" class="btn btn-step dlg-go">{{ t('ref.upload_btn') }}</button>
           </div>
+          <p class="dlg-hint">{{ t('ref.copy_forced_hint') }}</p>
         </form>
         <script>
           // 集中处理弹框内两表单的错误回显:htmx 默认不渲染非 2xx,需手动取 detail
