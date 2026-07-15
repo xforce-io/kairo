@@ -260,7 +260,7 @@ class NormalizeRule:
 
 
 class DigestRule:
-    """有正文(transcript/source_text)且无 digest → 产忠实纪要(用 provider)。"""
+    """有正文(transcript/source_text)且无 digest → 产高密度记忆纪要(用 provider)。"""
 
     def __init__(self, ws, provider) -> None:
         self.ws = ws
