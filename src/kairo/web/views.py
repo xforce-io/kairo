@@ -433,27 +433,57 @@ def rename_ref(
     return ref_view(request, slug, ref_id)
 
 
-def _glossary_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
-    t = _t(request)
-    entries = [
-        {"name": e.name, "note": e.note, "aka": ", ".join(e.aka)}
-        for e in ws.constitution.glossary
+def _entry_rows(entries) -> list[dict]:
+    return [
+        {
+            "name": e.name,
+            "note": e.note,
+            "aka": ", ".join(e.aka),
+            "tags": ", ".join(e.tags),
+        }
+        for e in entries
     ]
+
+
+def _parse_aka(aka: str) -> list[str]:
+    return [p.strip() for p in aka.replace("，", ",").split(",") if p.strip()]
+
+
+def _parse_tags(tags: str) -> list[str]:
+    return [p.strip() for p in tags.replace("，", ",").split(",") if p.strip()]
+
+
+def _glossary_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
+    from kairo.glossary import (
+        load_glossary_file,
+        machine_glossary_path,
+        root_glossary_path,
+    )
+
+    t = _t(request)
+    serve_root = Path(request.app.state.root)
+    shared = load_glossary_file(root_glossary_path(serve_root))
+    machine = load_glossary_file(machine_glossary_path())
+    local = ws.constitution.glossary
     return _render(
         request,
         "_glossary.html",
         {
             "slug": slug,
-            "entries": entries,
-            "count": len(entries),
+            "shared_entries": _entry_rows(shared),
+            "local_entries": _entry_rows(local),
+            "shared_count": len(shared),
+            "local_count": len(local),
+            "machine_count": len(machine),
             "hint": t("glossary.restep_hint"),
+            "shared_hint": t("glossary.shared_hint"),
         },
     )
 
 
 @router.get("/w/{slug}/glossary", response_class=HTMLResponse)
 def glossary_view(request: Request, slug: str) -> HTMLResponse:
-    """#69:右栏真名册面板。"""
+    """#69/#71:右栏真名册面板(公共 root + 本工作区)。"""
     return _glossary_fragment(request, _open(request, slug), slug)
 
 
@@ -464,22 +494,51 @@ def glossary_add(
     name: str = Form(...),
     note: str = Form(""),
     aka: str = Form(""),
+    tags: str = Form(""),
+    scope: str = Form("workspace"),
 ) -> HTMLResponse:
-    """追加一条 glossary;aka 支持中英文逗号分隔。"""
+    """追加一条;scope=workspace|shared(root glossary.yaml)。"""
+    from kairo.glossary import add_entry, load_glossary_file, root_glossary_path, save_glossary_file
+
     ws = _open(request, slug)
-    parts = [p.strip() for p in aka.replace("，", ",").split(",") if p.strip()]
+    parts = _parse_aka(aka)
+    tag_parts = _parse_tags(tags)
     try:
-        ws.add_glossary_entry(name, note=note, aka=parts)
+        if scope == "shared":
+            path = root_glossary_path(Path(request.app.state.root))
+            entries = add_entry(
+                load_glossary_file(path), name, note=note, aka=parts, tags=tag_parts
+            )
+            save_glossary_file(path, entries)
+        else:
+            ws.add_glossary_entry(name, note=note, aka=parts, tags=tag_parts)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     return _glossary_fragment(request, ws, slug)
 
 
 @router.post("/w/{slug}/glossary/{index}/delete", response_class=HTMLResponse)
-def glossary_delete(request: Request, slug: str, index: int) -> HTMLResponse:
+def glossary_delete(
+    request: Request,
+    slug: str,
+    index: int,
+    scope: str = Form("workspace"),
+) -> HTMLResponse:
+    from kairo.glossary import (
+        load_glossary_file,
+        remove_entry,
+        root_glossary_path,
+        save_glossary_file,
+    )
+
     ws = _open(request, slug)
     try:
-        ws.remove_glossary_entry(index)
+        if scope == "shared":
+            path = root_glossary_path(Path(request.app.state.root))
+            entries = remove_entry(load_glossary_file(path), index)
+            save_glossary_file(path, entries)
+        else:
+            ws.remove_glossary_entry(index)
     except IndexError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
     return _glossary_fragment(request, ws, slug)

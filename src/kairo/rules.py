@@ -229,7 +229,7 @@ class NormalizeRule:
             content = _run_agent(
                 self.provider,
                 self.prompt
-                + self.ws.constitution.glossary_reference()
+                + self.ws.glossary_reference()
                 + _OUTPUT_DISCIPLINE,
                 body,
                 "prose.md",
@@ -316,7 +316,7 @@ class DigestRule:
             img_lines.append(str(p))
 
         def run(state: State) -> None:
-            persona = self.prompt + self.ws.constitution.glossary_reference()
+            persona = self.prompt + self.ws.glossary_reference()
             if img_lines:
                 persona += (
                     "\n\n[现场图片]本会议另有以下图片,请用 Read 工具逐一查看,"
@@ -473,7 +473,7 @@ class ComposeRule:
             content = _run_agent(
                 self.provider,
                 target.fold_protocol
-                + self.ws.constitution.glossary_reference()
+                + self.ws.glossary_reference()
                 + reference_section
                 + _OUTPUT_DISCIPLINE
                 + _COMPOSE_DISCIPLINE,

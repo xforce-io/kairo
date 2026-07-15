@@ -160,6 +160,7 @@ class GlossaryEntry(BaseModel):
     name: str
     note: str = ""
     aka: list[str] = Field(default_factory=list)  # 曾误识别/同音变体,纯参考
+    tags: list[str] = Field(default_factory=list)  # 轻量分组(#71),可选
 
 
 class Constitution(BaseModel):
@@ -180,21 +181,13 @@ class Constitution(BaseModel):
     glossary: list[GlossaryEntry] = Field(default_factory=list)  # 领域真名册(#20)
 
     def glossary_reference(self) -> str:
-        """真名册 → 一段权威参考(注入 Digest/Compose persona);空表返回空串(零行为变化)。"""
-        if not self.glossary:
-            return ""
-        lines = []
-        for e in self.glossary:
-            line = f"- {e.name}"
-            if e.note:
-                line += f" —— {e.note}"
-            if e.aka:
-                line += f"(亦作:{'/'.join(e.aka)})"
-            lines.append(line)
-        return (
-            "\n\n[领域真名册](权威参考;下列为本领域规范名,产出时一律用规范名,"
-            "勿用变体/别名;遇含糊提及按此锚定)\n" + "\n".join(lines)
-        )
+        """仅 workspace 层真名册 → 权威参考段;空表 ""。
+
+        注入请优先用 Workspace.glossary_reference()(含 machine/root 合并,#71)。
+        """
+        from kairo.glossary import format_glossary_reference
+
+        return format_glossary_reference(self.glossary)
 
 
 # ---- reference manifest (references/<id>/manifest.yaml) ----

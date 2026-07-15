@@ -76,7 +76,7 @@ glossary:
   note: 平台名（与 corpus 基线一致）
 ```
 
-注：纠正发生在**规范化 / 纪要 / 综合阶段**，ASR 转写本身不受影响（whisper 仍按音产出）。空表（`glossary: []`，默认）时零行为变化；对已生成的 reference 改 glossary 后，需 `kairo re-step <id>` 重产 digest 才会重新校正。Web Console 右栏 **真名册** 可追加/删除条目（写回本文件 `glossary`；[#69](https://github.com/xforce-io/kairo/issues/69)）。
+注：纠正发生在**规范化 / 纪要 / 综合阶段**，ASR 转写本身不受影响（whisper 仍按音产出）。空表（`glossary: []`，默认）时零行为变化；对已生成的 reference 改 glossary 后，需 `kairo re-step <id>` 重产 digest 才会重新校正。Web Console 右栏 **真名册** 分 **公共**（`<serve-root>/glossary.yaml`，所有 workspace 共享）与 **本工作区**（本文件 `glossary`）；注入时 machine（`~/.config/kairo/glossary.yaml`）→ root → workspace，同名后者覆盖（[#69](https://github.com/xforce-io/kairo/issues/69) / [#71](https://github.com/xforce-io/kairo/issues/71)）。
 
 ## 本机 ASR 配置
 
