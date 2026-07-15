@@ -192,6 +192,9 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .glossary-table .btn-regen { margin: 0; padding: 4px 8px; font-size: 11px; }
 .gl-section { padding-top: 4px; border-top: 1px solid var(--line); margin-top: 8px; }
 .gl-section:first-of-type { border-top: none; margin-top: 0; }
+.ref-blocks { margin: 10px 0 12px; padding: 10px 12px; border-radius: 8px; background: #f7ecec; border: 1px solid #e2b6b6; }
+.ref-block-list { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: #7a3030; }
+.ref-block-list code { font-size: 12px; }
 .dlg-row { display: flex; gap: 8px; align-items: stretch; }
 .dlg-row input[type=text] { flex: 1; min-width: 0; padding: 9px 11px; font-size: 13.5px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--paper-2); color: var(--ink); }
 .dlg-row input[type=text]:focus { outline: none; border-color: var(--pine); }

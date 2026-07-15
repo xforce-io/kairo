@@ -117,22 +117,71 @@ def step(ws, provider) -> bool:
     return any_progress
 
 
+def ref_product_blocks(ws, ref_id: str) -> list[dict]:
+    """该 reference 下 status=blocked 的 products(供 Web 展示)。"""
+    prefix = f"references/{ref_id}/"
+    out = []
+    for key, ps in ws.read_state().products.items():
+        if key.startswith(prefix) and ps.status == "blocked":
+            out.append(
+                {
+                    "key": key,
+                    "name": key[len(prefix) :],
+                    "reason": ps.reason or "blocked",
+                }
+            )
+    return sorted(out, key=lambda x: x["name"])
+
+
+def clear_reference_products(ws, ref_id: str) -> None:
+    """清除 ref 的派生产物记账与文件,并去掉非 origin=added 的 forms(#73 重试 asr-failed)。
+
+    保留用户添加的源 form(音频/附件/原文)。
+    """
+    if ref_id not in ws.list_reference_ids():
+        raise ValueError(f"reference 不存在:{ref_id}")
+    state = ws.read_state()
+    prefix = f"references/{ref_id}/"
+    for key in list(state.products):
+        if key.startswith(prefix):
+            (ws.root / key).unlink(missing_ok=True)
+            del state.products[key]
+    ref_dir = ws.references_dir() / ref_id
+    for name in ("transcript.md", "prose.md", "digest.md"):
+        (ref_dir / name).unlink(missing_ok=True)
+    for p in ref_dir.glob("transcript.*.md"):
+        p.unlink(missing_ok=True)
+    for p in ref_dir.glob("source_text*.md"):
+        p.unlink(missing_ok=True)
+    man = ws.read_manifest(ref_id)
+    man.forms = [f for f in man.forms if f.origin == "added"]
+    ws.write_manifest(ref_id, man)
+    ws.write_state(state)
+
+
+def retry_reference(ws, provider, ref_id: str) -> bool:
+    """清除 ref 派生产物(含终态 blocked)后 step 到收敛。"""
+    clear_reference_products(ws, ref_id)
+    return step(ws, provider)
+
+
 def re_step(ws, provider, target: str | None = None) -> bool:
-    """强制重算。全量 / 指定文档(整篇重综合,丢手改)/ 指定 reference(重产 digest)。"""
+    """强制重算。全量 / 指定文档(整篇重综合,丢手改)/ 指定 reference(清派生产物后重跑)。"""
     state = ws.read_state()
     target_paths = [t.path for t in ws.constitution.targets]
     if target is None:
         for tp in target_paths:
             (ws.root / tp).unlink(missing_ok=True)
         state.targets = {}
-    elif target in target_paths:
+        ws.write_state(state)
+        return step(ws, provider)
+    if target in target_paths:
         (ws.root / target).unlink(missing_ok=True)
         state.targets.pop(target, None)
-    else:
-        (ws.root / f"references/{target}/digest.md").unlink(missing_ok=True)
-        state.products.pop(f"references/{target}/digest.md", None)
-    ws.write_state(state)
-    return step(ws, provider)
+        ws.write_state(state)
+        return step(ws, provider)
+    # reference id:完整重试(含 asr-failed),不再只删 digest
+    return retry_reference(ws, provider, target)
 
 
 def accept(ws, doc: str) -> None:
