@@ -69,7 +69,7 @@ def add(
 
 @app.command()
 def step() -> None:
-    """跑调和循环到收敛(provider 自动选:endpoint 配置→Claude CLI→stub;KAIRO_STUB 强制 stub)。"""
+    """跑调和循环到收敛(provider 自动选:grok CLI→endpoint→claude CLI→stub;KAIRO_STUB 强制 stub)。"""
     ws = _open_ws()
     progressed = engine_step(ws, select_provider())
     typer.echo("stepped" if progressed else "no change")

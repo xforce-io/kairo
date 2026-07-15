@@ -2,6 +2,7 @@ from kairo import provider
 from kairo.provider import (
     ClaudeCodeProvider,
     CodexProvider,
+    GrokProvider,
     OpenAICompatibleProvider,
     StubProvider,
     resolve_openai_provider_config,
@@ -9,18 +10,30 @@ from kairo.provider import (
 )
 
 
-# ---- provider 选择(只 subscription,无 API 模式)----
+# ---- provider 选择 ----
 
 
-def test_select_provider_auto_uses_claude_code_when_cli_available(monkeypatch):
+def test_select_provider_auto_prefers_grok_when_cli_available(monkeypatch):
+    """#61:auto 默认真实路径 = grok CLI。"""
     monkeypatch.delenv("KAIRO_STUB", raising=False)
     monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
     monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: None)
-    monkeypatch.setattr(provider, "_cli_available", lambda cmd: True)
-    assert isinstance(select_provider(), ClaudeCodeProvider)  # subscription 优先
+    monkeypatch.setattr(
+        provider, "_cli_available", lambda cmd: cmd in {"grok", "claude"}
+    )
+    assert isinstance(select_provider(), GrokProvider)
 
 
-def test_select_provider_auto_prefers_configured_openai_endpoint(monkeypatch):
+def test_select_provider_auto_uses_claude_code_when_only_claude_available(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
+    monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: None)
+    monkeypatch.setattr(provider, "_cli_available", lambda cmd: cmd == "claude")
+    assert isinstance(select_provider(), ClaudeCodeProvider)
+
+
+def test_select_provider_auto_prefers_grok_over_configured_openai(monkeypatch):
+    """#61:grok 可用时优先于 openai endpoint。"""
     monkeypatch.delenv("KAIRO_STUB", raising=False)
     monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
     monkeypatch.setattr(
@@ -32,7 +45,23 @@ def test_select_provider_auto_prefers_configured_openai_endpoint(monkeypatch):
             "api_key": "test-key",
         },
     )
-    monkeypatch.setattr(provider, "_cli_available", lambda cmd: True)
+    monkeypatch.setattr(provider, "_cli_available", lambda cmd: cmd == "grok")
+    assert isinstance(select_provider(), GrokProvider)
+
+
+def test_select_provider_auto_uses_openai_when_no_grok(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
+    monkeypatch.setattr(
+        provider,
+        "resolve_openai_provider_config",
+        lambda: {
+            "base_url": "https://llm.example/v1",
+            "model": "endpoint-model",
+            "api_key": "test-key",
+        },
+    )
+    monkeypatch.setattr(provider, "_cli_available", lambda cmd: False)
     selected = select_provider()
     assert isinstance(selected, OpenAICompatibleProvider)
     assert selected.model == "endpoint-model"
@@ -43,7 +72,7 @@ def test_select_provider_auto_falls_back_to_stub_without_cli(monkeypatch):
     monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
     monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: None)
     monkeypatch.setattr(provider, "_cli_available", lambda cmd: False)
-    assert isinstance(select_provider(), StubProvider)  # 无 claude CLI → stub
+    assert isinstance(select_provider(), StubProvider)
 
 
 def test_select_provider_forced_stub_is_highest(monkeypatch):
@@ -62,6 +91,12 @@ def test_select_provider_explicit_codex(monkeypatch):
     monkeypatch.delenv("KAIRO_STUB", raising=False)
     monkeypatch.setenv("KAIRO_PROVIDER", "codex")
     assert isinstance(select_provider(), CodexProvider)
+
+
+def test_select_provider_explicit_grok(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "grok")
+    assert isinstance(select_provider(), GrokProvider)
 
 
 def test_select_provider_explicit_openai(monkeypatch):

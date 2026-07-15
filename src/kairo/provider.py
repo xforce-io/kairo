@@ -2,8 +2,10 @@
 
 #4:从「`complete(prompt)->str` 模型缝」升级为「`run(config)->artifacts` agent 缝」。
 agent 靠往 `artifact_dir` 写文件来通信;外壳(rules/engine)只编排与记账。
-backend:StubProvider(测试)/ OpenAICompatibleProvider / ClaudeCodeProvider / CodexProvider。
-默认真实 LLM 优先走 machine-local OpenAI-compatible endpoint 配置,否则回退 CLI subscription。
+backend:StubProvider(测试)/ GrokProvider / OpenAICompatibleProvider /
+ClaudeCodeProvider / CodexProvider。
+默认真实路径:本机 grok CLI 可用 → GrokProvider;否则 openai endpoint;
+否则 claude CLI;否则 stub。Grok 无 --add-dir,read_dirs 场景请用 claude-code。
 """
 
 from __future__ import annotations
@@ -274,10 +276,55 @@ class CodexProvider:
         )
 
 
+class GrokProvider:
+    """驱动 `grok -p` CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
+
+    #61:Grok 无 --add-dir;read_dirs(corpus/附件)忽略,相关场景请用 claude-code。
+    JSON 成功字段为 text;错误为 {"type":"error","message":...},写产物前拦截(#8)。
+    """
+
+    name = "grok"
+
+    def __init__(self, model: str = "", runner=None) -> None:
+        self.model = model
+        self._runner = runner or _default_cli_runner
+
+    def run(self, config: AgentConfig, signal=None) -> AgentResult:
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        prompt = f"{config.persona}\n\n---\n\n{config.context}"
+        (config.artifact_dir / "_prompt.md").write_text(prompt)
+        stdout_file = config.artifact_dir / "_grok_stdout.json"
+        # -p 要求 <PROMPT>;read_dirs 无 CLI 等价物,MVP 忽略(见设计 #61)
+        args = ["-p", prompt, "--output-format", "json"]
+        if self.model.strip():
+            args += ["-m", self.model]
+        self._runner(
+            "grok",
+            args,
+            cwd=config.artifact_dir,
+            input=prompt,
+            stdout_file=stdout_file,
+            timeout=config.timeout_s,
+        )
+        if not stdout_file.exists():
+            raise RuntimeError(f"grok 无 stdout 输出:{stdout_file}")
+        data = json.loads(stdout_file.read_text())
+        if data.get("type") == "error":
+            raise RuntimeError(f"grok 报错:{data.get('message')!r}")
+        result = data.get("text")
+        if not isinstance(result, str) or not result.strip():
+            raise RuntimeError(f"grok stdout 缺 text 字段:{stdout_file}")
+        (config.artifact_dir / (config.artifact or "output.md")).write_text(result)
+        return AgentResult(
+            artifacts=_scan_artifacts(config.artifact_dir), result_text=result
+        )
+
+
 _BACKENDS = {
     "stub": StubProvider,
     "claude-code": ClaudeCodeProvider,
     "codex": CodexProvider,
+    "grok": GrokProvider,
 }
 
 
@@ -304,8 +351,8 @@ def _cli_available(cmd: str) -> bool:
 def select_provider():
     """选 backend:KAIRO_STUB(测试隔离,最高)> KAIRO_PROVIDER(显式)> auto。
 
-    auto:配置了 OpenAI-compatible endpoint → OpenAICompatibleProvider;
-    否则 claude CLI 可用 → ClaudeCodeProvider;否则 StubProvider。
+    auto:grok CLI 可用 → GrokProvider;否则 OpenAI-compatible endpoint;
+    否则 claude CLI → ClaudeCodeProvider;否则 StubProvider。
     """
     if os.environ.get("KAIRO_STUB"):
         return StubProvider()
@@ -317,6 +364,8 @@ def select_provider():
                 raise RuntimeError("KAIRO_PROVIDER=openai 但缺少 provider.openai 配置或 API key")
             return provider
         return _BACKENDS.get(explicit, StubProvider)()
+    if _cli_available("grok"):
+        return GrokProvider()
     provider = _openai_provider_from_config()
     if provider is not None:
         return provider

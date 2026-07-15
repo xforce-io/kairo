@@ -103,11 +103,11 @@ model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → configured `[provider.openai]` → available `claude` CLI → stub. Set `KAIRO_PROVIDER=openai` to require the endpoint provider explicitly.
+Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → available `grok` CLI → configured `[provider.openai]` → available `claude` CLI → stub. With a local Grok login, plain `kairo step` uses `GrokProvider` by default. Set `KAIRO_PROVIDER=openai` / `claude-code` / `grok` to force a backend. Note: Grok has no `--add-dir`; corpus / image `read_dirs` paths still need `claude-code` (see [#61](https://github.com/xforce-io/kairo/issues/61)).
 
 ## Tech stack
 
-Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub / openai-compatible / claude-code / codex), no audit. See Issue [#4](https://github.com/xforce-io/kairo/issues/4) and [#54](https://github.com/xforce-io/kairo/issues/54) for details.
+Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub / grok / openai-compatible / claude-code / codex), no audit. See Issue [#4](https://github.com/xforce-io/kairo/issues/4), [#54](https://github.com/xforce-io/kairo/issues/54), and [#61](https://github.com/xforce-io/kairo/issues/61) for details.
 
 ## Web Console (optional)
 
@@ -122,4 +122,4 @@ In the browser (default `http://127.0.0.1:8000`, local only), manage the multipl
 
 ## Design & decision trail
 
-The CLI tools are usable (`init`/`add`/`step`/… all ready, 105+ tests). Each feature's design doc is stored by issue number under [`docs/design/`](docs/design) and is the single source of truth for that decision: MVP [#1](https://github.com/xforce-io/kairo/issues/1), AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4), source layering [#13](https://github.com/xforce-io/kairo/issues/13), Web Console i18n [#41](https://github.com/xforce-io/kairo/issues/41), etc.
+The CLI tools are usable (`init`/`add`/`step`/… all ready, 105+ tests). Each feature's design doc is stored by issue number under [`docs/design/`](docs/design) and is the single source of truth for that decision: MVP [#1](https://github.com/xforce-io/kairo/issues/1), AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4), source layering [#13](https://github.com/xforce-io/kairo/issues/13), Web Console i18n [#41](https://github.com/xforce-io/kairo/issues/41), Grok provider [#61](https://github.com/xforce-io/kairo/issues/61), etc.

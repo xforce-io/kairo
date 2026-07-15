@@ -3,7 +3,7 @@
 - Issue: [#61](https://github.com/xforce-io/kairo/issues/61)
 - 分支: `feat/61-grok-provider`
 - 关联: #4（AgentProvider 抽象）、#8（错误不写坏产物）、#13 / #44（`read_dirs` corpus / 附件）、#54（OpenAI-compatible endpoint）
-- 状态: 设计评审中
+- 状态: 已实现（待合入）
 
 ## 1. 目标
 
@@ -172,12 +172,13 @@ README 同步改写选择顺序说明。
 
 ## 7. 验收标准
 
-- [ ] `GrokProvider.run` 满足既有 artifact 约定（`_`/`.` 前缀不计）
-- [ ] 错误路径不写业务产物（#8）
-- [ ] `KAIRO_PROVIDER=grok` 可选中；**auto 在 `grok` 可用时默认选 grok**，否则回落 openai → claude → stub
-- [ ] 单测覆盖 §6 单元项
-- [ ] README 中/英已更新
-- [ ] 现有 stub / openai / claude-code / codex 测试全绿
+- [x] `GrokProvider.run` 满足既有 artifact 约定（`_`/`.` 前缀不计）
+- [x] 错误路径不写业务产物（#8）
+- [x] `KAIRO_PROVIDER=grok` 可选中；**auto 在 `grok` 可用时默认选 grok**，否则回落 openai → claude → stub
+- [x] 单测覆盖 §6 单元项
+- [x] README 中/英已更新
+- [x] 现有 stub / openai / claude-code / codex 测试全绿（286 passed）
+- [x] 本机真实 E2E：`KAIRO_PROVIDER=grok kairo step` 产出 digest/understanding，provenance `provider=grok`
 
 ## 8. 决策记录（相对 issue 开放问题）
 
