@@ -76,9 +76,8 @@ def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
     assert (tmp_path / "ws" / "understanding.md").is_file()
 
 
-def test_step_partial_reloads_layout_not_body(tmp_path, monkeypatch):
-    # 回归:done 后必须原地替换 .layout(保留 header),不能 outerHTML 整个 <body>;
-    # 也不能 sse-swap="done"(否则把退出码"0"灌进页面,整页变成一个"0")。
+def test_step_done_loads_run_summary_not_full_body(tmp_path, monkeypatch):
+    # #75:done 后进 run-summary(保留进度区结果),不能灌 body,也不能 sse-swap="done"。
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = Workspace.init(tmp_path / "ws", topic="t")
     (tmp_path / "m.txt").write_text("会议内容")
@@ -88,7 +87,8 @@ def test_step_partial_reloads_layout_not_body(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert 'sse-swap="done"' not in r.text
     assert 'hx-target="body"' not in r.text
-    assert 'hx-target=".layout"' in r.text
+    assert "/run-summary" in r.text
+    assert 'hx-target="#step-area"' in r.text
 
 
 def test_cancel_kills_running_task(tmp_path):

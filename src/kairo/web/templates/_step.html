@@ -1,10 +1,10 @@
 <div hx-ext="sse" sse-connect="/w/{{ slug }}/step/{{ task_id }}/stream">
   <div id="step-log" sse-swap="message" hx-swap="beforeend"></div>
+  {# #75:结束后进结果摘要,不再整页蒸发进度;并 OOB 刷新主按钮 #}
   <div class="step-status"
-       hx-get="/w/{{ slug }}"
+       hx-get="/w/{{ slug }}/run-summary"
        hx-trigger="sse:done"
-       hx-target=".layout"
-       hx-select=".layout"
-       hx-swap="outerHTML">{{ t('step.running') }}</div>
+       hx-target="#step-area"
+       hx-swap="innerHTML">{{ t('step.running') }}</div>
   <button class="btn btn-ghost" hx-post="/w/{{ slug }}/step/{{ task_id }}/cancel" hx-target="#step-area">{{ t('step.cancel') }}</button>
 </div>

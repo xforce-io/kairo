@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from html import escape
 from pathlib import Path
@@ -17,7 +18,13 @@ from fastapi.responses import (
     StreamingResponse,
 )
 
-from kairo.engine import ProseError, can_generate_prose, prose_precheck, ref_product_blocks
+from kairo.engine import (
+    ProseError,
+    can_generate_prose,
+    prose_precheck,
+    ref_product_blocks,
+    workspace_run_plan,
+)
 from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
@@ -172,6 +179,35 @@ def _split_refs(ws: Workspace):
     return streams, corpus
 
 
+def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
+    """#75 主按钮文案与是否可点。"""
+    t = _t(request)
+    running = request.app.state.registry.is_running(slug)
+    plan = workspace_run_plan(ws)
+    mode = plan["mode"]
+    if running:
+        return {
+            "run_mode": "running",
+            "run_label": t("run.running"),
+            "run_disabled": True,
+            "run_pending": plan["pending_count"],
+            "run_blocked": plan["blocked_count"],
+        }
+    labels = {
+        "clean": t("run.clean"),
+        "run": t("run.run"),
+        "retry": t("run.retry").format(n=plan["blocked_count"]),
+        "run_and_retry": t("run.run_and_retry").format(n=plan["blocked_count"]),
+    }
+    return {
+        "run_mode": mode,
+        "run_label": labels[mode],
+        "run_disabled": mode == "clean",
+        "run_pending": plan["pending_count"],
+        "run_blocked": plan["blocked_count"],
+    }
+
+
 @router.get("/w/{slug}", response_class=HTMLResponse)
 def workspace_view(request: Request, slug: str) -> HTMLResponse:
     ws = _open(request, slug)
@@ -185,6 +221,7 @@ def workspace_view(request: Request, slug: str) -> HTMLResponse:
             "targets": _target_states(ws),
             "streams": streams,
             "corpus": corpus,
+            **_run_button_ctx(request, ws, slug),
         },
     )
 
@@ -407,7 +444,18 @@ def add_ref(
             raise HTTPException(status_code=400, detail="need file or path")
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return _refs_fragment(request, ws, slug)
+    resp = _refs_fragment(request, ws, slug)
+    return _with_running_add_toast(request, slug, resp)
+
+
+def _with_running_add_toast(
+    request: Request, slug: str, resp: HTMLResponse
+) -> HTMLResponse:
+    """#75 方案松:运行中仍可添加,但 toast 说明下次运行才处理。"""
+    if request.app.state.registry.is_running(slug):
+        msg = _t(request)("run.add_while_running")
+        resp.headers["HX-Trigger"] = json.dumps({"kairoToast": msg})
+    return resp
 
 
 @router.post("/w/{slug}/ref/{ref_id}/attach", response_class=HTMLResponse)
@@ -572,7 +620,12 @@ def add_corpus(request: Request, slug: str, path: str = Form(...)) -> HTMLRespon
         ws.add([Path(path)], source_class="corpus")
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return HTMLResponse("", headers={"HX-Refresh": "true"})
+    headers = {"HX-Refresh": "true"}
+    if request.app.state.registry.is_running(slug):
+        headers["HX-Trigger"] = json.dumps(
+            {"kairoToast": _t(request)("run.add_while_running")}
+        )
+    return HTMLResponse("", headers=headers)
 
 
 @router.post("/w/{slug}/accept", response_class=HTMLResponse)
@@ -587,13 +640,75 @@ def accept_doc(request: Request, slug: str, doc: str = Form(...)) -> HTMLRespons
 
 @router.post("/w/{slug}/step", response_class=HTMLResponse)
 def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLResponse:
+    """兼容旧入口:有 target 时 re-step 文档/ref;无 target 时改走 run(含自动重试 blocked)。"""
     ws = _open(request, slug)
     reg = request.app.state.registry
     if reg.is_running(slug):
         return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
-    argv = [sys.executable, "-m", "kairo"] + (["re-step", target] if target else ["step"])
+    if target:
+        argv = [sys.executable, "-m", "kairo", "re-step", target]
+    else:
+        # #75:无 target 的「推进」= run(自动清 blocked)
+        plan = workspace_run_plan(ws)
+        if plan["mode"] == "clean":
+            return HTMLResponse(
+                f'<p class="muted run-summary">{_t(request)("run.clean_msg")}</p>'
+            )
+        argv = [sys.executable, "-m", "kairo", "run"]
     task = reg.start(slug, ws.root, argv)
     return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
+
+
+@router.post("/w/{slug}/run", response_class=HTMLResponse)
+def start_run(request: Request, slug: str) -> HTMLResponse:
+    """#75 主按钮:推进工作区(有 blocked 则自动重试)。"""
+    return start_step(request, slug, target=None)
+
+
+@router.get("/w/{slug}/run-summary", response_class=HTMLResponse)
+def run_summary(request: Request, slug: str) -> HTMLResponse:
+    """运行结束后的结果条(替代静默整页蒸发进度)。"""
+    ws = _open(request, slug)
+    t = _t(request)
+    plan = workspace_run_plan(ws)
+    lines = [f'<p class="run-summary-title">{t("run.done")}</p>']
+    if plan["blocked_count"]:
+        lines.append(
+            f'<p class="run-summary-fail">{t("run.still_blocked").format(n=plan["blocked_count"])}</p>'
+        )
+        lines.append('<ul class="ref-block-list">')
+        for item in plan["blocked_refs"]:
+            reasons = ", ".join(b["reason"] for b in item["blocks"])
+            rid = item["ref_id"]
+            lines.append(
+                f"<li><code>{escape(rid)}</code> · {escape(reasons)}</li>"
+            )
+        lines.append("</ul>")
+    else:
+        lines.append(f'<p class="muted">{t("run.done_ok")}</p>')
+    # 轻量刷新主按钮状态:提示用户可刷新;并给 OOB 替换 run 按钮区
+    btn = _run_button_ctx(request, ws, slug)
+    lines.append(
+        '<div id="run-btn-wrap" hx-swap-oob="true">'
+        + _run_button_html(slug, btn, t)
+        + "</div>"
+    )
+    return HTMLResponse("".join(lines))
+
+
+def _run_button_html(slug: str, btn: dict, t) -> str:
+    disabled = " disabled" if btn["run_disabled"] else ""
+    cls = "btn btn-ghost" if btn["run_mode"] in ("clean", "running") else "btn btn-step"
+    if btn["run_disabled"]:
+        return (
+            f'<button type="button" class="{cls}"{disabled} '
+            f'id="run-btn">{escape(btn["run_label"])}</button>'
+        )
+    return (
+        f'<button type="button" class="{cls}" id="run-btn" '
+        f'hx-post="/w/{quote(slug)}/run" hx-target="#step-area" '
+        f'hx-swap="innerHTML">{escape(btn["run_label"])}</button>'
+    )
 
 
 @router.post("/w/{slug}/ref/{ref_id}/retry", response_class=HTMLResponse)

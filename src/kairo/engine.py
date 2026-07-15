@@ -165,6 +165,54 @@ def retry_reference(ws, provider, ref_id: str) -> bool:
     return step(ws, provider)
 
 
+def workspace_run_plan(ws) -> dict:
+    """#75:主按钮状态机输入 —— pending 与 blocked 计数。
+
+    mode:
+      clean — 无待办无阻塞
+      run — 仅有 stale 待办
+      retry — 仅有 blocked(终态失败)
+      run_and_retry — 两者都有
+    """
+    pending_n = len(pending(ws))
+    blocked_refs: list[dict] = []
+    for ref_id in ws.list_reference_ids():
+        blocks = ref_product_blocks(ws, ref_id)
+        if blocks:
+            blocked_refs.append({"ref_id": ref_id, "blocks": blocks})
+    blocked_n = sum(len(b["blocks"]) for b in blocked_refs)
+    if pending_n == 0 and blocked_n == 0:
+        mode = "clean"
+    elif pending_n > 0 and blocked_n == 0:
+        mode = "run"
+    elif pending_n == 0 and blocked_n > 0:
+        mode = "retry"
+    else:
+        mode = "run_and_retry"
+    return {
+        "mode": mode,
+        "pending_count": pending_n,
+        "blocked_count": blocked_n,
+        "blocked_refs": blocked_refs,
+    }
+
+
+def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
+    """推进工作区:#75 主按钮语义。
+
+    retry_blocked:
+      None — 自动:有 blocked 则先清再 step
+      True/False — 强制
+    """
+    plan = workspace_run_plan(ws)
+    if retry_blocked is None:
+        retry_blocked = plan["blocked_count"] > 0
+    if retry_blocked:
+        for item in plan["blocked_refs"]:
+            clear_reference_products(ws, item["ref_id"])
+    return step(ws, provider)
+
+
 def re_step(ws, provider, target: str | None = None) -> bool:
     """强制重算。全量 / 指定文档(整篇重综合,丢手改)/ 指定 reference(清派生产物后重跑)。"""
     state = ws.read_state()

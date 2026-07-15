@@ -11,7 +11,9 @@ from kairo.engine import accept as engine_accept
 from kairo.engine import generate_prose as engine_generate_prose
 from kairo.engine import re_step as engine_re_step
 from kairo.engine import retry_reference as engine_retry_reference
+from kairo.engine import run_workspace as engine_run_workspace
 from kairo.engine import step as engine_step
+from kairo.engine import workspace_run_plan
 from kairo.history import diff_worktree, list_snapshots
 from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
@@ -81,10 +83,25 @@ def add(
 
 @app.command()
 def step() -> None:
-    """跑调和循环到收敛(provider 自动选:grok CLI→endpoint→claude CLI→stub;KAIRO_STUB 强制 stub)。"""
+    """跑调和循环到收敛(provider 自动选:grok CLI→endpoint→claude CLI→stub;KAIRO_STUB 强制 stub)。
+
+    注意:不自动重试 asr-failed 等终态 blocked;需要时用 run / retry-ref。
+    """
     ws = _open_ws()
     progressed = engine_step(ws, select_provider())
     typer.echo("stepped" if progressed else "no change")
+
+
+@app.command(name="run")
+def run_cmd() -> None:
+    """#75 推进工作区:有 blocked 则先清终态再 step(与 Web 主按钮一致)。"""
+    ws = _open_ws()
+    plan = workspace_run_plan(ws)
+    if plan["mode"] == "clean":
+        typer.echo("up to date")
+        return
+    progressed = engine_run_workspace(ws, select_provider())
+    typer.echo("ran" if progressed else "no change")
 
 
 @app.command(name="re-step")
