@@ -132,7 +132,14 @@
 
   <aside class="pane-panel">
     <div class="panel-title">{{ t('panel.actions') }}</div>
-    <button class="btn btn-step" hx-post="/w/{{ slug | urlencode }}/step" hx-target="#step-area" hx-swap="innerHTML">{{ t('step.btn') }}</button>
+    <div id="run-btn-wrap">
+      {% if run_disabled %}
+      <button type="button" class="btn {% if run_mode == 'clean' or run_mode == 'running' %}btn-ghost{% else %}btn-step{% endif %}" id="run-btn" disabled>{{ run_label }}</button>
+      {% else %}
+      <button type="button" class="btn btn-step" id="run-btn"
+              hx-post="/w/{{ slug | urlencode }}/run" hx-target="#step-area" hx-swap="innerHTML">{{ run_label }}</button>
+      {% endif %}
+    </div>
     <div id="step-area"></div>
     <button type="button" class="btn btn-ghost btn-regen" style="margin-top:10px"
             hx-get="/w/{{ slug | urlencode }}/glossary" hx-target="#meta" hx-swap="innerHTML">{{ t('glossary.btn') }}</button>
@@ -141,6 +148,22 @@
   </aside>
 </div>
 <script>
+  // #75:运行中添加参考等的 toast(HX-Trigger: kairoToast)
+  document.body.addEventListener('kairoToast', function (e) {
+    var msg = (e.detail && (e.detail.value || e.detail)) || '';
+    if (!msg) return;
+    var el = document.getElementById('kairo-toast');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'kairo-toast';
+      el.setAttribute('role', 'status');
+      document.body.appendChild(el);
+    }
+    el.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(function () { el.classList.remove('show'); }, 4200);
+  });
   // 复制路径:捕获阶段拦截,阻止冒泡到整行的 htmx 预览
   document.addEventListener('click', function (e) {
     var btn = e.target.closest('.copy-btn');
