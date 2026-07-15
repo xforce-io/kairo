@@ -2,7 +2,7 @@
 
 - Issue: [#60](https://github.com/xforce-io/kairo/issues/60)
 - 分支: `feat/60-ref-generate-prose`
-- 状态: 设计评审中
+- 状态: 已实现(TDD),待合入
 - 日期: 2026-07-15
 - 关联: [#30](https://github.com/xforce-io/kairo/issues/30) normalize→prose、[#33](https://github.com/xforce-io/kairo/issues/33) digest 恒从 transcript、[#52](https://github.com/xforce-io/kairo/issues/52) 产物 re-step 按钮 UI 模式、[#58](https://github.com/xforce-io/kairo/issues/58) 高密度 digest（正交）
 

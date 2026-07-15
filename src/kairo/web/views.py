@@ -16,6 +16,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 
+from kairo.engine import ProseError, can_generate_prose, prose_precheck
 from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
@@ -252,6 +253,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             # 主预览是 digest 时,OOB 画布与 target 同款可导出 PDF
             "exportable": bool(primary and primary["role"] == "digest"),
             "empty_hint": t("ref.empty_hint"),
+            "can_generate_prose": can_generate_prose(ws, ref_id),
         },
     )
 
@@ -450,6 +452,24 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
     if reg.is_running(slug):
         return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
     argv = [sys.executable, "-m", "kairo"] + (["re-step", target] if target else ["step"])
+    task = reg.start(slug, ws.root, argv)
+    return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
+
+
+@router.post("/w/{slug}/ref/{ref_id}/prose", response_class=HTMLResponse)
+def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
+    """#60:单 ref 按需生成可读文稿;子进程 kairo prose,复用 step 任务区。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    try:
+        prose_precheck(ws, ref_id)
+    except ProseError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    reg = request.app.state.registry
+    if reg.is_running(slug):
+        return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
+    argv = [sys.executable, "-m", "kairo", "prose", ref_id]
     task = reg.start(slug, ws.root, argv)
     return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
 

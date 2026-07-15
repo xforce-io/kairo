@@ -285,3 +285,86 @@ def test_refs_fragment_has_no_source_class_tag(tmp_path):
     r = _client(tmp_path).post("/w/ws/ref", files=files)
     assert r.status_code == 200
     assert 'class="tag' not in r.text
+
+
+def _ws_with_machine_transcript(tmp_path, monkeypatch):
+    """workspace 含 ASR 派生 transcript 的音频 ref;normalize 默认关。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    from kairo.models import State
+    from kairo.rules import TransformRule
+
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    audio = tmp_path / "rec.m4a"
+    audio.write_bytes(b"fake")
+    rid = ws.add([audio])
+    TransformRule(ws).discover()[0].run(State())
+    return rid
+
+
+def test_ref_meta_shows_generate_prose_when_eligible(tmp_path, monkeypatch):
+    rid = _ws_with_machine_transcript(tmp_path, monkeypatch)
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "生成可读文稿" in r.text or "Generate readable prose" in r.text
+    assert f'hx-post="/w/ws/ref/{rid}/prose"' in r.text
+
+
+def test_ref_meta_hides_generate_prose_for_human_text(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("人给")
+    rid = Workspace.open(tmp_path / "ws").add([src])
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert f'hx-post="/w/ws/ref/{rid}/prose"' not in r.text
+
+
+def test_ref_meta_hides_generate_prose_when_prose_exists(tmp_path, monkeypatch):
+    rid = _ws_with_machine_transcript(tmp_path, monkeypatch)
+    ws = Workspace.open(tmp_path / "ws")
+    from kairo.models import Form
+
+    (ws.root / f"references/{rid}/prose.md").write_text("已有文稿")
+    m = ws.read_manifest(rid)
+    m.forms.append(
+        Form(
+            role="prose",
+            location=f"references/{rid}/prose.md",
+            hash="x",
+            origin="normalize-from:x",
+        )
+    )
+    ws.write_manifest(rid, m)
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}")
+    assert f'hx-post="/w/ws/ref/{rid}/prose"' not in r.text
+
+
+def test_post_prose_starts_task(tmp_path, monkeypatch):
+    """POST 启动 prose 任务(子进程);KAIRO_STUB 下最终写出 prose.md。"""
+    import os
+    import time
+
+    rid = _ws_with_machine_transcript(tmp_path, monkeypatch)
+    # 子进程继承环境;确保 stub
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    os.environ["KAIRO_STUB"] = "1"
+    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/prose")
+    assert r.status_code == 200
+    assert "step/" in r.text and "stream" in r.text  # 任务区片段
+    # 等子进程写完
+    prose = tmp_path / "ws" / "references" / rid / "prose.md"
+    for _ in range(50):
+        if prose.is_file():
+            break
+        time.sleep(0.1)
+    assert prose.is_file(), "prose.md should be written by kairo prose subprocess"
+    assert "STUB TRANSCRIPT" in prose.read_text()
+
+
+def test_post_prose_rejects_ineligible(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("人给")
+    rid = Workspace.open(tmp_path / "ws").add([src])
+    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/prose")
+    assert r.status_code == 400

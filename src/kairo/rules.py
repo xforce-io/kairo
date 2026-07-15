@@ -188,10 +188,11 @@ class NormalizeRule:
     只碰机器派生的 transcript(origin≠added);人提供的原文与 corpus 不碰。
     """
 
-    def __init__(self, ws, provider) -> None:
+    def __init__(self, ws, provider, *, force_enabled: bool = False) -> None:
         self.ws = ws
         self.provider = provider
-        self.enabled = ws.constitution.pipeline.normalize.enabled
+        # force_enabled:按需单次旁路(不写 constitution);普通 step 仍看 constitution 开关
+        self.enabled = True if force_enabled else ws.constitution.pipeline.normalize.enabled
         self.prompt = ws.constitution.pipeline.normalize.prompt
 
     def discover(self, state: State | None = None) -> list[WorkItem]:

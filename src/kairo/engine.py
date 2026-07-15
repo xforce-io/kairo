@@ -13,6 +13,64 @@ from kairo.stream_index import write_stream_index
 MAX_ITER = 100
 
 
+class ProseError(Exception):
+    """单 ref 生成 prose 的前置失败(unknown-ref / not-stream / …)。"""
+
+    def __init__(self, code: str, message: str) -> None:
+        self.code = code
+        super().__init__(message)
+
+
+def _machine_transcript_form(man):
+    return next(
+        (f for f in man.forms if f.role == "transcript" and f.origin != "added"),
+        None,
+    )
+
+
+def prose_precheck(ws, ref_id: str) -> str:
+    """校验可生成 prose;返回 key。失败抛 ProseError(无副作用)。"""
+    if ref_id not in ws.list_reference_ids():
+        raise ProseError("unknown-ref", f"reference 不存在:{ref_id}")
+    man = ws.read_manifest(ref_id)
+    sc = ws.constitution.source_classes.get(man.source_class)
+    if sc is not None and not sc.fold:
+        raise ProseError("not-stream", f"基线参考不生成文稿:{ref_id}")
+    key = f"references/{ref_id}/prose.md"
+    if any(f.role == "prose" for f in man.forms) or (ws.root / key).exists():
+        raise ProseError("prose-exists", f"已有可读文稿:{ref_id}")
+    if _machine_transcript_form(man) is None:
+        raise ProseError("no-machine-transcript", f"需要机器 ASR 誊录才能生成文稿:{ref_id}")
+    return key
+
+
+def can_generate_prose(ws, ref_id: str) -> bool:
+    """Web/CLI 显示条件:stream + 机器 transcript + 尚无 prose。"""
+    try:
+        prose_precheck(ws, ref_id)
+    except ProseError:
+        return False
+    return True
+
+
+def generate_prose(ws, provider, ref_id: str) -> str:
+    """为单条 ref 生成 prose.md(旁路 normalize 开关,不改 constitution,不跑 digest/compose)。
+
+    返回 prose 相对路径。前置失败抛 ProseError(code=…)。
+    """
+    key = prose_precheck(ws, ref_id)
+    rule = NormalizeRule(ws, provider, force_enabled=True)
+    items = [it for it in rule.discover() if it.key == key]
+    if not items:
+        raise ProseError("no-machine-transcript", f"需要机器 ASR 誊录才能生成文稿:{ref_id}")
+    state = ws.read_state()
+    items[0].run(state)
+    ws.write_state(state)
+    if not (ws.root / key).is_file():
+        raise ProseError("failed", f"生成文稿失败:{ref_id}")
+    return key
+
+
 def _build_rules(ws, provider) -> list:
     """构造调和规则列表(transform 声明驱动 + Normalize/Digest/Compose)。
     discover/is_stale 不碰 provider,故 pending() 可传 provider=None 只读枚举。"""
