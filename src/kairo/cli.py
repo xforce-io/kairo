@@ -10,6 +10,7 @@ from kairo.engine import ProseError
 from kairo.engine import accept as engine_accept
 from kairo.engine import generate_prose as engine_generate_prose
 from kairo.engine import re_step as engine_re_step
+from kairo.engine import retry_reference as engine_retry_reference
 from kairo.engine import step as engine_step
 from kairo.history import diff_worktree, list_snapshots
 from kairo.history import rollback as history_rollback
@@ -90,10 +91,21 @@ def step() -> None:
 def re_step(
     target: str = typer.Argument(None, help="文档 / reference id;省略=全量"),
 ) -> None:
-    """强制重算(文档级=整篇重综合,丢手改)。"""
+    """强制重算(文档级=整篇重综合;reference=清派生产物含 blocked 后重跑)。"""
     ws = _open_ws()
     engine_re_step(ws, select_provider(), target)
     typer.echo(f"re-stepped {target or '(all)'}")
+
+
+@app.command(name="retry-ref")
+def retry_ref(ref_id: str = typer.Argument(..., help="reference id")) -> None:
+    """重新处理一条参考:清除 transcript/digest 等派生产物(含 asr-failed)后 step。"""
+    ws = _open_ws()
+    if ref_id not in ws.list_reference_ids():
+        typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    progressed = engine_retry_reference(ws, select_provider(), ref_id)
+    typer.echo("retried" if progressed else "no change")
 
 
 @app.command()

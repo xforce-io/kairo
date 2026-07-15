@@ -9,8 +9,22 @@
     <button type="submit" class="meta-rename-save" title="{{ t('ref.rename_save') }}">{{ t('ref.rename_save') }}</button>
   </form>
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
+  {% if blocks %}
+  <div class="ref-blocks" role="alert">
+    <div class="meta-label">{{ t('ref.blocked_label') }}</div>
+    <ul class="ref-block-list">
+    {% for b in blocks %}
+      <li><code>{{ b.name }}</code> · {{ b.reason }}</li>
+    {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
   <button type="button" class="btn btn-step btn-add-ref"
           onclick="document.getElementById('attach-dlg').showModal()">{{ t('ref.attach_btn') }}</button>
+  <button type="button" class="btn btn-ghost btn-regen"
+          hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/retry"
+          hx-target="#step-area" hx-swap="innerHTML"
+          hx-confirm="{{ t('ref.retry_confirm') }}">{{ t('ref.retry') }}</button>
   {% if can_generate_prose %}
   <button type="button" class="btn btn-ghost btn-regen"
           hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/prose"

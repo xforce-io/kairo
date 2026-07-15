@@ -17,7 +17,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 
-from kairo.engine import ProseError, can_generate_prose, prose_precheck
+from kairo.engine import ProseError, can_generate_prose, prose_precheck, ref_product_blocks
 from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
@@ -88,11 +88,24 @@ def _is_image_file(path: Path) -> bool:
 
 
 def _render_doc(path: Path) -> str:
-    """.md → markdown;其余文本 → 保留换行的 <pre>(转义)。"""
+    """.md → markdown;其余文本 → 保留换行的 <pre>(转义)。勿用于图片。"""
     text = path.read_text(errors="replace")
     if path.suffix.lower() in (".md", ".markdown"):
         return render_markdown(text)
     return f'<pre class="doc-plain">{escape(text)}</pre>'
+
+
+def _form_preview_html(ws: Workspace, slug: str, ref_id: str, form: dict) -> str | None:
+    """按 form 类型生成预览 HTML:图片走 <img>,文本走 markdown/pre。"""
+    path = _form_path(ws, form["location"])
+    if _is_image_file(path):
+        src = f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(form['key'])}"
+        return (
+            f'<img class="doc-img" src="{src}" alt="{escape(path.name)}">'
+        )
+    if _is_text_file(path):
+        return _render_doc(path)
+    return None
 
 
 def _target_states(ws: Workspace):
@@ -231,13 +244,20 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     t = _t(request)
     man = ws.read_manifest(ref_id)
     forms = _ref_forms(ws, ref_id, man, t)
+    # 优先正文形态;避免尚无 transcript 时默认把 PNG 当文本打开
     primary = (
         next((f for f in forms if f["role"] == "digest" and f["previewable"]), None)
         or next((f for f in forms if f["role"] == "transcript" and f["previewable"]), None)
+        or next((f for f in forms if f["role"] == "source_text" and f["previewable"]), None)
+        or next((f for f in forms if f["role"] == "prose" and f["previewable"]), None)
+        or next((f for f in forms if f["role"] == "attachment" and f["previewable"]), None)
         or next((f for f in forms if f["previewable"]), None)
     )
     sc = ws.constitution.source_classes.get(man.source_class)
     preview_title = f"{man.title} · {primary['role_label']}" if primary else ""
+    preview_html = (
+        _form_preview_html(ws, slug, ref_id, primary) if primary else None
+    )
     return _render(
         request,
         "_ref_meta.html",
@@ -250,11 +270,12 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "forms": forms,
             "preview_key": primary["key"] if primary else "",
             "preview_title": preview_title,
-            "preview_html": _render_doc(_form_path(ws, primary["location"])) if primary else None,
+            "preview_html": preview_html,
             # 主预览是 digest 时,OOB 画布与 target 同款可导出 PDF
             "exportable": bool(primary and primary["role"] == "digest"),
             "empty_hint": t("ref.empty_hint"),
             "can_generate_prose": can_generate_prose(ws, ref_id),
+            "blocks": ref_product_blocks(ws, ref_id),
         },
     )
 
@@ -571,6 +592,20 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
     if reg.is_running(slug):
         return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
     argv = [sys.executable, "-m", "kairo"] + (["re-step", target] if target else ["step"])
+    task = reg.start(slug, ws.root, argv)
+    return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
+
+
+@router.post("/w/{slug}/ref/{ref_id}/retry", response_class=HTMLResponse)
+def retry_ref(request: Request, slug: str, ref_id: str) -> HTMLResponse:
+    """#73:重新处理参考(清 blocked/派生产物后 step);走子进程 retry-ref。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    reg = request.app.state.registry
+    if reg.is_running(slug):
+        return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
+    argv = [sys.executable, "-m", "kairo", "retry-ref", ref_id]
     task = reg.start(slug, ws.root, argv)
     return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
 
