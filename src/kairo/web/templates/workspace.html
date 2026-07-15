@@ -134,6 +134,8 @@
     <div class="panel-title">{{ t('panel.actions') }}</div>
     <button class="btn btn-step" hx-post="/w/{{ slug | urlencode }}/step" hx-target="#step-area" hx-swap="innerHTML">{{ t('step.btn') }}</button>
     <div id="step-area"></div>
+    <button type="button" class="btn btn-ghost btn-regen" style="margin-top:10px"
+            hx-get="/w/{{ slug | urlencode }}/glossary" hx-target="#meta" hx-swap="innerHTML">{{ t('glossary.btn') }}</button>
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
     <div id="meta"><p class="panel-hint">{{ t('panel.hint') }}</p></div>
   </aside>
