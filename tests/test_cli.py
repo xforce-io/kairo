@@ -19,7 +19,7 @@ def test_cli_help_shows_quickstart():
 
 @pytest.mark.parametrize(
     "cmd",
-    [["status"], ["step"], ["add", "x.txt"], ["index"], ["history"], ["diff"]],
+    [["status"], ["step"], ["add", "x.txt"], ["index"], ["history"], ["diff"], ["prose", "x"]],
 )
 def test_cli_friendly_error_outside_workspace(tmp_path, monkeypatch, cmd):
     """#22 ②:非工作区给友好错误,非零退出,不吐 traceback。"""
@@ -85,6 +85,33 @@ def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
     )
     assert len(targets["understanding.md"]["folded"]) == 2
     assert len(targets["assessment.md"]["folded"]) == 2
+
+
+def test_cli_prose_generates_readable_archive(tmp_path, monkeypatch):
+    """#60:kairo prose <id> 在 normalize 默认关时仍可按需产 prose,不改 constitution。"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    audio = tmp_path / "rec.m4a"
+    audio.write_bytes(b"fake audio")
+    runner.invoke(app, ["add", str(audio)])
+    runner.invoke(app, ["step"])  # ASR + digest;默认无 prose
+    rid = next(p.name for p in (tmp_path / "references").iterdir() if p.is_dir())
+    assert not (tmp_path / "references" / rid / "prose.md").exists()
+
+    result = runner.invoke(app, ["prose", rid])
+    assert result.exit_code == 0
+    assert f"references/{rid}/prose.md" in result.output
+    assert (tmp_path / "references" / rid / "prose.md").is_file()
+    assert "STUB TRANSCRIPT" in (tmp_path / "references" / rid / "prose.md").read_text()
+    # constitution 仍关
+    import yaml
+
+    con = yaml.safe_load((tmp_path / "constitution.yaml").read_text())
+    assert not (con.get("pipeline") or {}).get("normalize", {}).get("enabled", False)
+    # 再跑失败
+    again = runner.invoke(app, ["prose", rid])
+    assert again.exit_code != 0
 
 
 def test_cli_re_step_discards_manual_edit(tmp_path, monkeypatch):

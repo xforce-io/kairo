@@ -11,6 +11,11 @@
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
   <button type="button" class="btn btn-step btn-add-ref"
           onclick="document.getElementById('attach-dlg').showModal()">{{ t('ref.attach_btn') }}</button>
+  {% if can_generate_prose %}
+  <button type="button" class="btn btn-ghost btn-regen"
+          hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/prose"
+          hx-target="#step-area" hx-swap="innerHTML">{{ t('prose.gen_btn') }}</button>
+  {% endif %}
   <dialog id="attach-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
     <div class="dlg-head">
       <h3 class="dlg-title">{{ t('ref.attach_btn') }}</h3>

@@ -6,7 +6,9 @@ from pathlib import Path
 
 import typer
 
+from kairo.engine import ProseError
 from kairo.engine import accept as engine_accept
+from kairo.engine import generate_prose as engine_generate_prose
 from kairo.engine import re_step as engine_re_step
 from kairo.engine import step as engine_step
 from kairo.history import diff_worktree, list_snapshots
@@ -83,6 +85,18 @@ def re_step(
     ws = _open_ws()
     engine_re_step(ws, select_provider(), target)
     typer.echo(f"re-stepped {target or '(all)'}")
+
+
+@app.command()
+def prose(ref_id: str = typer.Argument(..., help="reference id")) -> None:
+    """为单条参考生成可读文稿 prose.md(旁路 normalize 开关,不改 constitution)。"""
+    ws = _open_ws()
+    try:
+        key = engine_generate_prose(ws, select_provider(), ref_id)
+    except ProseError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"wrote {key}")
 
 
 @app.command()
