@@ -119,8 +119,11 @@ class Workspace:
             raise AddError(f"路径不存在:{missing[0]}")
         if copy:
             if any(f.is_dir() for f in files):
+                # 与 corpus 无关:目录既不能 copy,也不能整夹当 stream 参考
                 raise AddError(
-                    "目录不支持 copy;基线请用目录指针(add <dir> --corpus,勿加 --copy)"
+                    "目录不能复制进工作区,也不能整夹添加为观测参考。"
+                    "请改为添加目录内的具体文件;"
+                    "若要把整个目录当基线资料库,请用「添加基线」(仅登记路径,勿勾选复制)。"
                 )
             if ref_id is not None and (self.references_dir() / ref_id).is_dir():
                 dest_dir = self.references_dir() / ref_id
@@ -173,8 +176,10 @@ class Workspace:
             raise AddError("目录摄入仅支持单个目录参数(不与文件混加)")
         d = files[0]
         if (source_class or self.constitution.default_class) != "corpus":
+            # Web「添加参考」默认 stream:目录整夹不能当观测参考
             raise AddError(
-                f"目录摄入目前仅支持 corpus(加 --corpus);stream 请逐文件 add:{d}"
+                f"目录不能整夹添加为观测参考,请逐文件添加:{d}。"
+                "若要把整个目录当基线资料库,请用「添加基线」/ add --corpus(仅登记路径指针)。"
             )
         if ref_id is None:
             today = datetime.date.today().isoformat()
