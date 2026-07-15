@@ -11,6 +11,8 @@
 
 让已登录 Grok 的本机用户能跑真实 agent，而不必依赖 Claude Code、Codex 或 OpenAI-compatible endpoint 配置。
 
+**默认 backend**：auto 路径下，本机 `grok` CLI 可用时优先选 `GrokProvider`（见 §4.3）。
+
 ## 2. 现状
 
 | Backend | `name` | 形态 |
@@ -110,20 +112,31 @@ _BACKENDS = {
 }
 ```
 
-`select_provider`：
+`select_provider`（**grok 为 auto 默认**）：
 
-1. `KAIRO_STUB` → stub（不变）
+1. `KAIRO_STUB` → stub（不变，测试隔离最高）
 2. 显式 `KAIRO_PROVIDER`：
    - `grok` → `GrokProvider()`
    - 其余不变（含 `openai` 校验）
-3. **auto 不变**：openai config → claude CLI → stub  
-   **MVP 不把 `grok` 纳入 auto**，避免静默换 backend、打乱已有默认
+3. **auto**（按序，命中即返回）：
+   1. `grok` CLI 可用（`_cli_available("grok")`）→ **`GrokProvider()`** ← 默认真实路径
+   2. 已配置 openai endpoint → `OpenAICompatibleProvider`
+   3. `claude` CLI 可用 → `ClaudeCodeProvider`
+   4. 否则 → `StubProvider`
 
 用法：
 
 ```bash
-KAIRO_PROVIDER=grok kairo step
+# 本机有 grok 时，直接 step 即走 GrokProvider（无需 env）
+kairo step
+
+# 仍可用显式 env 覆盖
+KAIRO_PROVIDER=claude-code kairo step
+KAIRO_PROVIDER=openai kairo step
+KAIRO_STUB=1 kairo step
 ```
+
+README 同步改写选择顺序说明。
 
 ### 4.4 非目标
 
@@ -145,7 +158,7 @@ KAIRO_PROVIDER=grok kairo step
 
 | 文件 | 改动 |
 |---|---|
-| `tests/test_provider.py` 或既有 select 测试 | `KAIRO_PROVIDER=grok` 选中 `GrokProvider`；auto 仍不选 grok |
+| `tests/test_provider.py` 或既有 select 测试 | 显式 `KAIRO_PROVIDER=grok`；**auto 在 grok CLI 可用时选 `GrokProvider`**（mock `_cli_available`）；openai/claude 回落顺序 |
 
 ## 6. 测试计划
 
@@ -153,7 +166,7 @@ KAIRO_PROVIDER=grok kairo step
 |---|---|---|
 | **单元** | fake runner：CLI cmd/args 含 `-p`、`--output-format json`、非空 model 时 `-m`；stdout JSON `text` 落到 artifact；`type=error` / 缺 text / 无文件 → 抛错且不写产物；`name`/`model`；有 `read_dirs` 时 args **不含**伪造的 add-dir | 是 |
 | **集成** | 注入 `GrokProvider(runner=fake)`（或等价）跑 `step`/单 rule，产物入账、provenance `provider=grok` | 是（若仓库已有同类 fake-provider step 测；否则 provider 单测 + 手工 E2E 足够） |
-| **E2E（本机真实 CLI）** | 已登录 Grok：`KAIRO_PROVIDER=grok kairo step` 最小 workspace 跑通一步，artifacts 有正文，history/provenance 记 `grok` | **否**（与 claude-code/codex 真实路径同级，不进默认 CI） |
+| **E2E（本机真实 CLI）** | 已登录 Grok：无 env 时 `kairo step`（或显式 `KAIRO_PROVIDER=grok`）最小 workspace 跑通一步，artifacts 有正文，history/provenance 记 `grok` | **否**（与 claude-code/codex 真实路径同级，不进默认 CI） |
 
 与单元的区分：E2E 验的是「真实 CLI 登录 + 网络 + 写盘」用户路径，不 mock runner。
 
@@ -161,7 +174,7 @@ KAIRO_PROVIDER=grok kairo step
 
 - [ ] `GrokProvider.run` 满足既有 artifact 约定（`_`/`.` 前缀不计）
 - [ ] 错误路径不写业务产物（#8）
-- [ ] `KAIRO_PROVIDER=grok` 可选中；auto 行为不变
+- [ ] `KAIRO_PROVIDER=grok` 可选中；**auto 在 `grok` 可用时默认选 grok**，否则回落 openai → claude → stub
 - [ ] 单测覆盖 §6 单元项
 - [ ] README 中/英已更新
 - [ ] 现有 stub / openai / claude-code / codex 测试全绿
@@ -171,7 +184,7 @@ KAIRO_PROVIDER=grok kairo step
 | # | 问题 | 决策 |
 |---|---|---|
 | 1 | `read_dirs` | **忽略 + 文档说明**；不 fail run；corpus/图片场景指回 claude-code |
-| 2 | auto 选择 | **MVP 不纳入**；仅显式 `KAIRO_PROVIDER=grok` |
+| 2 | auto 选择 | **`grok` CLI 可用 → 默认 `GrokProvider`**；其后 openai → claude → stub。显式 env / `KAIRO_STUB` 仍可覆盖 |
 | 3 | 默认 model | **`""`，跟 CLI 默认**；非空才传 `-m` |
 
 评审推翻以上任一项时，先改本文再实现。
@@ -179,6 +192,7 @@ KAIRO_PROVIDER=grok kairo step
 ## 9. 实现顺序（通过评审后）
 
 1. 单测（红）→ `GrokProvider` + 注册（绿）
-2. `select_provider` / README
-3. 本机真实 `KAIRO_PROVIDER=grok kairo step` 烟测
-4. PR 链回 #61 与本文
+2. `select_provider` 默认优先 grok + 单测 mock `_cli_available`
+3. README 中/英选择顺序
+4. 本机真实（无 env）`kairo step` 烟测，确认 provenance=`grok`
+5. PR 链回 #61 与本文
