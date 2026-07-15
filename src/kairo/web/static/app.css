@@ -190,6 +190,8 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .glossary-add .dlg-go { width: 100%; margin-top: 4px; }
 .gl-note, .gl-aka { font-size: 12px; color: var(--muted); margin-top: 3px; font-weight: 400; }
 .glossary-table .btn-regen { margin: 0; padding: 4px 8px; font-size: 11px; }
+.gl-section { padding-top: 4px; border-top: 1px solid var(--line); margin-top: 8px; }
+.gl-section:first-of-type { border-top: none; margin-top: 0; }
 .dlg-row { display: flex; gap: 8px; align-items: stretch; }
 .dlg-row input[type=text] { flex: 1; min-width: 0; padding: 9px 11px; font-size: 13.5px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--paper-2); color: var(--ink); }
 .dlg-row input[type=text]:focus { outline: none; border-color: var(--pine); }

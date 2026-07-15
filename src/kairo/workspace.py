@@ -294,29 +294,36 @@ class Workspace:
         )
 
     def add_glossary_entry(
-        self, name: str, note: str = "", aka: list[str] | None = None
+        self,
+        name: str,
+        note: str = "",
+        aka: list[str] | None = None,
+        tags: list[str] | None = None,
     ) -> GlossaryEntry:
-        """追加一条真名册;name 必填;重名拒绝。"""
-        name = name.strip()
-        if not name:
-            raise ValueError("name 不能为空")
-        note = (note or "").strip()
-        aka_list = [a.strip() for a in (aka or []) if a and a.strip()]
+        """追加一条 **workspace** 真名册;name 必填;重名拒绝。"""
+        from kairo.glossary import add_entry
+
         con = self.constitution
-        if any(e.name == name for e in con.glossary):
-            raise ValueError(f"真名册已有同名条目:{name}")
-        entry = GlossaryEntry(name=name, note=note, aka=aka_list)
-        con.glossary.append(entry)
+        con.glossary = add_entry(con.glossary, name, note=note, aka=aka, tags=tags)
         self.write_constitution(con)
-        return entry
+        return con.glossary[-1]
 
     def remove_glossary_entry(self, index: int) -> None:
-        """按索引删除一条真名册。"""
+        """按索引删除一条 **workspace** 真名册。"""
+        from kairo.glossary import remove_entry
+
         con = self.constitution
-        if not 0 <= index < len(con.glossary):
-            raise IndexError(f"glossary 索引越界:{index}")
-        con.glossary.pop(index)
+        con.glossary = remove_entry(con.glossary, index)
         self.write_constitution(con)
+
+    def glossary_reference(self, *, serve_root: Path | None = None) -> str:
+        """合并 machine + root + workspace 后渲染注入段(#71)。"""
+        from kairo.glossary import format_glossary_reference, merged_glossary_entries
+
+        entries = merged_glossary_entries(
+            self.constitution.glossary, self.root, serve_root=serve_root
+        )
+        return format_glossary_reference(entries)
 
     def read_manifest(self, ref_id: str) -> Manifest:
         path = self.references_dir() / ref_id / "manifest.yaml"
