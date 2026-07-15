@@ -28,7 +28,8 @@ uv run kairo --help
 
 ```bash
 kairo init "我的调研主题"      # 当前目录初始化为 topic-workspace + 默认宪法
-kairo add 录音.m4a            # 登记一条 reference（默认 stream/观测）
+kairo add 录音.m4a            # 登记路径指针（默认 stream/观测）
+kairo add 录音.m4a --copy     # 先复制进工作区再登记（源删除仍可用）
 kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
 kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
 kairo step                    # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)
@@ -42,7 +43,7 @@ kairo status                  # 看各 reference / 文档的融入状态
 | 命令 | 作用 |
 | --- | --- |
 | `init` | 初始化 topic-workspace + 默认宪法 |
-| `add` | 登记一条 reference 的所有形态（`--corpus` 标基线，默认 stream 观测） |
+| `add` | 登记一条 reference（默认路径指针；`--copy` 物化进工作区；`--corpus` 标基线） |
 | `step` | 跑调和循环到收敛（endpoint 配置→Claude CLI→stub；`KAIRO_STUB` 强制 stub） |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |
 | `accept` | 接受手改、钉为新基线，解除 `blocked: manual-edit` |

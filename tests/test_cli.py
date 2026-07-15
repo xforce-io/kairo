@@ -196,6 +196,30 @@ def test_cli_add_dir_without_corpus_friendly_error(tmp_path, monkeypatch):
     assert "Traceback" not in result.output
 
 
+def test_cli_add_copy_materializes(tmp_path, monkeypatch):
+    """#64:kairo add --copy 物化到 .kairo/uploads。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    src = tmp_path / "out.txt"
+    src.write_text("外部文件")
+    result = runner.invoke(app, ["add", str(src), "--copy"])
+    assert result.exit_code == 0
+    uploads = tmp_path / ".kairo" / "uploads"
+    assert uploads.is_dir()
+    assert any(uploads.iterdir())
+
+
+def test_cli_add_copy_dir_friendly_error(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    d = tmp_path / "lib"
+    d.mkdir()
+    (d / "a.md").write_text("a")
+    result = runner.invoke(app, ["add", str(d), "--corpus", "--copy"])
+    assert result.exit_code != 0
+    assert "copy" in result.output.lower() or "目录" in result.output
+
+
 def test_cli_add_dir_corpus_ok(tmp_path, monkeypatch):
     """#24:add <dir> --corpus → 建一条 corpus_tree 引用。"""
     monkeypatch.chdir(tmp_path)

@@ -56,12 +56,21 @@ def add(
     corpus: bool = typer.Option(
         False, "--corpus", help="标为基线参考资料(corpus);默认会议流(stream)"
     ),
+    copy: bool = typer.Option(
+        False,
+        "--copy",
+        help="先复制进工作区(.kairo/uploads 或既有 ref 目录)再登记;默认只记路径指针",
+    ),
 ) -> None:
-    """登记一条 reference 的所有形态(指针)。目录 + --corpus 登记为目录指针。"""
+    """登记一条 reference 的所有形态(默认路径指针;--copy 物化)。目录 + --corpus 为目录指针。"""
     ws = _open_ws()
     try:
         rid = ws.add(
-            files, ref_id=ref_id, role=role, source_class="corpus" if corpus else None
+            files,
+            ref_id=ref_id,
+            role=role,
+            source_class="corpus" if corpus else None,
+            copy=copy,
         )
     except AddError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
