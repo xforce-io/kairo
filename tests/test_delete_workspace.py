@@ -62,6 +62,21 @@ def test_dashboard_has_trash_and_confirm_dialog(tmp_path):
     assert "kairoOpenDelWs" in r.text
 
 
+def test_dashboard_delete_confirm_does_not_leak_slug_as_placeholder(tmp_path):
+    """#84:答案不得印在 placeholder(看起来像已填好)。"""
+    Workspace.init(tmp_path / "能源业务", topic="能源业务")
+    r = TestClient(create_app(tmp_path)).get("/")
+    assert r.status_code == 200
+    # 框外展示必须键入的目录名
+    assert 'id="del-ws-expected"' in r.text
+    # 打开弹框的脚本不得把 expected 赋给 placeholder
+    assert "input.placeholder = expected" not in r.text
+    assert "placeholder = expected" not in r.text
+    # submit 初始 disabled;并有 submit 硬拦截
+    assert 'id="del-ws-submit"' in r.text and "disabled" in r.text
+    assert "addEventListener('submit'" in r.text or 'addEventListener("submit"' in r.text
+
+
 def test_web_delete_wrong_confirm_rejected(tmp_path):
     Workspace.init(tmp_path / "ws", topic="ws")
     r = TestClient(create_app(tmp_path)).post(

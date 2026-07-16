@@ -142,12 +142,16 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .dlg-bullets { margin: 0 0 14px; padding-left: 1.2em; color: var(--ink-soft); font-size: 13px; }
 .dlg-bullets li { margin: 4px 0; }
 .dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-.btn-danger {
-  background: var(--clay); color: #fffdf9; border: 1px solid var(--clay);
-  box-shadow: 0 6px 16px -8px rgba(168,65,42,.55);
+.dlg-actions .dlg-btn { width: auto; margin: 0; min-width: 7.5em; }
+/* #84:答案展示在框外等宽,不进 placeholder */
+.dlg-expected-wrap { margin: 0 0 10px; }
+.dlg-expected {
+  display: inline-block; font-family: var(--mono); font-size: 13.5px;
+  padding: 6px 10px; border-radius: 8px;
+  background: var(--paper-2); border: 1px solid var(--line-2); color: var(--ink);
+  user-select: all; word-break: break-all;
 }
-.btn-danger:hover { background: #8f3622; border-color: #8f3622; }
-.btn-danger:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+.dlg-expected:empty { display: none; }
 /* 入场错峰 */
 .card:nth-child(1){animation-delay:.02s}.card:nth-child(2){animation-delay:.06s}
 .card:nth-child(3){animation-delay:.10s}.card:nth-child(4){animation-delay:.14s}
@@ -206,15 +210,18 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   background: transparent; color: var(--clay); border: 1px solid #e7c6ba;
 }
 .btn-danger-ghost:hover { background: var(--clay-soft); border-color: #d9a898; }
+/* 危险主按钮:启用=陶土红;禁用=灰死(绝不能像可点 CTA) #84 */
 .btn-danger {
   background: var(--clay); color: #fffdf9; border: 1px solid var(--clay);
   box-shadow: 0 6px 16px -8px rgba(168,65,42,.55);
 }
-.btn-danger:hover { background: #8f3622; border-color: #8f3622; }
-.dlg-bullets { margin: 0 0 14px; padding-left: 1.2em; color: var(--ink-soft); font-size: 13px; }
-.dlg-bullets li { margin: 4px 0; }
+.btn-danger:hover:not(:disabled) { background: #8f3622; border-color: #8f3622; }
+.btn-danger:disabled,
+.btn-danger[disabled] {
+  background: #d9d2c6; color: #8a8276; border-color: #cfc6b6;
+  box-shadow: none; opacity: 1; cursor: not-allowed;
+}
 .dlg-hint-warn { color: var(--clay); font-style: normal; margin-top: 4px; }
-.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 /* 添加参考弹框 */
 .ref-dialog { width: min(440px, 92vw); padding: 22px 24px 26px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); color: var(--ink); box-shadow: 0 30px 70px -24px rgba(20,16,10,.55); }
