@@ -30,6 +30,35 @@ class WorkspaceNotFound(Exception):
     """当前目录不是 kairo 工作区(无 .kairo/state.json)。"""
 
 
+class WorkspaceBusy(Exception):
+    """工作区正忙(如 step 运行中),拒绝删除等危险操作。"""
+
+
+def delete_workspace(serve_root: Path | str, slug: str) -> None:
+    """#78:删除 serve root 下某个 workspace 整目录。
+
+    - 仅允许 root 的直接子目录;拒绝 `..` / 越界
+    - 必须是可识别的 workspace(含 constitution.yaml)
+    - 不碰 root/glossary.yaml 及其它 workspace
+    """
+    root = Path(serve_root).resolve()
+    # 拒绝路径分隔与隐藏名(/ 与反斜杠)
+    if (
+        not slug
+        or slug in (".", "..")
+        or "/" in slug
+        or chr(92) in slug
+        or slug.startswith(".")
+    ):
+        raise ValueError(f"非法 workspace 名:{slug!r}")
+    dest = (root / slug).resolve()
+    if dest.parent != root:
+        raise ValueError(f"非法 workspace 名:{slug!r}")
+    if not dest.is_dir() or not (dest / "constitution.yaml").is_file():
+        raise WorkspaceNotFound(dest)
+    shutil.rmtree(dest)
+
+
 def _slug(text: str) -> str:
     # 保留中文/字母数字(unicode word),标点/空白 → -;全标点(空)回退内容 hash 保唯一
     s = re.sub(r"[^\w]+", "-", text.lower()).strip("-_")

@@ -119,9 +119,35 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 }
 .card:hover { transform: translateY(-3px); box-shadow: 0 2px 4px rgba(31,27,22,.05), 0 16px 30px -14px rgba(31,27,22,.28); border-color: var(--line-2); }
 .card:hover::before { opacity: 1; }
+.card-main {
+  display: block; text-decoration: none; color: inherit;
+  padding-right: 28px; /* 给右下角垃圾桶留空 */
+}
 .card h3 { margin: 0 0 4px; font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: .01em; }
 .card .slug { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .card .badges { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 6px; }
+/* #78 弱样式垃圾桶:卡片右下角,默认很淡,hover 卡片时显现 */
+.card-trash {
+  position: absolute; right: 10px; bottom: 10px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0; margin: 0;
+  border: 1px solid transparent; border-radius: 8px;
+  background: transparent; color: var(--muted); cursor: pointer;
+  opacity: .35; transition: opacity .15s ease, color .15s ease, background .15s ease, border-color .15s ease;
+}
+.card:hover .card-trash { opacity: .75; }
+.card-trash:hover {
+  opacity: 1; color: var(--clay); background: var(--clay-soft); border-color: #e7c6ba;
+}
+.dlg-bullets { margin: 0 0 14px; padding-left: 1.2em; color: var(--ink-soft); font-size: 13px; }
+.dlg-bullets li { margin: 4px 0; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.btn-danger {
+  background: var(--clay); color: #fffdf9; border: 1px solid var(--clay);
+  box-shadow: 0 6px 16px -8px rgba(168,65,42,.55);
+}
+.btn-danger:hover { background: #8f3622; border-color: #8f3622; }
+.btn-danger:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
 /* 入场错峰 */
 .card:nth-child(1){animation-delay:.02s}.card:nth-child(2){animation-delay:.06s}
 .card:nth-child(3){animation-delay:.10s}.card:nth-child(4){animation-delay:.14s}

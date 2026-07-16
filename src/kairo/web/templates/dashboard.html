@@ -8,25 +8,106 @@
 </form>
 <div class="grid">
   {% for s in items %}
-  <a class="card" href="/w/{{ s.slug | urlencode }}">
-    <h3>{{ s.topic }}</h3>
-    <div class="slug">{{ s.slug }}</div>
-    <div class="badges">
-      <span class="badge stream">{{ s.stream_count }} {{ t('dash.badge_stream') }}</span>
-      <span class="badge corpus">{{ s.corpus_count }} {{ t('dash.badge_corpus') }}</span>
-      {% if s.stale_count %}<span class="badge stale">{{ s.stale_count }} {{ t('dash.badge_stale') }}</span>{% endif %}
-      {% if s.blocked_count %}<span class="badge blocked">⚠ {{ s.blocked_count }}</span>{% endif %}
-    </div>
-  </a>
+  <div class="card">
+    <a class="card-main" href="/w/{{ s.slug | urlencode }}">
+      <h3>{{ s.topic }}</h3>
+      <div class="slug">{{ s.slug }}</div>
+      <div class="badges">
+        <span class="badge stream">{{ s.stream_count }} {{ t('dash.badge_stream') }}</span>
+        <span class="badge corpus">{{ s.corpus_count }} {{ t('dash.badge_corpus') }}</span>
+        {% if s.stale_count %}<span class="badge stale">{{ s.stale_count }} {{ t('dash.badge_stale') }}</span>{% endif %}
+        {% if s.blocked_count %}<span class="badge blocked">⚠ {{ s.blocked_count }}</span>{% endif %}
+      </div>
+    </a>
+    <button type="button" class="card-trash" title="{{ t('dash.delete_btn') }}"
+            aria-label="{{ t('dash.delete_btn') }}"
+            data-slug="{{ s.slug }}" data-topic="{{ s.topic }}"
+            onclick="kairoOpenDelWs(this)">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+           stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <polyline points="3 6 5 6 21 6"/>
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6M14 11v6"/>
+        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+      </svg>
+    </button>
+  </div>
   {% else %}
   <p class="empty">{{ t('dash.empty') }}</p>
   {% endfor %}
 </div>
+
+<dialog id="del-ws-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
+  <div class="dlg-head">
+    <h3 class="dlg-title">{{ t('dash.delete_title') }}</h3>
+    <button type="button" class="dlg-x" aria-label="close" onclick="this.closest('dialog').close()">×</button>
+  </div>
+  <p class="dlg-hint" id="del-ws-lead"></p>
+  <ul class="dlg-bullets">
+    <li>{{ t('dash.delete_bullet_all') }}</li>
+    <li>{{ t('dash.delete_bullet_irreversible') }}</li>
+    <li>{{ t('dash.delete_bullet_glossary') }}</li>
+  </ul>
+  <form id="del-ws-form" class="dlg-form" hx-post="/" hx-swap="none"
+        hx-on::after-request="if(event.detail.successful)this.closest('dialog').close()">
+    <label class="dlg-label" for="del-ws-confirm">{{ t('dash.delete_confirm_label') }}</label>
+    <input id="del-ws-confirm" type="text" name="confirm_name" autocomplete="off" required>
+    <p class="dlg-err" id="del-ws-err" role="alert" hidden
+       data-fallback="{{ t('dash.delete_failed') }}"></p>
+    <div class="dlg-actions">
+      <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">{{ t('dash.delete_cancel') }}</button>
+      <button type="submit" class="btn btn-danger" id="del-ws-submit" disabled>{{ t('dash.delete_confirm') }}</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
   document.querySelector('.new-ws').addEventListener('htmx:responseError', function (e) {
     var box = document.getElementById('ws-error');
     try { box.textContent = JSON.parse(e.detail.xhr.responseText).detail; }
     catch (_) { box.textContent = '{{ t("dash.create_failed") }}'; }
   });
+
+  (function () {
+    var dlg = document.getElementById('del-ws-dlg');
+    var form = document.getElementById('del-ws-form');
+    var input = document.getElementById('del-ws-confirm');
+    var submit = document.getElementById('del-ws-submit');
+    var lead = document.getElementById('del-ws-lead');
+    var err = document.getElementById('del-ws-err');
+    var expected = '';
+    var leadTpl = {{ t('dash.delete_lead') | tojson }};
+
+    function sync() {
+      submit.disabled = input.value.trim() !== expected;
+    }
+    input.addEventListener('input', sync);
+
+    window.kairoOpenDelWs = function (btn) {
+      expected = btn.dataset.slug || '';
+      var topic = btn.dataset.topic || expected;
+      lead.textContent = leadTpl.replace('{topic}', topic);
+      input.value = '';
+      input.placeholder = expected;
+      err.hidden = true;
+      err.textContent = '';
+      form.setAttribute('hx-post', '/workspaces/' + encodeURIComponent(expected) + '/delete');
+      if (window.htmx) htmx.process(form);
+      sync();
+      dlg.showModal();
+      input.focus();
+    };
+
+    form.addEventListener('htmx:responseError', function (e) {
+      var msg;
+      try { msg = JSON.parse(e.detail.xhr.responseText).detail; } catch (_) {}
+      err.textContent = msg || err.dataset.fallback;
+      err.hidden = false;
+    });
+    form.addEventListener('htmx:beforeRequest', function () {
+      err.hidden = true;
+      err.textContent = '';
+    });
+  })();
 </script>
 {% endblock %}

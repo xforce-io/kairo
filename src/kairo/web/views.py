@@ -31,7 +31,12 @@ from kairo.web.discovery import scan_workspaces
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
 from kairo.web.tasks import stream_events
-from kairo.workspace import AddError, Workspace, WorkspaceNotFound
+from kairo.workspace import (
+    AddError,
+    Workspace,
+    WorkspaceNotFound,
+    delete_workspace,
+)
 
 router = APIRouter()
 
@@ -168,6 +173,27 @@ def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
         raise HTTPException(status_code=400, detail=t("err.topic_exists").format(topic=topic))
     Workspace.init(dest, topic=topic)
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
+
+
+@router.post("/workspaces/{slug}/delete", response_class=HTMLResponse)
+def delete_workspace_view(
+    request: Request,
+    slug: str,
+    confirm_name: str = Form(""),
+) -> HTMLResponse:
+    """#78:dashboard 删除 workspace;须键入 slug 全等确认。"""
+    t = _t(request)
+    if confirm_name.strip() != slug:
+        raise HTTPException(status_code=400, detail=t("err.ws_confirm_mismatch"))
+    if request.app.state.registry.is_running(slug):
+        raise HTTPException(status_code=409, detail=t("err.ws_busy"))
+    try:
+        delete_workspace(request.app.state.root, slug)
+    except WorkspaceNotFound:
+        raise HTTPException(status_code=404, detail=t("err.ws_not_found")) from None
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return HTMLResponse("", headers={"HX-Redirect": "/"})
 
 
 def _split_refs(ws: Workspace):
