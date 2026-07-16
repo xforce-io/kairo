@@ -368,8 +368,13 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .meta-forms { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: 13px; }
 .meta-forms td { padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .meta-forms td:first-child { padding-left: 11px; }
-.meta-forms tr.is-prev { cursor: pointer; transition: background .12s ease; }
-.meta-forms tr.is-prev:hover { background: #ece5d6; }
+.meta-forms tr.is-prev,
+.meta-forms tr.is-open { cursor: pointer; transition: background .12s ease; }
+.meta-forms tr.is-prev:hover,
+.meta-forms tr.is-open:hover { background: #ece5d6; }
+.reader-empty-wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; min-height: 40vh; padding: 24px; }
+.reader-empty-wrap .reader-empty { margin: 0; text-align: center; max-width: 28em; }
+.reader-open { min-width: 10em; }
 .meta-forms tr.on,
 .meta-forms tr.on.is-prev:hover { background: var(--pine-soft); }
 .meta-forms tr.on td:first-child { box-shadow: inset 3px 0 0 var(--pine); }

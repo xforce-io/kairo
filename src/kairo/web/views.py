@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 from html import escape
 from pathlib import Path
@@ -98,6 +100,38 @@ _IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".heic"}
 
 def _is_image_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
+
+
+def _open_local_path(path: Path) -> None:
+    """用本机默认应用打开文件(本地 console;路径须已由 manifest 解析出)。"""
+    path = path.resolve()
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)], start_new_session=True)
+    elif sys.platform.startswith("linux"):
+        subprocess.Popen(["xdg-open", str(path)], start_new_session=True)
+    elif sys.platform == "win32":
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    else:
+        raise HTTPException(status_code=501, detail="open not supported on this OS")
+
+
+def _manifest_form_path(ws: Workspace, ref_id: str, key: str) -> Path:
+    """从 manifest 解析 form 绝对路径(digest 或 forms[i]);key 非法 → 404。"""
+    if key == "digest":
+        p = (ws.references_dir() / ref_id / "digest.md").resolve()
+        if not p.is_file():
+            raise HTTPException(status_code=404, detail="form not found")
+        return p
+    man = ws.read_manifest(ref_id)
+    try:
+        idx = int(key)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="form not found")
+    if not 0 <= idx < len(man.forms):
+        raise HTTPException(status_code=404, detail="form not found")
+    return _form_path(ws, man.forms[idx].location).resolve()
 
 
 def _render_doc(path: Path) -> str:
@@ -282,17 +316,21 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
                 "role_label": _role_label("digest", t),
                 "location": f"references/{ref_id}/digest.md",
                 "previewable": True,
+                "openable": False,
                 "key": "digest",
             }
         )
     for i, f in enumerate(man.forms):
         p = _form_path(ws, f.location)
+        previewable = _is_text_file(p) or _is_image_file(p)
         forms.append(
             {
                 "role": f.role,
                 "role_label": _role_label(f.role, t),
                 "location": f.location,
-                "previewable": _is_text_file(p) or _is_image_file(p),
+                "previewable": previewable,
+                # 不可内联预览但文件在:用系统应用打开(#88 引用模型)
+                "openable": (not previewable) and p.is_file(),
                 "key": str(i),
             }
         )
@@ -322,8 +360,8 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     preview_html = (
         _form_preview_html(ws, slug, ref_id, primary) if primary else None
     )
-    # #88:无可预览 + 基线 document 原件 → 专用 hint(说明待抽正文/不 fold);
-    # corpus_tree / 音频等仍走通用 empty_hint
+    open_form = next((f for f in forms if f.get("openable")), None) if primary is None else None
+    # #88 引用模型:无可预览时,基线原件走专用 hint + 系统打开;目录树等仍通用文案
     if (
         primary is None
         and sc is not None
@@ -349,6 +387,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             # 主预览是 digest 时,OOB 画布与 target 同款可导出 PDF
             "exportable": bool(primary and primary["role"] == "digest"),
             "empty_hint": empty_hint,
+            "open_form": open_form,
             "can_generate_prose": can_generate_prose(ws, ref_id),
             "blocks": ref_product_blocks(ws, ref_id),
         },
@@ -408,6 +447,17 @@ def ref_form_file(request: Request, slug: str, ref_id: str, key: str) -> FileRes
     if ws.root.resolve() not in path.parents or not path.is_file():
         raise HTTPException(status_code=404, detail="file not found")
     return FileResponse(path)
+
+
+@router.post("/w/{slug}/ref/{ref_id}/form/{key}/open")
+def ref_form_open(request: Request, slug: str, ref_id: str, key: str) -> JSONResponse:
+    """#88:用系统默认应用打开 form 路径(本地 console;路径仅来自 manifest)。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    path = _manifest_form_path(ws, ref_id, key)
+    _open_local_path(path)
+    return JSONResponse({"ok": True, "path": str(path)})
 
 
 @router.get("/w/{slug}/target", response_class=HTMLResponse)

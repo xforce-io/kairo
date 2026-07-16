@@ -21,16 +21,16 @@ audio  --(whisper backend)----> transcript    （已有）
 binary --(markitdown backend)-> source_text   （新增）
 ```
 
-## 范围（已与 owner 锁定；#88 修订 corpus）
+## 范围（已与 owner 锁定；#88 引用模型）
 
 - **stream 型二进制**：`add x.docx`（默认 stream，fold=True）→ 产 `source_text` Form
   → 进 digest/compose 管线。
-- **corpus 二进制（#88 修订）**：基线 pptx/pdf 为常态。`document → source_text`（markitdown）
-  **也对 corpus 开放**，供 Web 预览与 agent Read；**仍不 digest、不进 fold-delta**
-  （与 `NormalizeRule`/`DigestRule` 的 fold=False 跳过一致）。「抽取正文」与「fold」正交。
-  目录指针（#24）里二进制叶子的 bulk 物化 **不在本 issue / #88**。
-- **格式**：docx / pptx / xlsx / pdf 全上（markitdown 统吃）。
-- **非目标**：OCR、扫描件、版面/图片提取、表格→结构化 schema（正交，另一层）。
+- **corpus 二进制（#88 引用模型）**：基线是**路径指针**，不跑 markitdown / 不抽 `source_text`、
+  不 digest、不 fold。`corpus.collect` 把 `document` 等原件路径挂进基线前言 + `read_dirs`；
+  Web 能预览（md/图）则预览，否则「用系统应用打开」。目录指针（#24）内二进制叶子 bulk 物化
+  **不在本 issue**。
+- **格式**：docx / pptx / xlsx / pdf 全上（stream 侧 markitdown 统吃）。
+- **非目标**：OCR、扫描件、版面/图片提取、表格→结构化 schema（正交，另一层）；基线全量抽取。
 
 ## Backend 选型：markitdown 单后端
 
@@ -48,8 +48,8 @@ binary --(markitdown backend)-> source_text   （新增）
 2. **默认 Transform 增一条**（`_default_transforms`）：
    `Transform(name="doc2text", consumes=["document"], produces="source_text", backend="markitdown")`。
 3. **`AsrRule` → `TransformRule`**（`rules.py`）：类已参数化 consumes/produces/backend；
-   仅把名字改诚实 + 把后端执行抽到 `backends.py`。`discover()`：ASR 跳过 corpus（fold=False）；
-   #88 起 markitdown→source_text 对 corpus 也 discover。
+   仅把名字改诚实 + 把后端执行抽到 `backends.py`。`discover()` 跳过 corpus（fold=False）—
+   基线不派生（#88 引用模型）。
 4. **新 `kairo/backends.py`**：后端 dispatch 注册表，统一返回
    `("ok", text, origin)` | `("blocked", reason)`。
    - `markitdown`：进程内转换；产 `source_text`，`origin="markitdown-from:<src_hash>"`；
@@ -80,8 +80,8 @@ rules.py     规则编排（TransformRule：discover/run/is_stale）
 
 ## 测试
 
-- **stub 模式**覆盖 rule 接线：`document` reference 被 discover、corpus 也 discover doc2text
-  （#88）、corpus ASR 仍跳过、missing-source、收敛幂等。
+- **stub 模式**覆盖 rule 接线：stream `document` 被 discover、corpus 二进制不 discover、
+  missing-source、收敛幂等；corpus.collect 纳入 document 指针（#88）。
 - **真实转换**：提交小 fixture（`tests/fixtures/sample.docx/.pptx/.xlsx/.pdf`），
   以 markitdown 可用性 gate（`pytest.importorskip("markitdown")`）跑端到端转换断言。
 - ASR 既有测试全绿（仅类名 `AsrRule`→`TransformRule` 的机械替换）。

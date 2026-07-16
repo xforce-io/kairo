@@ -59,8 +59,8 @@ class TransformRule:
     后端执行委托 backends.run_backend;KAIRO_STUB 下产占位 produces。
     blocked:源丢失 missing-source、未配 asr 后端 no-asr、asr 命令失败 asr-failed、
     markitdown 转换失败 convert-failed。
-    corpus(fold=False):#88 允许 markitdown→source_text(可读/可预览,供 agent Read);
-    仍跳过 ASR 等其它派生;digest/fold 由 DigestRule/ComposeRule 继续跳过。
+    corpus(fold=False)是路径引用层(#88 引用模型):不跑 Transform(含 markitdown);
+    由 corpus.collect 挂路径 + agent 按需 Read;Web 可预览则预览,否则系统打开。
     consumes/produces/backend 参数化 → 加新转换只声明 Transform。
     """
 
@@ -81,17 +81,13 @@ class TransformRule:
         )
         self.ws.write_manifest(ref_id, m)
 
-    def _skip_corpus(self) -> bool:
-        """fold=False 参考层:仅开放 document→source_text(markitdown);ASR 等仍跳过。"""
-        return not (self.produces == "source_text" and self.backend == "markitdown")
-
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
         for ref_id in self.ws.list_reference_ids():
             man = self.ws.read_manifest(ref_id)
             sc = self.ws.constitution.source_classes.get(man.source_class)
-            if sc is not None and not sc.fold and self._skip_corpus():
-                continue
+            if sc is not None and not sc.fold:
+                continue  # 基线=路径引用,不派生
             srcs = [f for f in man.forms if f.role in self.consumes]
             if not srcs:
                 continue

@@ -1,5 +1,14 @@
 {# OOB:选中条目时顺带刷新中间预览画布(#reader) #}
 <main id="reader" class="pane-read" hx-swap-oob="true">
   {% if preview_html %}<article class="doc"><p class="doc-kicker"><span class="dk-title">{{ preview_title }}</span>{% if exportable %}<button type="button" class="doc-export" onclick="kairoPrintDoc()">{{ t('doc.export_pdf') }}</button>{% endif %}</p>{{ preview_html|safe }}</article>
-  {% else %}<p class="reader-empty">{{ empty_hint }}</p>{% endif %}
+  {% else %}
+  <div class="reader-empty-wrap">
+    <p class="reader-empty">{{ empty_hint }}</p>
+    {% if open_form %}
+    <button type="button" class="btn btn-step reader-open"
+            hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ open_form.key }}/open"
+            hx-swap="none">{{ t('forms.open_system') }}</button>
+    {% endif %}
+  </div>
+  {% endif %}
 </main>

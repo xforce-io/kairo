@@ -269,8 +269,8 @@ def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):
     assert 'class="meta"' in r.text and "no inline-previewable" in r.text
 
 
-def test_corpus_document_empty_hint_and_role_label(tmp_path):
-    """#88:基线仅 document → 形态标签 Original + corpus-aware empty hint(非故障空白)。"""
+def test_corpus_document_empty_hint_and_open_system(tmp_path, monkeypatch):
+    """#88 引用模型:基线 document → Original + 路径说明 + 系统打开入口。"""
     from pathlib import Path
 
     fixtures = Path(__file__).parent / "fixtures"
@@ -281,30 +281,46 @@ def test_corpus_document_empty_hint_and_role_label(tmp_path):
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
     assert "Original" in r.text  # role.document i18n (en default)
-    assert "Baseline original only" in r.text
+    assert "path pointer" in r.text
+    assert "Open with system app" in r.text
+    assert f'/w/ws/ref/{rid}/form/0/open' in r.text
     assert "no inline-previewable" not in r.text
 
 
-def test_corpus_source_text_is_previewable(tmp_path):
-    """#88:基线抽完 source_text 后中间预览正文,不再 empty hint。"""
+def test_corpus_md_still_previewable(tmp_path):
+    """基线 md 仍内联预览(可预览则预览)。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    p = tmp_path / "wp.md"
+    p.write_text("# 白皮书\n权威术语")
+    rid = ws.add([p], source_class="corpus")
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "权威术语" in r.text
+    assert "path pointer" not in r.text
+
+
+def test_ref_form_open_calls_system_open(tmp_path, monkeypatch):
+    """POST …/form/{key}/open 用本机 open 打开 manifest 路径。"""
     from pathlib import Path
 
-    from kairo.models import State
-    from kairo.rules import TransformRule
+    called = []
+
+    def fake_popen(cmd, **kwargs):
+        called.append(cmd)
+        return type("P", (), {"pid": 0})()
+
+    monkeypatch.setattr("kairo.web.views.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("kairo.web.views.sys.platform", "darwin")
 
     fixtures = Path(__file__).parent / "fixtures"
     ws = Workspace.init(tmp_path / "ws", topic="t")
-    dst = ws.root / "sample.docx"
-    dst.write_bytes((fixtures / "sample.docx").read_bytes())
+    dst = ws.root / "sample.pdf"
+    dst.write_bytes((fixtures / "sample.pdf").read_bytes())
     rid = ws.add([dst], source_class="corpus")
-    TransformRule(
-        ws, consumes=["document"], produces="source_text", backend="markitdown"
-    ).discover()[0].run(State())
-    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
-    assert r.status_code == 200
-    assert "Baseline original only" not in r.text
-    assert "康医通系统" in r.text  # fixture docx 正文
-    assert "Body" in r.text  # role.source_text
+    r = TestClient(create_app(tmp_path)).post(f"/w/ws/ref/{rid}/form/0/open")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert called and called[0][0] == "open"
+    assert Path(called[0][1]).resolve() == dst.resolve()
 
 
 def test_target_meta_shows_status_and_previews(tmp_path, monkeypatch):
