@@ -317,6 +317,7 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
                 "role_label": _role_label("digest", t),
                 "location": f"references/{ref_id}/digest.md",
                 "filename": dig.name,
+                "ext": dig.suffix.lstrip(".").upper() or "MD",
                 "previewable": True,
                 "openable": False,
                 "key": "digest",
@@ -325,12 +326,14 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
     for i, f in enumerate(man.forms):
         p = _form_path(ws, f.location)
         previewable = _is_text_file(p) or _is_image_file(p)
+        name = p.name if p.name else f.location
         forms.append(
             {
                 "role": f.role,
                 "role_label": _role_label(f.role, t),
                 "location": f.location,
-                "filename": p.name if p.name else f.location,
+                "filename": name,
+                "ext": (p.suffix.lstrip(".").upper() if p.suffix else "FILE"),
                 "previewable": previewable,
                 # 不可内联预览但文件在:用系统应用打开(#88 引用模型)
                 "openable": (not previewable) and p.is_file(),
