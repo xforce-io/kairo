@@ -70,5 +70,32 @@
     {% endfor %}
     </tbody>
   </table>
+  <div class="meta-danger-zone">
+    <button type="button" class="btn btn-danger-ghost"
+            onclick="document.getElementById('del-ref-dlg').showModal()">{{ t('ref.delete_btn') }}</button>
+  </div>
+  <dialog id="del-ref-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
+    <div class="dlg-head">
+      <h3 class="dlg-title">{{ t('ref.delete_title') }}</h3>
+      <button type="button" class="dlg-x" aria-label="close" onclick="this.closest('dialog').close()">×</button>
+    </div>
+    <p class="dlg-hint">{{ t('ref.delete_lead').format(title=title) }}</p>
+    <ul class="dlg-bullets">
+      <li>{{ t('ref.delete_bullet_dir') }}</li>
+      <li>{{ t('ref.delete_bullet_body') }}</li>
+    </ul>
+    <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/delete"
+          hx-target="#step-area" hx-swap="innerHTML"
+          hx-on::after-request="if(event.detail.successful)this.closest('dialog').close()">
+      <label class="dlg-check">
+        <input type="checkbox" name="recompose" value="1"> {{ t('ref.delete_recompose') }}
+      </label>
+      <p class="dlg-hint dlg-hint-warn">{{ t('ref.delete_recompose_hint') }}</p>
+      <div class="dlg-actions">
+        <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">{{ t('ref.delete_cancel') }}</button>
+        <button type="submit" class="btn btn-danger">{{ t('ref.delete_confirm') }}</button>
+      </div>
+    </form>
+  </dialog>
 </div>
 {% include "_reader_oob.html" %}

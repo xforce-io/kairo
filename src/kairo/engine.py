@@ -6,6 +6,8 @@ step 不懂规则干啥:扫规则 → 跑 stale 的 → 收敛即停。一次 st
 
 from __future__ import annotations
 
+import shutil
+
 from kairo.history import snapshot
 from kairo.rules import ComposeRule, DigestRule, NormalizeRule, TransformRule, _hash
 from kairo.stream_index import write_stream_index
@@ -163,6 +165,50 @@ def retry_reference(ws, provider, ref_id: str) -> bool:
     """清除 ref 派生产物(含终态 blocked)后 step 到收敛。"""
     clear_reference_products(ws, ref_id)
     return step(ws, provider)
+
+
+def delete_reference(ws, ref_id: str, *, recompose: bool = False, provider=None) -> None:
+    """#77:永久删除一条参考。
+
+    - 删 `references/<id>/` 整树与 `state.products` 前缀项
+    - 各 target 的 folded / last_major_folded 摘掉该 digest 键
+    - 若该 digest 曾 fold 进产物:标 `reason=materials-changed`(正文默认保留,主按钮变运行)
+    - recompose=True:整篇 re-step 全量重综合(需 provider;手改可能丢失)
+    - 不删用户 workspace 外的原始路径(仅 workspace 内登记/copy)
+    """
+    if ref_id not in ws.list_reference_ids():
+        raise ValueError(f"reference 不存在:{ref_id}")
+    if recompose and provider is None:
+        raise ValueError("recompose 需要 provider")
+
+    digest_key = f"references/{ref_id}/digest.md"
+    prefix = f"references/{ref_id}/"
+    state = ws.read_state()
+
+    for key in list(state.products):
+        if key.startswith(prefix):
+            del state.products[key]
+
+    for path, ts in list(state.targets.items()):
+        had = digest_key in ts.folded
+        ts.folded = {k: v for k, v in ts.folded.items() if k != digest_key}
+        ts.last_major_folded = {
+            k: v for k, v in ts.last_major_folded.items() if k != digest_key
+        }
+        if had and ts.status != "blocked":
+            # 材料集变了:账本已诚实,正文待用户运行综合(或本次 recompose)
+            ts.reason = "materials-changed"
+        state.targets[path] = ts
+
+    ref_dir = ws.references_dir() / ref_id
+    if ref_dir.is_dir():
+        shutil.rmtree(ref_dir)
+
+    ws.write_state(state)
+    write_stream_index(ws)
+
+    if recompose:
+        re_step(ws, provider)
 
 
 def workspace_run_plan(ws) -> dict:

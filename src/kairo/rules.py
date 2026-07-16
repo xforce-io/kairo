@@ -418,8 +418,10 @@ class ComposeRule:
             ts = state.targets.get(target.path) if state else None
             folded = ts.folded if ts else {}
             delta = {p: h for p, h in all_digests.items() if folded.get(p) != h}
+            materials_changed = ts is not None and ts.reason == "materials-changed"
             if (
                 delta
+                or materials_changed
                 or self._upstream_changed(target, state, ts)
                 or self._is_edited(target.path, ts)
             ):
@@ -433,17 +435,24 @@ class ComposeRule:
         def run(state: State) -> None:
             doc_path = self.ws.root / key
             ts0 = state.targets.get(key)
-            if (
-                ts0
-                and doc_path.exists()
-                and _hash(doc_path.read_text()) != ts0.output_hash
-            ):
-                # 检测到手改 → 暂停该文档,不静默覆盖(D-status manual-edit)
-                ts0.status = "blocked"
-                ts0.reason = "manual-edit"
-                state.targets[key] = ts0
-                return
-            current = doc_path.read_text() if doc_path.exists() else ""
+            # #77:材料集变更 → 按剩余 digests 整篇重综合(丢当前正文/手改)
+            materials_changed = ts0 is not None and ts0.reason == "materials-changed"
+            if materials_changed:
+                current = ""
+                use_delta = dict(all_digests)
+            else:
+                if (
+                    ts0
+                    and doc_path.exists()
+                    and _hash(doc_path.read_text()) != ts0.output_hash
+                ):
+                    # 检测到手改 → 暂停该文档,不静默覆盖(D-status manual-edit)
+                    ts0.status = "blocked"
+                    ts0.reason = "manual-edit"
+                    state.targets[key] = ts0
+                    return
+                current = doc_path.read_text() if doc_path.exists() else ""
+                use_delta = delta
             upstream_blocks = [
                 f"---上游 {dep}---\n{(self.ws.root / dep).read_text()}"
                 for dep in target.depends_on
@@ -454,11 +463,11 @@ class ComposeRule:
             # 存在参考层时,fold 块(stream)标 ·观测 提示需对基线校准;无 corpus 时与今天一致。
             corpus_refs = corpus.collect(self.ws)
             has_corpus = bool(corpus_refs)
-            classes = self._delta_classes(delta)
+            classes = self._delta_classes(use_delta)
             digest_blocks = [
                 f"[来源:{p}{self._fold_label(classes[p]) if has_corpus else ''}]\n"
                 f"{(self.ws.root / p).read_text()}"
-                for p in sorted(delta)
+                for p in sorted(use_delta)
             ]
             reference_section = (
                 corpus.reference_section(self.ws, corpus_refs) if has_corpus else ""
@@ -467,7 +476,7 @@ class ComposeRule:
             context = (
                 f"---当前文档---\n{current}\n\n"
                 + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
-                + f"---新增 digest({len(delta)} 条,批量融入)---\n"
+                + f"---新增 digest({len(use_delta)} 条,批量融入)---\n"
                 + "\n\n".join(digest_blocks)
             )
             content = _run_agent(
@@ -483,8 +492,10 @@ class ComposeRule:
             )
             # 退化护栏(#28):有充分长的上一版,新输出却骤缩 → 不覆盖,标 blocked,
             # 保留旧文档(避免单次 LLM 退化输出静默销毁整篇)。需人工 re-step 重综合。
+            # materials-changed 从空正文重综合,不适用此护栏。
             if (
-                len(current) > _COMPOSE_MIN_PRIOR_LEN
+                not materials_changed
+                and len(current) > _COMPOSE_MIN_PRIOR_LEN
                 and len(content) < _COMPOSE_DEGRADE_RATIO * len(current)
             ):
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
@@ -507,7 +518,8 @@ class ComposeRule:
             ts.status = "ok"
             ts.reason = None
             ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
-            if ts0 is None:  # 全量重综合(A)→ 刷新漂移基线
+            # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
+            if ts0 is None or materials_changed:
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts
 
@@ -517,6 +529,9 @@ class ComposeRule:
             # compose-degraded 视为终态:不自动重试(否则对退化输出死循环),手动 re-step 重综合。
             if ts and ts.status == "blocked" and ts.reason == "compose-degraded":
                 return False
+            # #77:删参考后材料集变更,待运行综合
+            if ts and ts.reason == "materials-changed":
+                return True
             if (
                 ts
                 and doc_path.exists()
