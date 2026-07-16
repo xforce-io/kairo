@@ -310,11 +310,13 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
     置顶以示主次;其余形态(音频/转写/附件等)按 manifest 顺序随后。"""
     forms = []
     if (ws.references_dir() / ref_id / "digest.md").is_file():
+        dig = ws.references_dir() / ref_id / "digest.md"
         forms.append(
             {
                 "role": "digest",
                 "role_label": _role_label("digest", t),
                 "location": f"references/{ref_id}/digest.md",
+                "filename": dig.name,
                 "previewable": True,
                 "openable": False,
                 "key": "digest",
@@ -328,6 +330,7 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
                 "role": f.role,
                 "role_label": _role_label(f.role, t),
                 "location": f.location,
+                "filename": p.name if p.name else f.location,
                 "previewable": previewable,
                 # 不可内联预览但文件在:用系统应用打开(#88 引用模型)
                 "openable": (not previewable) and p.is_file(),
@@ -361,16 +364,17 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         _form_preview_html(ws, slug, ref_id, primary) if primary else None
     )
     open_form = next((f for f in forms if f.get("openable")), None) if primary is None else None
-    # #88 引用模型:无可预览时,基线原件走专用 hint + 系统打开;目录树等仍通用文案
-    if (
-        primary is None
-        and sc is not None
-        and not sc.fold
-        and any(f["role"] == "document" for f in forms)
-    ):
+    is_corpus = sc is not None and not sc.fold
+    # #88:无可预览时基线 document → 空态卡片;目录树等仍通用 empty_hint
+    if primary is None and is_corpus and any(f["role"] == "document" for f in forms):
         empty_hint = t("ref.empty_hint_corpus")
+        empty_card = True
     else:
         empty_hint = t("ref.empty_hint")
+        empty_card = False
+    blocks = ref_product_blocks(ws, ref_id)
+    # 基线干净指针无 blocked 时隐藏「重新处理」(避免假故障感);stream 或 blocked 仍显示
+    show_retry = bool(blocks) or not is_corpus
     return _render(
         request,
         "_ref_meta.html",
@@ -387,9 +391,11 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             # 主预览是 digest 时,OOB 画布与 target 同款可导出 PDF
             "exportable": bool(primary and primary["role"] == "digest"),
             "empty_hint": empty_hint,
+            "empty_card": empty_card,
             "open_form": open_form,
             "can_generate_prose": can_generate_prose(ws, ref_id),
-            "blocks": ref_product_blocks(ws, ref_id),
+            "blocks": blocks,
+            "show_retry": show_retry,
         },
     )
 

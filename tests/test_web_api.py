@@ -270,7 +270,7 @@ def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):
 
 
 def test_corpus_document_empty_hint_and_open_system(tmp_path, monkeypatch):
-    """#88 引用模型:基线 document → Original + 路径说明 + 系统打开入口。"""
+    """#88 引用模型:空态卡 + 文件名 + 在系统中打开;右侧短「打开」;无重新处理。"""
     from pathlib import Path
 
     fixtures = Path(__file__).parent / "fixtures"
@@ -281,9 +281,13 @@ def test_corpus_document_empty_hint_and_open_system(tmp_path, monkeypatch):
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
     assert "Original" in r.text  # role.document i18n (en default)
+    assert "sample.pptx" in r.text  # 文件名可见
+    assert "reader-card" in r.text  # 中间空态卡
     assert "path pointer" in r.text
-    assert "Open with system app" in r.text
+    assert "Open in system app" in r.text  # 卡片主文案
+    assert 'class="mf-prev">Open</span>' in r.text  # 形态表短词
     assert f'/w/ws/ref/{rid}/form/0/open' in r.text
+    assert "Reprocess" not in r.text  # 干净基线隐藏重新处理
     assert "no inline-previewable" not in r.text
 
 
