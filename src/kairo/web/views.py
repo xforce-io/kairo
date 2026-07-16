@@ -322,6 +322,17 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     preview_html = (
         _form_preview_html(ws, slug, ref_id, primary) if primary else None
     )
+    # #88:无可预览 + 基线 document 原件 → 专用 hint(说明待抽正文/不 fold);
+    # corpus_tree / 音频等仍走通用 empty_hint
+    if (
+        primary is None
+        and sc is not None
+        and not sc.fold
+        and any(f["role"] == "document" for f in forms)
+    ):
+        empty_hint = t("ref.empty_hint_corpus")
+    else:
+        empty_hint = t("ref.empty_hint")
     return _render(
         request,
         "_ref_meta.html",
@@ -337,7 +348,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "preview_html": preview_html,
             # 主预览是 digest 时,OOB 画布与 target 同款可导出 PDF
             "exportable": bool(primary and primary["role"] == "digest"),
-            "empty_hint": t("ref.empty_hint"),
+            "empty_hint": empty_hint,
             "can_generate_prose": can_generate_prose(ws, ref_id),
             "blocks": ref_product_blocks(ws, ref_id),
         },

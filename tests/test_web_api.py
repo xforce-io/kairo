@@ -269,6 +269,44 @@ def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):
     assert 'class="meta"' in r.text and "no inline-previewable" in r.text
 
 
+def test_corpus_document_empty_hint_and_role_label(tmp_path):
+    """#88:基线仅 document → 形态标签 Original + corpus-aware empty hint(非故障空白)。"""
+    from pathlib import Path
+
+    fixtures = Path(__file__).parent / "fixtures"
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    dst = ws.root / "sample.pptx"
+    dst.write_bytes((fixtures / "sample.pptx").read_bytes())
+    rid = ws.add([dst], source_class="corpus")
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "Original" in r.text  # role.document i18n (en default)
+    assert "Baseline original only" in r.text
+    assert "no inline-previewable" not in r.text
+
+
+def test_corpus_source_text_is_previewable(tmp_path):
+    """#88:基线抽完 source_text 后中间预览正文,不再 empty hint。"""
+    from pathlib import Path
+
+    from kairo.models import State
+    from kairo.rules import TransformRule
+
+    fixtures = Path(__file__).parent / "fixtures"
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    dst = ws.root / "sample.docx"
+    dst.write_bytes((fixtures / "sample.docx").read_bytes())
+    rid = ws.add([dst], source_class="corpus")
+    TransformRule(
+        ws, consumes=["document"], produces="source_text", backend="markitdown"
+    ).discover()[0].run(State())
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "Baseline original only" not in r.text
+    assert "康医通系统" in r.text  # fixture docx 正文
+    assert "Body" in r.text  # role.source_text
+
+
 def test_target_meta_shows_status_and_previews(tmp_path, monkeypatch):
     # 选产物 → 右栏出状态元信息;OOB 预览正文进 #reader
     _ws_with_step(tmp_path, monkeypatch)

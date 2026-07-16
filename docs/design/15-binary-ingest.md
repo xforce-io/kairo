@@ -21,14 +21,14 @@ audio  --(whisper backend)----> transcript    （已有）
 binary --(markitdown backend)-> source_text   （新增）
 ```
 
-## 范围（已与 owner 锁定）
+## 范围（已与 owner 锁定；#88 修订 corpus）
 
-- **只处理 stream 型 reference 的二进制**：`add x.docx`（默认 stream，fold=True）→ 产 `source_text` Form
+- **stream 型二进制**：`add x.docx`（默认 stream，fold=True）→ 产 `source_text` Form
   → 进 digest/compose 管线。
-- **corpus 二进制不处理**：corpus（fold=False）是只读参考层，agent 经 `read_dirs` 直读、不进
-  digest/compose；转 `source_text` 无意义。`TransformRule` 跳过 `fold=False` refs——与
-  `NormalizeRule`/`DigestRule` 一致（corpus 直读不派生）。目录指针（#24）里二进制叶子的物化
-  **不在本 issue**。
+- **corpus 二进制（#88 修订）**：基线 pptx/pdf 为常态。`document → source_text`（markitdown）
+  **也对 corpus 开放**，供 Web 预览与 agent Read；**仍不 digest、不进 fold-delta**
+  （与 `NormalizeRule`/`DigestRule` 的 fold=False 跳过一致）。「抽取正文」与「fold」正交。
+  目录指针（#24）里二进制叶子的 bulk 物化 **不在本 issue / #88**。
 - **格式**：docx / pptx / xlsx / pdf 全上（markitdown 统吃）。
 - **非目标**：OCR、扫描件、版面/图片提取、表格→结构化 schema（正交，另一层）。
 
@@ -48,7 +48,8 @@ binary --(markitdown backend)-> source_text   （新增）
 2. **默认 Transform 增一条**（`_default_transforms`）：
    `Transform(name="doc2text", consumes=["document"], produces="source_text", backend="markitdown")`。
 3. **`AsrRule` → `TransformRule`**（`rules.py`）：类已参数化 consumes/produces/backend；
-   仅把名字改诚实 + 把后端执行抽到 `backends.py`。`discover()` 增 corpus 跳过（fold=False）。
+   仅把名字改诚实 + 把后端执行抽到 `backends.py`。`discover()`：ASR 跳过 corpus（fold=False）；
+   #88 起 markitdown→source_text 对 corpus 也 discover。
 4. **新 `kairo/backends.py`**：后端 dispatch 注册表，统一返回
    `("ok", text, origin)` | `("blocked", reason)`。
    - `markitdown`：进程内转换；产 `source_text`，`origin="markitdown-from:<src_hash>"`；
@@ -79,8 +80,8 @@ rules.py     规则编排（TransformRule：discover/run/is_stale）
 
 ## 测试
 
-- **stub 模式**覆盖 rule 接线：`document` reference 被 discover、corpus 二进制被跳过、
-  missing-source、收敛幂等。
+- **stub 模式**覆盖 rule 接线：`document` reference 被 discover、corpus 也 discover doc2text
+  （#88）、corpus ASR 仍跳过、missing-source、收敛幂等。
 - **真实转换**：提交小 fixture（`tests/fixtures/sample.docx/.pptx/.xlsx/.pdf`），
   以 markitdown 可用性 gate（`pytest.importorskip("markitdown")`）跑端到端转换断言。
 - ASR 既有测试全绿（仅类名 `AsrRule`→`TransformRule` 的机械替换）。

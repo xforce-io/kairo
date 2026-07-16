@@ -3,6 +3,9 @@
 corpus 不 digest、不 ASR —— 它是只读参考层:compose 时拼成「基线前言」(各类
 hint + 文件清单/目录树)并经 read_dirs 授 agent 只读,agent 按需 Read。
 
+#88:二进制基线(pptx/pdf/…)经 markitdown 产 source_text 后,file 型 collect 以
+body_roles 命中可读正文;纯 document、尚无 source_text 时仍不进 collect。
+
 本模块统一 file(单文件)与 tree(目录指针)两种形态:CorpusRef + collect /
 reference_section / read_dirs / stamp。ComposeRule 只委托这些,不再自己懂 corpus。
 """
