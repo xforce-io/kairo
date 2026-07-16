@@ -68,6 +68,74 @@ def test_add_two_chinese_filenames_no_collision(tmp_path):
     assert ws.add([a]) != ws.add([b])
 
 
+def test_add_same_stem_sequential_gets_distinct_ids(tmp_path):
+    """#81 E1:同 stem 不同路径顺序 add → 两条 ref,互不吞并。"""
+    ws = Workspace.init(tmp_path)
+    a = tmp_path / "a" / "note.txt"
+    b = tmp_path / "b" / "note.txt"
+    a.parent.mkdir()
+    b.parent.mkdir()
+    a.write_text("CONTENT_A_UNIQUE")
+    b.write_text("CONTENT_B_UNIQUE")
+    r1, r2 = ws.add([a]), ws.add([b])
+    assert r1 != r2
+    assert {r1, r2} <= set(ws.list_reference_ids())
+    bodies = set()
+    for rid in (r1, r2):
+        loc = ws.read_manifest(rid).forms[0].location
+        p = __import__("pathlib").Path(loc)
+        if not p.is_absolute():
+            p = ws.root / loc
+        bodies.add(p.read_text())
+    assert bodies == {"CONTENT_A_UNIQUE", "CONTENT_B_UNIQUE"}
+
+
+def test_add_same_stem_concurrent_copy_no_silent_loss(tmp_path):
+    """#81 E1:同 stem + copy 并发 add → 两条 ref,双方正文都在,不静默丢。"""
+    from concurrent.futures import ThreadPoolExecutor
+
+    ws = Workspace.init(tmp_path)
+    a = tmp_path / "a" / "note.txt"
+    b = tmp_path / "b" / "note.txt"
+    a.parent.mkdir()
+    b.parent.mkdir()
+    a.write_text("CONTENT_A_UNIQUE")
+    b.write_text("CONTENT_B_UNIQUE")
+
+    def _add(p):
+        return ws.add([p], copy=True)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        r1, r2 = list(pool.map(_add, [a, b]))
+
+    assert r1 != r2
+    assert {r1, r2} <= set(ws.list_reference_ids())
+    bodies = set()
+    for rid in (r1, r2):
+        man = ws.read_manifest(rid)
+        assert len(man.forms) >= 1
+        loc = man.forms[0].location
+        p = __import__("pathlib").Path(loc)
+        if not p.is_absolute():
+            p = ws.root / loc
+        bodies.add(p.read_text())
+    assert "CONTENT_A_UNIQUE" in bodies
+    assert "CONTENT_B_UNIQUE" in bodies
+
+
+def test_add_explicit_ref_id_still_appends(tmp_path):
+    """显式 --to / ref_id 追加形态语义保留(非自动 id 场景)。"""
+    ws = Workspace.init(tmp_path)
+    a = tmp_path / "a.txt"
+    a.write_text("aaa")
+    rid = ws.add([a])
+    b = tmp_path / "b.md"
+    b.write_text("bbb")
+    assert ws.add([b], ref_id=rid) == rid
+    man = ws.read_manifest(rid)
+    assert len(man.forms) == 2
+
+
 # ---- #13:源分层 class(corpus 基线 / stream 观测) ----
 
 

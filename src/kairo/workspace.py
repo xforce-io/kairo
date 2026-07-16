@@ -5,7 +5,9 @@ from __future__ import annotations
 import datetime
 import hashlib
 import json
+import os
 import re
+import secrets
 import shutil
 from pathlib import Path
 
@@ -66,6 +68,27 @@ def _slug(text: str) -> str:
 
 
 class Workspace:
+    def _alloc_ref_id(self, name: str) -> str:
+        """自动派生 ref_id 并用 mkdir 独占认领 references/<id>/ (#81 E1)。
+
+        格式 ``YYYY-MM-DD-<slug>``;目录已存在则 ``-2``/``-3``…,再随机后缀。
+        ``mkdir(exist_ok=False)`` 在并发下保证两个 add 不会认到同一 id(静默丢材料)。
+        显式传入的 ref_id 不走本函数,仍可向既有 ref 追加 forms。
+        """
+        today = datetime.date.today().isoformat()
+        base = f"{today}-{_slug(name)}"
+        refs = self.references_dir()
+        refs.mkdir(parents=True, exist_ok=True)
+        candidates = [base]
+        candidates.extend(f"{base}-{n}" for n in range(2, 64))
+        candidates.extend(f"{base}-{secrets.token_hex(3)}" for _ in range(16))
+        for rid in candidates:
+            try:
+                (refs / rid).mkdir(exist_ok=False)
+                return rid
+            except FileExistsError:
+                continue
+        raise AddError(f"无法分配唯一 reference id(base={base})")
     def __init__(self, root: Path) -> None:
         self.root = Path(root)
 
@@ -127,17 +150,23 @@ class Workspace:
         """把源文件拷进 dest_dir;同名则 stem-1/stem-2…。返回副本路径。
 
         文件名取自源 basename,不依赖 title(#64:title ⊥ 副本名)。
+        #81 E1:用 O_EXCL 独占创建空文件再 copy2,避免并发同名互盖静默丢字节。
         """
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / src.name
-        if dest.exists():
-            stem, suffix = src.stem, src.suffix
-            n = 1
-            while dest.exists():
-                dest = dest_dir / f"{stem}-{n}{suffix}"
-                n += 1
-        shutil.copy2(src, dest)
-        return dest
+        stem, suffix = src.stem, src.suffix
+        names = [src.name]
+        names.extend(f"{stem}-{n}{suffix}" for n in range(1, 64))
+        names.extend(f"{stem}-{secrets.token_hex(3)}{suffix}" for _ in range(8))
+        for name in names:
+            dest = dest_dir / name
+            try:
+                fd = os.open(dest, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+            except FileExistsError:
+                continue
+            shutil.copy2(src, dest)
+            return dest
+        raise AddError(f"无法在 {dest_dir} 为 {src.name} 分配唯一副本名")
 
     def _known_role_exts(self) -> set[str]:
         """可摄入扩展名:constitution 声明 ∪ 内置默认(音频/文档/图片)。"""
@@ -180,10 +209,10 @@ class Workspace:
                 "(仅识别音频/文档/图片/文本等已知扩展名,且不递归子目录)"
             )
         if ref_id is None:
-            today = datetime.date.today().isoformat()
-            ref_id = f"{today}-{_slug(d.name)}"
+            ref_id = self._alloc_ref_id(d.name)  # 已独占创建 references/<id>/
+        else:
+            (self.references_dir() / ref_id).mkdir(parents=True, exist_ok=True)
         ref_dir = self.references_dir() / ref_id
-        ref_dir.mkdir(parents=True, exist_ok=True)
         if copy:
             members = [self._copy_into(f, ref_dir) for f in members]
         # 复用文件 add;copy 已处理
@@ -240,9 +269,11 @@ class Workspace:
             else:
                 dest_dir = self.root / ".kairo" / "uploads"
             files = [self._copy_into(f, dest_dir) for f in files]
+        claimed = False
         if ref_id is None:
-            today = datetime.date.today().isoformat()
-            ref_id = f"{today}-{_slug(files[0].stem)}"
+            # #81 E1:自动 id 独占认领,避免同 stem 并发/连加认到同一 id 静默丢材料
+            ref_id = self._alloc_ref_id(files[0].stem)
+            claimed = True
         ref_dir = self.references_dir() / ref_id
         existing = ref_dir / "manifest.yaml"
         new_forms = [
@@ -255,12 +286,13 @@ class Workspace:
             for f in files
         ]
         if existing.is_file():
-            # 追加到已有 ref:保留既有 forms,按 location 去重
+            # 追加到已有 ref(仅显式 ref_id):保留既有 forms,按 location 去重
             man = self.read_manifest(ref_id)
             have = {fm.location for fm in man.forms}
             man.forms.extend(fm for fm in new_forms if fm.location not in have)
         else:
-            ref_dir.mkdir(parents=True, exist_ok=True)
+            if not claimed:
+                ref_dir.mkdir(parents=True, exist_ok=True)
             man = Manifest(
                 id=ref_id,
                 title=title or files[0].stem,
@@ -284,10 +316,9 @@ class Workspace:
         if (source_class or self.constitution.default_class) != "corpus":
             raise AddError(f"内部错误:非 corpus 目录应走多形态 stream 路径:{d}")
         if ref_id is None:
-            today = datetime.date.today().isoformat()
-            ref_id = f"{today}-{_slug(d.name)}"
-        ref_dir = self.references_dir() / ref_id
-        ref_dir.mkdir(parents=True, exist_ok=True)
+            ref_id = self._alloc_ref_id(d.name)
+        else:
+            (self.references_dir() / ref_id).mkdir(parents=True, exist_ok=True)
         man = Manifest(
             id=ref_id,
             title=title or d.name,
