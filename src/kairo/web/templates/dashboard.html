@@ -51,12 +51,18 @@
   <form id="del-ws-form" class="dlg-form" hx-post="/" hx-swap="none"
         hx-on::after-request="if(event.detail.successful)this.closest('dialog').close()">
     <label class="dlg-label" for="del-ws-confirm">{{ t('dash.delete_confirm_label') }}</label>
-    <input id="del-ws-confirm" type="text" name="confirm_name" autocomplete="off" required>
+    <p class="dlg-expected-wrap">
+      <code id="del-ws-expected" class="dlg-expected"></code>
+    </p>
+    <input id="del-ws-confirm" type="text" name="confirm_name"
+           placeholder="{{ t('dash.delete_confirm_placeholder') }}"
+           autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+           data-1p-ignore="true" data-lpignore="true" required>
     <p class="dlg-err" id="del-ws-err" role="alert" hidden
        data-fallback="{{ t('dash.delete_failed') }}"></p>
     <div class="dlg-actions">
-      <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">{{ t('dash.delete_cancel') }}</button>
-      <button type="submit" class="btn btn-danger" id="del-ws-submit" disabled>{{ t('dash.delete_confirm') }}</button>
+      <button type="button" class="btn btn-ghost dlg-btn" onclick="this.closest('dialog').close()">{{ t('dash.delete_cancel') }}</button>
+      <button type="submit" class="btn btn-danger dlg-btn" id="del-ws-submit" disabled>{{ t('dash.delete_confirm') }}</button>
     </div>
   </form>
 </dialog>
@@ -74,21 +80,36 @@
     var input = document.getElementById('del-ws-confirm');
     var submit = document.getElementById('del-ws-submit');
     var lead = document.getElementById('del-ws-lead');
+    var expectedEl = document.getElementById('del-ws-expected');
     var err = document.getElementById('del-ws-err');
     var expected = '';
     var leadTpl = {{ t('dash.delete_lead') | tojson }};
 
+    function matched() {
+      return input.value.trim() === expected && expected.length > 0;
+    }
     function sync() {
-      submit.disabled = input.value.trim() !== expected;
+      var ok = matched();
+      submit.disabled = !ok;
+      submit.setAttribute('aria-disabled', ok ? 'false' : 'true');
     }
     input.addEventListener('input', sync);
+    // 硬拦:disabled 被拔掉 / Enter 误触时仍不提交
+    form.addEventListener('submit', function (e) {
+      if (!matched()) {
+        e.preventDefault();
+        e.stopPropagation();
+        sync();
+      }
+    });
 
     window.kairoOpenDelWs = function (btn) {
       expected = btn.dataset.slug || '';
       var topic = btn.dataset.topic || expected;
       lead.textContent = leadTpl.replace('{topic}', topic);
+      expectedEl.textContent = expected;
       input.value = '';
-      input.placeholder = expected;
+      // 绝不把 slug 写入 placeholder(答案不得印在输入框里)
       err.hidden = true;
       err.textContent = '';
       form.setAttribute('hx-post', '/workspaces/' + encodeURIComponent(expected) + '/delete');
@@ -104,7 +125,12 @@
       err.textContent = msg || err.dataset.fallback;
       err.hidden = false;
     });
-    form.addEventListener('htmx:beforeRequest', function () {
+    form.addEventListener('htmx:beforeRequest', function (e) {
+      if (!matched()) {
+        e.preventDefault(); // 双保险:htmx 发请求前再拦一次
+        sync();
+        return;
+      }
       err.hidden = true;
       err.textContent = '';
     });
