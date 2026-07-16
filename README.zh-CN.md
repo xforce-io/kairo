@@ -114,9 +114,9 @@ Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub /
 ## Web Console（可选）
 
     pip install 'kairo[web]'
-    kairo serve <包含多个 workspace 的根目录> [--port 8000]
+    kairo serve <包含多个 workspace 的根目录> [--port 8787]
 
-浏览器（默认 `http://127.0.0.1:8000`，仅本机）统管 root 下的多个 workspace：
+浏览器（默认 `http://127.0.0.1:8787`，仅本机）统管 root 下的多个 workspace：
 
 - **总览（dashboard）**：列出各 workspace（观测/基线计数、待 step / blocked 状态）；支持**单字段新建 workspace**——填 topic 即在 root 下建目录并 `init`。
 - **详情页**：左栏分 `产物 / 参考(观测) / 基线`；选中条目 → 右栏常驻元信息（各形态可选预览、一键复制路径），中间为预览画布。transcript / digest 等形态即点即看（含 workspace 外的 `.txt` 转写，`.md` 渲染、纯文本保留换行），顶部可返回总览。
