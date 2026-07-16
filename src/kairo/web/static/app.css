@@ -173,6 +173,22 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 /* 产物「重新生成」:破坏性次级操作,克制描边,hover 透出警示红 */
 .btn-regen { width: auto; margin: 2px 0 14px; padding: 7px 12px; font-size: 12.5px; font-weight: 500; }
 .btn-regen:hover { color: #9a3b3b; border-color: #d8b0b0; background: #f7ecec; }
+/* #77 删除参考:危险区置底 */
+.meta-danger-zone { margin-top: 22px; padding-top: 14px; border-top: 1px dashed var(--line-2); }
+.btn-danger-ghost {
+  width: auto; margin: 0; padding: 7px 12px; font-size: 12.5px; font-weight: 500;
+  background: transparent; color: var(--clay); border: 1px solid #e7c6ba;
+}
+.btn-danger-ghost:hover { background: var(--clay-soft); border-color: #d9a898; }
+.btn-danger {
+  background: var(--clay); color: #fffdf9; border: 1px solid var(--clay);
+  box-shadow: 0 6px 16px -8px rgba(168,65,42,.55);
+}
+.btn-danger:hover { background: #8f3622; border-color: #8f3622; }
+.dlg-bullets { margin: 0 0 14px; padding-left: 1.2em; color: var(--ink-soft); font-size: 13px; }
+.dlg-bullets li { margin: 4px 0; }
+.dlg-hint-warn { color: var(--clay); font-style: normal; margin-top: 4px; }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 
 /* 添加参考弹框 */
 .ref-dialog { width: min(440px, 92vw); padding: 22px 24px 26px; border: 1px solid var(--line); border-radius: 14px; background: var(--paper); color: var(--ink); box-shadow: 0 30px 70px -24px rgba(20,16,10,.55); }

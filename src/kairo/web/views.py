@@ -21,6 +21,7 @@ from fastapi.responses import (
 from kairo.engine import (
     ProseError,
     can_generate_prose,
+    delete_reference,
     prose_precheck,
     ref_product_blocks,
     workspace_run_plan,
@@ -723,6 +724,51 @@ def retry_ref(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     argv = [sys.executable, "-m", "kairo", "retry-ref", ref_id]
     task = reg.start(slug, ws.root, argv)
     return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
+
+
+@router.post("/w/{slug}/ref/{ref_id}/delete", response_class=HTMLResponse)
+def delete_ref(
+    request: Request,
+    slug: str,
+    ref_id: str,
+    recompose: str = Form("0"),
+) -> HTMLResponse:
+    """#77:删除参考。默认保留产物正文;可选立即整篇 re-step。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    reg = request.app.state.registry
+    want_recompose = recompose in ("1", "true", "on", "yes")
+    if want_recompose and reg.is_running(slug):
+        raise HTTPException(status_code=409, detail=_t(request)("step.busy"))
+    try:
+        delete_reference(ws, ref_id, recompose=False)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    if want_recompose:
+        argv = [sys.executable, "-m", "kairo", "re-step"]
+        task = reg.start(slug, ws.root, argv)
+        # 进度进 step-area;列表/元信息/阅读区 OOB 清掉已删参考
+        step = _render(
+            request, "_step.html", {"slug": slug, "task_id": task.task_id}
+        ).body.decode()
+        streams, _corpus = _split_refs(ws)
+        refs = _render(
+            request, "_refs_list.html", {"slug": slug, "refs": streams}
+        ).body.decode()
+        t = _t(request)
+        btn = _run_button_ctx(request, ws, slug)
+        oob = (
+            f'<div id="refs-list" hx-swap-oob="true">{refs}</div>'
+            f'<div id="meta" hx-swap-oob="true">'
+            f'<p class="panel-hint">{escape(t("panel.hint"))}</p></div>'
+            f'<main id="reader" class="pane-read" hx-swap-oob="true">'
+            f'<p class="reader-empty">{escape(t("reader.empty"))}</p></main>'
+            f'<div id="run-btn-wrap" hx-swap-oob="true">'
+            f"{_run_button_html(slug, btn, t)}</div>"
+        )
+        return HTMLResponse(step + oob)
+    return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(slug)})
 
 
 @router.post("/w/{slug}/ref/{ref_id}/prose", response_class=HTMLResponse)

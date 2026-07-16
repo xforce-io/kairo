@@ -8,6 +8,7 @@ import typer
 
 from kairo.engine import ProseError
 from kairo.engine import accept as engine_accept
+from kairo.engine import delete_reference as engine_delete_reference
 from kairo.engine import generate_prose as engine_generate_prose
 from kairo.engine import re_step as engine_re_step
 from kairo.engine import retry_reference as engine_retry_reference
@@ -123,6 +124,31 @@ def retry_ref(ref_id: str = typer.Argument(..., help="reference id")) -> None:
         raise typer.Exit(1)
     progressed = engine_retry_reference(ws, select_provider(), ref_id)
     typer.echo("retried" if progressed else "no change")
+
+
+@app.command(name="rm-ref")
+def rm_ref(
+    ref_id: str = typer.Argument(..., help="reference id"),
+    recompose: bool = typer.Option(
+        False, "--recompose", help="删除后立即用剩余参考整篇重综合产物"
+    ),
+) -> None:
+    """#77:永久删除一条参考(摘 folded;默认不改写产物正文)。"""
+    ws = _open_ws()
+    if ref_id not in ws.list_reference_ids():
+        typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    try:
+        engine_delete_reference(
+            ws,
+            ref_id,
+            recompose=recompose,
+            provider=select_provider() if recompose else None,
+        )
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"deleted {ref_id}" + (" + recomposed" if recompose else ""))
 
 
 @app.command()
