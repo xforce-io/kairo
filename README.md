@@ -114,9 +114,9 @@ Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub 
 ## Web Console (optional)
 
     pip install 'kairo[web]'
-    kairo serve <root directory containing multiple workspaces> [--port 8000]
+    kairo serve <root directory containing multiple workspaces> [--port 8787]
 
-In the browser (default `http://127.0.0.1:8000`, local only), manage the multiple workspaces under `root`. The UI is bilingual (English by default; switch to Chinese with the `EN | 中` toggle in the top bar, or via your browser's `Accept-Language`):
+In the browser (default `http://127.0.0.1:8787`, local only), manage the multiple workspaces under `root`. The UI is bilingual (English by default; switch to Chinese with the `EN | 中` toggle in the top bar, or via your browser's `Accept-Language`):
 
 - **Dashboard**: lists each workspace (observation/baseline counts, to-step / blocked status); supports **single-field workspace creation** — type a topic to create a directory under `root` and `init` it.
 - **Detail page**: the left column splits into `Targets / References (observations) / Corpus`; selecting an item → a persistent metadata column on the right (per-form optional preview, one-click path copy), with a preview canvas in the middle. Forms like transcript / digest preview on click (including `.txt` transcriptions outside the workspace — `.md` is rendered, plain text keeps line breaks); the top bar returns to the dashboard.

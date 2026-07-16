@@ -24,7 +24,7 @@ def create_app(root: Path) -> FastAPI:
     return app
 
 
-def run(root: Path, port: int = 8000) -> None:
+def run(root: Path, port: int = 8787) -> None:
     import uvicorn
 
     uvicorn.run(create_app(Path(root)), host="127.0.0.1", port=port)

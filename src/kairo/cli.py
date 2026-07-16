@@ -234,7 +234,7 @@ def diff(seq: str = typer.Argument(None, help="对比的快照;省略=最近")) 
 @app.command()
 def serve(
     root: Path = typer.Argument(Path.cwd, help="包含多个 workspace 的根目录"),
-    port: int = typer.Option(8000, "--port", "-p", help="监听端口"),
+    port: int = typer.Option(8787, "--port", "-p", help="监听端口(默认 8787,避开常见 8000/alfred 8765)"),
 ) -> None:
     """启动本地 Web Console,浏览器统管 root 下的多个 workspace。"""
     try:
