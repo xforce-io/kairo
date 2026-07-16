@@ -164,10 +164,10 @@
     clearTimeout(el._t);
     el._t = setTimeout(function () { el.classList.remove('show'); }, 4200);
   });
-  // 复制路径:捕获阶段拦截,阻止冒泡到整行的 htmx 预览
+  // 复制路径:任意 [data-copy];捕获阶段拦截,避免冒泡触发行预览/打开
   document.addEventListener('click', function (e) {
-    var btn = e.target.closest('.copy-btn');
-    if (!btn) return;
+    var btn = e.target.closest('[data-copy]');
+    if (!btn || !btn.dataset.copy) return;
     e.preventDefault();
     e.stopPropagation();
     navigator.clipboard.writeText(btn.dataset.copy).then(function () {
@@ -175,9 +175,9 @@
       setTimeout(function () { btn.classList.remove('copied'); }, 1200);
     });
   }, true);
-  // 点整行(可预览)→ 高亮;预览本身由该行 hx-get 触发
+  // 点整行(可预览/可系统打开)→ 高亮;预览或 open 由该行 hx-* 触发
   document.addEventListener('click', function (e) {
-    var tr = e.target.closest('.meta-forms tr.is-prev');
+    var tr = e.target.closest('.meta-forms tr.is-prev, .meta-forms tr.is-open');
     if (!tr) return;
     tr.parentElement.querySelectorAll('tr').forEach(function (x) { x.classList.remove('on'); });
     tr.classList.add('on');

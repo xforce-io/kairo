@@ -1,5 +1,31 @@
 {# OOB:选中条目时顺带刷新中间预览画布(#reader) #}
 <main id="reader" class="pane-read" hx-swap-oob="true">
   {% if preview_html %}<article class="doc"><p class="doc-kicker"><span class="dk-title">{{ preview_title }}</span>{% if exportable %}<button type="button" class="doc-export" onclick="kairoPrintDoc()">{{ t('doc.export_pdf') }}</button>{% endif %}</p>{{ preview_html|safe }}</article>
-  {% else %}<p class="reader-empty">{{ empty_hint }}</p>{% endif %}
+  {% elif empty_card and open_form %}
+  {# #88 基线原件空态卡:文件身份 + 轻量操作,不抢全局 primary #}
+  <div class="reader-empty-wrap">
+    <div class="reader-card">
+      <div class="reader-card-badge" aria-hidden="true">{{ open_form.ext or 'FILE' }}</div>
+      <p class="reader-card-file" title="{{ open_form.location }}">{{ open_form.filename or open_form.location }}</p>
+      <p class="reader-card-kicker">{{ t('ref.empty_card_kicker') }}</p>
+      <div class="reader-card-actions">
+        <button type="button" class="btn-card-open"
+                hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ open_form.key }}/open"
+                hx-swap="none">{{ t('forms.open_in_system') }}</button>
+        <button type="button" class="btn-card-copy" data-copy="{{ open_form.location }}"
+                title="{{ open_form.location }}">{{ t('forms.copy_path') }}</button>
+      </div>
+      <p class="reader-card-note">{{ t('ref.empty_card_note') }}</p>
+    </div>
+  </div>
+  {% else %}
+  <div class="reader-empty-wrap">
+    <p class="reader-empty">{{ empty_hint }}</p>
+    {% if open_form %}
+    <button type="button" class="btn-card-open"
+            hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ open_form.key }}/open"
+            hx-swap="none">{{ t('forms.open_in_system') }}</button>
+    {% endif %}
+  </div>
+  {% endif %}
 </main>

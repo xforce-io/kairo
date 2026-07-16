@@ -269,6 +269,64 @@ def test_corpus_ref_has_no_inline_preview(tmp_path, monkeypatch):
     assert 'class="meta"' in r.text and "no inline-previewable" in r.text
 
 
+def test_corpus_document_empty_hint_and_open_system(tmp_path, monkeypatch):
+    """#88 引用模型:空态卡 + 文件名 + 在系统中打开;右侧短「打开」;无重新处理。"""
+    from pathlib import Path
+
+    fixtures = Path(__file__).parent / "fixtures"
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    dst = ws.root / "sample.pptx"
+    dst.write_bytes((fixtures / "sample.pptx").read_bytes())
+    rid = ws.add([dst], source_class="corpus")
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "Original" in r.text  # role.document i18n (en default)
+    assert "sample.pptx" in r.text  # 文件名可见
+    assert "reader-card" in r.text  # 中间空态卡
+    assert "path pointer" in r.text
+    assert "Open in system app" in r.text  # 卡片主文案
+    assert 'class="mf-prev">Open</span>' in r.text  # 形态表短词
+    assert f'/w/ws/ref/{rid}/form/0/open' in r.text
+    assert "Reprocess" not in r.text  # 干净基线隐藏重新处理
+    assert "no inline-previewable" not in r.text
+
+
+def test_corpus_md_still_previewable(tmp_path):
+    """基线 md 仍内联预览(可预览则预览)。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    p = tmp_path / "wp.md"
+    p.write_text("# 白皮书\n权威术语")
+    rid = ws.add([p], source_class="corpus")
+    r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{rid}")
+    assert r.status_code == 200
+    assert "权威术语" in r.text
+    assert "path pointer" not in r.text
+
+
+def test_ref_form_open_calls_system_open(tmp_path, monkeypatch):
+    """POST …/form/{key}/open 用本机 open 打开 manifest 路径。"""
+    from pathlib import Path
+
+    called = []
+
+    def fake_popen(cmd, **kwargs):
+        called.append(cmd)
+        return type("P", (), {"pid": 0})()
+
+    monkeypatch.setattr("kairo.web.views.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("kairo.web.views.sys.platform", "darwin")
+
+    fixtures = Path(__file__).parent / "fixtures"
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    dst = ws.root / "sample.pdf"
+    dst.write_bytes((fixtures / "sample.pdf").read_bytes())
+    rid = ws.add([dst], source_class="corpus")
+    r = TestClient(create_app(tmp_path)).post(f"/w/ws/ref/{rid}/form/0/open")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert called and called[0][0] == "open"
+    assert Path(called[0][1]).resolve() == dst.resolve()
+
+
 def test_target_meta_shows_status_and_previews(tmp_path, monkeypatch):
     # 选产物 → 右栏出状态元信息;OOB 预览正文进 #reader
     _ws_with_step(tmp_path, monkeypatch)

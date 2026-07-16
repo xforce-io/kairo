@@ -1,19 +1,23 @@
-"""二进制/结构化源摄入(#15):TransformRule + markitdown 后端。
+"""二进制/结构化源摄入(#15) + 基线引用模型(#88):TransformRule + markitdown。
 
-与 ASR 同构:stream 型二进制(docx/pptx/xlsx/pdf)→ source_text Form,下游零改动。
-corpus 二进制不处理(fold=False 跳过)。真实转换用提交的 fixture,以 markitdown 可用性 gate。
+stream:document(docx/pptx/xlsx/pdf)→ source_text Form → digest 管线。
+corpus:不跑 Transform;路径指针由 corpus.collect 挂出,Web 预览或系统打开。
 """
 
 from pathlib import Path
 
 import pytest
 
+from kairo import corpus
+from kairo.engine import step
 from kairo.models import State
-from kairo.rules import TransformRule
+from kairo.provider import StubProvider
+from kairo.rules import DigestRule, TransformRule
 from kairo.workspace import Workspace
 
 FIXTURES = Path(__file__).parent / "fixtures"
 DOC_BACKEND = dict(consumes=["document"], produces="source_text", backend="markitdown")
+ASR_BACKEND = dict(consumes=["audio"], produces="transcript", backend="asr-stub")
 
 
 def _add_doc(ws, name="sample.docx", source_class=None):
@@ -42,13 +46,22 @@ def test_transform_discovers_document_without_source_text(tmp_path):
 
 
 def test_transform_skips_corpus_binary(tmp_path):
-    """corpus(fold=False)是只读参考层,二进制不派生(与 Normalize/Digest 一致)。"""
+    """#88 引用模型:corpus 不跑 markitdown/doc2text。"""
     ws = Workspace.init(tmp_path)
     _add_doc(ws, source_class="corpus")
     assert TransformRule(ws, **DOC_BACKEND).discover() == []
 
 
-# ---- run:真实 markitdown 转换(markitdown 为硬依赖,缺失即失败) ----
+def test_transform_skips_corpus_audio_asr(tmp_path):
+    """corpus 仍不跑 ASR。"""
+    ws = Workspace.init(tmp_path)
+    audio = ws.root / "meet.m4a"
+    audio.write_bytes(b"fake-audio")
+    ws.add([audio], source_class="corpus", role="audio")
+    assert TransformRule(ws, **ASR_BACKEND).discover() == []
+
+
+# ---- run:真实 markitdown 转换(stream only) ----
 
 
 def test_markitdown_converts_docx_to_source_text(tmp_path):
@@ -118,3 +131,59 @@ def test_transform_converges_idempotent(tmp_path):
     assert item.is_stale(state) is False
     # 已产 source_text → 不再 discover
     assert TransformRule(ws, **DOC_BACKEND).discover() == []
+
+
+# ---- #88 引用模型:corpus 指针可达,不抽取 ----
+
+
+@pytest.mark.parametrize("name", ["sample.pptx", "sample.pdf", "sample.docx", "sample.xlsx"])
+def test_corpus_binary_pointer_collect_no_transform(tmp_path, name):
+    """基线 pptx/pdf 等:不产 source_text/digest;collect 挂原件路径;stamp 可用。"""
+    ws = Workspace.init(tmp_path)
+    rid = _add_doc(ws, name, source_class="corpus")
+    src = (ws.root / name).resolve()
+
+    assert TransformRule(ws, **DOC_BACKEND).discover() == []
+    assert DigestRule(ws, StubProvider()).discover() == []
+    assert not (ws.root / "references" / rid / "source_text.md").exists()
+    assert not (ws.root / "references" / rid / "digest.md").exists()
+
+    refs = {r.ref_id: r for r in corpus.collect(ws)}
+    assert rid in refs
+    assert refs[rid].kind == "file"
+    assert refs[rid].path.resolve() == src
+    assert corpus.stamp([refs[rid]])
+    section = corpus.reference_section(ws, list(refs.values()))
+    assert name in section or str(src) in section
+
+
+def test_corpus_binary_step_no_source_text(tmp_path, monkeypatch):
+    """step 不抽 corpus;stream 仍 digest;collect 仍见基线原件。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path)
+    crid = _add_doc(ws, "sample.pptx", source_class="corpus")
+    stream_txt = tmp_path / "meet.txt"
+    stream_txt.write_text("观测会议正文")
+    srid = ws.add([stream_txt])
+
+    assert step(ws, StubProvider()) is True
+
+    assert not (ws.root / "references" / crid / "source_text.md").exists()
+    assert not (ws.root / "references" / crid / "digest.md").exists()
+    assert (ws.root / "references" / srid / "digest.md").is_file()
+    assert crid in {r.ref_id for r in corpus.collect(ws)}
+    state = ws.read_state()
+    ts = state.targets.get("understanding.md")
+    if ts and ts.folded:
+        assert not any(crid in k for k in ts.folded)
+
+
+def test_corpus_document_stamp_changes_on_edit(tmp_path):
+    """二进制基线 stamp 跟文件字节走,不 read_text。"""
+    ws = Workspace.init(tmp_path)
+    rid = _add_doc(ws, "sample.pdf", source_class="corpus")
+    ref = next(r for r in corpus.collect(ws) if r.ref_id == rid)
+    s0 = corpus.stamp([ref])
+    (ws.root / "sample.pdf").write_bytes(b"%PDF-1.4 changed")
+    ref2 = next(r for r in corpus.collect(ws) if r.ref_id == rid)
+    assert corpus.stamp([ref2]) != s0

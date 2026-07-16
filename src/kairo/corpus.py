@@ -1,7 +1,10 @@
 """corpus(基线参考层)概念的归属地。
 
-corpus 不 digest、不 ASR —— 它是只读参考层:compose 时拼成「基线前言」(各类
-hint + 文件清单/目录树)并经 read_dirs 授 agent 只读,agent 按需 Read。
+corpus 不 digest、不 ASR、不 markitdown —— 它是路径引用层:compose 时拼成
+「基线前言」(各类 hint + 文件清单/目录树)并经 read_dirs 授 agent 只读,agent 按需 Read。
+
+#88 引用模型:file 型指针优先 body_roles 正文,否则 document 等原件路径也进 collect
+(不抽 source_text);二进制 stamp 用内容 hash,不 read_text。
 
 本模块统一 file(单文件)与 tree(目录指针)两种形态:CorpusRef + collect /
 reference_section / read_dirs / stamp。ComposeRule 只委托这些,不再自己懂 corpus。
@@ -15,9 +18,19 @@ from pathlib import Path
 
 CORPUS_TREE_ROLE = "corpus_tree"  # 目录指针 form 的 role
 
+# file 型指针:body 之后再试的 role 优先序(原件/附件等,不进 digest 管线)
+_POINTER_ROLES = ("document", "attachment", "audio", "note", "prose")
+
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _file_stamp(path: Path) -> str:
+    """文件版本戳:字节 hash(文本/二进制均适用,避免对 pptx 等 read_text)。"""
+    if not path.exists() or not path.is_file():
+        return ""
+    return hashlib.sha256(path.read_bytes()).hexdigest()[:12]
 
 
 # ---- 树助手(tree 形态内部用) ----
@@ -68,7 +81,7 @@ class CorpusRef:
     ref_id: str
     title: str
     cls: str  # source_class
-    path: Path  # file 型=正文文件;tree 型=目录根(均绝对路径)
+    path: Path  # file 型=正文/原件路径;tree 型=目录根(均绝对路径)
     kind: str  # "file" | "tree"
 
     def read_dir(self) -> Path:
@@ -76,10 +89,10 @@ class CorpusRef:
         return self.path if self.kind == "tree" else self.path.parent
 
     def stamp_input(self) -> str:
-        """版本戳输入:file→正文文本;tree→全树指纹。"""
+        """版本戳输入:file→内容字节 hash;tree→全树指纹。"""
         if self.kind == "tree":
             return tree_hash(self.path)
-        return self.path.read_text() if self.path.exists() else ""
+        return _file_stamp(self.path)
 
     def render(self) -> str:
         """基线段一项:file→单行;tree→标题 + 缩进树。"""
@@ -92,7 +105,7 @@ class CorpusRef:
 
 def _resolve(ws, location: str) -> Path:
     loc = Path(location)
-    return loc if loc.is_absolute() else ws.root / loc
+    return loc if loc.is_absolute() else ws.root / location
 
 
 def _is_fold_class(ws, source_class: str) -> bool:
@@ -110,6 +123,21 @@ def _body_path(ws, man) -> Path | None:
     return None
 
 
+def _pointer_path(ws, man) -> Path | None:
+    """file 型基线指针:优先可读 body,否则 document 等原件路径(不要求已抽取)。"""
+    bp = _body_path(ws, man)
+    if bp is not None:
+        return bp
+    for role in _POINTER_ROLES:
+        for f in man.forms:
+            if f.role == role:
+                return _resolve(ws, f.location)
+    for f in man.forms:
+        if f.role != CORPUS_TREE_ROLE:
+            return _resolve(ws, f.location)
+    return None
+
+
 def collect(ws) -> list[CorpusRef]:
     """扫 references,挑 fold=False 的,识别 file / tree 形态。"""
     refs: list[CorpusRef] = []
@@ -124,7 +152,7 @@ def collect(ws) -> list[CorpusRef]:
                 CorpusRef(ref_id, title, man.source_class, _resolve(ws, tree_form.location), "tree")
             )
             continue
-        bp = _body_path(ws, man)
+        bp = _pointer_path(ws, man)
         if bp is not None:
             refs.append(CorpusRef(ref_id, title, man.source_class, bp, "file"))
     return refs

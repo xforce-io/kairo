@@ -148,3 +148,18 @@ def test_corpusref_file_render(tmp_path):
     ref = next(r for r in corpus.collect(ws) if r.ref_id == rf)
     out = ref.render()
     assert out.startswith("- ") and "wp.md" in out
+
+
+def test_collect_includes_document_binary_pointer(tmp_path):
+    """#88:纯 document 基线(无 source_text)也进 collect,路径为原件。"""
+    fixtures = Path(__file__).parent / "fixtures"
+    ws = Workspace.init(tmp_path)
+    dst = ws.root / "bp.pptx"
+    dst.write_bytes((fixtures / "sample.pptx").read_bytes())
+    rid = ws.add([dst], source_class="corpus")
+    refs = {r.ref_id: r for r in corpus.collect(ws)}
+    assert rid in refs
+    assert refs[rid].kind == "file"
+    assert refs[rid].path.resolve() == dst.resolve()
+    # 字节 hash stamp,不因二进制崩
+    assert corpus.stamp([refs[rid]])
