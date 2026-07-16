@@ -195,6 +195,12 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   transition: background .14s ease, color .14s ease;
 }
 .nav-doc:hover { background: #ece5d6; }
+/* #86 当前选中态：对齐 .meta-forms tr.on（pine-soft + 左侧 inset 松绿条） */
+.nav-doc.is-active,
+.nav-doc.is-active:hover {
+  background: var(--pine-soft);
+  box-shadow: inset 3px 0 0 var(--pine);
+}
 .nav-doc .name { overflow: hidden; text-overflow: ellipsis; }
 .nav-doc.is-ref .name { font-weight: 500; }
 .nav-empty { color: var(--muted); font-size: 12.5px; font-style: italic; padding: 2px 9px; }

@@ -182,6 +182,23 @@
     tr.parentElement.querySelectorAll('tr').forEach(function (x) { x.classList.remove('on'); });
     tr.classList.add('on');
   });
+  // #86 左侧 nav-doc 当前选中：全栏唯一 is-active；真名册等非列表入口清除
+  function kairoClearNavActive() {
+    document.querySelectorAll('.nav-doc.is-active').forEach(function (x) {
+      x.classList.remove('is-active');
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var nav = e.target.closest('a.nav-doc');
+    if (nav) {
+      kairoClearNavActive();
+      nav.classList.add('is-active');
+      return;
+    }
+    // 真名册按钮 hx-get …/glossary → 中间/右栏切到非列表入口
+    var gl = e.target.closest('button[hx-get*="/glossary"], [hx-get*="/glossary"]');
+    if (gl) kairoClearNavActive();
+  });
   // 导出 PDF:复用浏览器打印(@media print 只留阅读区正文)。
   // 临时把阅读区标题写入 document.title,使另存 PDF 的默认文件名即产物标题。
   function kairoPrintDoc() {
