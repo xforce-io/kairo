@@ -122,6 +122,17 @@ In the browser (default `http://127.0.0.1:8787`, local only), manage the multipl
 - **Detail page**: the left column splits into `Targets / References (observations) / Corpus`; selecting an item → a persistent metadata column on the right (per-form optional preview, one-click path copy), with a preview canvas in the middle. Forms like transcript / digest preview on click (including `.txt` transcriptions outside the workspace — `.md` is rendered, plain text keeps line breaks); the top bar returns to the dashboard.
 - **Run**: trigger `step` from the UI and watch the progress log live.
 
+## Agent skill (optional)
+
+The repo ships a `kairo` operator skill at [`.claude/skills/kairo/`](.claude/skills/kairo/SKILL.md): a thin conversational shell over the same CLI and workspace layout (discover workspaces → `kairo status` → read `understanding.md` / `assessment.md` by layer; write commands require confirmation). Make it available in Claude Code sessions by symlinking into your global skills directory (run from a checkout of this repo):
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)/.claude/skills/kairo" ~/.claude/skills/kairo
+```
+
+Other coding agents: copy or symlink the same folder into that agent's skills path. The skill is **read-first** — pure "what's the status / summarize conclusions" intents must not trigger `step` / `re-step` / `accept` / etc.; raw transcripts are never treated as final conclusions.
+
 ## Design & decision trail
 
 The CLI tools are usable (`init`/`add`/`step`/… all ready, 105+ tests). Each feature's design doc is stored by issue number under [`docs/design/`](docs/design) and is the single source of truth for that decision: MVP [#1](https://github.com/xforce-io/kairo/issues/1), AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4), source layering [#13](https://github.com/xforce-io/kairo/issues/13), Web Console i18n [#41](https://github.com/xforce-io/kairo/issues/41), Grok provider [#61](https://github.com/xforce-io/kairo/issues/61), etc.
