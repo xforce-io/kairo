@@ -122,6 +122,17 @@ Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub /
 - **详情页**：左栏分 `产物 / 参考(观测) / 基线`；选中条目 → 右栏常驻元信息（各形态可选预览、一键复制路径），中间为预览画布。transcript / digest 等形态即点即看（含 workspace 外的 `.txt` 转写，`.md` 渲染、纯文本保留换行），顶部可返回总览。
 - **运行**：界面触发 `step`，实时看进度日志。
 
+## Agent skill（可选）
+
+仓库自带 `kairo` operator skill：[`.claude/skills/kairo/`](.claude/skills/kairo/SKILL.md)。它是同一套 CLI + workspace 布局之上的薄会话壳（发现 workspace → `kairo status` → 按层读 `understanding.md` / `assessment.md`；写操作需确认）。在 Claude Code 会话中全局可用，可软链到 skills 目录（在本仓库根执行）：
+
+```bash
+mkdir -p ~/.claude/skills
+ln -s "$(pwd)/.claude/skills/kairo" ~/.claude/skills/kairo
+```
+
+其它 coding-agent：把同一目录拷贝或软链到该 agent 的 skills 路径即可。skill **默认只读**——纯「看状态 / 总结结论」意图不得触发 `step` / `re-step` / `accept` 等；raw transcript 不得当作最终结论。
+
 ## 设计与决策轨迹
 
 可用的 CLI 工具（`init`/`add`/`step`/… 全部就绪，105+ 测试）。各特性的设计稿按 issue 编号存于 [`docs/design/`](docs/design)，是对应决策的 single source of truth：MVP [#1](https://github.com/xforce-io/kairo/issues/1)、AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4)、源分层 [#13](https://github.com/xforce-io/kairo/issues/13)、Grok provider [#61](https://github.com/xforce-io/kairo/issues/61) 等。
