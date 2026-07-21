@@ -1,0 +1,263 @@
+#!/usr/bin/env bash
+# kairo 本地 Web Console 启停（本仓约定入口）
+#
+# 用法:
+#   ./scripts/serve start|stop|status|logs|restart
+#
+# 若本机已安装 LaunchAgent（默认 com.kairo.web），启停走 launchctl；
+# 否则 nohup 前台二进制。
+#
+# 环境变量（可选）:
+#   KAIRO_SERVE_ROOT    serve root（其下各 workspace），默认 ~/kairo
+#   KAIRO_SERVE_PORT    端口，默认 8787
+#   KAIRO_BIN           可执行文件；默认优先本仓 .venv/bin/kairo
+#   KAIRO_LAUNCHD       LaunchAgent label，默认 com.kairo.web；设空禁用 launchd
+set -euo pipefail
+
+NAME=kairo
+DEFAULT_PORT=8787
+DEFAULT_ROOT="${HOME}/kairo"
+PORT="${KAIRO_SERVE_PORT:-$DEFAULT_PORT}"
+ROOT="${KAIRO_SERVE_ROOT:-$DEFAULT_ROOT}"
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+if [[ -z "${KAIRO_BIN:-}" ]]; then
+  if [[ -x "$REPO_ROOT/.venv/bin/kairo" ]]; then
+    BIN="$REPO_ROOT/.venv/bin/kairo"
+  else
+    BIN=kairo
+  fi
+else
+  BIN="$KAIRO_BIN"
+fi
+# 空字符串 = 强制 nohup；未设置 = 默认 label（bash 3.2 无 +set 探测）
+if [ "${KAIRO_LAUNCHD+set}" = set ]; then
+  LAUNCHD_LABEL="$KAIRO_LAUNCHD"
+else
+  LAUNCHD_LABEL=com.kairo.web
+fi
+PLIST="${HOME}/Library/LaunchAgents/${LAUNCHD_LABEL}.plist"
+
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/${NAME}-serve"
+PID_FILE="$STATE_DIR/${NAME}.pid"
+LOG_FILE="$STATE_DIR/${NAME}.log"
+# LaunchAgent 默认日志（与常见 plist 对齐）
+LAUNCHD_OUT="${HOME}/.config/kairo/logs/web.out"
+LAUNCHD_ERR="${HOME}/.config/kairo/logs/web.err"
+mkdir -p "$STATE_DIR"
+
+_is_alive() { [[ -n "${1:-}" ]] && kill -0 "$1" 2>/dev/null; }
+
+_listener_pid() {
+  lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 { print $2; exit }'
+}
+
+_matches() {
+  local pid="$1" cmd
+  cmd="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  echo "$cmd" | grep -Eq 'kairo serve'
+}
+
+_resolve_pid() {
+  local pid=""
+  if [[ -f "$PID_FILE" ]]; then
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if _is_alive "$pid" && _matches "$pid"; then
+      printf '%s' "$pid"
+      return 0
+    fi
+    rm -f "$PID_FILE"
+  fi
+  pid="$(_listener_pid || true)"
+  if [[ -n "$pid" ]] && _matches "$pid"; then
+    printf '%s' "$pid"
+    return 0
+  fi
+  return 1
+}
+
+_use_launchd() {
+  [[ -n "$LAUNCHD_LABEL" && -f "$PLIST" ]]
+}
+
+_domain() { printf 'gui/%s' "$(id -u)"; }
+_target() { printf '%s/%s' "$(_domain)" "$LAUNCHD_LABEL"; }
+
+cmd_start() {
+  local pid
+  if pid="$(_resolve_pid 2>/dev/null)"; then
+    printf '✓ %s already running (pid=%s)  http://127.0.0.1:%s/\n' "$NAME" "$pid" "$PORT"
+    return 0
+  fi
+
+  if _use_launchd; then
+    local domain target
+    domain="$(_domain)"
+    target="$(_target)"
+    if launchctl print "$target" >/dev/null 2>&1; then
+      launchctl kickstart -k "$target" 2>/dev/null || true
+    else
+      launchctl bootstrap "$domain" "$PLIST" 2>/dev/null \
+        || launchctl load "$PLIST" 2>/dev/null \
+        || true
+    fi
+    sleep 0.5
+    pid="$(_resolve_pid 2>/dev/null || true)"
+    if [[ -n "$pid" ]]; then
+      echo "$pid" >"$PID_FILE"
+      printf '✓ %s started via launchd:%s (pid=%s)  http://127.0.0.1:%s/\n' \
+        "$NAME" "$LAUNCHD_LABEL" "$pid" "$PORT"
+    else
+      printf '✓ %s submitted to launchd:%s  http://127.0.0.1:%s/\n' \
+        "$NAME" "$LAUNCHD_LABEL" "$PORT"
+    fi
+    printf '  root: %s\n' "$ROOT"
+    printf '  log:  %s\n' "$LAUNCHD_OUT"
+    printf '  err:  %s\n' "$LAUNCHD_ERR"
+    return 0
+  fi
+
+  if [[ ! -d "$ROOT" ]]; then
+    echo "error: serve root not found: $ROOT" >&2
+    return 1
+  fi
+  if [[ ! -x "$BIN" ]] && ! command -v "$BIN" >/dev/null 2>&1; then
+    echo "error: kairo binary not found: $BIN" >&2
+    return 1
+  fi
+  local foreign
+  foreign="$(_listener_pid || true)"
+  if [[ -n "$foreign" ]]; then
+    echo "error: port $PORT in use by pid=$foreign" >&2
+    return 1
+  fi
+  nohup "$BIN" serve "$ROOT" -p "$PORT" >>"$LOG_FILE" 2>&1 &
+  echo $! >"$PID_FILE"
+  sleep 0.4
+  pid="$(cat "$PID_FILE")"
+  if ! _is_alive "$pid"; then
+    echo "error: failed to start — see $LOG_FILE" >&2
+    tail -n 20 "$LOG_FILE" 2>/dev/null || true
+    rm -f "$PID_FILE"
+    return 1
+  fi
+  local lp
+  lp="$(_listener_pid || true)"
+  if [[ -n "$lp" ]]; then
+    echo "$lp" >"$PID_FILE"
+    pid="$lp"
+  fi
+  printf '✓ %s started (pid=%s)  http://127.0.0.1:%s/\n' "$NAME" "$pid" "$PORT"
+  printf '  root: %s\n' "$ROOT"
+  printf '  log:  %s\n' "$LOG_FILE"
+}
+
+cmd_stop() {
+  if _use_launchd && launchctl print "$(_target)" >/dev/null 2>&1; then
+    launchctl bootout "$(_target)" 2>/dev/null \
+      || launchctl unload "$PLIST" 2>/dev/null \
+      || true
+    local lp
+    lp="$(_listener_pid || true)"
+    if [[ -n "$lp" ]] && _matches "$lp"; then
+      kill "$lp" 2>/dev/null || true
+      sleep 0.2
+      _is_alive "$lp" && kill -9 "$lp" 2>/dev/null || true
+    fi
+    rm -f "$PID_FILE"
+    printf '✓ %s stopped (launchd:%s bootout)\n' "$NAME" "$LAUNCHD_LABEL"
+    return 0
+  fi
+
+  local pid
+  if ! pid="$(_resolve_pid 2>/dev/null)"; then
+    echo "· $NAME not running"
+    rm -f "$PID_FILE"
+    return 0
+  fi
+  kill "$pid" 2>/dev/null || true
+  local i
+  for i in 1 2 3 4 5 6 7 8; do
+    _is_alive "$pid" || break
+    sleep 0.15
+  done
+  _is_alive "$pid" && kill -9 "$pid" 2>/dev/null || true
+  rm -f "$PID_FILE"
+  printf '✓ %s stopped (was pid=%s)\n' "$NAME" "$pid"
+}
+
+cmd_status() {
+  local pid
+  if pid="$(_resolve_pid 2>/dev/null)"; then
+    printf '%s  running  pid=%s  port=%s  http://127.0.0.1:%s/\n' "$NAME" "$pid" "$PORT" "$PORT"
+  else
+    printf '%s  stopped  port=%s\n' "$NAME" "$PORT"
+  fi
+  printf '  root: %s\n' "$ROOT"
+  if _use_launchd; then
+    printf '  mode: launchd (%s)\n' "$LAUNCHD_LABEL"
+    printf '  log:  %s\n' "$LAUNCHD_OUT"
+    printf '  err:  %s\n' "$LAUNCHD_ERR"
+  else
+    printf '  mode: nohup\n'
+    printf '  log:  %s\n' "$LOG_FILE"
+  fi
+}
+
+cmd_logs() {
+  local n="${1:-40}"
+  if _use_launchd; then
+    if [[ -f "$LAUNCHD_OUT" ]]; then
+      echo "── $LAUNCHD_OUT (last $n lines) ──"
+      tail -n "$n" "$LAUNCHD_OUT"
+      echo
+    else
+      echo "·· $LAUNCHD_OUT (missing)"
+    fi
+    if [[ -f "$LAUNCHD_ERR" ]]; then
+      echo "── $LAUNCHD_ERR [err] (last $n lines) ──"
+      tail -n "$n" "$LAUNCHD_ERR"
+    else
+      echo "·· $LAUNCHD_ERR (missing)"
+    fi
+    return 0
+  fi
+  if [[ ! -f "$LOG_FILE" ]]; then
+    echo "no log yet: $LOG_FILE"
+    return 0
+  fi
+  echo "── $LOG_FILE (last $n lines) ──"
+  tail -n "$n" "$LOG_FILE"
+}
+
+cmd_restart() {
+  cmd_stop || true
+  cmd_start
+}
+
+usage() {
+  cat <<EOF
+$NAME web console control (repo-local)
+
+  $(basename "$0") start|stop|status|logs|restart
+
+  KAIRO_SERVE_ROOT  (default: $DEFAULT_ROOT)
+  KAIRO_SERVE_PORT  (default: $DEFAULT_PORT)
+  KAIRO_LAUNCHD     (default: com.kairo.web; set empty to force nohup)
+EOF
+}
+
+main() {
+  local cmd="${1:-status}"
+  shift || true
+  case "$cmd" in
+    start)   cmd_start ;;
+    stop)    cmd_stop ;;
+    status)  cmd_status ;;
+    logs)    cmd_logs "${1:-40}" ;;
+    restart) cmd_restart ;;
+    -h|--help|help) usage ;;
+    *) echo "unknown: $cmd" >&2; usage >&2; exit 1 ;;
+  esac
+}
+
+main "$@"
