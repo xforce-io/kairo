@@ -289,3 +289,116 @@ def test_cli_serve_missing_web_dep_friendly(monkeypatch):
     assert result.exit_code != 0
     assert "kairo[web]" in result.output
     assert "Traceback" not in result.output
+
+
+def test_cli_list_scans_serve_root(tmp_path, monkeypatch):
+    """#95:kairo list 扫 root 下一层 workspace,与 discovery 同源。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["new", "alpha"])
+    runner.invoke(app, ["new", "beta"])
+    (tmp_path / "noise").mkdir()
+    result = runner.invoke(app, ["list", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "alpha" in result.output and "beta" in result.output
+    assert "noise" not in result.output or "SLUG" in result.output
+    j = runner.invoke(app, ["list", str(tmp_path), "--json"])
+    assert j.exit_code == 0
+    data = json.loads(j.output)
+    assert {x["slug"] for x in data} == {"alpha", "beta"}
+
+
+def test_cli_list_uses_kairo_serve_root_env(tmp_path, monkeypatch):
+    """#95:无参数时 list 读 KAIRO_SERVE_ROOT。"""
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(tmp_path))
+    monkeypatch.chdir(tmp_path / "elsewhere" if False else tmp_path)
+    elsewhere = tmp_path / "cwd"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    runner.invoke(app, ["new", "env-ws", "--root", str(tmp_path)])
+    result = runner.invoke(app, ["list"])
+    assert result.exit_code == 0
+    assert "env-ws" in result.output
+
+
+def test_cli_new_and_rm_ws(tmp_path, monkeypatch):
+    """#95:new 建目录+init;rm-ws --yes 删除且保留 root glossary。"""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "glossary.yaml").write_text("entries: []\n")
+    created = runner.invoke(app, ["new", "能源业务", "--root", str(tmp_path)])
+    assert created.exit_code == 0
+    assert (tmp_path / "能源业务" / "constitution.yaml").is_file()
+    bad = runner.invoke(app, ["new", "能源业务", "--root", str(tmp_path)])
+    assert bad.exit_code != 0
+    deleted = runner.invoke(app, ["rm-ws", "能源业务", "--root", str(tmp_path), "--yes"])
+    assert deleted.exit_code == 0
+    assert not (tmp_path / "能源业务").exists()
+    assert (tmp_path / "glossary.yaml").is_file()
+
+
+def test_cli_rm_ws_rejects_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    result = runner.invoke(app, ["rm-ws", "nope", "--root", str(tmp_path), "--yes"])
+    assert result.exit_code != 0
+    assert "不存在" in result.output
+
+
+def test_cli_add_to_attaches_form(tmp_path, monkeypatch):
+    """#95:add --to <id> 向既有参考追加形态(Web attach)。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    a = tmp_path / "a.txt"
+    a.write_text("主材料")
+    b = tmp_path / "b.png"
+    b.write_bytes(b"\x89PNG")
+    runner.invoke(app, ["add", str(a)])
+    rid = next(p.name for p in (tmp_path / "references").iterdir() if p.is_dir())
+    result = runner.invoke(app, ["add", str(b), "--to", rid, "--copy"])
+    assert result.exit_code == 0
+    man = (tmp_path / "references" / rid / "manifest.yaml").read_text()
+    assert man.count("role:") >= 2
+
+
+def test_cli_title_renames_display_name(tmp_path, monkeypatch):
+    """#95:title 只改展示名,不动 id。"""
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+    t = tmp_path / "meeting.txt"
+    t.write_text("x")
+    runner.invoke(app, ["add", str(t)])
+    rid = next(p.name for p in (tmp_path / "references").iterdir() if p.is_dir())
+    result = runner.invoke(app, ["title", rid, "王强会"])
+    assert result.exit_code == 0
+    assert "王强会" in (tmp_path / "references" / rid / "manifest.yaml").read_text()
+    st = runner.invoke(app, ["status"])
+    assert st.exit_code == 0
+    assert "plan=" in st.output and "王强会" in st.output
+
+
+def test_cli_glossary_workspace_and_shared(tmp_path, monkeypatch):
+    """#95:glossary add/list/rm 覆盖 workspace 与 shared。"""
+    root = tmp_path / "serve"
+    root.mkdir()
+    monkeypatch.chdir(root)
+    runner.invoke(app, ["new", "ws", "--root", str(root)])
+    monkeypatch.chdir(root / "ws")
+
+    add_ws = runner.invoke(app, ["glossary", "add", "天溯", "--note", "本区"])
+    assert add_ws.exit_code == 0
+    add_sh = runner.invoke(
+        app, ["glossary", "add", "公共锚", "--scope", "shared", "--note", "root"]
+    )
+    assert add_sh.exit_code == 0
+    assert (root / "glossary.yaml").is_file()
+
+    listed = runner.invoke(app, ["glossary", "list"])
+    assert listed.exit_code == 0
+    assert "天溯" in listed.output and "公共锚" in listed.output
+    assert "[workspace]" in listed.output and "[shared]" in listed.output
+
+    rm_ws = runner.invoke(app, ["glossary", "rm", "0", "--scope", "workspace"])
+    assert rm_ws.exit_code == 0
+    rm_sh = runner.invoke(app, ["glossary", "rm", "0", "--scope", "shared"])
+    assert rm_sh.exit_code == 0
+    again = runner.invoke(app, ["glossary", "list"])
+    assert "天溯" not in again.output
+    assert "公共锚" not in again.output or "[shared] (0)" in again.output

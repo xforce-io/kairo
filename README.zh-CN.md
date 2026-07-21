@@ -43,16 +43,26 @@ kairo status                  # 看各 reference / 文档的融入状态
 
 | 命令 | 作用 |
 | --- | --- |
-| `init` | 初始化 topic-workspace + 默认宪法 |
-| `add` | 登记一条 reference（默认路径指针；`--copy` 物化进工作区；`--corpus` 标基线） |
+| `init` | 初始化**当前目录**为 topic-workspace + 默认宪法 |
+| `list` | 列出 serve root 下各 workspace 摘要（`--json`；root 默认 `KAIRO_SERVE_ROOT` 或 cwd）[#95](https://github.com/xforce-io/kairo/issues/95) |
+| `new` | 在 serve root 下新建 workspace 目录并 init（对标 Web 新建） |
+| `rm-ws` | 删除 serve root 下某个 workspace（`--yes` 跳过确认；不碰 root glossary） |
+| `add` | 登记一条 reference（默认路径指针；`--copy` 物化；`--corpus` 标基线；`--to <id>` 追加到既有参考） |
+| `title` | 重命名参考展示名（不动 id / 目录） |
 | `step` | 跑调和循环到收敛（endpoint 配置→Claude CLI→stub；`KAIRO_STUB` 强制 stub） |
+| `run` | 有终态 blocked 则先清再 step（与 Web 主按钮一致） |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |
+| `retry-ref` | 单条参考清派生产物后重跑 |
+| `rm-ref` | 永久删除一条参考 |
+| `prose` | 为单条参考生成可读文稿 `prose.md` |
 | `accept` | 接受手改、钉为新基线，解除 `blocked: manual-edit` |
 | `status` | 列 references / 各文档融入状态 |
+| `glossary` | 真名册 `list` / `add` / `rm`（`--scope workspace\|shared`） |
 | `index` | 重生成 `references/MEETINGS.md` 导航索引 |
 | `history` | 列版本快照 |
 | `rollback` | 回退文档到某版本 |
 | `diff` | 工作态 vs 版本文档差异（自带，不依赖 git） |
+| `serve` | 启动本地 Web Console |
 
 ## 核心概念
 

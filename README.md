@@ -43,16 +43,26 @@ Produces two layers of documents: `understanding.md` (neutral facts) and `assess
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Initialize a topic-workspace + default constitution |
-| `add` | Register a reference (path pointer by default; `--copy` materializes into workspace; `--corpus` marks baseline) |
+| `init` | Initialize the **current directory** as a topic-workspace + default constitution |
+| `list` | List workspaces under a serve root (`--json`; root defaults to `KAIRO_SERVE_ROOT` or cwd) [#95](https://github.com/xforce-io/kairo/issues/95) |
+| `new` | Create a workspace directory under the serve root and `init` it (Web create parity) |
+| `rm-ws` | Delete a workspace under the serve root (`--yes` skips confirm; root glossary kept) |
+| `add` | Register a reference (path pointer by default; `--copy` materializes; `--corpus` marks baseline; `--to <id>` attaches to an existing ref) |
+| `title` | Rename a reference's display title (id / directory unchanged) |
 | `step` | Run the reconciliation loop to convergence (configured endpoint → Claude CLI → stub; `KAIRO_STUB` forces stub) |
+| `run` | Clear terminal blocked then step (same as Web primary button) |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
+| `retry-ref` | Clear derived products for one reference and re-run |
+| `rm-ref` | Permanently delete a reference |
+| `prose` | Generate readable archive `prose.md` for one reference |
 | `accept` | Accept manual edits, pin as the new baseline, clear `blocked: manual-edit` |
 | `status` | List references / fold status of each document |
+| `glossary` | Glossary `list` / `add` / `rm` (`--scope workspace\|shared`) |
 | `index` | Regenerate the `references/MEETINGS.md` navigation index |
 | `history` | List version snapshots |
 | `rollback` | Roll a document back to a version |
 | `diff` | Working-state vs versioned-document diff (built in, no git needed) |
+| `serve` | Start the local Web Console |
 
 ## Core concepts
 

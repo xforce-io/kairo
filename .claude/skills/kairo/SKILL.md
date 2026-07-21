@@ -21,10 +21,10 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 1. 用户给出了 path / root → 用该 path
 2. 否则当前 cwd 含 `constitution.yaml` → 单目标 workspace
-3. 否则用户提到的 serve-root / 可推断 root 下一层：凡含 `constitution.yaml` 的子目录即 workspace
+3. 否则 **`kairo list [root]`**（root 默认 `KAIRO_SERVE_ROOT` 或 cwd；与 Web dashboard 同源；可用 `--json`）
 4. 找不到 → 问用户 root，**不要**在随机目录 `init` 或 `step`
 
-每个目标在其 **workspace 根目录** 下跑 CLI（`cd <ws>` 或等价 cwd）。多 workspace 时先列清单，再按用户点名深入。
+每个目标在其 **workspace 根目录** 下跑 CLI（`cd <ws>` 或等价 cwd）。多 workspace 时先 `kairo list`，再按用户点名深入。
 
 ## 命令映射（看优先）
 
@@ -32,7 +32,10 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 | 用户意图 | 跑什么 |
 |---|---|
-| 有哪些调研 / 某主题现在什么情况 / 状态 | 发现 workspace → 在目标 cwd 执行 `kairo status`（只读；可对多个 ws 各跑一次） |
+| 有哪些调研 / spaces / 工作区列表 | **`kairo list`**（或 `kairo list --json`）；勿手写扫盘 |
+| 某主题现在什么情况 / 状态 | 在目标 cwd 执行 `kairo status`（只读；可对多个 ws 各跑一次） |
+| 新建 / 删除整个 workspace | 确认后 `kairo new "<topic>"` / `kairo rm-ws <slug> --yes`（须讲清不可恢复） |
+| 真名册 / glossary | `kairo glossary list`；写操作用 `add` / `rm`（`--scope workspace|shared`）并先确认 |
 | 事实/判断到哪了 / 总结结论 / 结论是什么 | **先** `kairo status`，再读两层文档（见下节）；必要时下钻 digest，**不**把 raw transcript 当最终结论 |
 | 为什么卡住 / blocked / 怎么推进 | 依据 `status` 的 `⚠ blocked:…` 与下表解释含义与选项；**未确认不写** |
 | 推进一下 / step / 调和 | **默认**说明副作用（烧 LLM token、可能改文档）→ 确认后 `kairo step`（不自动清终态 blocked） |
@@ -40,11 +43,12 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | 重算 / re-step / 重试某条 | 说明副作用（文档级重综合可能丢手改；ref 级重产 digest）→ 确认后 `kairo re-step …` / `kairo retry-ref <id>` |
 | 接受手改 / accept | 说明将钉为新基线、解除 `manual-edit` → 确认后 `kairo accept <doc>` |
 | 回退 / rollback | 说明文档回退到快照、references 不动 → 确认后 `kairo rollback <seq>`（可先 `kairo history` / `kairo diff` 只读预览） |
-| 登记材料 / add | 说明路径指针 vs `--copy`、stream vs `--corpus` → 确认后 `kairo add …` |
+| 登记材料 / add | 说明路径指针 vs `--copy`、stream vs `--corpus` → 确认后 `kairo add …`；往既有参考追加形态用 `kairo add <file> --to <id> [--copy]` |
+| 改参考展示名 / title | 确认后 `kairo title <id> <新名>`（不改 id） |
 | 删参考 / rm-ref | 说明会改 state；确认后 `kairo rm-ref <id>`（若带 `--recompose` 会立刻重综合，副作用更大，须单独确认） |
 | 生成 prose / 重建 MEETINGS 索引 | 写磁盘；确认后 `kairo prose <id>` / `kairo index` |
 
-纯读命令（无需确认）：`status`、`history`、`diff`，以及直接读 workspace 内 markdown / state。
+纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`glossary list`，以及直接读 workspace 内 markdown / state。
 
 ## 两层心智：怎么读知识产物
 
@@ -84,7 +88,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 ## 铁律
 
-1. **默认只读**：用户说「看看 / 什么情况 / 总结一下」→ 写类命令次数 = 0（`add` / `step` / `run` / `re-step` / `retry-ref` / `accept` / `rollback` / `rm-ref` / `prose` / `index` / `init` 皆算写或副作用）
+1. **默认只读**：用户说「看看 / 什么情况 / 总结一下」→ 写类命令次数 = 0（`add` / `step` / `run` / `re-step` / `retry-ref` / `accept` / `rollback` / `rm-ref` / `rm-ws` / `new` / `prose` / `index` / `init` / `glossary add|rm` 皆算写或副作用）
 2. **写操作先确认**：执行前说明命令与副作用（token、覆盖文档、丢手改、改 state）。用户本轮已明确「直接执行 / 不用问了」可跳过确认
 3. **不代批 accept**：手改接受权在人；只解释 `manual-edit`，确认后才 `accept`
 4. **不串 cwd**：始终在目标 workspace 根执行 CLI；多 workspace 禁止在 A 目录对 B 主题 step
@@ -103,7 +107,8 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 ## Common mistakes
 
 - 想看状态却跑 `step` / `run` → 白烧 token 还可能改文档。**看用 `status` + 读 md。**
-- 把 `serve` root 当成单个 workspace 在 root 上 `status` → 失败或误导。**先发现子目录 workspace。**
+- 把 `serve` root 当成单个 workspace 在 root 上 `status` → 失败或误导。**先 `kairo list`。**
+- 问「有哪些 spaces」却手写 `find` 扫盘 → 应用 **`kairo list`**。
 - 把 transcript / prose 摘要当成「调研结论」→ 违反两层心智。**结论在 understanding / assessment。**
 - 未确认就 `accept` 或 `re-step` → 钉基线或丢手改。**先说明副作用。**
 - 用户说「推进」就对所有 workspace 批量 `step` → 越界。**先列清单，确认范围。**
