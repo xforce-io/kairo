@@ -26,6 +26,13 @@ from kairo.models import (
     State,
     TargetState,
 )
+from kairo.provenance import (
+    REASON_PROVENANCE_INVALID,
+    build_source_catalog,
+    format_source_catalog_block,
+    provenance_protocol_for,
+    validate_provenance,
+)
 from kairo.provider import AgentConfig
 from kairo.workspace import _slug
 
@@ -224,7 +231,8 @@ _OUTPUT_DISCIPLINE = (
 _COMPOSE_DISCIPLINE = (
     "\n- 你只产出当前这一个文档,不要内联其它文档的内容"
     "(例如 understanding 中不要写 assessment 段落)。\n"
-    "- 正文中的 [来源:...] 是溯源标签,不是磁盘文件路径,无需也不应去读取。\n"
+    "- 溯源使用来源目录中的短 ID〔S-…〕与文末索引;不要在正文堆叠完整 "
+    "`references/.../digest.md` 路径(索引表链接除外)。\n"
     "- 你必须输出当前文档的**完整全文**(含未改动章节);即使本轮判断无需演进,"
     "也要原样重述全文,禁止只输出「为何不改」的变更说明或差异摘要。"
 )
@@ -529,11 +537,15 @@ class ComposeRule:
             corpus_refs = corpus.collect(self.ws)
             has_corpus = bool(corpus_refs)
             classes = self._delta_classes(use_delta)
-            digest_blocks = [
-                f"[来源:{p}{self._fold_label(classes[p]) if has_corpus else ''}]\n"
-                f"{(self.ws.root / p).read_text()}"
-                for p in sorted(use_delta)
-            ]
+            # #99:来源目录(全量 all_digests)——短 ID 稳定;context 中标注 S-…
+            catalog = build_source_catalog(self.ws, all_digests)
+            sid_by_path = {e.digest_path: e.source_id for e in catalog}
+            digest_blocks = []
+            for p in sorted(use_delta):
+                sid = sid_by_path.get(p, "")
+                label = self._fold_label(classes[p]) if has_corpus else ""
+                head = f"[{sid} | {p}{label}]" if sid else f"[来源:{p}{label}]"
+                digest_blocks.append(f"{head}\n{(self.ws.root / p).read_text()}")
             reference_section = (
                 corpus.reference_section(self.ws, corpus_refs) if has_corpus else ""
             )
@@ -541,13 +553,16 @@ class ComposeRule:
             context = (
                 f"---当前文档---\n{current}\n\n"
                 + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
-                + f"---新增 digest({len(use_delta)} 条,批量融入)---\n"
+                + format_source_catalog_block(catalog)
+                + f"\n---新增 digest({len(use_delta)} 条,批量融入)---\n"
                 + "\n\n".join(digest_blocks)
             )
+            layer = getattr(target, "layer", None) or "fact"
             try:
                 content = _run_agent(
                     self.provider,
                     target.fold_protocol
+                    + provenance_protocol_for(layer)
                     + self.ws.glossary_reference()
                     + reference_section
                     + _OUTPUT_DISCIPLINE
@@ -577,6 +592,15 @@ class ComposeRule:
                 ts.diagnostic = None
                 state.targets[key] = ts
                 return
+            # #99:写盘前溯源结构校验;失败保留旧文,记 compose-provenance-invalid
+            prov_errs = validate_provenance(content, catalog, layer=layer)
+            if prov_errs:
+                ts = ts0 or TargetState(depends_on=list(target.depends_on))
+                ts.status = "blocked"
+                ts.reason = REASON_PROVENANCE_INVALID
+                # 不改 output_hash / folded / 文件,便于 re-step 恢复
+                state.targets[key] = ts
+                return
             doc_path.write_text(content)
             ts = state.targets.get(key) or TargetState(depends_on=list(target.depends_on))
             ts.folded = dict(all_digests)
@@ -601,10 +625,11 @@ class ComposeRule:
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)
             doc_path = self.ws.root / key
-            # compose-degraded / provider-failed 终态:不自动重试;显式 run/re-step 才恢复
+            # 所有可诊断的 compose 终态均不自动重试;仅显式 run/re-step 恢复。
             if ts and ts.status == "blocked" and ts.reason in (
                 "compose-degraded",
                 REASON_PROVIDER_FAILED,
+                REASON_PROVENANCE_INVALID,
             ):
                 return False
             # #77:删参考后材料集变更,待运行综合

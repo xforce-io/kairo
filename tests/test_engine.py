@@ -21,10 +21,18 @@ class _NonDeterministicProvider:
         self.n = 0
 
     def run(self, config, signal=None):
+        from kairo.provider import _stub_compose_document
+
         self.n += 1
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
-        content = f"OUTPUT #{self.n}\n{config.context}"  # 每次内容不同
-        (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
+        art = config.artifact or "output.md"
+        if art == "doc.md":
+            # #99:compose 须过溯源校验;在 stub 结构上加变号保持非确定性
+            base = _stub_compose_document(config.persona, config.context)
+            content = f"OUTPUT #{self.n}\n{base}"
+        else:
+            content = f"OUTPUT #{self.n}\n{config.context}"
+        (config.artifact_dir / art).write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
 
@@ -48,8 +56,15 @@ class _EndpointCompletions:
         self.n = 0
 
     def create(self, **kwargs):
+        from kairo.provider import _stub_compose_document
+
         self.n += 1
         user = kwargs["messages"][1]["content"]
+        system = kwargs["messages"][0]["content"] if kwargs.get("messages") else ""
+        # #99:compose 上下文含来源目录 → 产出可过校验的文档;digest 仍 echo
+        if "来源目录" in user or "溯源输出协议" in system:
+            body = _stub_compose_document(system, user)
+            return _EndpointCompletion(f"ENDPOINT #{self.n}\n{body}")
         return _EndpointCompletion(f"ENDPOINT #{self.n}\n{user}")
 
 
