@@ -1,8 +1,8 @@
 <div hx-ext="sse" sse-connect="/w/{{ slug }}/step/{{ task_id }}/stream">
   <div id="step-log" sse-swap="message" hx-swap="beforeend"></div>
-  {# #75:结束后进结果摘要,不再整页蒸发进度;并 OOB 刷新主按钮 #}
+  {# #75/#97:结束后按 task 终态进结果摘要(非仅 workspace plan);并 OOB 刷新主按钮 #}
   <div class="step-status"
-       hx-get="/w/{{ slug }}/run-summary"
+       hx-get="/w/{{ slug }}/run-summary?task_id={{ task_id }}"
        hx-trigger="sse:done"
        hx-target="#step-area"
        hx-swap="innerHTML">{{ t('step.running') }}</div>

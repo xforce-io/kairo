@@ -32,7 +32,7 @@ from kairo.engine import accept as engine_accept
 from kairo.web.discovery import scan_workspaces
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
-from kairo.web.tasks import stream_events
+from kairo.web.tasks import classify_task, stream_events
 from kairo.workspace import (
     AddError,
     Workspace,
@@ -763,27 +763,57 @@ def start_run(request: Request, slug: str) -> HTMLResponse:
 
 
 @router.get("/w/{slug}/run-summary", response_class=HTMLResponse)
-def run_summary(request: Request, slug: str) -> HTMLResponse:
-    """运行结束后的结果条(替代静默整页蒸发进度)。"""
+def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTMLResponse:
+    """运行结束后的结果条。#97:任务终态优先于 workspace plan;失败/取消不渲染成功结论。"""
     ws = _open(request, slug)
     t = _t(request)
-    plan = workspace_run_plan(ws)
-    lines = [f'<p class="run-summary-title">{t("run.done")}</p>']
-    if plan["blocked_count"]:
-        lines.append(
-            f'<p class="run-summary-fail">{t("run.still_blocked").format(n=plan["blocked_count"])}</p>'
-        )
-        lines.append('<ul class="ref-block-list">')
-        for item in plan["blocked_refs"]:
-            reasons = ", ".join(b["reason"] for b in item["blocks"])
-            rid = item["ref_id"]
+    reg = request.app.state.registry
+    task = reg.get(task_id) if task_id else None
+    result = classify_task(task if task_id else None)
+    # 无 task_id 或任务已回收 → missing;未结束 → running。二者均非成功。
+    if result.kind in ("missing", "running"):
+        title_key = "run.task_missing" if result.kind == "missing" else "run.task_pending"
+        lines = [
+            f'<p class="run-summary-title run-summary-warn">{t(title_key)}</p>',
+            f'<p class="muted">{t("run.task_missing_hint")}</p>',
+        ]
+    elif result.kind == "failed":
+        lines = [
+            f'<p class="run-summary-title run-summary-error">{t("run.failed")}</p>',
+        ]
+        if result.exit_code is not None:
             lines.append(
-                f"<li><code>{escape(rid)}</code> · {escape(reasons)}</li>"
+                f'<p class="run-summary-meta">{t("run.exit_code").format(code=result.exit_code)}</p>'
             )
-        lines.append("</ul>")
+        summary = result.message or t("run.failed_no_detail")
+        lines.append(
+            f'<p class="run-summary-error-detail">{escape(summary)}</p>'
+        )
+        lines.append(f'<p class="muted">{t("run.failed_retry_hint")}</p>')
+    elif result.kind == "cancelled":
+        lines = [
+            f'<p class="run-summary-title run-summary-cancel">{t("run.cancelled")}</p>',
+            f'<p class="muted">{t("run.cancelled_hint")}</p>',
+        ]
     else:
-        lines.append(f'<p class="muted">{t("run.done_ok")}</p>')
-    # 轻量刷新主按钮状态:提示用户可刷新;并给 OOB 替换 run 按钮区
+        # succeeded: 才用 plan 描述收敛结果
+        plan = workspace_run_plan(ws)
+        lines = [f'<p class="run-summary-title">{t("run.done")}</p>']
+        if plan["blocked_count"]:
+            lines.append(
+                f'<p class="run-summary-fail">{t("run.still_blocked").format(n=plan["blocked_count"])}</p>'
+            )
+            lines.append('<ul class="ref-block-list">')
+            for item in plan["blocked_refs"]:
+                reasons = ", ".join(b["reason"] for b in item["blocks"])
+                rid = item["ref_id"]
+                lines.append(
+                    f"<li><code>{escape(rid)}</code> · {escape(reasons)}</li>"
+                )
+            lines.append("</ul>")
+        else:
+            lines.append(f'<p class="muted">{t("run.done_ok")}</p>')
+    # 任务结束后释放运行锁(is_running 看 done);OOB 刷新 Run 按钮以便再次发起
     btn = _run_button_ctx(request, ws, slug)
     lines.append(
         '<div id="run-btn-wrap" hx-swap-oob="true">'

@@ -83,6 +83,10 @@ def test_web_run_clean_disabled(tmp_path, monkeypatch):
 
 
 def test_web_run_summary_lists_blocks(tmp_path, monkeypatch):
+    """#75/#97: 成功终态下 run-summary 才列 plan blocked;需绑定已结束 task。"""
+    import sys
+    import time
+
     ws, rid = _ws_audio(tmp_path, monkeypatch)
     src_hash = ws.read_manifest(rid).forms[0].hash
     key = f"references/{rid}/transcript.md"
@@ -91,7 +95,16 @@ def test_web_run_summary_lists_blocks(tmp_path, monkeypatch):
         input_hash=src_hash, status="blocked", reason="asr-failed"
     )
     ws.write_state(st)
-    r = TestClient(create_app(tmp_path)).get("/w/ws/run-summary")
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    task = app.state.registry.start(
+        "ws", ws.root, [sys.executable, "-c", "print('ok')"]
+    )
+    end = time.time() + 5
+    while not task.done and time.time() < end:
+        time.sleep(0.02)
+    assert task.done
+    r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
     assert r.status_code == 200
     assert "asr-failed" in r.text
     assert rid in r.text
