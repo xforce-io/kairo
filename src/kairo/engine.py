@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 
 from kairo.history import snapshot
+from kairo.models import REASON_PROVIDER_FAILED
 from kairo.rules import ComposeRule, DigestRule, NormalizeRule, TransformRule, _hash
 from kairo.stream_index import write_stream_index
 
@@ -125,14 +126,37 @@ def ref_product_blocks(ws, ref_id: str) -> list[dict]:
     out = []
     for key, ps in ws.read_state().products.items():
         if key.startswith(prefix) and ps.status == "blocked":
+            diag = ps.diagnostic
             out.append(
                 {
                     "key": key,
                     "name": key[len(prefix) :],
                     "reason": ps.reason or "blocked",
+                    "summary": diag.summary if diag else None,
+                    "stage": diag.stage if diag else None,
+                    "provider": diag.provider if diag else None,
                 }
             )
     return sorted(out, key=lambda x: x["name"])
+
+
+def clear_provider_failed_targets(ws) -> int:
+    """清除 target 上的 provider-failed 终态(保留正文),返回清除条数。
+
+    #98:run 等显式恢复入口用;不删 understanding/assessment 已有内容。
+    """
+    state = ws.read_state()
+    n = 0
+    for path, ts in list(state.targets.items()):
+        if ts.status == "blocked" and ts.reason == REASON_PROVIDER_FAILED:
+            ts.status = "ok"
+            ts.reason = None
+            ts.diagnostic = None
+            state.targets[path] = ts
+            n += 1
+    if n:
+        ws.write_state(state)
+    return n
 
 
 def clear_reference_products(ws, ref_id: str) -> None:
@@ -219,6 +243,8 @@ def workspace_run_plan(ws) -> dict:
       run — 仅有 stale 待办
       retry — 仅有 blocked(终态失败)
       run_and_retry — 两者都有
+
+    #98:blocked 含 reference 产物失败 + target 的 provider-failed。
     """
     pending_n = len(pending(ws))
     blocked_refs: list[dict] = []
@@ -226,7 +252,20 @@ def workspace_run_plan(ws) -> dict:
         blocks = ref_product_blocks(ws, ref_id)
         if blocks:
             blocked_refs.append({"ref_id": ref_id, "blocks": blocks})
-    blocked_n = sum(len(b["blocks"]) for b in blocked_refs)
+    blocked_targets: list[dict] = []
+    for path, ts in ws.read_state().targets.items():
+        if ts.status == "blocked" and ts.reason == REASON_PROVIDER_FAILED:
+            diag = ts.diagnostic
+            blocked_targets.append(
+                {
+                    "path": path,
+                    "reason": ts.reason,
+                    "summary": diag.summary if diag else None,
+                    "stage": diag.stage if diag else None,
+                    "provider": diag.provider if diag else None,
+                }
+            )
+    blocked_n = sum(len(b["blocks"]) for b in blocked_refs) + len(blocked_targets)
     if pending_n == 0 and blocked_n == 0:
         mode = "clean"
     elif pending_n > 0 and blocked_n == 0:
@@ -240,6 +279,7 @@ def workspace_run_plan(ws) -> dict:
         "pending_count": pending_n,
         "blocked_count": blocked_n,
         "blocked_refs": blocked_refs,
+        "blocked_targets": blocked_targets,
     }
 
 
@@ -249,6 +289,8 @@ def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
     retry_blocked:
       None — 自动:有 blocked 则先清再 step
       True/False — 强制
+
+    #98:显式恢复时清除 reference 派生产物 blocked 与 target provider-failed(保留正文)。
     """
     plan = workspace_run_plan(ws)
     if retry_blocked is None:
@@ -256,6 +298,7 @@ def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
     if retry_blocked:
         for item in plan["blocked_refs"]:
             clear_reference_products(ws, item["ref_id"])
+        clear_provider_failed_targets(ws)
     return step(ws, provider)
 
 

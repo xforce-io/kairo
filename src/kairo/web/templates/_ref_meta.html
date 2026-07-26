@@ -14,7 +14,7 @@
     <div class="meta-label">{{ t('ref.blocked_label') }}</div>
     <ul class="ref-block-list">
     {% for b in blocks %}
-      <li><code>{{ b.name }}</code> · {{ b.reason }}</li>
+      <li><code>{{ b.name }}</code> · {{ b.reason }}{% if b.summary %} — {{ b.summary }}{% endif %}{% if b.provider %} ({{ b.provider }}){% endif %}</li>
     {% endfor %}
     </ul>
   </div>
