@@ -478,6 +478,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ts = ws.read_state().targets.get(path)
     status = ts.status if ts else "missing"
     has_doc = (ws.root / path).is_file()
+    diag = ts.diagnostic if ts else None
     return _render(
         request,
         "_target_meta.html",
@@ -486,6 +487,9 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
             "path": path,
             "status": status,
             "reason": ts.reason if ts else None,
+            "diagnostic_summary": diag.summary if diag else None,
+            "diagnostic_stage": diag.stage if diag else None,
+            "diagnostic_provider": diag.provider if diag else None,
             "has_doc": has_doc,
             "preview_title": path,
             "preview_html": _preview_html(ws, path) if has_doc else None,
@@ -805,10 +809,31 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
             )
             lines.append('<ul class="ref-block-list">')
             for item in plan["blocked_refs"]:
-                reasons = ", ".join(b["reason"] for b in item["blocks"])
+                parts = []
+                for b in item["blocks"]:
+                    bit = b["reason"]
+                    if b.get("stage"):
+                        bit = f"{bit} (stage={b['stage']})"
+                    if b.get("provider"):
+                        bit = f"{bit} (provider={b['provider']})"
+                    if b.get("summary"):
+                        bit = f"{bit} — {b['summary']}"
+                    parts.append(bit)
+                reasons = ", ".join(parts)
                 rid = item["ref_id"]
                 lines.append(
                     f"<li><code>{escape(rid)}</code> · {escape(reasons)}</li>"
+                )
+            for item in plan.get("blocked_targets") or []:
+                bit = item.get("reason") or "blocked"
+                if item.get("stage"):
+                    bit = f"{bit} (stage={item['stage']})"
+                if item.get("provider"):
+                    bit = f"{bit} (provider={item['provider']})"
+                if item.get("summary"):
+                    bit = f"{bit} — {item['summary']}"
+                lines.append(
+                    f"<li><code>{escape(item['path'])}</code> · {escape(bit)}</li>"
                 )
             lines.append("</ul>")
         else:

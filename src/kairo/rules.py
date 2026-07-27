@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,13 +17,62 @@ from typing import Callable
 from kairo import corpus
 from kairo.backends import run_backend
 from kairo.machine import resolve_asr
-from kairo.models import Form, Manifest, ProductState, State, TargetState
+from kairo.models import (
+    REASON_PROVIDER_FAILED,
+    FailureDiagnostic,
+    Form,
+    Manifest,
+    ProductState,
+    State,
+    TargetState,
+)
 from kairo.provider import AgentConfig
 from kairo.workspace import _slug
+
+# #98 安全摘要:单行长度上限
+_PROVIDER_SUMMARY_MAX = 200
+_REDACT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # Authorization: Bearer <token> 或 Authorization: <token>
+    re.compile(r"(?i)(authorization\s*:\s*)(?:bearer\s+)?\S+"),
+    re.compile(r"(?i)(bearer\s+)\S+"),
+    re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)\S+"),
+    re.compile(r"(?i)(x-api-key\s*[=:]\s*)\S+"),
+    re.compile(r"(?i)(token\s*[=:]\s*)\S+"),
+    re.compile(r"(?i)(password\s*[=:]\s*)\S+"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}\b"),
+)
 
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def safe_provider_summary(
+    exc: BaseException | str, *, max_len: int = _PROVIDER_SUMMARY_MAX
+) -> str:
+    """异常 → 脱敏、单行、截断的安全摘要(可进 state;不保真原始报文)。"""
+    raw = str(exc) if not isinstance(exc, str) else exc
+    one = re.sub(r"\s+", " ", raw).strip() or "provider call failed"
+    for pat in _REDACT_PATTERNS:
+        if pat.groups:
+            one = pat.sub(r"\1[redacted]", one)
+        else:
+            one = pat.sub("[redacted]", one)
+    if len(one) > max_len:
+        one = one[: max_len - 1].rstrip() + "…"
+    return one
+
+
+def make_provider_diagnostic(
+    stage: str, provider, exc: BaseException
+) -> FailureDiagnostic:
+    """归一化为 FailureDiagnostic;provider 标识来自 provider.name。"""
+    name = getattr(provider, "name", None) or "unknown"
+    return FailureDiagnostic(
+        stage=stage,
+        provider=str(name),
+        summary=safe_provider_summary(exc),
+    )
 
 
 def _run_agent(
@@ -41,7 +91,10 @@ def _run_agent(
                 read_dirs=list(read_dirs or []),
             )
         )
-        return (Path(d) / artifact).read_text()
+        path = Path(d) / artifact
+        if not path.is_file():
+            raise RuntimeError(f"provider produced no artifact: {artifact}")
+        return path.read_text()
 
 
 @dataclass
@@ -326,13 +379,22 @@ class DigestRule:
                     + "\n".join(f"- {p}" for p in img_lines)
                 )
             persona += _OUTPUT_DISCIPLINE
-            content = _run_agent(
-                self.provider,
-                persona,
-                body,
-                "digest.md",
-                read_dirs=[ref_dir] if img_lines else None,
-            )
+            try:
+                content = _run_agent(
+                    self.provider,
+                    persona,
+                    body,
+                    "digest.md",
+                    read_dirs=[ref_dir] if img_lines else None,
+                )
+            except Exception as exc:  # #98:可归属 provider 失败 → 持久化诊断,不写半成品
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_PROVIDER_FAILED,
+                    diagnostic=make_provider_diagnostic("digest", self.provider, exc),
+                )
+                return
             (self.ws.root / key).write_text(content)
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -343,6 +405,7 @@ class DigestRule:
             )
 
         def is_stale(state: State) -> bool:
+            # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试
             ps = state.products.get(key)
             return ps is None or ps.input_hash != input_hash
 
@@ -481,17 +544,25 @@ class ComposeRule:
                 + f"---新增 digest({len(use_delta)} 条,批量融入)---\n"
                 + "\n\n".join(digest_blocks)
             )
-            content = _run_agent(
-                self.provider,
-                target.fold_protocol
-                + self.ws.glossary_reference()
-                + reference_section
-                + _OUTPUT_DISCIPLINE
-                + _COMPOSE_DISCIPLINE,
-                context,
-                "doc.md",
-                read_dirs=read_dirs,
-            )
+            try:
+                content = _run_agent(
+                    self.provider,
+                    target.fold_protocol
+                    + self.ws.glossary_reference()
+                    + reference_section
+                    + _OUTPUT_DISCIPLINE
+                    + _COMPOSE_DISCIPLINE,
+                    context,
+                    "doc.md",
+                    read_dirs=read_dirs,
+                )
+            except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
+                ts = ts0 or TargetState(depends_on=list(target.depends_on))
+                ts.status = "blocked"
+                ts.reason = REASON_PROVIDER_FAILED
+                ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
+                state.targets[key] = ts
+                return
             # 退化护栏(#28):有充分长的上一版,新输出却骤缩 → 不覆盖,标 blocked,
             # 保留旧文档(避免单次 LLM 退化输出静默销毁整篇)。需人工 re-step 重综合。
             # materials-changed 从空正文重综合,不适用此护栏。
@@ -503,6 +574,7 @@ class ComposeRule:
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
                 ts.reason = "compose-degraded"
+                ts.diagnostic = None
                 state.targets[key] = ts
                 return
             doc_path.write_text(content)
@@ -519,6 +591,7 @@ class ComposeRule:
             }
             ts.status = "ok"
             ts.reason = None
+            ts.diagnostic = None  # 成功清除 #98 诊断
             ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or materials_changed:
@@ -528,8 +601,11 @@ class ComposeRule:
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)
             doc_path = self.ws.root / key
-            # compose-degraded 视为终态:不自动重试(否则对退化输出死循环),手动 re-step 重综合。
-            if ts and ts.status == "blocked" and ts.reason == "compose-degraded":
+            # compose-degraded / provider-failed 终态:不自动重试;显式 run/re-step 才恢复
+            if ts and ts.status == "blocked" and ts.reason in (
+                "compose-degraded",
+                REASON_PROVIDER_FAILED,
+            ):
                 return False
             # #77:删参考后材料集变更,待运行综合
             if ts and ts.reason == "materials-changed":

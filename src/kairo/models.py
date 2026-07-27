@@ -212,12 +212,27 @@ class Manifest(BaseModel):
 
 # ---- reconcile state (.kairo/state.json) ----
 
+# #98: Digest/Compose provider 失败的稳定 reason;普通 step 不自动重试。
+REASON_PROVIDER_FAILED = "provider-failed"
+
+
+class FailureDiagnostic(BaseModel):
+    """工作项级安全诊断(#98)。可选字段;旧 state 缺失时按无诊断兼容。
+
+    summary 已脱敏/截断,不承诺原始异常保真;禁止持久化密钥/完整 prompt/原始 JSON。
+    """
+
+    stage: str  # digest | compose
+    provider: str = ""
+    summary: str = ""
+
 
 class ProductState(BaseModel):
     input_hash: str
     produced_by: dict[str, str] | None = None
     status: str = "ok"
     reason: str | None = None
+    diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
 
 
 class TargetState(BaseModel):
@@ -230,7 +245,8 @@ class TargetState(BaseModel):
     upstream_hash: dict[str, str] = Field(default_factory=dict)
     corpus_stamp: str = ""  # 折叠时 corpus 参考层版本戳;漂移 → advisory 提示手动 recompute
     status: str = "ok"  # ok | blocked
-    reason: str | None = None  # manual-edit | …
+    reason: str | None = None  # manual-edit | provider-failed | …
+    diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
 
 
 class State(BaseModel):

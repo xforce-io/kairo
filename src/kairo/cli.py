@@ -324,6 +324,21 @@ def accept(doc: str = typer.Argument(..., help="要接受手改的文档")) -> N
     typer.echo(f"accepted {doc}")
 
 
+def _format_block_diag(reason: str | None, diagnostic) -> str:
+    """#98:blocked 原因 + 可选 stage/provider/summary 安全诊断。"""
+    base = reason or "blocked"
+    if diagnostic is None:
+        return base
+    bits = [base]
+    if diagnostic.stage:
+        bits.append(f"stage={diagnostic.stage}")
+    if diagnostic.provider:
+        bits.append(f"provider={diagnostic.provider}")
+    if diagnostic.summary:
+        bits.append(diagnostic.summary)
+    return " ".join(bits)
+
+
 @app.command()
 def status() -> None:
     """列 references / 各文档融入状态;顶部摘要 topic 与 run plan(stale/blocked)。"""
@@ -340,7 +355,7 @@ def status() -> None:
         roles = ",".join(f.role for f in man.forms)
         title_s = f" «{man.title}»" if man.title and man.title != ref_id else ""
         blocked = [
-            f"{k.rsplit('/', 1)[-1]}:{v.reason}"
+            f"{k.rsplit('/', 1)[-1]}:{_format_block_diag(v.reason, v.diagnostic)}"
             for k, v in state.products.items()
             if k.startswith(f"references/{ref_id}/") and v.status == "blocked"
         ]
@@ -352,7 +367,11 @@ def status() -> None:
             typer.echo(f"target {target.path}: (未生成)")
             continue
         drift = len(ts.folded) - len(ts.last_major_folded)
-        flag = f"  ⚠ blocked:{ts.reason}" if ts.status == "blocked" else ""
+        flag = (
+            f"  ⚠ blocked:{_format_block_diag(ts.reason, ts.diagnostic)}"
+            if ts.status == "blocked"
+            else ""
+        )
         if compose.corpus_drifted(target.path, state):
             flag += "  ⚠ corpus 已变,可 re-step 重算"
         typer.echo(
