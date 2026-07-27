@@ -488,6 +488,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
             "status": status,
             "reason": ts.reason if ts else None,
             "diagnostic_summary": diag.summary if diag else None,
+            "diagnostic_stage": diag.stage if diag else None,
             "diagnostic_provider": diag.provider if diag else None,
             "has_doc": has_doc,
             "preview_title": path,
@@ -811,6 +812,10 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
                 parts = []
                 for b in item["blocks"]:
                     bit = b["reason"]
+                    if b.get("stage"):
+                        bit = f"{bit} (stage={b['stage']})"
+                    if b.get("provider"):
+                        bit = f"{bit} (provider={b['provider']})"
                     if b.get("summary"):
                         bit = f"{bit} — {b['summary']}"
                     parts.append(bit)
@@ -821,6 +826,10 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
                 )
             for item in plan.get("blocked_targets") or []:
                 bit = item.get("reason") or "blocked"
+                if item.get("stage"):
+                    bit = f"{bit} (stage={item['stage']})"
+                if item.get("provider"):
+                    bit = f"{bit} (provider={item['provider']})"
                 if item.get("summary"):
                     bit = f"{bit} — {item['summary']}"
                 lines.append(

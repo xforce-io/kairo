@@ -13,7 +13,13 @@ from kairo.engine import (
     step,
     workspace_run_plan,
 )
-from kairo.models import FailureDiagnostic, ProductState, REASON_PROVIDER_FAILED, State
+from kairo.models import (
+    FailureDiagnostic,
+    ProductState,
+    REASON_PROVIDER_FAILED,
+    State,
+    TargetState,
+)
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import make_provider_diagnostic, safe_provider_summary
 from kairo.workspace import Workspace
@@ -291,3 +297,34 @@ def test_pending_excludes_provider_failed_digest(tmp_path):
     keys = [it.key for it in pending(ws)]
     rid = ws.list_reference_ids()[0]
     assert f"references/{rid}/digest.md" not in keys
+
+
+def test_web_shows_provider_failure_stage_for_reference_and_target(tmp_path):
+    """#98 S1: Web 持久化诊断须明确显示失败阶段，不能只靠文件名推断。"""
+    from fastapi.testclient import TestClient
+
+    from kairo.web.server import create_app
+
+    ws = _ws_with_text(tmp_path)
+    step(ws, FailProvider("digest unavailable"))
+    rid = ws.list_reference_ids()[0]
+    client = TestClient(create_app(tmp_path))
+
+    ref = client.get(f"/w/ws/ref/{rid}")
+    assert ref.status_code == 200
+    assert "stage=digest" in ref.text
+    assert "provider=fail-prov" in ref.text
+
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        status="blocked",
+        reason=REASON_PROVIDER_FAILED,
+        diagnostic=FailureDiagnostic(
+            stage="compose", provider="fail-prov", summary="compose unavailable"
+        ),
+    )
+    ws.write_state(state)
+    target = client.get("/w/ws/target", params={"path": "understanding.md"})
+    assert target.status_code == 200
+    assert "stage=compose" in target.text
+    assert "provider=fail-prov" in target.text
