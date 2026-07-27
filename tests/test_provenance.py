@@ -74,6 +74,12 @@ def test_validate_accepts_compact_doc_rejects_path_leak_and_unknown_id(tmp_path)
 | {sid} | {cat[0].title} | [digest]({path}) |
 """
     assert validate_provenance(good, cat, layer="fact") == []
+    fake_anchor = good.replace(
+        fact_anchor_id(sid, 1), "F-deadbeef-01"
+    )
+    assert "fact anchor has unknown source id: F-deadbeef-01" in validate_provenance(
+        fake_anchor, cat, layer="fact"
+    )
 
     leak = good.replace("关键数字 24 小时〔" + sid + "〕。", f"见 [来源:{path}]")
     errs = validate_provenance(leak, cat, layer="fact")
@@ -88,6 +94,29 @@ def test_validate_accepts_compact_doc_rejects_path_leak_and_unknown_id(tmp_path)
     no_index = f"## 主题\n\n内容〔{sid}〕\n"
     errs3 = validate_provenance(no_index, cat, layer="fact")
     assert any("missing" in e for e in errs3)
+
+    # 判断层仅经 F → S 链接时无需重复来源索引和 digest 路径。
+    fid = fact_anchor_id(sid, 1)
+    judgment = f"""## 判断
+
+该结论可复核〔依据:{fid}〕。
+
+## 依据事实索引
+
+| 锚点 | 来源 |
+|---|---|
+| {fid} | {sid} · {cat[0].title} |
+"""
+    assert validate_provenance(
+        judgment, cat, layer="judgment", known_fact_ids={fid}
+    ) == []
+
+    # F- 格式合法也不能伪造；必须是上游事实层实际声明的锚点。
+    invented = judgment.replace(fid, "F-deadbeef-99")
+    errs4 = validate_provenance(
+        invented, cat, layer="judgment", known_fact_ids={fid}
+    )
+    assert "unknown fact id: F-deadbeef-99" in errs4
 
 
 def test_compose_invalid_keeps_old_document(tmp_path):
@@ -129,6 +158,51 @@ def test_compose_invalid_keeps_old_document(tmp_path):
     ts = ws.read_state().targets["understanding.md"]
     assert ts.status == "blocked"
     assert ts.reason == REASON_PROVENANCE_INVALID
+
+
+def test_compose_rejects_invented_judgment_fact_anchor(tmp_path):
+    """判断层的 F-… 必须是本轮 understanding 实际声明的事实锚点。"""
+    ws = Workspace.init(tmp_path / "ws")
+    source = tmp_path / "m.txt"
+    source.write_text("材料正文")
+    ws.add([source])
+    step(ws, StubProvider())
+    old_assessment = (ws.root / "assessment.md").read_text()
+
+    class InventedFactProvider:
+        name = "invented-fact"
+        model = "invented-fact"
+
+        def run(self, config, signal=None):
+            if config.artifact == "doc.md" and "判断层" in config.persona:
+                config.artifact_dir.mkdir(parents=True, exist_ok=True)
+                text = """## 判断
+
+伪造的依据〔依据:F-deadbeef-99〕。
+
+## 依据事实索引
+
+| 锚点 | 来源 |
+|---|---|
+| F-deadbeef-99 | 不存在的事实 |
+"""
+                (config.artifact_dir / "doc.md").write_text(text)
+                return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
+            return StubProvider().run(config, signal)
+
+    # 制造新 delta，使 understanding 先正常更新、assessment 再消费伪造输出。
+    rid = ws.list_reference_ids()[0]
+    (ws.root / f"references/{rid}/digest.md").write_text("新材料")
+    state = ws.read_state()
+    for target in state.targets.values():
+        target.folded = {}
+    ws.write_state(state)
+    step(ws, InventedFactProvider())
+
+    assessment = ws.read_state().targets["assessment.md"]
+    assert assessment.status == "blocked"
+    assert assessment.reason == REASON_PROVENANCE_INVALID
+    assert (ws.root / "assessment.md").read_text() == old_assessment
 
 
 def test_compose_valid_writes_without_body_path_stack(tmp_path):

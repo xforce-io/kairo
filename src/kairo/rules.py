@@ -29,6 +29,7 @@ from kairo.models import (
 from kairo.provenance import (
     REASON_PROVENANCE_INVALID,
     build_source_catalog,
+    fact_anchor_ids,
     format_source_catalog_block,
     provenance_protocol_for,
     validate_provenance,
@@ -592,12 +593,23 @@ class ComposeRule:
                 ts.diagnostic = None
                 state.targets[key] = ts
                 return
-            # #99:写盘前溯源结构校验;失败保留旧文,记 compose-provenance-invalid
-            prov_errs = validate_provenance(content, catalog, layer=layer)
+            # #99:判断层 F-… 必须在实际的上游事实文档中声明，不能只符合格式。
+            known_fact_ids = None
+            if layer == "judgment":
+                known_fact_ids = set()
+                for dep in target.depends_on:
+                    dep_path = self.ws.root / dep
+                    if dep_path.is_file():
+                        known_fact_ids.update(fact_anchor_ids(dep_path.read_text()))
+            # 写盘前溯源结构校验;失败保留旧文,记 compose-provenance-invalid
+            prov_errs = validate_provenance(
+                content, catalog, layer=layer, known_fact_ids=known_fact_ids
+            )
             if prov_errs:
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
                 ts.reason = REASON_PROVENANCE_INVALID
+                ts.diagnostic = None
                 # 不改 output_hash / folded / 文件,便于 re-step 恢复
                 state.targets[key] = ts
                 return

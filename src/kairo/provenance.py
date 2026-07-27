@@ -16,14 +16,15 @@ REASON_PROVENANCE_INVALID = "compose-provenance-invalid"
 # 短 ID:S- + 由 ref_id 派生的 hex;碰撞时加长
 _SID_RE = re.compile(r"\bS-[0-9a-f]+\b")
 _FID_RE = re.compile(r"\bF-[0-9a-f]+-\d+\b")
+_FACT_ANCHOR_RE = re.compile(
+    r'<a\s+[^>]*\bid\s*=\s*["\'](F-[0-9a-f]+-\d+)["\'][^>]*>',
+    re.IGNORECASE,
+)
 # 正文中禁止的完整 digest 路径(索引链接除外)
 _DIGEST_PATH_RE = re.compile(r"references/[^/\s\]]+/digest\.md")
-_INDEX_HEADINGS = (
-    "## 来源索引",
-    "## 依据事实索引",
-    "## Source Index",
-    "## Fact Index",
-)
+_SOURCE_INDEX_HEADINGS = ("## 来源索引", "## Source Index")
+_FACT_INDEX_HEADINGS = ("## 依据事实索引", "## Fact Index")
+_INDEX_HEADINGS = _SOURCE_INDEX_HEADINGS + _FACT_INDEX_HEADINGS
 
 
 @dataclass(frozen=True)
@@ -154,16 +155,24 @@ def provenance_protocol_for(layer: str) -> str:
     return _PROVENANCE_PROTOCOL_FACT
 
 
+def _section_after_heading(content: str, headings: tuple[str, ...]) -> str:
+    """返回最早匹配标题及其后内容；无该类索引则为空。"""
+    starts = [i for h in headings if (i := content.find(h)) >= 0]
+    return content[min(starts) :] if starts else ""
+
+
 def _split_body_and_index(content: str) -> tuple[str, str]:
     """拆出正文与第一个索引标题及其后内容。"""
-    best = -1
-    for h in _INDEX_HEADINGS:
-        i = content.find(h)
-        if i >= 0 and (best < 0 or i < best):
-            best = i
-    if best < 0:
+    starts = [i for h in _INDEX_HEADINGS if (i := content.find(h)) >= 0]
+    if not starts:
         return content, ""
-    return content[:best], content[best:]
+    start = min(starts)
+    return content[:start], content[start:]
+
+
+def fact_anchor_ids(content: str) -> set[str]:
+    """提取事实层实际声明的 HTML F- 锚点，供判断层引用校验。"""
+    return set(_FACT_ANCHOR_RE.findall(content))
 
 
 def validate_provenance(
@@ -171,14 +180,21 @@ def validate_provenance(
     catalog: list[SourceEntry],
     *,
     layer: str = "fact",
+    known_fact_ids: set[str] | None = None,
 ) -> list[str]:
-    """结构校验;返回错误列表(空=通过)。不评价业务结论质量。"""
+    """结构校验;返回错误列表(空=通过)。不评价业务结论质量。
+
+    ``known_fact_ids`` 由调用方从上游事实文档提取；判断层传入后，所有 F-…
+    必须确实存在，避免伪造锚点写盘。
+    """
     errors: list[str] = []
     if not content or not content.strip():
         return ["empty document"]
 
     by_id = catalog_by_id(catalog)
     body, index = _split_body_and_index(content)
+    source_index = _section_after_heading(content, _SOURCE_INDEX_HEADINGS)
+    fact_index = _section_after_heading(content, _FACT_INDEX_HEADINGS)
 
     # 5. 正文路径泄漏(索引区允许 markdown 链接)
     for m in _DIGEST_PATH_RE.finditer(body):
@@ -188,26 +204,45 @@ def validate_provenance(
     body_sids = set(_SID_RE.findall(body))
     all_sids = set(_SID_RE.findall(content))
     all_fids = set(_FID_RE.findall(content))
+    declared_fact_ids = fact_anchor_ids(content)
 
     # 1. 每个 S- 必须在目录中
     for sid in sorted(all_sids):
         if sid not in by_id:
             errors.append(f"unknown source id: {sid}")
 
-    # 索引存在性:有来源被引用或 catalog 非空且文档非平凡时需要索引
-    if all_sids or (catalog and len(content) > 80):
+    # 事实层 F-<source-id>-NN 的 source-id 必须存在，避免伪造锚点成为
+    # 判断层的“可引用事实”。判断层的 F- 由 known_fact_ids 精确校验。
+    if layer != "judgment":
+        for fid in sorted(declared_fact_ids):
+            source_id = f"S-{fid[2:].rsplit('-', 1)[0]}"
+            if source_id not in by_id:
+                errors.append(f"fact anchor has unknown source id: {fid}")
+
+    # 至少有一类索引；事实层总是要求来源索引，判断层的事实索引即可。
+    if all_sids or all_fids or (catalog and len(content) > 80):
         if not index.strip():
             errors.append("missing source/fact index section")
+
+    # 事实层的每个 S- 都必须落到来源索引。判断层则只要求正文直接 S- 例外
+    # 有来源索引；「依据事实索引」中的 S- 仅描述 F 的来源，不应强迫重复路径。
+    required_source_sids = all_sids if layer != "judgment" else body_sids
+    if layer != "judgment" and catalog and len(content) > 80 and not source_index:
+        errors.append("missing source index section")
+    if required_source_sids:
+        if not source_index:
+            errors.append("missing source index section")
         else:
-            # 索引中的链接应覆盖已用 S- 并指向正确 digest
-            for sid in sorted(body_sids | all_sids):
+            for sid in sorted(required_source_sids):
                 if sid not in by_id:
                     continue
                 ent = by_id[sid]
-                if sid not in index:
-                    errors.append(f"index missing id: {sid}")
-                elif ent.digest_path not in index:
-                    errors.append(f"index missing digest link for {sid}: {ent.digest_path}")
+                if sid not in source_index:
+                    errors.append(f"source index missing id: {sid}")
+                elif ent.digest_path not in source_index:
+                    errors.append(
+                        f"source index missing digest link for {sid}: {ent.digest_path}"
+                    )
 
     # 章节证据范围:若出现「证据范围」行,其中 ID 须合法(已在 all_sids 检查)
     for line in body.splitlines():
@@ -216,15 +251,16 @@ def validate_provenance(
                 if sid not in by_id:
                     errors.append(f"scope unknown id: {sid}")
 
-    # judgment:应有 F- 或明确例外;有判断层关键词时软提示——结构上要求索引或 F
     if layer == "judgment":
         if all_fids:
-            # F- 格式已由正则约束;是否在 understanding 存在留给上层可选
-            pass
-        elif all_sids and "依据" not in content and "依据事实索引" not in content:
-            # 仅有 S 也可以是例外路径,但需要来源索引
-            if "来源索引" not in content and "Source Index" not in content:
-                errors.append("judgment layer needs fact index or source index")
+            if not fact_index:
+                errors.append("missing fact index section")
+            if known_fact_ids is not None:
+                for fid in sorted(all_fids):
+                    if fid not in known_fact_ids:
+                        errors.append(f"unknown fact id: {fid}")
+        elif body_sids and not source_index:
+            errors.append("judgment layer needs fact index or source index")
 
     return errors
 
