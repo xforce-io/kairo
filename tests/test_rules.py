@@ -24,10 +24,16 @@ class _RunOnlyProvider:
         self.calls = []
 
     def run(self, config, signal=None):
+        from kairo.provider import _stub_compose_document
+
         self.calls.append(config)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
-        content = f"RUN-ONLY\n\n{config.context}"  # echo context 供溯源断言
-        (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
+        art = config.artifact or "output.md"
+        if art == "doc.md":
+            content = "RUN-ONLY\n" + _stub_compose_document(config.persona, config.context)
+        else:
+            content = f"RUN-ONLY\n\n{config.context}"
+        (config.artifact_dir / art).write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
 
@@ -564,6 +570,28 @@ def test_compose_converges_after_folding(tmp_path):
 # ---- #28:compose 退化护栏(单次 LLM 退化输出不得静默销毁整篇文档)----
 
 
+def _valid_compose_doc(ws, body: str, *, judgment: bool = False) -> str:
+    """#99:为固定内容包上可通过溯源校验的索引骨架。"""
+    from kairo.provenance import build_source_catalog
+
+    cat = build_source_catalog(ws)
+    if not cat:
+        idx = "## 来源索引\n\n| ID | 材料 | 可核对来源 |\n|---|---|---|\n"
+        return body.rstrip() + "\n\n" + idx
+    sids = " ".join(f"〔{e.source_id}〕" for e in cat)
+    lines = [body.rstrip(), "", f"证据范围:{sids}", ""]
+    if judgment:
+        lines += ["## 依据事实索引", "", "| 锚点 | 来源 |", "|---|---|"]
+        for e in cat:
+            core = e.source_id[2:]
+            lines.append(f"| F-{core}-01 | {e.source_id} · {e.title} |")
+        lines.append("")
+    lines += ["## 来源索引", "", "| ID | 材料 | 可核对来源 |", "|---|---|---|"]
+    for e in cat:
+        lines.append(f"| {e.source_id} | {e.title} | [digest]({e.digest_path}) |")
+    return "\n".join(lines) + "\n"
+
+
 class _FixedProvider:
     """返回固定内容,模拟 agent 输出(可控,用于护栏断言)。"""
 
@@ -621,7 +649,8 @@ def test_compose_allows_normal_sized_update(tmp_path):
     good = "完整的判断正文。" * 400
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, good)
-    prov = _FixedProvider("完整的判断正文(已更新)。" * 380)  # 量级相当 → 不该拦
+    # 量级相当 + 合法溯源结构 → 不该拦
+    prov = _FixedProvider(_valid_compose_doc(ws, "完整的判断正文(已更新)。" * 380))
     _understanding_item(ws, prov, state).run(state)
     assert "已更新" in (ws.root / "understanding.md").read_text()
     assert state.targets["understanding.md"].status == "ok"
@@ -635,9 +664,10 @@ def test_compose_from_scratch_not_guarded(tmp_path):
     rid = ws.add([t])
     _make_digest(ws, rid, "新纪要")
     state = State()  # understanding 无既有文档
-    prov = _FixedProvider("短小但合法的首版正文。")
+    content = _valid_compose_doc(ws, "短小但合法的首版正文。")
+    prov = _FixedProvider(content)
     _understanding_item(ws, prov, state).run(state)
-    assert (ws.root / "understanding.md").read_text() == "短小但合法的首版正文。"
+    assert "短小但合法的首版正文" in (ws.root / "understanding.md").read_text()
     assert state.targets["understanding.md"].status == "ok"
 
 
@@ -698,7 +728,8 @@ def test_compose_persona_carries_output_discipline(tmp_path):
     persona = prov.calls[0].persona
     assert "只输出文档正文" in persona  # P1 无旁白/提议
     assert "只产出当前这一个文档" in persona  # P2 不内联其它文档
-    assert "溯源标签" in persona  # P4 来源是标签非文件
+    # #99:短 ID + 索引,禁止正文堆叠完整路径
+    assert "短 ID" in persona or "来源索引" in persona or "S-…" in persona
     assert "待核" in persona  # P6 可疑专名标 ⚠️
 
 

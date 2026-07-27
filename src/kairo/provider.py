@@ -57,10 +57,120 @@ def _scan_artifacts(d: Path) -> list[Path]:
     )
 
 
+def _parse_stub_catalog(context: str) -> list[tuple[str, str, str]]:
+    """从 Compose context 的来源目录表解析 (S-id, title, digest_path)。"""
+    import re
+
+    rows: list[tuple[str, str, str]] = []
+    for m in re.finditer(
+        r"\|\s*(S-[0-9a-f]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*(references/[^|]+/digest\.md)\s*\|",
+        context,
+    ):
+        sid, _ref, title, path = m.group(1), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+        rows.append((sid, title, path))
+    return rows
+
+
+def _digest_bodies_from_context(context: str) -> list[str]:
+    """抽取 context 中各 digest 块正文(供 stub 写入事实层,保持链上可断言)。"""
+    import re
+
+    parts = re.split(r"\n(?=\[(?:S-[0-9a-f]+ \||来源:))", context)
+    bodies: list[str] = []
+    for part in parts:
+        if not part.startswith("["):
+            continue
+        nl = part.find("\n")
+        if nl < 0:
+            continue
+        body = part[nl + 1 :].strip()
+        if body:
+            bodies.append(body)
+    return bodies
+
+
+def _stub_compose_document(persona: str, context: str) -> str:
+    """#99:stub 产出可通过溯源校验的紧凑文档(确定性,依赖 persona+context)。"""
+    seed = f"{persona}\n{context}"
+    digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+    catalog = _parse_stub_catalog(context)
+    # 勿用 persona 里「判断进 assessment」误判事实层;认协议标题
+    judgment = "溯源输出协议 · 判断层" in persona or "【判断层】" in persona
+    if not catalog:
+        # 无 digest 时仍给最小合法结构
+        if judgment:
+            return (
+                f"⚠️ STUB ASSESSMENT [{digest}]\n\n"
+                f"## 判断\n\n暂无新材料支撑的判断。\n\n"
+                f"## 依据事实索引\n\n| 锚点 | 说明 |\n|---|---|\n| — | 无 |\n"
+            )
+        return (
+            f"⚠️ STUB UNDERSTANDING [{digest}]\n\n"
+            f"## 概览\n\n暂无 fold 材料。\n\n"
+            f"## 来源索引\n\n| ID | 材料 | 可核对来源 |\n|---|---|---|\n"
+        )
+    sids = [c[0] for c in catalog]
+    scope = " ".join(f"〔{s}〕" for s in sorted(sids))
+    bodies = _digest_bodies_from_context(context)
+    body_bits = [
+        f"⚠️ STUB {'ASSESSMENT' if judgment else 'UNDERSTANDING'} [{digest}]",
+        "",
+        "## 主题",
+        "",
+        f"证据范围:{scope}",
+        "",
+    ]
+    for i, (sid, title, path) in enumerate(catalog):
+        core = sid[2:]
+        fid = f"F-{core}-01"
+        snippet = bodies[i] if i < len(bodies) else ""
+        # 去掉 digest 内可能的路径泄漏,避免校验失败
+        snippet = snippet.replace("references/", "ref:")
+        if judgment:
+            body_bits.append(
+                f"基于材料「{title}」的判断成立〔依据:{fid}〕。"
+                + (f" 摘要:{snippet[:400]}" if snippet else "")
+            )
+        else:
+            body_bits.append(
+                f'<a id="{fid}"></a>与「{title}」相关的关键事实〔{sid}〕。'
+                + (f"\n\n{snippet[:800]}" if snippet else "")
+            )
+        body_bits.append("")
+    # 判断层应能看到上游 understanding 路径名(测试依赖)
+    if judgment and "understanding.md" in context:
+        body_bits.append("上游 understanding.md 已作为事实层输入。")
+        body_bits.append("")
+    if judgment:
+        body_bits += [
+            "## 依据事实索引",
+            "",
+            "| 锚点 | 来源 |",
+            "|---|---|",
+        ]
+        for sid, title, path in catalog:
+            core = sid[2:]
+            body_bits.append(f"| F-{core}-01 | {sid} · {title} |")
+        body_bits += ["", "## 来源索引", "", "| ID | 材料 | 可核对来源 |", "|---|---|---|"]
+        for sid, title, path in catalog:
+            body_bits.append(f"| {sid} | {title} | [digest]({path}) |")
+    else:
+        body_bits += [
+            "## 来源索引",
+            "",
+            "| ID | 材料 | 可核对来源 |",
+            "|---|---|---|",
+        ]
+        for sid, title, path in catalog:
+            body_bits.append(f"| {sid} | {title} | [digest]({path}) |")
+    return "\n".join(body_bits) + "\n"
+
+
 class StubProvider:
     """确定性 Fake:离线 + 测试。echo 输入 + STUB 标记,只验骨牌链、不被当真。
 
     输出只依赖 (persona, context),不依赖 artifact_dir 路径 —— 否则破坏收敛幂等。
+    #99:compose(doc.md) 产出紧凑溯源结构,以便写盘前校验可通过。
     """
 
     name = "stub"
@@ -68,13 +178,17 @@ class StubProvider:
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
-        seed = f"{config.persona}\n{config.context}"
-        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
-        content = (
-            f"⚠️ STUB OUTPUT [{digest}]\n\n"
-            f"{config.persona.strip()}\n\n{config.context.strip()}"
-        )
-        (config.artifact_dir / (config.artifact or "output.md")).write_text(content)
+        art = config.artifact or "output.md"
+        if art == "doc.md":
+            content = _stub_compose_document(config.persona, config.context)
+        else:
+            seed = f"{config.persona}\n{config.context}"
+            digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+            content = (
+                f"⚠️ STUB OUTPUT [{digest}]\n\n"
+                f"{config.persona.strip()}\n\n{config.context.strip()}"
+            )
+        (config.artifact_dir / art).write_text(content)
         return AgentResult(
             artifacts=_scan_artifacts(config.artifact_dir), result_text=content
         )
