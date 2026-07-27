@@ -1,11 +1,14 @@
 """step 后台任务:子进程跑 step + 逐行缓冲 stdout;单 workspace 串行;SSE 事件流。
 
 任务状态纯内存(server 重启丢运行中任务,本地单用户可接受)。
+#97: 以退出码 + 取消意图分类任务终态,并从受限日志生成安全错误摘要。
 """
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import signal
 import subprocess
 import threading
@@ -14,6 +17,34 @@ import uuid
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+
+# 安全摘要:单行长度上限(字符)
+_SUMMARY_MAX_LEN = 240
+
+# 脱敏:凭证/密钥/Authorization 等模式(替换为 [redacted])
+_REDACT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"(?i)(authorization\s*:\s*)\S+"),
+    re.compile(r"(?i)(bearer\s+)\S+"),
+    re.compile(r"(?i)(api[_-]?key\s*[=:]\s*)\S+"),
+    re.compile(r"(?i)(x-api-key\s*[=:]\s*)\S+"),
+    re.compile(r"(?i)(token\s*[=:]\s*)\S+"),
+    re.compile(r"(?i)(password\s*[=:]\s*)\S+"),
+    re.compile(r"(?i)(secret\s*[=:]\s*)\S+"),
+    re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{12,}\b"),
+)
+
+TaskKind = Literal["running", "succeeded", "failed", "cancelled", "missing"]
+
+
+@dataclass
+class TaskResult:
+    """一次已结束(或缺失)任务的结构化终态,仅供本次页面呈现。"""
+
+    kind: TaskKind
+    exit_code: int | None = None
+    message: str = ""
 
 
 @dataclass
@@ -23,8 +54,80 @@ class StepTask:
     lines: list[str] = field(default_factory=list)
     done: bool = False
     exit_code: int | None = None
+    cancel_requested: bool = False
     proc: subprocess.Popen | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+
+
+def redact_sensitive(text: str) -> str:
+    """脱敏凭证类片段;不承诺完整日志保真。"""
+    out = text
+    for pat in _REDACT_PATTERNS:
+        if pat.groups:
+            out = pat.sub(r"\1[redacted]", out)
+        else:
+            out = pat.sub("[redacted]", out)
+    return out
+
+
+def _pick_error_line(lines: list[str]) -> str:
+    """从缓冲末尾挑一条最能说明失败的行。"""
+    errorish = re.compile(
+        r"(?i)(error|fail|exception|traceback|denied|refused|timeout|unauthorized|status\s*[45]\d\d)"
+    )
+    candidates = [ln.strip() for ln in lines if ln and ln.strip()]
+    if not candidates:
+        return ""
+    # 优先最后一条 error-like
+    for ln in reversed(candidates):
+        if errorish.search(ln):
+            return ln
+    return candidates[-1]
+
+
+def safe_error_summary(lines: list[str], *, max_len: int = _SUMMARY_MAX_LEN) -> str:
+    """从已缓冲日志提炼单行、脱敏、截断的安全错误摘要。"""
+    raw = _pick_error_line(lines)
+    if not raw:
+        return ""
+    # 压成单行
+    one = re.sub(r"\s+", " ", raw).strip()
+    one = redact_sensitive(one)
+    if len(one) > max_len:
+        one = one[: max_len - 1].rstrip() + "…"
+    return one
+
+
+def classify_task(task: StepTask | None) -> TaskResult:
+    """退出码 + 取消意图 → 互斥终态。task 缺失或未结束均非成功。"""
+    if task is None:
+        return TaskResult(kind="missing", message="task not found")
+    with task.lock:
+        done = task.done
+        code = task.exit_code
+        cancelled = task.cancel_requested
+        lines = list(task.lines)
+    if not done:
+        return TaskResult(kind="running", exit_code=code, message="task still running")
+    # 用户取消且进程已结束 → cancelled(优先于非零退出码)
+    if cancelled:
+        return TaskResult(kind="cancelled", exit_code=code, message="")
+    if code is not None and code != 0:
+        return TaskResult(
+            kind="failed",
+            exit_code=code,
+            message=safe_error_summary(lines),
+        )
+    return TaskResult(kind="succeeded", exit_code=0 if code is None else code, message="")
+
+
+def result_payload(result: TaskResult) -> dict:
+    """SSE done / 查询共用的精简字段。"""
+    return {
+        "kind": result.kind,
+        "exit_code": result.exit_code,
+        "message": result.message,
+    }
 
 
 class TaskRegistry:
@@ -82,6 +185,8 @@ class TaskRegistry:
         task = self._tasks.get(task_id)
         if task is None or task.proc is None or task.done:
             return False
+        with task.lock:
+            task.cancel_requested = True
         try:
             os.killpg(os.getpgid(task.proc.pid), signal.SIGTERM)
         except (ProcessLookupError, PermissionError):
@@ -90,7 +195,7 @@ class TaskRegistry:
 
 
 def stream_events(task: StepTask) -> Iterator[str]:
-    """SSE:先回放已缓冲行,再 tail 新行,进程结束推 done(exit_code)。
+    """SSE:先回放已缓冲行,再 tail 新行,进程结束推 done(结构化终态)。
 
     客户端断开时生成器继续在 threadpool 线程中轮询直到 task.done(单用户本地可接受;
     _pump 独立线程,无子进程泄漏)。
@@ -100,11 +205,14 @@ def stream_events(task: StepTask) -> Iterator[str]:
         with task.lock:
             new = task.lines[idx:]
             done = task.done
-            code = task.exit_code
         for line in new:
             yield f"data: {line}\n\n"
         idx += len(new)
         if done:
-            yield f"event: done\ndata: {code}\n\n"
+            result = classify_task(task)
+            # 兼容旧客户端:data 仍可解析为退出码;同时附带 kind/message JSON
+            payload = result_payload(result)
+            # 第一字段保持 exit_code 整数可读性:若只要 code 的旧逻辑,JSON 中仍有 exit_code
+            yield f"event: done\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
             return
         time.sleep(0.1)

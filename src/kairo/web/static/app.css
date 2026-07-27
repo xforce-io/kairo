@@ -260,6 +260,15 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 #kairo-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .run-summary-title { font-weight: 600; margin: 8px 0 4px; }
 .run-summary-fail { color: #7a3030; margin: 4px 0; font-size: 13px; }
+.run-summary-error { color: #8b1e1e; }
+.run-summary-error-detail {
+  margin: 6px 0; padding: 8px 10px; font-size: 13px; line-height: 1.45;
+  color: #5c2020; background: #f8ecec; border: 1px solid #e0b8b8; border-radius: 8px;
+  white-space: pre-wrap; word-break: break-word;
+}
+.run-summary-meta { margin: 2px 0 4px; font-size: 12.5px; color: #6a5555; }
+.run-summary-cancel { color: #5a5348; }
+.run-summary-warn { color: #7a5a20; }
 #run-btn-wrap { margin-bottom: 4px; }
 #run-btn[disabled] { opacity: .65; cursor: default; }
 .dlg-row { display: flex; gap: 8px; align-items: stretch; }

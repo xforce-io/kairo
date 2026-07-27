@@ -5,7 +5,14 @@ import time
 from fastapi.testclient import TestClient
 
 from kairo.web.server import create_app
-from kairo.web.tasks import StepTask, TaskRegistry, stream_events
+from kairo.web.tasks import (
+    StepTask,
+    TaskRegistry,
+    classify_task,
+    redact_sensitive,
+    safe_error_summary,
+    stream_events,
+)
 from kairo.workspace import Workspace
 
 
@@ -52,7 +59,52 @@ def test_stream_events_replays_then_done():
     out = list(stream_events(t))
     assert "data: line1\n\n" in out
     assert "data: line2\n\n" in out
-    assert out[-1] == "event: done\ndata: 0\n\n"
+    assert out[-1].startswith("event: done\ndata: ")
+    assert '"kind": "succeeded"' in out[-1] or '"kind":"succeeded"' in out[-1]
+
+
+def test_classify_task_exit_code_and_cancel():
+    # 成功
+    ok = StepTask(task_id="a", slug="ws", done=True, exit_code=0)
+    assert classify_task(ok).kind == "succeeded"
+    # 失败 + 安全摘要
+    bad = StepTask(
+        task_id="b",
+        slug="ws",
+        done=True,
+        exit_code=1,
+        lines=["info", "Error: Grok request failed status 401"],
+    )
+    r = classify_task(bad)
+    assert r.kind == "failed"
+    assert r.exit_code == 1
+    assert "401" in r.message or "failed" in r.message.lower()
+    # 取消优先于非零退出
+    can = StepTask(task_id="c", slug="ws", done=True, exit_code=-15, cancel_requested=True)
+    assert classify_task(can).kind == "cancelled"
+    # 缺失 / 运行中
+    assert classify_task(None).kind == "missing"
+    running = StepTask(task_id="d", slug="ws", done=False)
+    assert classify_task(running).kind == "running"
+
+
+def test_safe_error_summary_redacts_and_truncates():
+    lines = [
+        "Authorization: Bearer super-secret-token-value",
+        "api_key=sk-abcdefghijklmnopqrstuvwxyz012345",
+        "Error: provider timeout after 30s",
+    ]
+    s = safe_error_summary(lines)
+    assert "super-secret" not in s
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in s or "[redacted]" in s
+    assert "timeout" in s.lower() or "Error" in s
+    # 截断
+    long = ["E: " + ("x" * 500)]
+    short = safe_error_summary(long, max_len=40)
+    assert len(short) <= 40
+    assert short.endswith("…")
+    # 直接脱敏
+    assert "[redacted]" in redact_sensitive("Bearer abcdefghijklmnop")
 
 
 def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
@@ -77,7 +129,7 @@ def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
 
 
 def test_step_done_loads_run_summary_not_full_body(tmp_path, monkeypatch):
-    # #75:done 后进 run-summary(保留进度区结果),不能灌 body,也不能 sse-swap="done"。
+    # #75/#97:done 后进 run-summary(带 task_id),不能灌 body,也不能 sse-swap="done"。
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = Workspace.init(tmp_path / "ws", topic="t")
     (tmp_path / "m.txt").write_text("会议内容")
@@ -88,7 +140,99 @@ def test_step_done_loads_run_summary_not_full_body(tmp_path, monkeypatch):
     assert 'sse-swap="done"' not in r.text
     assert 'hx-target="body"' not in r.text
     assert "/run-summary" in r.text
+    assert "task_id=" in r.text
     assert 'hx-target="#step-area"' in r.text
+
+
+def test_run_summary_failed_nonzero_exit(tmp_path, monkeypatch):
+    """#97 S1: 子进程非零退出 → 失败摘要,绝无成功/无剩余阻塞措辞;按钮可再点。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    # 可控非零退出(不写 blocked state)——驱动真实 TaskRegistry + run-summary
+    fail_argv = [
+        sys.executable,
+        "-c",
+        "import sys; print('Error: Grok request failed status 502'); sys.exit(1)",
+    ]
+    task = app.state.registry.start("ws", ws.root, fail_argv)
+    _wait(task)
+    assert task.exit_code == 1
+    r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
+    assert r.status_code == 200
+    body = r.text
+    assert "Run failed" in body or "运行失败" in body
+    assert "502" in body or "Grok" in body or "failed" in body.lower()
+    # 禁止成功结论
+    assert "No remaining blocks" not in body
+    assert "无剩余阻塞" not in body
+    assert "run.done_ok" not in body
+    # 运行锁释放 + OOB 刷新按钮(可再次 Run)
+    assert app.state.registry.is_running("ws") is False
+    assert 'id="run-btn-wrap"' in body
+    assert "hx-post=" in body and "/run" in body
+
+
+def test_run_summary_cancelled(tmp_path, monkeypatch):
+    """#97: 用户取消 → cancelled 终态,非失败伪装。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    slow = [sys.executable, "-c", "import time; time.sleep(30)"]
+    task = app.state.registry.start("ws", ws.root, slow)
+    assert app.state.registry.cancel(task.task_id) is True
+    _wait(task, timeout=5)
+    r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
+    assert r.status_code == 200
+    assert "cancelled" in r.text.lower() or "已取消" in r.text
+    assert "No remaining blocks" not in r.text
+    assert "无剩余阻塞" not in r.text
+
+
+def test_run_summary_succeeded_shows_plan(tmp_path, monkeypatch):
+    """#97: 退出 0 才走 plan;有 blocked 显示数量而非假成功抹平失败。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    from kairo.models import ProductState
+
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    a = tmp_path / "a.m4a"
+    a.write_bytes(b"x")
+    rid = ws.add([a])
+    src_hash = ws.read_manifest(rid).forms[0].hash
+    key = f"references/{rid}/transcript.md"
+    st = ws.read_state()
+    st.products[key] = ProductState(
+        input_hash=src_hash, status="blocked", reason="asr-failed"
+    )
+    ws.write_state(st)
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    ok_argv = [sys.executable, "-c", "print('ok')"]
+    task = app.state.registry.start("ws", ws.root, ok_argv)
+    _wait(task)
+    r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
+    assert r.status_code == 200
+    assert "asr-failed" in r.text
+    assert rid in r.text
+    # 成功标题可以有,但不得出现失败标题冒充
+    assert "Run failed" not in r.text and "运行失败" not in r.text
+
+
+def test_run_summary_missing_task_not_success(tmp_path, monkeypatch):
+    """#97: 无 task_id / 任务不存在 → 不可用提示,非成功。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    Workspace.init(tmp_path / "ws", topic="t")
+    c = TestClient(create_app(tmp_path))
+    r = c.get("/w/ws/run-summary")
+    assert r.status_code == 200
+    assert "No remaining blocks" not in r.text
+    assert "无剩余阻塞" not in r.text
+    assert "unavailable" in r.text.lower() or "不可用" in r.text
+    r2 = c.get("/w/ws/run-summary?task_id=deadbeef0000")
+    assert r2.status_code == 200
+    assert "No remaining blocks" not in r2.text
 
 
 def test_cancel_kills_running_task(tmp_path):
