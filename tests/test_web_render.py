@@ -119,3 +119,41 @@ def test_render_citation_patterns_do_not_open_xss():
     assert not re.search(r"<a\b[^>]*onclick", html, re.I)
     # 非 hex 的 S- 不 linkify 成 source 链
     assert 'href="#source-S-' not in html or "script" not in html.split('href="#source-S-')[0]
+
+
+def test_render_digest_link_rewrites_with_slug():
+    """#111 S1:有 slug 时 references/…/digest.md → console form 路由。"""
+    md = (
+        "## 来源索引\n\n"
+        "| ID | 材料 | 可核对来源 |\n"
+        "|---|---|---|\n"
+        "| S-8f7b5c | 访谈 | [digest](references/2026-07-28-1dd66203c07808f243b65f57153c1264/digest.md) |\n"
+    )
+    html = render_markdown(md, slug="数据模型闭环逻辑")
+    assert "references/2026-07-28-1dd66203c07808f243b65f57153c1264/digest.md" not in html
+    assert (
+        'href="/w/%E6%95%B0%E6%8D%AE%E6%A8%A1%E5%9E%8B%E9%97%AD%E7%8E%AF%E9%80%BB%E8%BE%91'
+        '/ref/2026-07-28-1dd66203c07808f243b65f57153c1264/form/digest"'
+    ) in html or (
+        "/ref/2026-07-28-1dd66203c07808f243b65f57153c1264/form/digest" in html
+        and html.count("form/digest") >= 1
+    )
+    assert 'hx-target="#reader"' in html
+    assert "hx-get=" in html
+
+
+def test_render_digest_link_keeps_relative_without_slug():
+    """#111 S2:无 slug 保留相对路径。"""
+    md = "[digest](references/2026-07-28-abc/digest.md)\n"
+    html = render_markdown(md)
+    assert 'href="references/2026-07-28-abc/digest.md"' in html
+    assert "/w/" not in html
+
+
+def test_render_digest_link_rejects_traversal():
+    """#111 S3:路径穿越不重写。"""
+    md = "[x](references/../etc/passwd/digest.md)\n"
+    html = render_markdown(md, slug="ws")
+    assert "/w/ws/ref/" not in html
+    # 仍可能是相对 href 原文(markdown 保留),但不得变成 console 路由
+    assert "form/digest" not in html or ".." in html

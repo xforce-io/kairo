@@ -72,10 +72,10 @@ def _safe_doc(ws: Workspace, relpath: str) -> Path:
     return target
 
 
-def _preview_html(ws: Workspace, location: str) -> str | None:
+def _preview_html(ws: Workspace, location: str, slug: str | None = None) -> str | None:
     """把 workspace 内的 .md 渲染成 HTML;越界/缺失 → None(右栏给提示,不报错)。"""
     try:
-        return render_markdown(_safe_doc(ws, location).read_text())
+        return render_markdown(_safe_doc(ws, location).read_text(), slug=slug)
     except HTTPException:
         return None
 
@@ -134,11 +134,11 @@ def _manifest_form_path(ws: Workspace, ref_id: str, key: str) -> Path:
     return _form_path(ws, man.forms[idx].location).resolve()
 
 
-def _render_doc(path: Path) -> str:
+def _render_doc(path: Path, *, slug: str | None = None) -> str:
     """.md → markdown;其余文本 → 保留换行的 <pre>(转义)。勿用于图片。"""
     text = path.read_text(errors="replace")
     if path.suffix.lower() in (".md", ".markdown"):
-        return render_markdown(text)
+        return render_markdown(text, slug=slug)
     return f'<pre class="doc-plain">{escape(text)}</pre>'
 
 
@@ -151,7 +151,7 @@ def _form_preview_html(ws: Workspace, slug: str, ref_id: str, form: dict) -> str
             f'<img class="doc-img" src="{src}" alt="{escape(path.name)}">'
         )
     if _is_text_file(path):
-        return _render_doc(path)
+        return _render_doc(path, slug=slug)
     return None
 
 
@@ -295,7 +295,11 @@ def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     return _render(
         request,
         "_doc.html",
-        {"title": path, "html": render_markdown(target.read_text()), "exportable": exportable},
+        {
+            "title": path,
+            "html": render_markdown(target.read_text(), slug=slug),
+            "exportable": exportable,
+        },
     )
 
 
@@ -434,7 +438,7 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
     return _render(
         request,
         "_doc.html",
-        {"title": title, "html": _render_doc(path), "exportable": key == "digest"},
+        {"title": title, "html": _render_doc(path, slug=slug), "exportable": key == "digest"},
     )
 
 
@@ -492,7 +496,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
             "diagnostic_provider": diag.provider if diag else None,
             "has_doc": has_doc,
             "preview_title": path,
-            "preview_html": _preview_html(ws, path) if has_doc else None,
+            "preview_html": _preview_html(ws, path, slug) if has_doc else None,
             "exportable": True,
             "empty_hint": _t(request)("target.empty_hint"),
         },
