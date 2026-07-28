@@ -62,3 +62,60 @@ def test_render_rejects_onclick_anchor_as_live():
     )
     # 更严:整页无活 a+onclick
     assert not re.search(r"<a\b[^>]*onclick", html, re.I)
+
+
+def test_render_s_citation_links_to_source_index_row():
+    """#109 S1:〔S-hex〕→ 可点链接,指向 #source-S-…;索引行带 id。"""
+    import re
+
+    md = """## 订单
+
+关键时限 24 小时〔S-8f7b5c〕。
+
+## 来源索引
+
+| ID | 材料 | 可核对来源 |
+|---|---|---|
+| S-8f7b5c | 访谈 | [digest](references/2026-07-28-x/digest.md) |
+"""
+    html = render_markdown(md)
+    # 正文引用是链接
+    assert re.search(
+        r'<a\s+href="#source-S-8f7b5c"[^>]*>[^<]*S-8f7b5c[^<]*</a>',
+        html,
+    ), html
+    # 索引行有落地 id
+    assert 'id="source-S-8f7b5c"' in html
+    # digest 相对链仍在
+    assert "references/2026-07-28-x/digest.md" in html
+
+
+def test_render_fact_basis_citation_links_to_f_anchor():
+    """#109 S2:〔依据:F-…〕与全角冒号 → #F-…;空锚点仍不可见字面。"""
+    import re
+
+    md = (
+        '<a id="F-8f7b5c-01"></a>事实句。\n\n'
+        "判断成立〔依据:F-8f7b5c-01〕。\n\n"
+        "另一条〔依据：F-8f7b5c-01〕。\n"
+    )
+    html = render_markdown(md)
+    assert "&lt;a id=" not in html
+    assert 'id="F-8f7b5c-01"' in html
+    links = re.findall(r'<a\s+href="(#F-8f7b5c-01)"[^>]*>', html)
+    assert links.count("#F-8f7b5c-01") >= 2, html
+
+
+def test_render_citation_patterns_do_not_open_xss():
+    """#109 S3:伪 citation / 脚本不得变成活危险标签。"""
+    import re
+
+    html = render_markdown(
+        "坏〔S-<script>x</script>〕完 "
+        "〔依据:F-\" onclick=alert(1) x〕 "
+        "<script>alert(1)</script>"
+    )
+    assert "<script" not in html
+    assert not re.search(r"<a\b[^>]*onclick", html, re.I)
+    # 非 hex 的 S- 不 linkify 成 source 链
+    assert 'href="#source-S-' not in html or "script" not in html.split('href="#source-S-')[0]
