@@ -55,7 +55,7 @@ def _rewrite_digest_links(html: str, slug: str) -> str:
         url = f"/w/{qslug}/ref/{quote(ref_id, safe='')}/form/digest"
         return (
             f'href="{url}" '
-            f'hx-get="{url}" hx-target="#reader" hx-swap="innerHTML"'
+            f'hx-get="{url}" hx-target="#reader" hx-swap="innerHTML show:top"'
         )
 
     return _DIGEST_REL_HREF_RE.sub(_repl, html)

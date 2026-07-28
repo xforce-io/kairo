@@ -140,6 +140,7 @@ def test_render_digest_link_rewrites_with_slug():
     )
     assert 'hx-target="#reader"' in html
     assert "hx-get=" in html
+    assert "show:top" in html  # 换入阅读区后滚到顶,避免停在文末
 
 
 def test_render_digest_link_keeps_relative_without_slug():

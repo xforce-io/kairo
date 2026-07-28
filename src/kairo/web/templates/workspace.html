@@ -148,6 +148,17 @@
   </aside>
 </div>
 <script>
+  // 阅读区换内容后滚回顶部。否则在文末点 digest/形态时 scrollTop 仍在底部,看起来「定位到尾部」。
+  function kairoScrollReaderTop(el) {
+    if (!el || el.id !== 'reader') return;
+    el.scrollTop = 0;
+  }
+  document.body.addEventListener('htmx:afterSwap', function (e) {
+    kairoScrollReaderTop(e.detail && e.detail.target);
+  });
+  document.body.addEventListener('htmx:oobAfterSwap', function (e) {
+    kairoScrollReaderTop(e.detail && e.detail.target);
+  });
   // #75:运行中添加参考等的 toast(HX-Trigger: kairoToast)
   document.body.addEventListener('kairoToast', function (e) {
     var msg = (e.detail && (e.detail.value || e.detail)) || '';
