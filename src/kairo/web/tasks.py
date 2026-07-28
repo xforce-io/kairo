@@ -106,7 +106,7 @@ _FATAL_AGENT_LINE = re.compile(
     r"|error sending request"
     r"|cli-chat-proxy\.grok\.com"
     r"|cli agent timeout"
-    r"|CLI agent timeout"
+    r"|provider-failed"
     r")"
 )
 

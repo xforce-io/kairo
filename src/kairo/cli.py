@@ -12,6 +12,7 @@ from kairo.engine import ProseError
 from kairo.engine import accept as engine_accept
 from kairo.engine import delete_reference as engine_delete_reference
 from kairo.engine import generate_prose as engine_generate_prose
+from kairo.engine import has_provider_failed
 from kairo.engine import re_step as engine_re_step
 from kairo.engine import retry_reference as engine_retry_reference
 from kairo.engine import run_workspace as engine_run_workspace
@@ -235,15 +236,28 @@ def title(
     typer.echo(f"titled {ref_id} → {name}")
 
 
+def _exit_if_provider_failed(ws: Workspace) -> None:
+    """#105:provider-failed 后非零退出,Web TaskRegistry 才能判 failed(非假成功)。"""
+    if has_provider_failed(ws):
+        typer.secho(
+            "Error: provider-failed — see kairo status / Web blocks",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+
+
 @app.command()
 def step() -> None:
     """跑调和循环到收敛(provider 自动选:grok CLI→endpoint→claude CLI→stub;KAIRO_STUB 强制 stub)。
 
     注意:不自动重试 asr-failed 等终态 blocked;需要时用 run / retry-ref。
+    provider-failed 时非零退出(#105),便于 Web Run 显示失败而非 Running/假成功。
     """
     ws = _open_ws()
     progressed = engine_step(ws, select_provider())
     typer.echo("stepped" if progressed else "no change")
+    _exit_if_provider_failed(ws)
 
 
 @app.command(name="run")
@@ -256,6 +270,7 @@ def run_cmd() -> None:
         return
     progressed = engine_run_workspace(ws, select_provider())
     typer.echo("ran" if progressed else "no change")
+    _exit_if_provider_failed(ws)
 
 
 @app.command(name="re-step")

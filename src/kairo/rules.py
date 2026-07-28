@@ -413,6 +413,14 @@ class DigestRule:
                     read_dirs=[ref_dir] if img_lines else None,
                 )
             except Exception as exc:  # #98:可归属 provider 失败 → 持久化诊断,不写半成品
+                import sys
+
+                # #105:写入任务流,供 Web classify 与人读日志(超时文案含 CLI agent timeout)
+                print(
+                    f"Error: provider-failed stage=digest: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 state.products[key] = ProductState(
                     input_hash=input_hash,
                     status="blocked",
@@ -589,6 +597,13 @@ class ComposeRule:
                     read_dirs=read_dirs,
                 )
             except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
+                import sys
+
+                print(
+                    f"Error: provider-failed stage=compose: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
                 ts.reason = REASON_PROVIDER_FAILED

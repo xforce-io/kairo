@@ -250,3 +250,141 @@ def test_classify_task_running_until_done():
     )
     # 仍 running(终态只在 done 后;超时由 runner 保证会 done)
     assert classify_task(t).kind == "running"
+
+
+def test_cli_step_exits_nonzero_on_provider_failed(tmp_path, monkeypatch):
+    """S2:真实 CLI step 在 provider-failed 后非零退出(供 Web TaskRegistry)。"""
+    from typer.testing import CliRunner
+
+    from kairo.cli import app
+    from kairo.engine import has_provider_failed
+
+    class FailProvider:
+        name = "fail-prov"
+        model = "m"
+
+        def run(self, config, signal=None):
+            raise RuntimeError("boom 502")
+
+    ws_root = tmp_path / "ws"
+    ws = Workspace.init(ws_root, topic="t105cli")
+    src = tmp_path / "m.txt"
+    src.write_text("材料")
+    ws.add([src])
+    monkeypatch.chdir(ws_root)
+    monkeypatch.setattr("kairo.cli.select_provider", lambda: FailProvider())
+    result = CliRunner().invoke(app, ["step"])
+    assert result.exit_code == 1, result.output
+    out = (result.output or "") + (result.stderr or "")
+    assert "provider-failed" in out.lower()
+    assert has_provider_failed(Workspace.open(ws_root))
+
+
+def test_task_registry_failed_after_real_runner_timeout(tmp_path):
+    """S2 e2e:TaskRegistry 跑真实短超时 runner → done + kind=failed + provider-failed 落盘。"""
+    from kairo.web.tasks import TaskRegistry, classify_task
+
+    ws = Workspace.init(tmp_path / "ws", topic="t105reg")
+    src = tmp_path / "m.txt"
+    src.write_text("会议材料")
+    ws.add([src])
+    # 子进程走 shipped engine+runner+CLI 退出语义(非预塞 fatal 行)
+    script = tmp_path / "timeout_step.py"
+    script.write_text(
+        f"""
+import sys
+from pathlib import Path
+from kairo.workspace import Workspace
+from kairo.engine import step, has_provider_failed
+from kairo.provider import _default_cli_runner
+
+class TimeoutCliProvider:
+    name = "timeout-cli"
+    model = "t"
+    def run(self, config, signal=None):
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        _default_cli_runner(
+            sys.executable,
+            ["-c", "import time; time.sleep(30)"],
+            cwd=config.artifact_dir,
+            input="",
+            stdout_file=config.artifact_dir / "_out.txt",
+            timeout=1,
+        )
+        (config.artifact_dir / (config.artifact or "output.md")).write_text("x")
+
+ws = Workspace.open(Path({str(ws.root)!r}))
+step(ws, TimeoutCliProvider())
+if has_provider_failed(ws):
+    # 与 cli._exit_if_provider_failed 同语义
+    print("Error: provider-failed — see kairo status / Web blocks", file=sys.stderr, flush=True)
+    sys.exit(1)
+sys.exit(0)
+"""
+    )
+    reg = TaskRegistry()
+    task = reg.start("ws", ws.root, [sys.executable, str(script)])
+    deadline = time.time() + 20
+    while not task.done and time.time() < deadline:
+        time.sleep(0.05)
+    assert task.done, "task stuck running after timeout path"
+    assert task.exit_code == 1
+    r = classify_task(task)
+    assert r.kind == "failed"
+    # 日志应含超时或 provider-failed(runner 打 stderr / 脚本 exit 文案)
+    joined = "\n".join(task.lines)
+    assert (
+        "timeout" in joined.lower()
+        or "provider-failed" in joined.lower()
+        or "CLI agent" in joined
+    )
+    from kairo.engine import has_provider_failed
+
+    assert has_provider_failed(Workspace.open(ws.root))
+
+
+def test_cancel_kills_cli_agent_process_group(tmp_path):
+    """S1/cancel:Web cancel 不留下 start_new_session 的 CLI 孤儿。"""
+    from kairo.web.tasks import TaskRegistry
+
+    marker = tmp_path / "cli_child.pid"
+    parent = tmp_path / "parent_cli.py"
+    # 父进程= kairo run 角色:通过 shipped runner 起独立 session 的长 sleep 子进程
+    parent.write_text(
+        f"""
+import sys
+from kairo.provider import _default_cli_runner
+_default_cli_runner(
+    sys.executable,
+    ["-c", "import os,time,pathlib; pathlib.Path(r'{marker}').write_text(str(os.getpid())); time.sleep(120)"],
+    cwd=r"{tmp_path}",
+    input=None,
+    timeout=90,
+)
+"""
+    )
+    reg = TaskRegistry()
+    task = reg.start("ws", tmp_path, [sys.executable, str(parent)])
+    # 等 CLI 子进程写出 pid
+    child_pid = None
+    for _ in range(200):
+        if marker.is_file() and marker.read_text().strip().isdigit():
+            child_pid = int(marker.read_text().strip())
+            break
+        time.sleep(0.05)
+    assert child_pid is not None, "CLI child never started"
+    assert reg.cancel(task.task_id) is True
+    deadline = time.time() + 8
+    while not task.done and time.time() < deadline:
+        time.sleep(0.05)
+    assert task.done
+    # 子进程应已死
+    dead = False
+    for _ in range(40):
+        try:
+            __import__("os").kill(child_pid, 0)
+            time.sleep(0.05)
+        except OSError:
+            dead = True
+            break
+    assert dead, f"CLI child pid {child_pid} still alive after cancel (orphan)"
