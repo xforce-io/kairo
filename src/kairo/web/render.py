@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from markdown_it import MarkdownIt
 
@@ -26,6 +27,38 @@ _INDEX_TD_RE = re.compile(
 )
 
 _PLACEHOLDER_FMT = "\ue000KAIROFACT{n}\ue001"
+
+# #111:来源索引 [digest](references/<ref_id>/digest.md) → console 预览路由
+_DIGEST_REL_HREF_RE = re.compile(
+    r'href="references/([^"/]+)/digest\.md"'
+)
+
+
+def _is_safe_ref_id(ref_id: str) -> bool:
+    """拒绝路径穿越与空段;允许与 workspace ref 目录名兼容的字符。"""
+    if not ref_id or ref_id in (".", ".."):
+        return False
+    if "/" in ref_id or "\\" in ref_id or ".." in ref_id:
+        return False
+    # 与常见 ref_id 一致:日期-slug / hex 等,不含空白与引号
+    return bool(re.fullmatch(r"[\w.\-]+", ref_id, flags=re.UNICODE))
+
+
+def _rewrite_digest_links(html: str, slug: str) -> str:
+    """把相对 digest 路径改写成 /w/{slug}/ref/{id}/form/digest,并挂 hx 供阅读区加载。"""
+    qslug = quote(slug, safe="")
+
+    def _repl(m: re.Match[str]) -> str:
+        ref_id = m.group(1)
+        if not _is_safe_ref_id(ref_id):
+            return m.group(0)
+        url = f"/w/{qslug}/ref/{quote(ref_id, safe='')}/form/digest"
+        return (
+            f'href="{url}" '
+            f'hx-get="{url}" hx-target="#reader" hx-swap="innerHTML"'
+        )
+
+    return _DIGEST_REL_HREF_RE.sub(_repl, html)
 
 
 def _linkify_citations(text: str) -> str:
@@ -61,13 +94,15 @@ def _tag_source_index_rows(html: str) -> str:
     return _INDEX_TD_RE.sub(_td, html)
 
 
-def render_markdown(text: str) -> str:
+def render_markdown(text: str, *, slug: str | None = None) -> str:
     """渲染 markdown 为 HTML。
 
     - 默认禁用原始 HTML(防注入)
     - #107:空 F- 事实锚点恢复为 ``<a id="F-…"></a>``
     - #109:``〔S-hex〕`` → 链到 ``#source-S-hex``;``〔依据:F-…〕`` → ``#F-…``;
       索引表 ID 列加 ``id="source-S-…"``
+    - #111:传入 ``slug`` 时,``references/<ref>/digest.md`` 重写为 console
+      ``/w/{slug}/ref/{ref}/form/digest``(无 slug 则保留相对路径)
     """
     if not text:
         return _md.render(text)
@@ -88,4 +123,7 @@ def render_markdown(text: str) -> str:
         html = html.replace(token, f'<a id="{fid}"></a>')
     # 3) 索引行落地 id
     html = _tag_source_index_rows(html)
+    # 4) Web console:相对 digest → 预览路由
+    if slug:
+        html = _rewrite_digest_links(html, slug)
     return html
