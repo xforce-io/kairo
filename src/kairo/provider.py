@@ -13,10 +13,16 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import signal
+import subprocess
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+
+# #105:CLI agent 默认超时(秒)。防 grok/claude 网络挂起时无限 wait。
+# 合法长 digest 可经 AgentConfig.timeout_s 覆盖;测试注入短超时。
+DEFAULT_CLI_TIMEOUT_S = 600
 
 
 @dataclass
@@ -29,7 +35,7 @@ class AgentConfig:
     model: str
     schema: dict | None = None  # 结构化输出契约(api backend 用;CLI 可忽略)
     artifact: str | None = None  # schema/产物落到哪个文件名
-    timeout_s: int | None = None
+    timeout_s: int | None = None  # None → runner 使用 DEFAULT_CLI_TIMEOUT_S(#105)
     read_dirs: list[Path] = field(default_factory=list)  # 只读授权目录(corpus 参考层 → --add-dir)
 
 
@@ -283,21 +289,65 @@ class OpenAICompatibleProvider:
         )
 
 
-def _default_cli_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
-    import subprocess
+def resolve_cli_timeout(timeout: int | None) -> int:
+    """#105:None → 默认超时;显式值原样使用(含测试用短超时)。"""
+    if timeout is None:
+        return DEFAULT_CLI_TIMEOUT_S
+    return int(timeout)
 
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """终止 start_new_session 子进程组;失败则 terminate/kill 单进程。"""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _default_cli_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+    """跑 CLI agent。#105:默认超时;超时杀进程组并抛 RuntimeError(供 #98 落盘)。
+
+    start_new_session 使子树同属一 pgid,超时 killpg 不留孤儿 grok/claude。
+    exit code 仍不当成功判据(check=False 语义);外壳凭产物 / 异常判断。
+    """
+    limit = resolve_cli_timeout(timeout)
     # 回答在 stdout(claude)时重定向到文件;codex 用 --output-last-message 自写文件,无需重定向
     out = open(stdout_file, "w") if stdout_file else None
     try:
-        subprocess.run(
+        proc = subprocess.Popen(
             [cmd, *args],
             cwd=str(cwd),
-            input=input,
+            stdin=subprocess.PIPE if input is not None else None,
+            # stdout → 文件(JSON 结果);stderr 继承父进程,Web SSE 仍可见 Internal error(#105)
+            stdout=out if out is not None else None,
+            stderr=None,
             text=True,
-            stdout=out,
-            timeout=timeout,
-            check=False,  # exit code 不当异常;外壳凭产物判断
+            start_new_session=True,
         )
+        try:
+            proc.communicate(input=input, timeout=limit)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
+            raise RuntimeError(f"CLI agent timeout after {limit}s: {cmd}") from None
     finally:
         if out:
             out.close()

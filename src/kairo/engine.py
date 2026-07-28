@@ -99,7 +99,11 @@ def pending(ws) -> list:
 
 
 def step(ws, provider) -> bool:
-    """跑调和循环到收敛。返回是否有推进。"""
+    """跑调和循环到收敛。返回是否有推进。
+
+    #105:每个 WorkItem 执行后立刻 write_state,使 provider-failed 等 blocked
+    诊断在后续 item 挂起/进程被杀时仍已落盘。
+    """
     state = ws.read_state()
     rules = _build_rules(ws, provider)
     any_progress = False
@@ -110,6 +114,7 @@ def step(ws, provider) -> bool:
                 if item.is_stale(state):
                     item.run(state)
                     progressed = True
+                    ws.write_state(state)  # #105 中途落盘
         if not progressed:
             break
         any_progress = True
