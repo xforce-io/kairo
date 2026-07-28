@@ -84,10 +84,25 @@ def make_provider_diagnostic(
 
 
 def _run_agent(
-    provider, persona: str, context: str, artifact: str, read_dirs=None
+    provider,
+    persona: str,
+    context: str,
+    artifact: str,
+    read_dirs=None,
+    *,
+    timeout_s: int | None = None,
 ) -> str:
     """跑 agent,从隔离 artifact_dir 取回产物内容。写沙箱:artifact-only;
-    read_dirs 为额外只读授权目录(corpus 参考层),agent 按需 Read。"""
+    read_dirs 为额外只读授权目录(corpus 参考层),agent 按需 Read。
+
+    #105:timeout_s 默认 DEFAULT_CLI_TIMEOUT_S;传入显式值可覆盖(测试/长任务)。
+    """
+    from kairo.provider import DEFAULT_CLI_TIMEOUT_S, resolve_cli_timeout
+
+    # timeout_s is None → 默认;显式 int 保留(含短超时测试)
+    effective = (
+        DEFAULT_CLI_TIMEOUT_S if timeout_s is None else resolve_cli_timeout(timeout_s)
+    )
     with tempfile.TemporaryDirectory() as d:
         provider.run(
             AgentConfig(
@@ -96,6 +111,7 @@ def _run_agent(
                 artifact_dir=Path(d),
                 model=provider.model,
                 artifact=artifact,
+                timeout_s=effective,
                 read_dirs=list(read_dirs or []),
             )
         )
@@ -397,6 +413,14 @@ class DigestRule:
                     read_dirs=[ref_dir] if img_lines else None,
                 )
             except Exception as exc:  # #98:可归属 provider 失败 → 持久化诊断,不写半成品
+                import sys
+
+                # #105:写入任务流,供 Web classify 与人读日志(超时文案含 CLI agent timeout)
+                print(
+                    f"Error: provider-failed stage=digest: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 state.products[key] = ProductState(
                     input_hash=input_hash,
                     status="blocked",
@@ -573,6 +597,13 @@ class ComposeRule:
                     read_dirs=read_dirs,
                 )
             except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
+                import sys
+
+                print(
+                    f"Error: provider-failed stage=compose: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
                 ts.reason = REASON_PROVIDER_FAILED

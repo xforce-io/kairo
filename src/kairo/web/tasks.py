@@ -98,8 +98,36 @@ def safe_error_summary(lines: list[str], *, max_len: int = _SUMMARY_MAX_LEN) -> 
     return one
 
 
+# #105:Grok/代理/CLI 超时等致命行 — 进程虽可能 exit 0,任务仍应 failed
+_FATAL_AGENT_LINE = re.compile(
+    r"(?i)("
+    r"internal error"
+    r"|request error stream"
+    r"|error sending request"
+    r"|cli-chat-proxy\.grok\.com"
+    r"|cli agent timeout"
+    r"|provider-failed"
+    r")"
+)
+
+
+def is_fatal_agent_line(line: str) -> bool:
+    """判定一行日志是否为 agent/代理致命失败(供 classify 与测试)。"""
+    if not line or not str(line).strip():
+        return False
+    return bool(_FATAL_AGENT_LINE.search(str(line)))
+
+
+def has_fatal_agent_error(lines: list[str]) -> bool:
+    return any(is_fatal_agent_line(ln) for ln in lines)
+
+
 def classify_task(task: StepTask | None) -> TaskResult:
-    """退出码 + 取消意图 → 互斥终态。task 缺失或未结束均非成功。"""
+    """退出码 + 取消意图 + 致命日志 → 互斥终态。task 缺失或未结束均非成功。
+
+    #105:已结束且日志含致命 agent 错误时,即使 exit_code==0 也判 failed,
+    避免「黑框 Error + 绿勾成功」;hang 由 runner 超时保证会 done。
+    """
     if task is None:
         return TaskResult(kind="missing", message="task not found")
     with task.lock:
@@ -116,6 +144,13 @@ def classify_task(task: StepTask | None) -> TaskResult:
         return TaskResult(
             kind="failed",
             exit_code=code,
+            message=safe_error_summary(lines),
+        )
+    # exit 0 但日志已暴露致命 agent/代理错误 → failed(#105 S2)
+    if has_fatal_agent_error(lines):
+        return TaskResult(
+            kind="failed",
+            exit_code=0 if code is None else code,
             message=safe_error_summary(lines),
         )
     return TaskResult(kind="succeeded", exit_code=0 if code is None else code, message="")

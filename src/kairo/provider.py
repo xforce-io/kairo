@@ -10,13 +10,28 @@ ClaudeCodeProvider / CodexProvider。
 
 from __future__ import annotations
 
+import atexit
 import hashlib
 import json
 import os
+import signal
+import subprocess
+import sys
+import threading
+import time
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
+
+# #105:CLI agent 默认超时(秒)。防 grok/claude 网络挂起时无限 wait。
+# 合法长 digest 可经 AgentConfig.timeout_s 覆盖;测试注入短超时。
+DEFAULT_CLI_TIMEOUT_S = 600
+
+# start_new_session 的 CLI 子树 pgid;Web cancel 只 kill kairo 会话时据此清孤儿(#105)
+_active_cli_pgids: set[int] = set()
+_cli_pgid_lock = threading.Lock()
+_cli_cleanup_handlers_installed = False
 
 
 @dataclass
@@ -29,7 +44,7 @@ class AgentConfig:
     model: str
     schema: dict | None = None  # 结构化输出契约(api backend 用;CLI 可忽略)
     artifact: str | None = None  # schema/产物落到哪个文件名
-    timeout_s: int | None = None
+    timeout_s: int | None = None  # None → runner 使用 DEFAULT_CLI_TIMEOUT_S(#105)
     read_dirs: list[Path] = field(default_factory=list)  # 只读授权目录(corpus 参考层 → --add-dir)
 
 
@@ -283,22 +298,146 @@ class OpenAICompatibleProvider:
         )
 
 
-def _default_cli_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
-    import subprocess
+def resolve_cli_timeout(timeout: int | None) -> int:
+    """#105:None → 默认超时;显式值原样使用(含测试用短超时)。"""
+    if timeout is None:
+        return DEFAULT_CLI_TIMEOUT_S
+    return int(timeout)
 
+
+def _kill_pgid(pgid: int, *, sig: int = signal.SIGTERM) -> None:
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError, OSError):
+        pass
+
+
+def kill_active_cli_agents() -> None:
+    """终止所有登记中的 CLI agent 进程组(Web cancel / 父进程 SIGTERM 时调用)。"""
+    with _cli_pgid_lock:
+        pgids = list(_active_cli_pgids)
+        _active_cli_pgids.clear()
+    for pgid in pgids:
+        _kill_pgid(pgid, sig=signal.SIGTERM)
+    # 给优雅退出一点时间,再强杀
+    if pgids:
+        time.sleep(0.15)
+    for pgid in pgids:
+        _kill_pgid(pgid, sig=signal.SIGKILL)
+
+
+def _register_cli_pgid(pgid: int) -> None:
+    with _cli_pgid_lock:
+        _active_cli_pgids.add(pgid)
+    _ensure_cli_cleanup_handlers()
+
+
+def _unregister_cli_pgid(pgid: int) -> None:
+    with _cli_pgid_lock:
+        _active_cli_pgids.discard(pgid)
+
+
+def _ensure_cli_cleanup_handlers() -> None:
+    """父进程被 Web cancel(killpg) 时先清 CLI 子会话,避免 grok/claude 孤儿。"""
+    global _cli_cleanup_handlers_installed
+    if _cli_cleanup_handlers_installed:
+        return
+    _cli_cleanup_handlers_installed = True
+
+    def _wrap(prev):
+        def _handler(signum, frame):
+            kill_active_cli_agents()
+            if callable(prev) and prev not in (signal.SIG_DFL, signal.SIG_IGN):
+                prev(signum, frame)
+            else:
+                signal.signal(signum, signal.SIG_DFL)
+                try:
+                    os.kill(os.getpid(), signum)
+                except ProcessLookupError:
+                    pass
+
+        return _handler
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            prev = signal.getsignal(sig)
+            signal.signal(sig, _wrap(prev))
+        except (ValueError, OSError):
+            # 非主线程等无法装 handler 时跳过;仍靠 timeout/finally 清理
+            pass
+    atexit.register(kill_active_cli_agents)
+
+
+def _kill_process_group(proc: subprocess.Popen) -> None:
+    """终止 start_new_session 子进程组;失败则 terminate/kill 单进程。"""
+    if proc.poll() is not None:
+        return
+    try:
+        pgid = os.getpgid(proc.pid)
+    except (ProcessLookupError, OSError):
+        pgid = None
+    if pgid is not None:
+        _kill_pgid(pgid, sig=signal.SIGTERM)
+    else:
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        if pgid is not None:
+            _kill_pgid(pgid, sig=signal.SIGKILL)
+        else:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _default_cli_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+    """跑 CLI agent。#105:默认超时;超时杀进程组并抛 RuntimeError(供 #98 落盘)。
+
+    start_new_session 使 CLI 子树独立 pgid,超时 killpg 清 grok/claude。
+    同时登记 pgid:Web cancel 只杀 kairo 会话时,SIGTERM handler 会清这些子会话。
+    超时消息写 stderr,供 Web SSE / classify_task 识别为 failed。
+    """
+    limit = resolve_cli_timeout(timeout)
     # 回答在 stdout(claude)时重定向到文件;codex 用 --output-last-message 自写文件,无需重定向
     out = open(stdout_file, "w") if stdout_file else None
+    proc: subprocess.Popen | None = None
+    pgid: int | None = None
     try:
-        subprocess.run(
+        proc = subprocess.Popen(
             [cmd, *args],
             cwd=str(cwd),
-            input=input,
+            stdin=subprocess.PIPE if input is not None else None,
+            # stdout → 文件(JSON 结果);stderr 继承父进程,Web SSE 仍可见 Internal error(#105)
+            stdout=out if out is not None else None,
+            stderr=None,
             text=True,
-            stdout=out,
-            timeout=timeout,
-            check=False,  # exit code 不当异常;外壳凭产物判断
+            start_new_session=True,
         )
+        try:
+            pgid = os.getpgid(proc.pid)
+            _register_cli_pgid(pgid)
+        except (ProcessLookupError, OSError):
+            pgid = None
+        try:
+            proc.communicate(input=input, timeout=limit)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
+            msg = f"CLI agent timeout after {limit}s: {cmd}"
+            # 进入合并 stdout 的 Web 任务流,触发 classify failed(#105 S2)
+            print(msg, file=sys.stderr, flush=True)
+            raise RuntimeError(msg) from None
     finally:
+        if pgid is not None:
+            _unregister_cli_pgid(pgid)
         if out:
             out.close()
 
