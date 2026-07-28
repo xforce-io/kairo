@@ -169,6 +169,10 @@ def test_cli_status_lists_references(tmp_path, monkeypatch):
 
 def test_cli_index_command_writes_meetings(tmp_path, monkeypatch):
     """#16:kairo index 手动重建 stream 导航索引(无需 step)。"""
+    import re
+
+    from kairo.workspace import Workspace
+
     monkeypatch.chdir(tmp_path)
     runner.invoke(app, ["init"])
     meeting = tmp_path / "会议实录.txt"
@@ -180,7 +184,12 @@ def test_cli_index_command_writes_meetings(tmp_path, monkeypatch):
     assert result.exit_code == 0
     index = tmp_path / "references" / "MEETINGS.md"
     assert index.is_file()
-    assert "会议实录" in index.read_text()
+    # #103:默认 title 为 YYYYMMDD-HH;索引应含该展示名
+    ws = Workspace.open(tmp_path)
+    rid = ws.list_reference_ids()[0]
+    title = ws.read_manifest(rid).title
+    assert re.fullmatch(r"\d{8}-\d{2}", title)
+    assert title in index.read_text()
 
 
 def test_cli_add_dir_stream_multiform(tmp_path, monkeypatch):

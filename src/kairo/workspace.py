@@ -67,6 +67,20 @@ def _slug(text: str) -> str:
     return s or hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
 
 
+def default_reference_title(*, now: datetime.datetime | None = None) -> str:
+    """新建 reference 的默认展示名:本地时间 ``YYYYMMDD-HH``(#103)。
+
+    仅人读 title;不参与 ref_id / 目录分配。``now`` 供测试注入。
+    """
+    t = now if now is not None else datetime.datetime.now()
+    return t.strftime("%Y%m%d-%H")
+
+
+def _resolve_new_title(title: str | None) -> str:
+    """新建 manifest 时解析 title:显式传入保留,否则用默认时间格式。"""
+    return title if title is not None else default_reference_title()
+
+
 class Workspace:
     def _alloc_ref_id(self, name: str) -> str:
         """自动派生 ref_id 并用 mkdir 独占认领 references/<id>/ (#81 E1)。
@@ -215,12 +229,12 @@ class Workspace:
         ref_dir = self.references_dir() / ref_id
         if copy:
             members = [self._copy_into(f, ref_dir) for f in members]
-        # 复用文件 add;copy 已处理
+        # 复用文件 add;copy 已处理。title 原样下传(None → add 内默认 YYYYMMDD-HH,#103)
         return self.add(
             members,
             ref_id=ref_id,
             role=role,
-            title=title or d.name,
+            title=title,
             source_class="stream",
             copy=False,
         )
@@ -295,7 +309,7 @@ class Workspace:
                 ref_dir.mkdir(parents=True, exist_ok=True)
             man = Manifest(
                 id=ref_id,
-                title=title or files[0].stem,
+                title=_resolve_new_title(title),
                 source_class=source_class or self.constitution.default_class,
                 forms=new_forms,
             )
@@ -321,7 +335,7 @@ class Workspace:
             (self.references_dir() / ref_id).mkdir(parents=True, exist_ok=True)
         man = Manifest(
             id=ref_id,
-            title=title or d.name,
+            title=_resolve_new_title(title),
             source_class="corpus",
             forms=[
                 Form(

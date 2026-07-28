@@ -88,7 +88,12 @@ def test_add_ref_path_with_empty_file_field(tmp_path):
     ws = Workspace.open(tmp_path / "ws")
     ids = ws.list_reference_ids()
     assert len(ids) == 1
-    assert "note" in ws.read_manifest(ids[0]).title  # 来自 path 的文件名,不是 upload.bin
+    # #103:默认 title 为 YYYYMMDD-HH;且确为 path 添加(非空上传伪文件名)
+    import re
+
+    title = ws.read_manifest(ids[0]).title
+    assert re.fullmatch(r"\d{8}-\d{2}", title)
+    assert "upload" not in title.lower()
 
 
 def test_add_ref_fragment_excludes_corpus(tmp_path):
@@ -242,9 +247,10 @@ def test_rename_ref_empty_returns_400_and_keeps_old(tmp_path):
     src = tmp_path / "260629_110439.txt"
     src.write_text("内容")
     rid = ws.add([src])
+    old_title = Workspace.open(tmp_path / "ws").read_manifest(rid).title
     r = _client(tmp_path).post(f"/w/ws/ref/{rid}/title", data={"title": "   "})
     assert r.status_code == 400
-    assert Workspace.open(tmp_path / "ws").read_manifest(rid).title == "260629_110439"
+    assert Workspace.open(tmp_path / "ws").read_manifest(rid).title == old_title
 
 
 def test_rename_unknown_ref_404(tmp_path):
@@ -259,11 +265,12 @@ def test_ref_meta_has_rename_form(tmp_path):
     src = tmp_path / "260629_110439.txt"
     src.write_text("内容")
     rid = ws.add([src])
+    current = Workspace.open(tmp_path / "ws").read_manifest(rid).title
     r = _client(tmp_path).get(f"/w/ws/ref/{rid}")
     assert r.status_code == 200
     assert f"/w/ws/ref/{rid}/title" in r.text
     assert 'name="title"' in r.text
-    assert "260629_110439" in r.text  # 输入预填当前标题
+    assert current in r.text  # 输入预填当前标题(#103 默认为 YYYYMMDD-HH)
 
 
 def test_nav_has_no_source_class_tag(tmp_path):
@@ -425,7 +432,9 @@ def test_add_ref_directory_creates_one_multiform(tmp_path):
     assert len(ids) == 1
     man = ws.read_manifest(ids[0])
     assert man.source_class == "stream"
-    assert man.title == "能源讨论"
+    import re
+
+    assert re.fullmatch(r"\d{8}-\d{2}", man.title)  # #103 默认时间 title
     assert len(man.forms) == 2
 
 
