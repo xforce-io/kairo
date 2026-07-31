@@ -273,6 +273,7 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
 def workspace_view(request: Request, slug: str) -> HTMLResponse:
     ws = _open(request, slug)
     streams, corpus = _split_refs(ws)
+    running = request.app.state.registry.current(slug)
     return _render(
         request,
         "workspace.html",
@@ -282,9 +283,11 @@ def workspace_view(request: Request, slug: str) -> HTMLResponse:
             "targets": _target_states(ws),
             "streams": streams,
             "corpus": corpus,
+            "run_task_id": running.task_id if running else None,
             **_run_button_ctx(request, ws, slug),
         },
     )
+
 
 
 @router.get("/w/{slug}/doc", response_class=HTMLResponse)
@@ -743,13 +746,34 @@ def accept_doc(request: Request, slug: str, doc: str = Form(...)) -> HTMLRespons
     return HTMLResponse(f'<span class="dot {status}"></span>{doc}: {status}')
 
 
+def _step_response(
+    request: Request, ws: Workspace, slug: str, task
+) -> HTMLResponse:
+    """#114:运行视图 + OOB 主按钮 disabled Running…(start 与 attach 共用)。"""
+    step = _render(
+        request, "_step.html", {"slug": slug, "task_id": task.task_id}
+    ).body.decode()
+    t = _t(request)
+    btn = _run_button_ctx(request, ws, slug)
+    oob = (
+        f'<div id="run-btn-wrap" hx-swap-oob="true">'
+        f"{_run_button_html(slug, btn, t)}</div>"
+    )
+    return HTMLResponse(step + oob)
+
+
 @router.post("/w/{slug}/step", response_class=HTMLResponse)
 def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLResponse:
-    """兼容旧入口:有 target 时 re-step 文档/ref;无 target 时改走 run(含自动重试 blocked)。"""
+    """兼容旧入口:有 target 时 re-step 文档/ref;无 target 时改走 run(含自动重试 blocked)。
+
+    #114:已有运行中任务则附着同一 task_id,不新开 job;响应 OOB 刷新主按钮。
+    """
     ws = _open(request, slug)
     reg = request.app.state.registry
-    if reg.is_running(slug):
-        return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
+    existing = reg.current(slug)
+    if existing is not None:
+        # target 与当前 job 类型可能不同,仍附着——串行锁下不能并行第二 job
+        return _step_response(request, ws, slug, existing)
     if target:
         argv = [sys.executable, "-m", "kairo", "re-step", target]
     else:
@@ -760,8 +784,15 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
                 f'<p class="muted run-summary">{_t(request)("run.clean_msg")}</p>'
             )
         argv = [sys.executable, "-m", "kairo", "run"]
-    task = reg.start(slug, ws.root, argv)
-    return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
+    try:
+        task = reg.start(slug, ws.root, argv)
+    except RuntimeError:
+        # 竞态:判断 is_running 与 start 之间被抢占 → 附着
+        task = reg.current(slug)
+        if task is None:
+            raise
+    return _step_response(request, ws, slug, task)
+
 
 
 @router.post("/w/{slug}/run", response_class=HTMLResponse)
@@ -869,16 +900,27 @@ def _run_button_html(slug: str, btn: dict, t) -> str:
 
 @router.post("/w/{slug}/ref/{ref_id}/retry", response_class=HTMLResponse)
 def retry_ref(request: Request, slug: str, ref_id: str) -> HTMLResponse:
-    """#73:重新处理参考(清 blocked/派生产物后 step);走子进程 retry-ref。"""
+    """#73:重新处理参考(清 blocked/派生产物后 step);走子进程 retry-ref。
+
+    #114:运行中则附着当前 task。
+    """
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
     reg = request.app.state.registry
-    if reg.is_running(slug):
-        return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
+    existing = reg.current(slug)
+    if existing is not None:
+        return _step_response(request, ws, slug, existing)
     argv = [sys.executable, "-m", "kairo", "retry-ref", ref_id]
-    task = reg.start(slug, ws.root, argv)
-    return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
+    try:
+        task = reg.start(slug, ws.root, argv)
+    except RuntimeError:
+        task = reg.current(slug)
+        if task is None:
+            raise
+    return _step_response(request, ws, slug, task)
+
+
 
 
 @router.post("/w/{slug}/ref/{ref_id}/delete", response_class=HTMLResponse)
@@ -928,7 +970,10 @@ def delete_ref(
 
 @router.post("/w/{slug}/ref/{ref_id}/prose", response_class=HTMLResponse)
 def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
-    """#60:单 ref 按需生成可读文稿;子进程 kairo prose,复用 step 任务区。"""
+    """#60:单 ref 按需生成可读文稿;子进程 kairo prose,复用 step 任务区。
+
+    #114:运行中则附着当前 task。
+    """
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
@@ -937,11 +982,19 @@ def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     except ProseError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     reg = request.app.state.registry
-    if reg.is_running(slug):
-        return HTMLResponse(f'<p class="muted">{_t(request)("step.busy")}</p>')
+    existing = reg.current(slug)
+    if existing is not None:
+        return _step_response(request, ws, slug, existing)
     argv = [sys.executable, "-m", "kairo", "prose", ref_id]
-    task = reg.start(slug, ws.root, argv)
-    return _render(request, "_step.html", {"slug": slug, "task_id": task.task_id})
+    try:
+        task = reg.start(slug, ws.root, argv)
+    except RuntimeError:
+        task = reg.current(slug)
+        if task is None:
+            raise
+    return _step_response(request, ws, slug, task)
+
+
 
 
 @router.get("/w/{slug}/step/{task_id}/stream")

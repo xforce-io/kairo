@@ -140,7 +140,7 @@
               hx-post="/w/{{ slug | urlencode }}/run" hx-target="#step-area" hx-swap="innerHTML">{{ run_label }}</button>
       {% endif %}
     </div>
-    <div id="step-area"></div>
+    <div id="step-area">{% if run_task_id %}{% with task_id=run_task_id %}{% include "_step.html" %}{% endwith %}{% endif %}</div>
     <button type="button" class="btn btn-ghost btn-regen" style="margin-top:10px"
             hx-get="/w/{{ slug | urlencode }}/glossary" hx-target="#meta" hx-swap="innerHTML">{{ t('glossary.btn') }}</button>
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
