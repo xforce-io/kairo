@@ -179,6 +179,17 @@ class TaskRegistry:
             tid = self._running_by_slug.get(slug)
             return tid is not None and not self._tasks[tid].done
 
+    def current(self, slug: str) -> StepTask | None:
+        """#114:返回该 slug 未完成的任务;无则 None。"""
+        with self._guard:
+            tid = self._running_by_slug.get(slug)
+            if tid is None:
+                return None
+            task = self._tasks.get(tid)
+            if task is None or task.done:
+                return None
+            return task
+
     def start(self, slug: str, cwd: Path, argv: list[str]) -> StepTask:
         with self._guard:
             tid = self._running_by_slug.get(slug)

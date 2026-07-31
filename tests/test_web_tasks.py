@@ -247,19 +247,87 @@ def test_cancel_kills_running_task(tmp_path):
     assert task.done, "task did not become done after cancel"
 
 
-def test_step_rejects_concurrent(tmp_path, monkeypatch):
+def test_registry_current_returns_running_only(tmp_path):
+    """#114:current(slug) 仅返回未完成任务。"""
+    reg = TaskRegistry()
+    assert reg.current("ws") is None
+    slow = [sys.executable, "-c", "import time; time.sleep(2)"]
+    task = reg.start("ws", tmp_path, slow)
+    assert reg.current("ws") is task
+    reg.cancel(task.task_id)
+    _wait(task, timeout=5)
+    assert reg.current("ws") is None
+
+
+def test_step_attaches_running_task_not_busy_text(tmp_path, monkeypatch):
+    """#114 S2:运行中再 POST /step|/run → 附着同一 task_id,非 busy 纯文案。"""
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = Workspace.init(tmp_path / "ws", topic="t")
     (tmp_path / "m.txt").write_text("x")
     ws.add([tmp_path / "m.txt"])
-    c = TestClient(create_app(tmp_path))
-    # 直接占用该 slug 的串行锁(注入一个慢任务),再请求 step
-    import sys
-    app = c.app
-    app.state.registry.start("ws", tmp_path / "ws", [sys.executable, "-c", "import time; time.sleep(2)"])
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    slow = [sys.executable, "-c", "import time; time.sleep(3)"]
+    task = app.state.registry.start("ws", ws.root, slow)
     r = c.post("/w/ws/step")
     assert r.status_code == 200
-    assert "Running" in r.text
+    body = r.text
+    # 附着运行视图,不是冷 busy 句
+    assert f"/step/{task.task_id}/stream" in body
+    assert "wait for the current job" not in body
+    assert "请等待当前任务结束" not in body
+    # OOB 主按钮 running disabled
+    assert 'id="run-btn-wrap"' in body
+    assert "hx-swap-oob" in body
+    assert "disabled" in body
+    assert "Running" in body or "运行中" in body
+    # 仍是单 job
+    assert app.state.registry.current("ws") is task
+    app.state.registry.cancel(task.task_id)
+    _wait(task, timeout=5)
+
+
+def test_run_start_oob_disables_button(tmp_path, monkeypatch):
+    """#114 S1:POST /run 成功响应含 step 流 + OOB disabled Running…。"""
+    import re
+
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    r = c.post("/w/ws/run")
+    assert r.status_code == 200
+    body = r.text
+    m = re.search(r"/w/ws/step/([0-9a-f]+)/stream", body)
+    assert m, body
+    tid = m.group(1)
+    assert app.state.registry.current("ws") is not None
+    assert app.state.registry.current("ws").task_id == tid
+    assert 'id="run-btn-wrap"' in body and "hx-swap-oob" in body
+    assert "disabled" in body
+    assert "Running" in body or "运行中" in body
+    # 耗尽 SSE 以免挂起
+    c.get(f"/w/ws/step/{tid}/stream")
+
+
+def test_workspace_page_prefills_running_step(tmp_path, monkeypatch):
+    """#114:整页加载时若 job 在跑,step-area 预填可取消的运行视图。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    slow = [sys.executable, "-c", "import time; time.sleep(3)"]
+    task = app.state.registry.start("ws", ws.root, slow)
+    r = c.get("/w/ws")
+    assert r.status_code == 200
+    assert f"/step/{task.task_id}/stream" in r.text
+    assert 'id="run-btn"' in r.text and "disabled" in r.text
+    app.state.registry.cancel(task.task_id)
+    _wait(task, timeout=5)
+
+
 
 
 def test_step_with_target_triggers_restep(tmp_path, monkeypatch):
