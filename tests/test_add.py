@@ -27,6 +27,16 @@ def test_add_audio_guesses_audio_role(tmp_path):
     assert man.forms[0].role == "audio"
 
 
+def test_add_mp4_guesses_audio_role(tmp_path):
+    """会议视频容器(.mp4)默认当 audio,走 ASR,不落到 transcript 兜底。"""
+    ws = Workspace.init(tmp_path)
+    src = tmp_path / "meeting.mp4"
+    src.write_bytes(b"\x00fake video")
+    ref_id = ws.add([src])
+    man = ws.read_manifest(ref_id)
+    assert man.forms[0].role == "audio"
+
+
 def test_add_multiple_forms_share_one_id(tmp_path):
     ws = Workspace.init(tmp_path)
     a = tmp_path / "rec.m4a"

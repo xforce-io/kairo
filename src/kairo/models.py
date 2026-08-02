@@ -87,7 +87,7 @@ def _default_targets() -> list[Target]:
     ]
 
 
-_AUDIO_EXTS = (".m4a", ".wav", ".mp3", ".aac", ".flac", ".ogg")
+_AUDIO_EXTS = (".m4a", ".wav", ".mp3", ".aac", ".flac", ".ogg", ".mp4", ".m4v", ".mov", ".webm")
 # 二进制/结构化文档(#15):markitdown 统吃 → 单一 document role,doc2text 转 source_text。
 _DOCUMENT_EXTS = (".docx", ".pptx", ".xlsx", ".pdf")
 # 图片:作附件 form 挂在会议下,不转文本、由多模态 agent 在 digest 时 Read 看图(#44)。
