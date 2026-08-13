@@ -429,9 +429,21 @@ def diff(seq: str = typer.Argument(None, help="对比的快照;省略=最近")) 
 def serve(
     root: Path = typer.Argument(None, help="包含多个 workspace 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd"),
     port: int = typer.Option(8787, "--port", "-p", help="监听端口(默认 8787,避开常见 8000/alfred 8765)"),
+    mode: str = typer.Option(
+        "console",
+        "--mode",
+        help="console=本地 Console(默认); public-read=匿名公开只读面(#118)",
+    ),
 ) -> None:
-    """启动本地 Web Console,浏览器统管 root 下的多个 workspace。"""
+    """启动 Web 服务。默认本地 Console;``--mode public-read`` 仅挂匿名公开只读面。"""
     serve_root = _serve_root(root)
+    if mode not in {"console", "public-read"}:
+        typer.secho(
+            f"未知 mode: {mode}(期望 console 或 public-read)",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     try:
         from kairo.web.server import run as web_run
     except ImportError:
@@ -441,8 +453,10 @@ def serve(
             err=True,
         )
         raise typer.Exit(1) from None
-    typer.echo(f"kairo console: http://127.0.0.1:{port}  (root={serve_root})")
-    web_run(serve_root, port=port)
+    label = "public-read" if mode == "public-read" else "console"
+    typer.echo(f"kairo {label}: http://127.0.0.1:{port}  (root={serve_root})")
+    web_run(serve_root, port=port, mode=mode)  # type: ignore[arg-type]
+
 
 
 @glossary_app.command("list")
