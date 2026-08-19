@@ -29,6 +29,7 @@ from kairo.engine import (
     workspace_run_plan,
 )
 from kairo.engine import accept as engine_accept
+from kairo.listen_read import pair_audio_transcripts, parse_units
 from kairo.web.discovery import scan_workspaces
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
@@ -153,6 +154,75 @@ def _form_preview_html(ws: Workspace, slug: str, ref_id: str, form: dict) -> str
     if _is_text_file(path):
         return _render_doc(path, slug=slug)
     return None
+
+def _clock(sec: float) -> str:
+    m = int(sec // 60)
+    s = sec - 60 * m
+    if float(s).is_integer():
+        return f"{m}:{int(s):02d}"
+    return f"{m}:{s:04.1f}"
+
+
+def _num_attr(n: float | None) -> str:
+    if n is None:
+        return ""
+    return str(int(n)) if float(n).is_integer() else str(n)
+
+
+def _form_index(man, form) -> str:
+    for i, f in enumerate(man.forms):
+        if f is form:
+            return str(i)
+    raise HTTPException(status_code=404, detail="form not found")
+
+
+def _listen_read_html(request: Request, ws, slug: str, ref_id: str, man, audio_form) -> str:
+    t = _t(request)
+    pairs = pair_audio_transcripts(man.forms)
+    pair = next((p for p in pairs if p.audio is audio_form), None)
+    audio_key = _form_index(man, audio_form)
+    audio_src = f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(audio_key)}"
+    units = []
+    if pair and pair.linked and pair.transcript:
+        path = _form_path(ws, pair.transcript.location)
+        if path.is_file():
+            parsed = parse_units(path.read_text(errors="replace"), duration=None)
+            units = [
+                {
+                    "text": u.text,
+                    "start_attr": _num_attr(u.start),
+                    "end_attr": _num_attr(u.end),
+                    "label": _clock(u.start) if u.start is not None else "",
+                    "timed": u.start is not None,
+                }
+                for u in parsed
+            ]
+    switcher = []
+    linked = [p for p in pairs if p.linked]
+    if len(linked) > 1:
+        switcher = [
+            {
+                "key": _form_index(man, p.audio),
+                "label": Path(p.audio.location).name or _form_index(man, p.audio),
+            }
+            for p in linked
+        ]
+    lang = resolve_lang(request)
+    return request.app.state.templates.get_template("_listen_read.html").render(
+        {
+            "slug": slug,
+            "ref_id": ref_id,
+            "audio_key": audio_key,
+            "audio_src": audio_src,
+            "units": units,
+            "switcher": switcher,
+            "t": t,
+            "lang": lang,
+        }
+    )
+
+
+
 
 
 def _target_states(ws: Workspace):
@@ -332,7 +402,11 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
         )
     for i, f in enumerate(man.forms):
         p = _form_path(ws, f.location)
-        previewable = _is_text_file(p) or _is_image_file(p)
+        previewable = (
+            _is_text_file(p)
+            or _is_image_file(p)
+            or (f.role == "audio" and p.is_file())
+        )
         name = p.name if p.name else f.location
         forms.append(
             {
@@ -342,12 +416,12 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
                 "filename": name,
                 "ext": (p.suffix.lstrip(".").upper() if p.suffix else "FILE"),
                 "previewable": previewable,
-                # 不可内联预览但文件在:用系统应用打开(#88 引用模型)
                 "openable": (not previewable) and p.is_file(),
                 "key": str(i),
             }
         )
     return forms
+
 
 
 @router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
@@ -366,7 +440,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         or next((f for f in forms if f["role"] == "source_text" and f["previewable"]), None)
         or next((f for f in forms if f["role"] == "prose" and f["previewable"]), None)
         or next((f for f in forms if f["role"] == "attachment" and f["previewable"]), None)
-        or next((f for f in forms if f["previewable"]), None)
+        or next((f for f in forms if f["previewable"] and f["role"] != "audio"), None)
     )
     sc = ws.constitution.source_classes.get(man.source_class)
     preview_title = f"{man.title} · {primary['role_label']}" if primary else ""
@@ -419,6 +493,7 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
     man = ws.read_manifest(ref_id)
     if key == "digest":
         path, role = ws.references_dir() / ref_id / "digest.md", "digest"
+        form = None
     else:
         try:
             idx = int(key)
@@ -426,9 +501,16 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
             raise HTTPException(status_code=404, detail="form not found")
         if not 0 <= idx < len(man.forms):
             raise HTTPException(status_code=404, detail="form not found")
-        path, role = _form_path(ws, man.forms[idx].location), man.forms[idx].role
+        form = man.forms[idx]
+        path, role = _form_path(ws, form.location), form.role
     t = _t(request)
     title = f"{man.title} · {_role_label(role, t)}"
+    if role == "audio" and form is not None and path.is_file():
+        return _render(
+            request,
+            "_doc.html",
+            {"title": title, "html": _listen_read_html(request, ws, slug, ref_id, man, form)},
+        )
     if _is_image_file(path):
         img = (
             f'<img class="doc-img" src="/w/{quote(slug)}/ref/{ref_id}/file/{quote(key)}"'
@@ -437,12 +519,12 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
         return _render(request, "_doc.html", {"title": title, "html": img})
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
-    # digest 是这条 reference 的目的产物,与 target 同款可导出 PDF;其它形态(转写/音频)不导出
     return _render(
         request,
         "_doc.html",
         {"title": title, "html": _render_doc(path, slug=slug), "exportable": key == "digest"},
     )
+
 
 
 @router.get("/w/{slug}/ref/{ref_id}/file/{key}")

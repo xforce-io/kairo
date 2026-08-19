@@ -1,0 +1,38 @@
+<div class="listen-read" data-audio-key="{{ audio_key }}">
+  <div class="lr-head">
+    <div class="lr-time" data-lr-time>0:00.0</div>
+    {% if switcher %}
+    <div class="lr-switch">
+      {% for item in switcher %}
+      <a class="lr-switch-item{% if item.key == audio_key %} on{% endif %}"
+         href="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ item.key }}"
+         hx-get="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ item.key }}"
+         hx-target="#reader">{{ item.label }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <input class="lr-seek" type="range" min="0" max="1000" value="0" data-lr-seek>
+  </div>
+  <div class="lr-search">
+    <input type="search" data-lr-q placeholder="{{ t('listen.search') }}" autocomplete="off">
+    <div class="lr-hits" data-lr-hits hidden></div>
+  </div>
+  <div class="lr-units" data-lr-units>
+    {% for u in units %}
+    {% if u.timed %}
+    <button type="button" class="lr-unit" data-start="{{ u.start_attr }}" data-end="{{ u.end_attr }}">
+      <span class="lr-unit-time">{{ u.label }}</span>
+      <span class="lr-unit-text">{{ u.text }}</span>
+    </button>
+    {% else %}
+    <div class="lr-unit is-untimed">
+      <span class="lr-unit-text">{{ u.text }}</span>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  <div class="lr-dock">
+    <audio class="lr-audio" src="{{ audio_src }}" preload="metadata" data-lr-audio></audio>
+    <button type="button" class="lr-play" data-lr-play data-play="{{ t('listen.play') }}" data-pause="{{ t('listen.pause') }}">{{ t('listen.play') }}</button>
+  </div>
+</div>

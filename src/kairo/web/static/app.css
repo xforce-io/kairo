@@ -502,3 +502,51 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   .doc pre { background: #f4f1ea; color: #2a2620; }
   @page { margin: 18mm 16mm; }
 }
+
+/* #122 听读三区 */
+#reader:has(.listen-read) { overflow: hidden; }
+#reader:has(.listen-read) > .doc {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
+.listen-read {
+  display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; overflow: hidden;
+}
+.lr-head { display: flex; flex-direction: column; gap: 10px; flex: none; }
+.lr-time {
+  font-family: var(--mono); font-size: 34px; font-weight: 600; letter-spacing: .04em;
+  line-height: 1; color: var(--ink);
+}
+.lr-seek { width: 100%; accent-color: var(--pine); }
+.lr-switch { display: flex; flex-wrap: wrap; gap: 6px; }
+.lr-switch-item {
+  font-family: var(--mono); font-size: 12px; padding: 4px 8px; border-radius: 7px;
+  border: 1px solid var(--line-2); color: var(--ink-soft); text-decoration: none;
+}
+.lr-switch-item.on, .lr-switch-item:hover { background: var(--pine-soft); color: var(--pine-deep); }
+.lr-search { flex: none; }
+.lr-search input[type=search] {
+  width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--line-2);
+  border-radius: 8px; background: var(--paper-2); color: var(--ink);
+}
+.lr-hits { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.lr-hit, .lr-unit {
+  display: block; width: 100%; text-align: left; border: 1px solid transparent;
+  background: transparent; cursor: pointer; border-radius: 8px; color: inherit;
+}
+.lr-hit { padding: 6px 8px; background: var(--paper-2); font-size: 13px; }
+.lr-units { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow: auto; }
+.lr-unit { padding: 8px 10px; }
+.lr-unit.is-untimed { cursor: default; }
+.lr-unit.on { background: var(--pine-soft); }
+.lr-unit-time { display: block; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.lr-unit-text { display: block; font-family: var(--serif); font-size: 16px; line-height: 1.7; white-space: pre-wrap; }
+.lr-dock {
+  display: flex; align-items: center; gap: 12px; padding-top: 8px;
+  border-top: 1px solid var(--line); flex: none; position: sticky; bottom: 0;
+  background: var(--card);
+}
+.lr-audio { flex: 1; min-width: 0; }
+.lr-play {
+  flex: none; font-family: var(--mono); font-size: 12px; padding: 8px 14px;
+  border-radius: 8px; border: 1px solid var(--pine); background: var(--pine); color: #fbfaf6; cursor: pointer;
+}
