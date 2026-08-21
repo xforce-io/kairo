@@ -15,14 +15,18 @@
 ## 安装
 
 ```bash
-# 全局安装控制台命令 kairo（需要 uv）
-uv tool install .
+# 全局 CLI（需要 uv，Python ≥ 3.11）
+uv tool install git+https://github.com/xforce-io/kairo.git
+# Web Console extra:
+# uv tool install 'git+https://github.com/xforce-io/kairo.git[web]'
 
-# 或在仓库内开发态运行
-uv run kairo --help
+kairo doctor     # PATH / provider / ASR / skill
+kairo connect    # 把 operator skill 挂到本机 Claude / Cursor / Codex / Pi
 ```
 
-需要 Python ≥ 3.11。音频转写依赖本机 whisper，见下方「本机 ASR 配置」。
+开发者在 checkout 里：`uv tool install .` 或 `uv run kairo --help`。
+
+音频转写依赖本机 whisper，见下方「本机 ASR 配置」。
 
 ## 快速上手
 
@@ -63,6 +67,8 @@ kairo status                  # 看各 reference / 文档的融入状态
 | `rollback` | 回退文档到某版本 |
 | `diff` | 工作态 vs 版本文档差异（自带，不依赖 git） |
 | `serve` | 启动本地 Web Console |
+| `doctor` | 本机体检：provider / ASR / skill 挂载 |
+| `connect` | 把 operator skill 挂到本机 coding agent |
 
 ## 核心概念
 
@@ -123,7 +129,7 @@ Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub /
 
 ## Web Console（可选）
 
-    pip install 'kairo[web]'
+    uv tool install 'git+https://github.com/xforce-io/kairo.git[web]'
     kairo serve <包含多个 workspace 的根目录> [--port 8787]
 
 浏览器（默认 `http://127.0.0.1:8787`，仅本机）统管 root 下的多个 workspace：
@@ -134,14 +140,15 @@ Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub /
 
 ## Agent skill（可选）
 
-仓库自带 `kairo` operator skill：[`.claude/skills/kairo/`](.claude/skills/kairo/SKILL.md)。它是同一套 CLI + workspace 布局之上的薄会话壳（发现 workspace → `kairo status` → 按层读 `understanding.md` / `assessment.md`；写操作需确认）。在 Claude Code 会话中全局可用，可软链到 skills 目录（在本仓库根执行）：
+operator skill 真身在 [`skills/kairo/SKILL.md`](skills/kairo/SKILL.md)（与 wheel 内同一份）。装好 CLI 之后：
 
 ```bash
-mkdir -p ~/.claude/skills
-ln -s "$(pwd)/.claude/skills/kairo" ~/.claude/skills/kairo
+kairo connect
+# 或已会用 skills.sh：
+npx skills add xforce-io/kairo --skill kairo -g
 ```
 
-其它 coding-agent：把同一目录拷贝或软链到该 agent 的 skills 路径即可。skill **默认只读**——纯「看状态 / 总结结论」意图不得触发 `step` / `re-step` / `accept` 等；raw transcript 不得当作最终结论。
+`kairo connect` 写入 `~/.agents/skills/kairo/`，并链到已探测的 Claude / Cursor / Codex / Pi。skill **默认只读**——纯「看状态 / 总结结论」意图不得触发 `step` / `re-step` / `accept` 等；raw transcript 不得当作最终结论。
 
 ## 设计与决策轨迹
 

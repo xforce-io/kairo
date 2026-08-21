@@ -11,7 +11,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 ## 前置自检
 
-首次调用前确认 CLI 可用：`kairo --help`（或开发态 `uv run kairo --help`）。失败 → 转述 README 安装（Python ≥ 3.11、`uv tool install .`），不硬闯、不贴裸 stack trace。
+首次调用前确认 CLI 可用：`kairo --help`（或开发态 `uv run kairo --help`）。失败 → 转述 README 安装（Python ≥ 3.11、`uv tool install git+https://github.com/xforce-io/kairo.git`，然后 `kairo doctor` / `kairo connect`），不硬闯、不贴裸 stack trace。
 
 ## 发现 workspace
 

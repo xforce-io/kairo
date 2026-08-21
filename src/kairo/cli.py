@@ -8,6 +8,7 @@ from pathlib import Path
 
 import typer
 
+from kairo.install import connect_skill, doctor_lines
 from kairo.engine import ProseError
 from kairo.engine import accept as engine_accept
 from kairo.engine import delete_reference as engine_delete_reference
@@ -448,7 +449,7 @@ def serve(
         from kairo.web.server import run as web_run
     except ImportError:
         typer.secho(
-            "未安装 web 依赖。请运行:pip install 'kairo[web]'",
+            "未安装 web 依赖。请运行:uv tool install 'git+https://github.com/xforce-io/kairo.git[web]'",
             fg=typer.colors.RED,
             err=True,
         )
@@ -457,6 +458,23 @@ def serve(
     typer.echo(f"kairo {label}: http://127.0.0.1:{port}  (root={serve_root})")
     web_run(serve_root, port=port, mode=mode)  # type: ignore[arg-type]
 
+
+@app.command()
+def doctor() -> None:
+    """本机体检:版本 / provider / ASR / web extra / skill 挂载。只读,不改配置。"""
+    for line in doctor_lines():
+        typer.echo(line)
+
+
+@app.command()
+def connect() -> None:
+    """把自带 operator skill 挂到 ~/.agents/skills/kairo,并对已装的 Claude/Cursor/Codex/Pi 建链。"""
+    try:
+        for line in connect_skill():
+            typer.echo(line)
+    except FileNotFoundError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
 
 
 @glossary_app.command("list")
