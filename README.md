@@ -15,14 +15,18 @@ One `kairo step` topples the dominoes all the way down: `add` a reference → AS
 ## Installation
 
 ```bash
-# Install the kairo console command globally (requires uv)
-uv tool install .
+# Global CLI (requires uv, Python ≥ 3.11)
+uv tool install git+https://github.com/xforce-io/kairo.git
+# Web Console extra:
+# uv tool install 'git+https://github.com/xforce-io/kairo.git[web]'
 
-# Or run in-repo in development mode
-uv run kairo --help
+kairo doctor     # PATH / provider / ASR / skill
+kairo connect    # hang the operator skill onto local Claude / Cursor / Codex / Pi
 ```
 
-Requires Python ≥ 3.11. Audio transcription depends on a local whisper — see "Local ASR configuration" below.
+Developers working in a checkout: `uv tool install .` or `uv run kairo --help`.
+
+Audio transcription depends on a local whisper — see "Local ASR configuration" below.
 
 ## Quick start
 
@@ -63,6 +67,8 @@ Produces two layers of documents: `understanding.md` (neutral facts) and `assess
 | `rollback` | Roll a document back to a version |
 | `diff` | Working-state vs versioned-document diff (built in, no git needed) |
 | `serve` | Start the local Web Console |
+| `doctor` | Machine check: provider / ASR / skill mount |
+| `connect` | Install the operator skill into local coding agents |
 
 ## Core concepts
 
@@ -123,7 +129,7 @@ Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub 
 
 ## Web Console (optional)
 
-    pip install 'kairo[web]'
+    uv tool install 'git+https://github.com/xforce-io/kairo.git[web]'
     kairo serve <root directory containing multiple workspaces> [--port 8787]
 
 In the browser (default `http://127.0.0.1:8787`, local only), manage the multiple workspaces under `root`. The UI is bilingual (English by default; switch to Chinese with the `EN | 中` toggle in the top bar, or via your browser's `Accept-Language`):
@@ -134,14 +140,15 @@ In the browser (default `http://127.0.0.1:8787`, local only), manage the multipl
 
 ## Agent skill (optional)
 
-The repo ships a `kairo` operator skill at [`.claude/skills/kairo/`](.claude/skills/kairo/SKILL.md): a thin conversational shell over the same CLI and workspace layout (discover workspaces → `kairo status` → read `understanding.md` / `assessment.md` by layer; write commands require confirmation). Make it available in Claude Code sessions by symlinking into your global skills directory (run from a checkout of this repo):
+The operator skill lives at [`skills/kairo/SKILL.md`](skills/kairo/SKILL.md) (same file the wheel ships). After installing the CLI:
 
 ```bash
-mkdir -p ~/.claude/skills
-ln -s "$(pwd)/.claude/skills/kairo" ~/.claude/skills/kairo
+kairo connect
+# or, if you already use skills.sh:
+npx skills add xforce-io/kairo --skill kairo -g
 ```
 
-Other coding agents: copy or symlink the same folder into that agent's skills path. The skill is **read-first** — pure "what's the status / summarize conclusions" intents must not trigger `step` / `re-step` / `accept` / etc.; raw transcripts are never treated as final conclusions.
+`kairo connect` writes `~/.agents/skills/kairo/` and links it into detected Claude / Cursor / Codex / Pi skill dirs. The skill is **read-first** — pure "what's the status / summarize conclusions" intents must not trigger `step` / `re-step` / `accept` / etc.; raw transcripts are never treated as final conclusions.
 
 ## Design & decision trail
 

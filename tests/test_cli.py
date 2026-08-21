@@ -296,7 +296,8 @@ def test_cli_serve_missing_web_dep_friendly(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", fake_import)
     result = runner.invoke(app, ["serve", "--port", "0"])
     assert result.exit_code != 0
-    assert "kairo[web]" in result.output
+    assert "[web]" in result.output
+    assert "git+https://github.com/xforce-io/kairo.git" in result.output
     assert "Traceback" not in result.output
 
 
