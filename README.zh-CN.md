@@ -77,7 +77,7 @@ kairo status                  # 看各 reference / 文档的融入状态
 - **两层产出**：`understanding.md`（全量证据卡重建的事实层）与依赖它的 `assessment.md`（只读有界 understanding 的判断层）；中立事实与立场判断不混。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
 - **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
-- **blocked 状态**：包括源/转换失败、`provider-failed`、证据卡结构无效或超 2,000 字符、compose 首行混入执行旁白、溯源无效、compose 超 20,000 字符、`manual-edit`，以及旧状态 `compose-degraded`。无效或超预算产物不会覆盖上一版；终态需显式 retry / `re-step`。
+- **blocked 状态**：包括源/转换失败、`provider-failed`、证据卡结构无效或超 2,000 字符、溯源无效、compose 超 20,000 字符、`manual-edit`，以及旧状态 `compose-invalid` / `compose-degraded`。Compose 会剥离首个 H1 前的执行旁白；无效或超预算产物不会覆盖上一版。
 
 ## 领域真名册（glossary）
 

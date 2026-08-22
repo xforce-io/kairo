@@ -927,8 +927,13 @@ class ComposeRule:
                 ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
                 state.targets[key] = ts
                 return
-            # 兼容无 H1 的旧输出；首行若带 H1，它必须是正文起点。
+            # Grok 未写 artifact 而把执行旁白与正文标题拼在首行时，
+            # 从该 H1 起取文档；正文后续材料里的 H1 不碰。
             first_line = content.lstrip().split("\n", 1)[0]
+            h1 = re.search(r"(?<!#)#\s+\S", first_line)
+            if h1 and first_line[: h1.start()].strip():
+                content = content.lstrip()[h1.start() :]
+                first_line = content.split("\n", 1)[0]
             if re.search(r"(?<!#)#\s+\S", first_line) and not re.match(
                 r"#\s+\S", first_line
             ):

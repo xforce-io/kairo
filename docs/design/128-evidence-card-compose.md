@@ -66,7 +66,7 @@ flowchart LR
 
 旧材料路径：已有 digest 没有当前 evidence 时，LegacyEvidenceRule 从 digest 生成 `legacy-derived` evidence，不运行模型；随后进入同一 Compose 路径。
 
-失败路径：Digest provider 失败或双块无效时保留上一对产物；legacy adapter 无法满足预算时阻塞该 evidence；Compose 首行混入执行旁白、provider 失败、超预算、来源不全或 provenance 无效时保留上一目标和 folded。
+失败路径：Digest provider 失败或双块无效时保留上一对产物；legacy adapter 无法满足预算时阻塞该 evidence；Compose 确定性剥离首个 H1 前的执行旁白，provider 失败、超预算、来源不全或 provenance 无效时保留上一目标和 folded。
 
 ## 7. 模块设计
 
@@ -107,7 +107,7 @@ flowchart LR
 - **E2E**：新 reference 使用可控 provider，断言只调用一次 Digest 且同时写出完整 digest 与 ≤2,000 字符 evidence；随后两层目标 ≤20,000 字符并收敛。
 - **E2E**：50 条已有 digest 通过 legacy adapter 零 provider 调用补 evidence，Compose 不读取完整 digest/旧目标，最终无 stale/blocked。
 - **E2E**：真实能源梳理副本迁移，记录 legacy evidence 数量、Compose 材料大小、目标大小与耗时；正式 workspace 不自动覆盖。
-- **Integration**：双块解析失败/超预算不覆盖旧产物；显式 artifact 不被更长 stdout 覆盖；Compose 首行旁白不覆盖旧目标；digest hash 变化使 evidence/target 标记 CHANGED；判断层只获得 bounded upstream。
+- **Integration**：双块解析失败/超预算不覆盖旧产物；显式 artifact 不被更长 stdout 覆盖；stdout 首个 H1 前的 Compose 旁白被剥离；digest hash 变化使 evidence/target 标记 CHANGED；判断层只获得 bounded upstream。
 - **Unit**：header、日期、hash、四节、预算、legacy 标记、门禁、来源全集、删除和失败回滚。
 
 ## 12. 开放问题 / 决策记录

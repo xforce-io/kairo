@@ -806,7 +806,7 @@ def test_compose_blocks_over_budget_output_and_keeps_prior(tmp_path):
     assert item.is_stale(state) is False
 
 
-def test_compose_blocks_process_preamble_and_keeps_prior(tmp_path):
+def test_compose_strips_process_preamble_before_h1(tmp_path):
     ws = Workspace.init(tmp_path)
     t = tmp_path / "m.txt"
     t.write_text("x")
@@ -819,9 +819,10 @@ def test_compose_blocks_process_preamble_and_keeps_prior(tmp_path):
     noisy = _valid_compose_doc(ws, "先读取材料并分析。# 当前正文")
     item = _understanding_item(ws, _FixedProvider(noisy), state)
     item.run(state)
-    assert (ws.root / "understanding.md").read_text() == prior
-    ts = state.targets["understanding.md"]
-    assert ts.status == "blocked" and ts.reason == "compose-invalid"
+    doc = (ws.root / "understanding.md").read_text()
+    assert doc.startswith("# 当前正文")
+    assert "先读取材料并分析" not in doc
+    assert state.targets["understanding.md"].status == "ok"
 
 
 def test_compose_allows_normal_sized_update(tmp_path):
