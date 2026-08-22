@@ -21,10 +21,12 @@ class _CaptureProvider:
         self.calls = []
 
     def run(self, config, signal=None):
+        from kairo.provider import merged_agent_input
+
         self.calls.append(config)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         (config.artifact_dir / (config.artifact or "output.md")).write_text(
-            f"CAPTURE\n\n{config.context}"
+            f"CAPTURE\n\n{merged_agent_input(config)}"
         )
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 

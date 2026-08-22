@@ -22,17 +22,27 @@ class _RunOnlyProvider:
 
     def __init__(self):
         self.calls = []
+        self.materials = {}
 
     def run(self, config, signal=None):
-        from kairo.provider import _stub_compose_document
+        from kairo.provider import (
+            _stub_compose_document,
+            compose_material_files,
+            merged_agent_input,
+        )
 
         self.calls.append(config)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        self.materials = {
+            p.relative_to(config.artifact_dir).as_posix(): p.read_text()
+            for p in compose_material_files(config.artifact_dir)
+        }
         art = config.artifact or "output.md"
+        ctx = merged_agent_input(config)
         if art == "doc.md":
-            content = "RUN-ONLY\n" + _stub_compose_document(config.persona, config.context)
+            content = "RUN-ONLY\n" + _stub_compose_document(config.persona, ctx)
         else:
-            content = f"RUN-ONLY\n\n{config.context}"
+            content = f"RUN-ONLY\n\n{ctx}"
         (config.artifact_dir / art).write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
@@ -785,4 +795,22 @@ def test_compose_single_class_keeps_today_behavior(tmp_path):
     assert "·观测" not in ctx  # 单类不打标签
     persona = prov.calls[0].persona
     assert "源分类" not in persona  # 单类不注入前言
+
+
+def test_compose_inventory_excludes_digest_body(tmp_path):
+    """#126:context 只留清单,Δ digest 正文在 artifact 文件里。"""
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    _make_digest(ws, rid, "关键纪要XYZ")
+    prov = _RunOnlyProvider()
+    state = State()
+    ComposeRule(ws, prov).discover(state)[0].run(state)
+    ctx = prov.calls[0].context
+    assert "关键纪要XYZ" not in ctx
+    assert "current.md" in ctx or "(无,从空文综合)" in ctx
+    blob = "\n".join(prov.materials.values())
+    assert "关键纪要XYZ" in blob
+    assert any(p.startswith("delta/") and p.endswith("digest.md") for p in prov.materials)
 

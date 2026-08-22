@@ -178,6 +178,25 @@ def test_claude_code_provider_no_allowed_tools_without_read_dirs(tmp_path):
     assert "--allowedTools" not in calls[0]
 
 
+def test_claude_code_provider_allows_read_when_compose_materials_present(tmp_path):
+    """#126:cwd 有摆盘材料时,无 corpus 也预授 Read。"""
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"result": "OK"}))
+
+    (tmp_path / "current.md").write_text("旧文")
+    ClaudeCodeProvider(model="opus", runner=fake_runner).run(
+        AgentConfig(
+            persona="P", context="清单", artifact_dir=tmp_path, model="opus", artifact="d.md"
+        )
+    )
+    assert "--allowedTools" in calls[0]
+    assert "Read" in calls[0]
+    assert "--add-dir" not in calls[0]
+
+
 def test_claude_code_provider_identity():
     p = ClaudeCodeProvider(model="opus")
     assert p.name == "claude-code"
@@ -222,7 +241,7 @@ def test_codex_provider_identity():
     assert CodexProvider().name == "codex"
 
 
-# ---- GrokProvider(driving `grok -p`,注入 runner)----
+# ---- GrokProvider(driving grok --prompt-file,注入 runner)----
 
 
 def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
@@ -247,13 +266,14 @@ def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
     )
     cmd, args, sent, timeout = calls[0]
     assert cmd == "grok"
-    assert "-p" in args
+    assert "--prompt-file" in args
+    assert "-p" not in args
+    assert sent is None
     assert "--output-format" in args and "json" in args
     assert "-m" in args and "grok-4.5" in args
     assert timeout == 30
-    # prompt 进 -p 参数或 input（与 runner 签名对齐）
-    prompt_blob = " ".join(args) + "\n" + (sent or "")
-    assert "你是X" in prompt_blob and "材料Y" in prompt_blob
+    prompt = (tmp_path / "_prompt.md").read_text()
+    assert "你是X" in prompt and "材料Y" in prompt
     out = tmp_path / "digest.md"
     assert out in res.artifacts
     assert out.read_text() == "GROK 纪要"
@@ -305,6 +325,58 @@ def test_grok_provider_ignores_read_dirs(tmp_path):
     assert "--add-dir" not in args
     assert "--allowedTools" not in args
     assert str(ref) not in args
+    assert "--tools" not in args
+
+
+def test_grok_provider_prompt_file_not_argv_body(tmp_path):
+    """#126:长材料只在文件里,不进 argv。"""
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"text": "OK"}))
+
+    body = "旧文档正文" * 50
+    (tmp_path / "current.md").write_text(body)
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="请 Read current.md",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+        )
+    )
+    args = calls[0]
+    joined = " ".join(args)
+    assert "--prompt-file" in args
+    assert "-p" not in args
+    assert body not in joined
+    assert "--always-approve" in args
+    assert "--tools" not in args  # 收成只读会挡住写 doc.md
+    assert body in (tmp_path / "current.md").read_text()
+    assert "请 Read current.md" in (tmp_path / "_prompt.md").read_text()
+
+
+def test_grok_provider_keeps_written_artifact_over_short_stdout(tmp_path):
+    """#126:agent 已写长产物时,不以 JSON 短确认覆盖。"""
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        Path(cwd, "out.md").write_text("完整全文" * 20)
+        Path(stdout_file).write_text(json.dumps({"text": "已写入 out.md"}))
+
+    res = GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="清单",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+        )
+    )
+    body = (tmp_path / "out.md").read_text()
+    assert body == "完整全文" * 20
+    assert res.result_text == body
 
 
 def test_grok_provider_identity():
@@ -477,6 +549,30 @@ def test_openai_compatible_provider_raises_on_empty_response(tmp_path):
             )
         )
     assert not (tmp_path / "out.md").exists()
+
+
+def test_openai_compatible_provider_inlines_compose_materials(tmp_path):
+    """#126:无工具 endpoint 在 provider 内把摆盘文件拼进 user message。"""
+    calls = []
+    p = OpenAICompatibleProvider(
+        base_url="https://llm.example/v1",
+        api_key="secret",
+        model="endpoint-model",
+        client=_FakeOpenAIClient(calls),
+    )
+    (tmp_path / "current.md").write_text("旧文ABC")
+    p.run(
+        AgentConfig(
+            persona="你是X",
+            context="请读 current.md",
+            artifact_dir=tmp_path,
+            model="endpoint-model",
+            artifact="digest.md",
+        )
+    )
+    user = calls[0]["messages"][1]["content"]
+    assert "请读 current.md" in user
+    assert "旧文ABC" in user
 
 
 # ---- #8:错误响应须抛错,不写坏产物、不记账 ----

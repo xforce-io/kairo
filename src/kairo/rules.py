@@ -83,6 +83,17 @@ def make_provider_diagnostic(
     )
 
 
+def _write_materials(root: Path, materials: dict[str, str]) -> None:
+    """#126:把 compose 主材料写进 artifact_dir;拒绝逃出目录。"""
+    root = root.resolve()
+    for rel, text in materials.items():
+        dest = (root / rel).resolve()
+        if dest != root and root not in dest.parents:
+            raise ValueError(f"material path escapes artifact_dir:{rel}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(text)
+
+
 def _run_agent(
     provider,
     persona: str,
@@ -91,9 +102,11 @@ def _run_agent(
     read_dirs=None,
     *,
     timeout_s: int | None = None,
+    materials: dict[str, str] | None = None,
 ) -> str:
     """跑 agent,从隔离 artifact_dir 取回产物内容。写沙箱:artifact-only;
     read_dirs 为额外只读授权目录(corpus 参考层),agent 按需 Read。
+    materials 为 compose 主材料(相对路径 → 正文),写入后再 run(#126)。
 
     #105:timeout_s 默认 DEFAULT_CLI_TIMEOUT_S;传入显式值可覆盖(测试/长任务)。
     """
@@ -104,18 +117,21 @@ def _run_agent(
         DEFAULT_CLI_TIMEOUT_S if timeout_s is None else resolve_cli_timeout(timeout_s)
     )
     with tempfile.TemporaryDirectory() as d:
+        root = Path(d)
+        if materials:
+            _write_materials(root, materials)
         provider.run(
             AgentConfig(
                 persona=persona,
                 context=context,
-                artifact_dir=Path(d),
+                artifact_dir=root,
                 model=provider.model,
                 artifact=artifact,
                 timeout_s=effective,
                 read_dirs=list(read_dirs or []),
             )
         )
-        path = Path(d) / artifact
+        path = root / artifact
         if not path.is_file():
             raise RuntimeError(f"provider produced no artifact: {artifact}")
         return path.read_text()
@@ -250,6 +266,8 @@ _COMPOSE_DISCIPLINE = (
     "(例如 understanding 中不要写 assessment 段落)。\n"
     "- 溯源使用来源目录中的短 ID〔S-…〕与文末索引;不要在正文堆叠完整 "
     "`references/.../digest.md` 路径(索引表链接除外)。\n"
+    "- 当前文档、上游、新增 digest 在 cwd 文件中(见清单),请 Read 后把完整全文作为最终回答输出;"
+    "不要只复述清单,也不要停在「已写入文件」。\n"
     "- 你必须输出当前文档的**完整全文**(含未改动章节);即使本轮判断无需演进,"
     "也要原样重述全文,禁止只输出「为何不改」的变更说明或差异摘要。"
 )
@@ -551,37 +569,46 @@ class ComposeRule:
                     return
                 current = doc_path.read_text() if doc_path.exists() else ""
                 use_delta = delta
-            upstream_blocks = [
-                f"---上游 {dep}---\n{(self.ws.root / dep).read_text()}"
-                for dep in target.depends_on
-                if (self.ws.root / dep).exists()
-            ]
             # 源分层(#13 v2):corpus(fold=False)作只读参考层,不进 context 折叠块;
             # 经 read_dirs 授读 + persona 列出文件,agent 按需 Read 校正/锚定。
             # 存在参考层时,fold 块(stream)标 ·观测 提示需对基线校准;无 corpus 时与今天一致。
+            # #126:主材料摆进 artifact_dir,context 只留清单,禁止把旧文/Δ 内联进 prompt。
             corpus_refs = corpus.collect(self.ws)
             has_corpus = bool(corpus_refs)
             classes = self._delta_classes(use_delta)
-            # #99:来源目录(全量 all_digests)——短 ID 稳定;context 中标注 S-…
             catalog = build_source_catalog(self.ws, all_digests)
             sid_by_path = {e.digest_path: e.source_id for e in catalog}
-            digest_blocks = []
+            layout: dict[str, str] = {}
+            inv: list[str] = [
+                "请 Read 下列文件,把完整文档作为最终回答输出。路径相对 cwd。",
+                "",
+            ]
+            if current:
+                layout["current.md"] = current
+                inv.append("当前文档: current.md")
+            else:
+                inv.append("当前文档: (无,从空文综合)")
+            ups = [dep for dep in target.depends_on if (self.ws.root / dep).exists()]
+            if ups:
+                inv.append("上游:")
+                for dep in ups:
+                    name = Path(dep).name
+                    layout[f"upstream/{name}"] = (self.ws.root / dep).read_text()
+                    inv.append(f"- upstream/{name}")
+            inv.append(f"新增 digest({len(use_delta)} 条,批量融入):")
+            if not use_delta:
+                inv.append("- (无)")
             for p in sorted(use_delta):
                 sid = sid_by_path.get(p, "")
                 label = self._fold_label(classes[p]) if has_corpus else ""
                 head = f"[{sid} | {p}{label}]" if sid else f"[来源:{p}{label}]"
-                digest_blocks.append(f"{head}\n{(self.ws.root / p).read_text()}")
+                layout[f"delta/{p}"] = f"{head}\n{(self.ws.root / p).read_text()}"
+                inv.append(f"- {head} → delta/{p}")
             reference_section = (
                 corpus.reference_section(self.ws, corpus_refs) if has_corpus else ""
             )
             read_dirs = corpus.read_dirs(corpus_refs)
-            context = (
-                f"---当前文档---\n{current}\n\n"
-                + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
-                + format_source_catalog_block(catalog)
-                + f"\n---新增 digest({len(use_delta)} 条,批量融入)---\n"
-                + "\n\n".join(digest_blocks)
-            )
+            context = "\n".join(inv) + format_source_catalog_block(catalog)
             layer = getattr(target, "layer", None) or "fact"
             try:
                 content = _run_agent(
@@ -595,6 +622,7 @@ class ComposeRule:
                     context,
                     "doc.md",
                     read_dirs=read_dirs,
+                    materials=layout,
                 )
             except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
                 import sys

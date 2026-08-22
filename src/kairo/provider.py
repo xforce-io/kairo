@@ -5,7 +5,8 @@ agent 靠往 `artifact_dir` 写文件来通信;外壳(rules/engine)只编排与�
 backend:StubProvider(测试)/ GrokProvider / OpenAICompatibleProvider /
 ClaudeCodeProvider / CodexProvider。
 默认真实路径:本机 grok CLI 可用 → GrokProvider;否则 openai endpoint;
-否则 claude CLI;否则 stub。Grok 无 --add-dir,read_dirs 场景请用 claude-code。
+否则 claude CLI;否则 stub。Grok 无 --add-dir,corpus 场景请用 claude-code;
+compose 主材料摆在 artifact_dir,Grok 走 --prompt-file(#126)。
 """
 
 from __future__ import annotations
@@ -72,6 +73,17 @@ def _scan_artifacts(d: Path) -> list[Path]:
     )
 
 
+def _prefer_written_artifact(dir: Path, name: str, stdout_text: str) -> str:
+    """#126:agent 若已把产物写进 cwd,优先用文件,避免 JSON 短确认覆盖长文。"""
+    path = dir / name
+    if path.is_file():
+        existing = path.read_text()
+        if existing.strip() and len(existing) >= len(stdout_text or ""):
+            return existing
+    path.write_text(stdout_text)
+    return stdout_text
+
+
 def _parse_stub_catalog(context: str) -> list[tuple[str, str, str]]:
     """从 Compose context 的来源目录表解析 (S-id, title, digest_path)。"""
     import re
@@ -84,6 +96,37 @@ def _parse_stub_catalog(context: str) -> list[tuple[str, str, str]]:
         sid, _ref, title, path = m.group(1), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
         rows.append((sid, title, path))
     return rows
+
+
+def compose_material_files(d: Path) -> list[Path]:
+    """#126:artifact_dir 内由外壳摆盘的 compose 主材料(不含 _ 内部文件)。"""
+    out: list[Path] = []
+    cur = d / "current.md"
+    if cur.is_file():
+        out.append(cur)
+    for sub in ("upstream", "delta"):
+        p = d / sub
+        if p.is_dir():
+            out.extend(sorted(x for x in p.rglob("*") if x.is_file()))
+    return out
+
+
+def compose_material_blob(d: Path) -> str:
+    """把摆盘文件拼成可解析块(供 stub / 无工具 endpoint)。"""
+    parts: list[str] = []
+    for p in compose_material_files(d):
+        rel = p.relative_to(d).as_posix()
+        parts.append(f"---文件 {rel}---\n{p.read_text()}")
+    return "\n\n".join(parts)
+
+
+def merged_agent_input(config: AgentConfig) -> str:
+    """context + 摆盘文件正文。无材料时等于 context(digest 路径不变)。"""
+    extra = compose_material_blob(config.artifact_dir)
+    ctx = config.context or ""
+    if extra:
+        return f"{ctx}\n\n{extra}" if ctx.strip() else extra
+    return ctx
 
 
 def _digest_bodies_from_context(context: str) -> list[str]:
@@ -184,7 +227,7 @@ def _stub_compose_document(persona: str, context: str) -> str:
 class StubProvider:
     """确定性 Fake:离线 + 测试。echo 输入 + STUB 标记,只验骨牌链、不被当真。
 
-    输出只依赖 (persona, context),不依赖 artifact_dir 路径 —— 否则破坏收敛幂等。
+    输出只依赖 (persona, context+摆盘文件正文),不依赖 artifact_dir 绝对路径 —— 否则破坏收敛幂等。
     #99:compose(doc.md) 产出紧凑溯源结构,以便写盘前校验可通过。
     """
 
@@ -194,14 +237,15 @@ class StubProvider:
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         art = config.artifact or "output.md"
+        context = merged_agent_input(config)
         if art == "doc.md":
-            content = _stub_compose_document(config.persona, config.context)
+            content = _stub_compose_document(config.persona, context)
         else:
-            seed = f"{config.persona}\n{config.context}"
+            seed = f"{config.persona}\n{context}"
             digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
             content = (
                 f"⚠️ STUB OUTPUT [{digest}]\n\n"
-                f"{config.persona.strip()}\n\n{config.context.strip()}"
+                f"{config.persona.strip()}\n\n{context.strip()}"
             )
         (config.artifact_dir / art).write_text(content)
         return AgentResult(
@@ -270,13 +314,14 @@ class OpenAICompatibleProvider:
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
-        prompt = f"{config.persona}\n\n---\n\n{config.context}"
+        user = merged_agent_input(config)
+        prompt = f"{config.persona}\n\n---\n\n{user}"
         (config.artifact_dir / "_prompt.md").write_text(prompt)
         kwargs = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": config.persona},
-                {"role": "user", "content": config.context},
+                {"role": "user", "content": user},
             ],
         }
         if config.timeout_s is not None:
@@ -459,7 +504,8 @@ class ClaudeCodeProvider:
         add_dir_args = []
         for d in config.read_dirs:  # corpus 只读参考层 → 授 agent 读访问(写仍限 cwd)
             add_dir_args += ["--add-dir", str(d)]
-        if config.read_dirs:  # 非交互预授只读工具,否则 -p 下读 corpus 会被拒
+        # 非交互预授只读:corpus(--add-dir)或 cwd 摆盘材料(#126)
+        if config.read_dirs or compose_material_files(config.artifact_dir):
             add_dir_args += ["--allowedTools", "Read", "Glob", "Grep"]
         self._runner(
             "claude",
@@ -530,9 +576,10 @@ class CodexProvider:
 
 
 class GrokProvider:
-    """驱动 `grok -p` CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
+    """驱动 grok CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
 
-    #61:Grok 无 --add-dir;read_dirs(corpus/附件)忽略,相关场景请用 claude-code。
+    #61:Grok 无 --add-dir;read_dirs(corpus)忽略,相关场景请用 claude-code。
+    #126:prompt 走 --prompt-file,不把正文塞进 argv;-p 不再使用。
     JSON 成功字段为 text;错误为 {"type":"error","message":...},写产物前拦截(#8)。
     """
 
@@ -545,17 +592,20 @@ class GrokProvider:
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
-        (config.artifact_dir / "_prompt.md").write_text(prompt)
+        prompt_file = config.artifact_dir / "_prompt.md"
+        prompt_file.write_text(prompt)
         stdout_file = config.artifact_dir / "_grok_stdout.json"
-        # -p 要求 <PROMPT>;read_dirs 无 CLI 等价物,MVP 忽略(见设计 #61)
-        args = ["-p", prompt, "--output-format", "json"]
+        args = ["--prompt-file", "_prompt.md", "--output-format", "json"]
         if self.model.strip():
             args += ["-m", self.model]
+        if compose_material_files(config.artifact_dir):
+            # 不把 --tools 收成只读:allowlist 会挡住写 doc.md;默认工具 + 预批即可
+            args += ["--always-approve"]
         self._runner(
             "grok",
             args,
             cwd=config.artifact_dir,
-            input=prompt,
+            input=None,
             stdout_file=stdout_file,
             timeout=config.timeout_s,
         )
@@ -565,11 +615,17 @@ class GrokProvider:
         if data.get("type") == "error":
             raise RuntimeError(f"grok 报错:{data.get('message')!r}")
         result = data.get("text")
-        if not isinstance(result, str) or not result.strip():
+        art = config.artifact or "output.md"
+        art_path = config.artifact_dir / art
+        if not (isinstance(result, str) and result.strip()) and not (
+            art_path.is_file() and art_path.read_text().strip()
+        ):
             raise RuntimeError(f"grok stdout 缺 text 字段:{stdout_file}")
-        (config.artifact_dir / (config.artifact or "output.md")).write_text(result)
+        text = _prefer_written_artifact(
+            config.artifact_dir, art, result if isinstance(result, str) else ""
+        )
         return AgentResult(
-            artifacts=_scan_artifacts(config.artifact_dir), result_text=result
+            artifacts=_scan_artifacts(config.artifact_dir), result_text=text
         )
 
 

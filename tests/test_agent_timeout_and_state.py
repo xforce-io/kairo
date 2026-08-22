@@ -107,6 +107,51 @@ def test_run_agent_preserves_explicit_timeout():
     assert p.timeout_s == 42
 
 
+def test_run_agent_writes_materials_before_provider_run():
+    """#126:materials 写入 artifact_dir 后 provider 才能读到。"""
+    seen: dict = {}
+
+    class CapturingProvider:
+        name = "cap"
+        model = "m"
+
+        def run(self, config: AgentConfig, signal=None):
+            p = config.artifact_dir / "delta/references/x/digest.md"
+            seen["digest"] = p.read_text()
+            seen["context"] = config.context
+            (config.artifact_dir / "out.md").write_text("ok")
+            return AgentResult(artifacts=[], result_text="ok")
+
+    text = _run_agent(
+        CapturingProvider(),
+        "persona",
+        "清单",
+        "out.md",
+        materials={"delta/references/x/digest.md": "关键纪要"},
+    )
+    assert text == "ok"
+    assert seen["digest"] == "关键纪要"
+    assert seen["context"] == "清单"
+
+
+def test_run_agent_rejects_material_path_escape():
+    class Dummy:
+        name = "d"
+        model = "m"
+
+        def run(self, config, signal=None):
+            raise AssertionError("should not run")
+
+    with pytest.raises(ValueError, match="escapes"):
+        _run_agent(
+            Dummy(),
+            "p",
+            "c",
+            "out.md",
+            materials={"../x.md": "no"},
+        )
+
+
 def test_cli_timeout_surfaces_as_provider_failed(tmp_path):
     """S3:runner 超时 → Digest 边界记 provider-failed,不写半成品 digest。"""
 

@@ -21,17 +21,18 @@ class _NonDeterministicProvider:
         self.n = 0
 
     def run(self, config, signal=None):
-        from kairo.provider import _stub_compose_document
+        from kairo.provider import _stub_compose_document, merged_agent_input
 
         self.n += 1
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         art = config.artifact or "output.md"
+        ctx = merged_agent_input(config)
         if art == "doc.md":
             # #99:compose 须过溯源校验;在 stub 结构上加变号保持非确定性
-            base = _stub_compose_document(config.persona, config.context)
+            base = _stub_compose_document(config.persona, ctx)
             content = f"OUTPUT #{self.n}\n{base}"
         else:
-            content = f"OUTPUT #{self.n}\n{config.context}"
+            content = f"OUTPUT #{self.n}\n{ctx}"
         (config.artifact_dir / art).write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
