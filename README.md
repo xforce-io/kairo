@@ -102,9 +102,11 @@ The audio-transcription command is **machine-specific** and is not written into 
 
 ```toml
 [asr.whisper]
-cmd = "mlx_whisper {input} --model mlx-community/whisper-large-v3-turbo --language zh -f txt -o {outdir} --output-name {stem}"
+cmd = "mlx_whisper {input} --model mlx-community/whisper-large-v3-turbo --language zh -f srt -o {outdir} --output-name {stem}"
 origin = "whisper:large-v3-turbo"
 ```
+
+Listen-read synchronization needs an SRT timeline. Existing `-f txt` configurations still transcribe, but show text without playback highlighting. After switching to `-f srt`, run `kairo re-step <reference-id>` to regenerate an existing transcript.
 
 `kairo step` looks up the matching section by the transform's `backend` in `constitution.yaml` (default `whisper`) — so one machine can host multiple backends (`[asr.whisper]`, `[asr.xxx]`), routed by the workspace's declared backend. Placeholders: `{input}` audio path, `{outdir}` temp output dir, `{stem}` output name, `{output}`=`{outdir}/{stem}.txt`. If the template contains any output placeholder → kairo reads the transcription from the output file; otherwise it captures stdout. Environment variables `KAIRO_ASR_CMD` (and `KAIRO_ASR_ORIGIN`) override globally. Command failure → `blocked: asr-failed` (a fake transcription is never written); no matching config → `blocked: no-asr`.
 

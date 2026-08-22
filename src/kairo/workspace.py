@@ -67,6 +67,15 @@ def _slug(text: str) -> str:
     return s or hashlib.sha256(text.encode("utf-8")).hexdigest()[:8]
 
 
+def _keyed_transform_filename(role: str, source: Form, sources: list[Form]) -> str:
+    """多源派生产物名；basename 冲突时用 location hash 消歧。"""
+    slug = _slug(Path(source.location).name)
+    if sum(_slug(Path(item.location).name) == slug for item in sources) > 1:
+        suffix = hashlib.sha256(source.location.encode()).hexdigest()[:8]
+        slug = f"{slug}-{suffix}"
+    return f"{role}.{slug}.md"
+
+
 def default_reference_title(*, now: datetime.datetime | None = None) -> str:
     """新建 reference 的默认展示名:本地时间 ``YYYYMMDD-HH``(#103)。
 

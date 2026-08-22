@@ -35,7 +35,7 @@ from kairo.provenance import (
     validate_provenance,
 )
 from kairo.provider import AgentConfig
-from kairo.workspace import _slug
+from kairo.workspace import _keyed_transform_filename
 
 # #98 安全摘要:单行长度上限
 _PROVIDER_SUMMARY_MAX = 200
@@ -178,7 +178,7 @@ class TransformRule:
             else:
                 # 多源:每源独立派生,用 keyed 格式
                 for i, src in enumerate(srcs):
-                    keyed = f"references/{ref_id}/{self.produces}.{_slug(Path(src.location).name)}.md"
+                    keyed = f"references/{ref_id}/{_keyed_transform_filename(self.produces, src, srcs)}"
                     done = keyed in produced_locs
                     if not done and i == 0 and legacy in produced_locs:
                         done = True  # 迁移:legacy {produces}.md 归属第一个源

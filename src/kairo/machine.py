@@ -5,7 +5,7 @@ constitution 只声明意图(transform 的 backend),"这台机器具体怎么转
 
 config.toml 按 transform 的 backend 名分节,形如:
     [asr.whisper]
-    cmd = "mlx_whisper {input} --model ... -f txt -o {outdir} --output-name {stem}"
+    cmd = "mlx_whisper {input} --model ... -f srt -o {outdir} --output-name {stem}"
     origin = "whisper:large-v3-turbo"
 """
 
