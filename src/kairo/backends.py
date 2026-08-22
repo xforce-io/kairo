@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 import subprocess
 import tempfile
@@ -58,6 +59,29 @@ def _run_asr(backend: str, src: Path) -> BackendResult:
     return ("ok", text, origin)
 
 
+def _normalize_srt(text: str) -> str:
+    """把标准 SRT cue 归一为听读层已有的行级时间前缀；异常时原样返回。"""
+    cues: list[str] = []
+    source = text.lstrip("\ufeff")
+    for block in re.split(r"\r?\n\s*\r?\n", source.strip()):
+        lines = block.splitlines()
+        if lines and lines[0].strip().isdigit():
+            lines = lines[1:]
+        if len(lines) < 2:
+            return text
+        match = re.match(r"^(\d{1,3}):([0-5]\d):([0-5]\d),(\d{3})\s+-->\s+", lines[0])
+        if not match:
+            return text
+        hour, minute, second, millis = match.groups()
+        fraction = millis.rstrip("0")
+        stamp = f"{int(hour)}:{minute}:{second}" + (f".{fraction}" if fraction else "")
+        body = "\n".join(lines[1:]).strip()
+        if not body:
+            return text
+        cues.append(f"[{stamp}] {body}")
+    return "\n".join(cues) if cues else text
+
+
 def _run_asr_cmd(template: str, input_path: Path) -> str | None:
     """跑本机转写命令,返回转写文本;失败/空产物返回 None。
 
@@ -90,7 +114,7 @@ def _run_asr_cmd(template: str, input_path: Path) -> str | None:
         for c in candidates:
             text = c.read_text().strip()
             if text:
-                return text
+                return _normalize_srt(text) if c.suffix.lower() == ".srt" else text
         return None
 
 

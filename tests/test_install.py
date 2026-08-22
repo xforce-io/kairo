@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from typer.testing import CliRunner
 
 from kairo.cli import app
@@ -28,6 +26,7 @@ def test_doctor_lines_stub_and_missing_skill(tmp_path, monkeypatch):
     assert "kairo " in text
     assert "provider: stub" in text
     assert "asr.whisper: 未配置" in text
+    assert "-f srt" in text
     assert "skill: 未 connect" in text
     assert "kairo connect" in text
 

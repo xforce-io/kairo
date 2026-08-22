@@ -1,10 +1,12 @@
 """#122 Web 听读面:选 audio、配对切换、媒体 URL。"""
 
+import sys
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from kairo.models import Form, Manifest
+from kairo.models import Form, Manifest, State
+from kairo.rules import TransformRule
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 
@@ -77,6 +79,40 @@ def test_switch_audio_swaps_transcript_and_src(tmp_path):
     assert "alpha one" not in r.text
     assert f'/w/ws/ref/{rid}/file/1' in r.text
     assert f'/w/ws/ref/{rid}/file/0"' not in r.text
+
+
+def test_real_transform_outputs_pair_and_render_timed_units(tmp_path, monkeypatch):
+    ws = Workspace.init(tmp_path / "ws", topic="listen")
+    a1, a2 = tmp_path / "a1.wav", tmp_path / "a2.wav"
+    _write_wav(a1)
+    _write_wav(a2)
+    rid = ws.add([a1, a2], role="audio")
+    fake = tmp_path / "fake_asr.py"
+    fake.write_text(
+        "import pathlib, sys\n"
+        "name = pathlib.Path(sys.argv[1]).stem\n"
+        "pathlib.Path(sys.argv[2], 'transcript.srt').write_text("
+        "f'1\\n00:00:01,500 --> 00:00:03,000\\n{name} shared\\n')\n"
+    )
+    monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {fake} {{input}} {{outdir}}")
+    monkeypatch.setenv("KAIRO_ASR_ORIGIN", "whisper:test")
+    state = State()
+    for item in TransformRule(ws, backend="whisper").discover():
+        item.run(state)
+
+    manifest = ws.read_manifest(rid)
+    assert [f.origin for f in manifest.forms if f.role == "transcript"] == [
+        "whisper:test",
+        "whisper:test",
+    ]
+    first = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/0")
+    second = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/1")
+    assert first.status_code == second.status_code == 200
+    assert "a1 shared" in first.text and "a2 shared" not in first.text
+    assert "a2 shared" in second.text and "a1 shared" not in second.text
+    assert 'data-start="1.5"' in first.text
+    assert f"/w/ws/ref/{rid}/file/0" in first.text
+    assert f"/w/ws/ref/{rid}/file/1" in second.text
 
 
 def test_unpaired_audio_plays_without_fake_transcript(tmp_path):

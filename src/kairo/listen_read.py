@@ -5,9 +5,11 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Iterable
 
 from kairo.models import Form
+from kairo.workspace import _keyed_transform_filename
 
 _PREFIX = re.compile(
     r"^[ \t]*\[(?:"
@@ -173,9 +175,33 @@ def pair_audio_transcripts(forms: Iterable[Form]) -> list[Pair]:
 
     rest_a = [a for a in audios if id(a) not in used_a]
     rest_t = [t for t in transcripts if id(t) not in used_t]
+
+    # 多源 Transform 以 keyed location 记录来源，origin 保留 ASR provider/model。
+    keyed = {
+        id(a): [
+            t
+            for t in rest_t
+            if not t.origin.startswith("asr-from:")
+            and Path(t.location).name
+            == _keyed_transform_filename("transcript", a, audios)
+        ]
+        for a in rest_a
+    }
+    transcript_claims = defaultdict(int)
+    for ts in keyed.values():
+        for t in ts:
+            transcript_claims[id(t)] += 1
+    for a in rest_a:
+        ts = keyed[id(a)]
+        if len(ts) == 1 and transcript_claims[id(ts[0])] == 1:
+            pairs.append(Pair(audio=a, transcript=ts[0], linked=True))
+            used_a.add(id(a))
+            used_t.add(id(ts[0]))
+
+    rest_a = [a for a in rest_a if id(a) not in used_a]
+    rest_t = [t for t in rest_t if id(t) not in used_t]
     if len(rest_a) == 1 and len(rest_t) == 1:
         pairs.append(Pair(audio=rest_a[0], transcript=rest_t[0], linked=True))
-        used_a.add(id(rest_a[0]))
         rest_a = []
 
     for a in rest_a:

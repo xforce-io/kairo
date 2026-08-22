@@ -82,7 +82,7 @@ def doctor_lines(*, home: Path | None = None) -> list[str]:
         lines.append("  [asr.whisper]")
         lines.append(
             '  cmd = "mlx_whisper {input} --model mlx-community/whisper-large-v3-turbo'
-            ' --language zh -f txt -o {outdir} --output-name {stem}"'
+            ' --language zh -f srt -o {outdir} --output-name {stem}"'
         )
         lines.append('  origin = "whisper:large-v3-turbo"')
 

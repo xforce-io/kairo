@@ -102,9 +102,11 @@ glossary:
 
 ```toml
 [asr.whisper]
-cmd = "mlx_whisper {input} --model mlx-community/whisper-large-v3-turbo --language zh -f txt -o {outdir} --output-name {stem}"
+cmd = "mlx_whisper {input} --model mlx-community/whisper-large-v3-turbo --language zh -f srt -o {outdir} --output-name {stem}"
 origin = "whisper:large-v3-turbo"
 ```
+
+听读联动需要 SRT 时间轴；旧 `-f txt` 配置仍可转写，但只显示正文、不随播放高亮。改为 `-f srt` 后，可用 `kairo re-step <reference-id>` 重产既有转写。
 
 `kairo step` 按 `constitution.yaml` 里 transform 的 `backend`（默认 `whisper`）查对应节——故一台机器可并存多种后端（`[asr.whisper]`、`[asr.xxx]`），按 workspace 声明的 backend 路由。占位符：`{input}` 音频路径、`{outdir}` 临时输出目录、`{stem}` 输出名、`{output}`=`{outdir}/{stem}.txt`。模板含任一输出占位 → kairo 从产物文件读转写；否则捕获 stdout。环境变量 `KAIRO_ASR_CMD`（及 `KAIRO_ASR_ORIGIN`）全局覆盖。命令失败 → `blocked: asr-failed`（绝不写假转写）；无对应配置 → `blocked: no-asr`。
 
