@@ -1,7 +1,7 @@
 # 【compose】Digest 同次产出定长证据卡并重建有界主题文档
 
 - Issue: #128
-- 状态: Approved
+- 状态: Implemented
 - 最后更新: 2026-08-22
 
 ## 1. 背景
