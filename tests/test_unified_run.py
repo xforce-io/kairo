@@ -53,6 +53,21 @@ def test_plan_retry_when_only_asr_failed(tmp_path, monkeypatch):
     assert ws.read_state().products[key].status != "blocked"
 
 
+def test_run_retries_compose_invalid_once(tmp_path, monkeypatch):
+    ws, _ = _ws_audio(tmp_path, monkeypatch)
+    step(ws, StubProvider())
+    st = ws.read_state()
+    st.targets["understanding.md"].status = "blocked"
+    st.targets["understanding.md"].reason = "compose-invalid"
+    ws.write_state(st)
+    plan = workspace_run_plan(ws)
+    assert plan["mode"] == "retry"
+    assert plan["blocked_targets"][0]["reason"] == "compose-invalid"
+    assert run_workspace(ws, StubProvider()) is True
+    assert ws.read_state().targets["understanding.md"].status == "ok"
+    assert workspace_run_plan(ws)["mode"] == "clean"
+
+
 def test_web_run_button_retry_label(tmp_path, monkeypatch):
     ws, rid = _ws_audio(tmp_path, monkeypatch)
     src_hash = ws.read_manifest(rid).forms[0].hash

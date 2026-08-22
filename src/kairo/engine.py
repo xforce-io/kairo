@@ -21,6 +21,7 @@ from kairo.rules import (
 from kairo.stream_index import write_stream_index
 
 MAX_ITER = 100
+_RETRYABLE_TARGET_REASONS = (REASON_PROVIDER_FAILED, "compose-invalid")
 
 
 class ProseError(Exception):
@@ -169,16 +170,13 @@ def ref_product_blocks(ws, ref_id: str) -> list[dict]:
 
 
 def clear_provider_failed_targets(ws) -> int:
-    """清除 target 上的 provider-failed 终态(保留正文),返回清除条数。
-
-    #98:run 等显式恢复入口用;不删 understanding/assessment 已有内容。
-    """
+    """清除 Run 可重试的 target 终态并强制重综合；保留上一版正文。"""
     state = ws.read_state()
     n = 0
     for path, ts in list(state.targets.items()):
-        if ts.status == "blocked" and ts.reason == REASON_PROVIDER_FAILED:
+        if ts.status == "blocked" and ts.reason in _RETRYABLE_TARGET_REASONS:
             ts.status = "ok"
-            ts.reason = None
+            ts.reason = "materials-changed"
             ts.diagnostic = None
             state.targets[path] = ts
             n += 1
@@ -277,7 +275,7 @@ def workspace_run_plan(ws) -> dict:
       retry — 仅有 blocked(终态失败)
       run_and_retry — 两者都有
 
-    #98:blocked 含 reference 产物失败 + target 的 provider-failed。
+    #98/#128:blocked 含 reference 产物失败 + Run 可重试的 target 终态。
     """
     pending_n = len(pending(ws))
     blocked_refs: list[dict] = []
@@ -287,7 +285,7 @@ def workspace_run_plan(ws) -> dict:
             blocked_refs.append({"ref_id": ref_id, "blocks": blocks})
     blocked_targets: list[dict] = []
     for path, ts in ws.read_state().targets.items():
-        if ts.status == "blocked" and ts.reason == REASON_PROVIDER_FAILED:
+        if ts.status == "blocked" and ts.reason in _RETRYABLE_TARGET_REASONS:
             diag = ts.diagnostic
             blocked_targets.append(
                 {
