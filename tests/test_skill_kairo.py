@@ -113,6 +113,7 @@ def test_skill_blocked_closed_set():
         "digest-invalid",
         "card-invalid",
         "card-over-budget",
+        "compose-invalid",
         "compose-provenance-invalid",
         "compose-over-budget",
         "provider-failed",

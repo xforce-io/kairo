@@ -45,7 +45,9 @@ REASON_DIGEST_INVALID = "digest-invalid"
 REASON_CARD_INVALID = "card-invalid"
 REASON_CARD_OVER_BUDGET = "card-over-budget"
 REASON_COMPOSE_OVER_BUDGET = "compose-over-budget"
+REASON_COMPOSE_INVALID = "compose-invalid"
 _CARD_HEADINGS = ("## 摘要", "## 关键事实", "## 决策", "## 开放问题")
+_LEGACY_TRUNCATION_MARKER = "[已截断，详见完整 digest]"
 
 # #98 安全摘要:单行长度上限
 _PROVIDER_SUMMARY_MAX = 200
@@ -128,6 +130,19 @@ def _evidence_header(entry, digest_hash: str, origin: str) -> str:
 
 def _valid_evidence_body(body: str) -> bool:
     return all(heading in body for heading in _CARD_HEADINGS)
+
+
+def _legacy_excerpt(source: str, budget: int) -> str:
+    source = source.strip()
+    if len(source) <= budget:
+        return source
+    suffix = "\n\n" + _LEGACY_TRUNCATION_MARKER
+    head = source[: budget - len(suffix)].rstrip()
+    boundaries = [m.end() for m in re.finditer(r"\n\n|[。！？]", head)]
+    complete = [end for end in boundaries if end >= len(head) // 2]
+    if complete:
+        head = head[: complete[-1]].rstrip()
+    return head + suffix
 
 
 def safe_provider_summary(
@@ -644,8 +659,13 @@ class LegacyEvidenceRule:
         def run(state: State) -> None:
             if path.is_file():
                 current = path.read_text()
+                old_legacy = (
+                    "- 生成: legacy-derived" in current
+                    and _LEGACY_TRUNCATION_MARKER not in current
+                )
                 if (
-                    len(current) <= EVIDENCE_CARD_MAX_CHARS
+                    not old_legacy
+                    and len(current) <= EVIDENCE_CARD_MAX_CHARS
                     and _valid_evidence_body(current)
                     and f"- Digest hash: {digest_hash}" in current
                 ):
@@ -683,7 +703,7 @@ class LegacyEvidenceRule:
             first_heading = re.search(r"(?m)^#\s+\S", source)
             if first_heading:
                 source = source[first_heading.start() :]
-            excerpt = source[:budget].rstrip()
+            excerpt = _legacy_excerpt(source, budget)
             path.write_text(prefix + (excerpt or "N/A") + suffix)
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -907,6 +927,17 @@ class ComposeRule:
                 ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
                 state.targets[key] = ts
                 return
+            # 兼容无 H1 的旧输出；首行若带 H1，它必须是正文起点。
+            first_line = content.lstrip().split("\n", 1)[0]
+            if re.search(r"(?<!#)#\s+\S", first_line) and not re.match(
+                r"#\s+\S", first_line
+            ):
+                ts = ts0 or TargetState(depends_on=list(target.depends_on))
+                ts.status = "blocked"
+                ts.reason = REASON_COMPOSE_INVALID
+                ts.diagnostic = None
+                state.targets[key] = ts
+                return
             if len(content) > COMPOSE_MAX_CHARS:
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
@@ -968,6 +999,7 @@ class ComposeRule:
                 REASON_PROVIDER_FAILED,
                 REASON_PROVENANCE_INVALID,
                 REASON_COMPOSE_OVER_BUDGET,
+                REASON_COMPOSE_INVALID,
             ):
                 return False
             if ts and ts.reason == "materials-changed":

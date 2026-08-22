@@ -379,6 +379,29 @@ def test_grok_provider_keeps_written_artifact_over_short_stdout(tmp_path):
     assert res.result_text == body
 
 
+def test_grok_provider_keeps_written_artifact_over_longer_stdout(tmp_path):
+    """agent 明确写了 artifact 时，stdout 的执行旁白再长也不能覆盖正文。"""
+
+    clean = "# 干净正文\n\n结论。\n"
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        Path(cwd, "out.md").write_text(clean)
+        noisy = "先读取材料并分析。" * 100 + clean
+        Path(stdout_file).write_text(json.dumps({"text": noisy}))
+
+    res = GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="清单",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+        )
+    )
+    assert (tmp_path / "out.md").read_text() == clean
+    assert res.result_text == clean
+
+
 def test_grok_provider_identity():
     p = GrokProvider(model="")
     assert p.name == "grok"

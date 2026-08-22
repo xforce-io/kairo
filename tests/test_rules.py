@@ -648,6 +648,42 @@ def test_legacy_digest_gets_zero_model_evidence(tmp_path):
     assert len(card) <= EVIDENCE_CARD_MAX_CHARS
 
 
+def test_legacy_evidence_truncates_at_complete_boundary(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    digest = "# 旧纪要\n\n" + ("这是完整事实句。" * 400) + "不应留下半句XYZ"
+    _make_digest(ws, rid, digest)
+    state = State()
+    _make_cards(ws, state)
+    card = (ws.root / f"references/{rid}/evidence.md").read_text()
+    summary = card.split("## 摘要\n\n", 1)[1].split("\n\n## 关键事实", 1)[0]
+    assert len(card) <= EVIDENCE_CARD_MAX_CHARS
+    assert summary.endswith("[已截断，详见完整 digest]")
+    assert "半句XYZ" not in summary
+    assert "完整事实句。\n\n[已截断" in summary
+
+
+def test_legacy_evidence_migrates_old_hard_cut_card(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    digest_key = _make_digest(ws, rid, "# 旧纪要\n\n" + ("完整句。" * 500))
+    digest_hash = _hash((ws.root / digest_key).read_text())
+    card = ws.root / f"references/{rid}/evidence.md"
+    card.write_text(
+        "# 证据卡\n\n"
+        f"- Digest hash: {digest_hash}\n- 生成: legacy-derived\n\n"
+        "## 摘要\n\n旧版硬截断\n\n## 关键事实\n\n- N/A\n\n"
+        "## 决策\n\n- N/A\n\n## 开放问题\n\n- N/A\n"
+    )
+    state = State()
+    LegacyEvidenceRule(ws).discover(state)[0].run(state)
+    assert "[已截断，详见完整 digest]" in card.read_text()
+
+
 # ---- Compose ----
 
 
@@ -768,6 +804,24 @@ def test_compose_blocks_over_budget_output_and_keeps_prior(tmp_path):
     ts = state.targets["understanding.md"]
     assert ts.status == "blocked" and ts.reason == "compose-over-budget"
     assert item.is_stale(state) is False
+
+
+def test_compose_blocks_process_preamble_and_keeps_prior(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    _make_digest(ws, rid, "新纪要")
+    prior = "# 上一版\n"
+    state = State()
+    state.targets["understanding.md"] = _seed_prior_understanding(ws, prior)
+    _make_cards(ws, state)
+    noisy = _valid_compose_doc(ws, "先读取材料并分析。# 当前正文")
+    item = _understanding_item(ws, _FixedProvider(noisy), state)
+    item.run(state)
+    assert (ws.root / "understanding.md").read_text() == prior
+    ts = state.targets["understanding.md"]
+    assert ts.status == "blocked" and ts.reason == "compose-invalid"
 
 
 def test_compose_allows_normal_sized_update(tmp_path):

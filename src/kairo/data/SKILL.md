@@ -80,7 +80,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | `missing-source` | 源路径不可达 | 恢复源或 `--copy` 重登记 |
 | `manual-edit` | 文档被手改，待接受 | 确认后 `kairo accept <doc>`；或放弃手改再 `re-step`（会丢手改，必须讲清） |
 | `digest-invalid` / `card-invalid` / `card-over-budget` | Digest 双产物缺块、证据卡缺节或超过 2,000 字符 | 不覆盖旧 digest/card；确认后 `retry-ref` |
-| `compose-provenance-invalid` / `compose-over-budget` | 目标溯源无效或超过 20,000 字符 | 不覆盖旧文档；确认后 `re-step` |
+| `compose-invalid` / `compose-provenance-invalid` / `compose-over-budget` | 目标首行混入执行旁白、溯源无效或超过 20,000 字符 | 不覆盖旧文档；确认后 `re-step` |
 | `provider-failed` | digest / compose provider 调用失败 | 终态；服务恢复后确认再 `run` / `retry-ref` / `re-step` |
 | `compose-degraded` | 旧版本遗留的全文骤缩护栏状态 | 终态；确认后 `re-step` 迁移到有界综合 |
 

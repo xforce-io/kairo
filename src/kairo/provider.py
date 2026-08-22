@@ -78,7 +78,7 @@ def _prefer_written_artifact(dir: Path, name: str, stdout_text: str) -> str:
     path = dir / name
     if path.is_file():
         existing = path.read_text()
-        if existing.strip() and len(existing) >= len(stdout_text or ""):
+        if existing.strip():
             return existing
     path.write_text(stdout_text)
     return stdout_text
