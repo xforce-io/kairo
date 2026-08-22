@@ -31,6 +31,16 @@ class _NonDeterministicProvider:
             # #99:compose 须过溯源校验;在 stub 结构上加变号保持非确定性
             base = _stub_compose_document(config.persona, ctx)
             content = f"OUTPUT #{self.n}\n{base}"
+        elif art == "digest.bundle.md":
+            content = (
+                "<KAIRO_EVIDENCE>\n"
+                f"## 摘要\n\nOUTPUT #{self.n} {ctx[-400:]}\n\n"
+                "## 关键事实\n\n- fact\n\n## 决策\n\n- N/A\n\n"
+                "## 开放问题\n\n- N/A\n"
+                "</KAIRO_EVIDENCE>\n<KAIRO_DIGEST>\n"
+                f"OUTPUT #{self.n}\n{ctx}\n"
+                "</KAIRO_DIGEST>\n"
+            )
         else:
             content = f"OUTPUT #{self.n}\n{ctx}"
         (config.artifact_dir / art).write_text(content)
@@ -62,7 +72,18 @@ class _EndpointCompletions:
         self.n += 1
         user = kwargs["messages"][1]["content"]
         system = kwargs["messages"][0]["content"] if kwargs.get("messages") else ""
-        # #99:compose 上下文含来源目录 → 产出可过校验的文档;digest 仍 echo
+        # #99:compose 上下文含来源目录 → 产出可过校验的文档;Digest 一次双产物。
+        if "<KAIRO_EVIDENCE>" in system:
+            return _EndpointCompletion(
+                "<KAIRO_EVIDENCE>\n## 摘要\n\n"
+                + user[-400:]
+                + "\n\n## 关键事实\n\n- endpoint fact\n\n"
+                "## 决策\n\n- N/A\n\n## 开放问题\n\n- N/A\n"
+                "</KAIRO_EVIDENCE>\n<KAIRO_DIGEST>\n"
+                + f"ENDPOINT #{self.n}\n"
+                + user
+                + "\n</KAIRO_DIGEST>\n"
+            )
         if "来源目录" in user or "溯源输出协议" in system:
             body = _stub_compose_document(system, user)
             return _EndpointCompletion(f"ENDPOINT #{self.n}\n{body}")

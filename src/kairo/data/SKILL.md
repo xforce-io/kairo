@@ -7,7 +7,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 把会话里的调研工作区意图翻译成正确的 `kairo` CLI 调用与文件读取，并按协议把输出解读成人话。这是 CLI + workspace 文件布局之上的**薄壳**：不重实现引擎逻辑，不代替人确认写操作。
 
-命令模型：**看（status + 读两层文档）永远便宜**；**算/做（step / re-step / accept …）永远显式确认**。两层产出：`understanding.md`（中立事实）与 `assessment.md`（立场判断）——不混、不颠倒。
+命令模型：**看（status + 读两层文档）永远便宜**；**算/做（step / re-step / accept …）永远显式确认**。两层有界产出：`understanding.md`（全量证据卡重建的中立事实）与 `assessment.md`（只依赖 understanding 的立场判断）——不混、不颠倒。
 
 ## 前置自检
 
@@ -57,8 +57,9 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 1. `kairo status` — fold 进度、blocked、corpus 漂移提示
 2. `understanding.md` — **事实层**（中立、可标来源）
 3. `assessment.md` — **判断层**（立场、依赖 understanding；不可当事实复述）
-4. 需要出处/细节时再下钻 `references/<id>/` 下的 **digest**（高密度记忆纪要 = 该条 reference 的记忆）
-5. transcript / source_text / prose / 原始 form — **原料或人读档案**，不是「调研结论」
+4. 需要出处时先看 `references/<id>/evidence.md`（≤2,000 字符证据卡）
+5. 需要完整细节再下钻同目录 **digest.md**（详细事实源）
+6. transcript / source_text / prose / 原始 form — **原料或人读档案**，不是「调研结论」
 
 回复必须：
 
@@ -78,12 +79,15 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | `convert-failed` | 二进制转换失败或空产物 | 查源文件；终态，需确认后重试 |
 | `missing-source` | 源路径不可达 | 恢复源或 `--copy` 重登记 |
 | `manual-edit` | 文档被手改，待接受 | 确认后 `kairo accept <doc>`；或放弃手改再 `re-step`（会丢手改，必须讲清） |
-| `compose-degraded` | 综合输出骤缩，已拒绝覆盖以保护旧文档 | 终态；确认后 `re-step` 重算 |
+| `digest-invalid` / `card-invalid` / `card-over-budget` | Digest 双产物缺块、证据卡缺节或超过 2,000 字符 | 不覆盖旧 digest/card；确认后 `retry-ref` |
+| `compose-provenance-invalid` / `compose-over-budget` | 目标溯源无效或超过 20,000 字符 | 不覆盖旧文档；确认后 `re-step` |
+| `provider-failed` | digest / compose provider 调用失败 | 终态；服务恢复后确认再 `run` / `retry-ref` / `re-step` |
+| `compose-degraded` | 旧版本遗留的全文骤缩护栏状态 | 终态；确认后 `re-step` 迁移到有界综合 |
 
 规则摘要：
 
 - 前置条件变化后，部分 blocked 在下次 `step` **自动**重试（如配好 ASR 后的 `no-asr`）
-- `asr-failed` / `convert-failed` / `compose-degraded` 视为**终态**，需手动 `re-step` / `retry-ref`
+- `asr-failed` / `convert-failed` / card/compose 校验失败 / `provider-failed` / `compose-degraded` 视为**终态**，需手动 `run` / `re-step` / `retry-ref`
 - skill **解释 + 给选项**；**绝不**未授权就 `accept` / `step` / `re-step`
 
 ## 铁律

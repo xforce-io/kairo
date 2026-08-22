@@ -39,6 +39,16 @@ DEFAULT_UNDERSTANDING_FOLD = (
     "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。"
 )
 
+DEFAULT_EVIDENCE_CARD_PROMPT = (
+    "把单条 digest 压缩成一张忠实、高密度的证据卡。\n"
+    "严格输出且只输出以下四节,无内容写 `- N/A`，不要写标题、来源、ID 或其它前后文：\n"
+    "## 摘要\n"
+    "## 关键事实\n"
+    "## 决策\n"
+    "## 开放问题\n"
+    "保留会改变 topic 理解或判断的数字、专名、约束、冲突与待办；不要复述过程性口水。"
+)
+
 DEFAULT_ASSESSMENT_FOLD = (
     "沉淀立场与判断,引用上游 understanding 的事实;随新材料演进、可推翻旧判断。\n"
     "不与 understanding 的中立事实混。\n"

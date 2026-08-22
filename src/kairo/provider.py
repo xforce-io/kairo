@@ -104,7 +104,7 @@ def compose_material_files(d: Path) -> list[Path]:
     cur = d / "current.md"
     if cur.is_file():
         out.append(cur)
-    for sub in ("upstream", "delta"):
+    for sub in ("upstream", "delta", "cards"):
         p = d / sub
         if p.is_dir():
             out.extend(sorted(x for x in p.rglob("*") if x.is_file()))
@@ -129,22 +129,20 @@ def merged_agent_input(config: AgentConfig) -> str:
     return ctx
 
 
-def _digest_bodies_from_context(context: str) -> list[str]:
-    """抽取 context 中各 digest 块正文(供 stub 写入事实层,保持链上可断言)。"""
+def _evidence_bodies_from_context(context: str) -> dict[str, str]:
+    """抽取摆盘 card 的 S-id→正文，供 stub 保持链上可断言。"""
     import re
 
-    parts = re.split(r"\n(?=\[(?:S-[0-9a-f]+ \||来源:))", context)
-    bodies: list[str] = []
-    for part in parts:
-        if not part.startswith("["):
-            continue
-        nl = part.find("\n")
-        if nl < 0:
-            continue
-        body = part[nl + 1 :].strip()
-        if body:
-            bodies.append(body)
-    return bodies
+    out: dict[str, str] = {}
+    for match in re.finditer(
+        r"---文件 cards/[^\n]+---\n"
+        r"\[状态:[^|]+\|\s*(S-[0-9a-f]+)\]\n"
+        r"(.*?)(?=\n\n---文件 |\Z)",
+        context,
+        re.DOTALL,
+    ):
+        out[match.group(1)] = match.group(2).strip()
+    return out
 
 
 def _stub_compose_document(persona: str, context: str) -> str:
@@ -169,7 +167,8 @@ def _stub_compose_document(persona: str, context: str) -> str:
         )
     sids = [c[0] for c in catalog]
     scope = " ".join(f"〔{s}〕" for s in sorted(sids))
-    bodies = _digest_bodies_from_context(context)
+    bodies = _evidence_bodies_from_context(context)
+    snippet_limit = max(40, min(400, 8_000 // max(1, len(catalog))))
     body_bits = [
         f"⚠️ STUB {'ASSESSMENT' if judgment else 'UNDERSTANDING'} [{digest}]",
         "",
@@ -181,8 +180,12 @@ def _stub_compose_document(persona: str, context: str) -> str:
     for i, (sid, title, path) in enumerate(catalog):
         core = sid[2:]
         fid = f"F-{core}-01"
-        snippet = bodies[i] if i < len(bodies) else ""
-        # 去掉 digest 内可能的路径泄漏,避免校验失败
+        card = bodies.get(sid, "")
+        summary = card
+        if "## 摘要" in card:
+            summary = card.split("## 摘要", 1)[1].split("## 关键事实", 1)[0]
+        snippet = summary.strip()[-snippet_limit:]
+        # 去掉 card 内可能的路径泄漏,避免校验失败
         snippet = snippet.replace("references/", "ref:")
         if judgment:
             body_bits.append(
@@ -192,7 +195,7 @@ def _stub_compose_document(persona: str, context: str) -> str:
         else:
             body_bits.append(
                 f'<a id="{fid}"></a>与「{title}」相关的关键事实〔{sid}〕。'
-                + (f"\n\n{snippet[:800]}" if snippet else "")
+                + (f"\n\n{snippet}" if snippet else "")
             )
         body_bits.append("")
     # 判断层应能看到上游 understanding 路径名(测试依赖)
@@ -240,6 +243,21 @@ class StubProvider:
         context = merged_agent_input(config)
         if art == "doc.md":
             content = _stub_compose_document(config.persona, context)
+        elif art == "digest.bundle.md":
+            digest_persona = config.persona.split("[Digest 双产物输出协议]", 1)[0].strip()
+            snippet = f"{digest_persona}\n{context}"[-800:].replace("references/", "ref:")
+            content = (
+                "<KAIRO_EVIDENCE>\n"
+                "## 摘要\n\n"
+                f"{snippet or '- N/A'}\n\n"
+                "## 关键事实\n\n- STUB 证据事实\n\n"
+                "## 决策\n\n- N/A\n\n"
+                "## 开放问题\n\n- N/A\n"
+                "</KAIRO_EVIDENCE>\n"
+                "<KAIRO_DIGEST>\n"
+                f"⚠️ STUB OUTPUT\n\n{digest_persona}\n\n{context.strip()}\n"
+                "</KAIRO_DIGEST>\n"
+            )
         else:
             seed = f"{config.persona}\n{context}"
             digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]

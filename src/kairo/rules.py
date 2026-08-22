@@ -18,6 +18,7 @@ from kairo import corpus
 from kairo.backends import run_backend
 from kairo.machine import resolve_asr
 from kairo.models import (
+    DEFAULT_EVIDENCE_CARD_PROMPT,
     REASON_PROVIDER_FAILED,
     FailureDiagnostic,
     Form,
@@ -37,6 +38,15 @@ from kairo.provenance import (
 from kairo.provider import AgentConfig
 from kairo.workspace import _slug
 
+# #128:证据卡与主题文档固定预算。按 Unicode code point(len)计。
+EVIDENCE_CARD_MAX_CHARS = 2_000
+COMPOSE_MAX_CHARS = 20_000
+REASON_DIGEST_INVALID = "digest-invalid"
+REASON_CARD_INVALID = "card-invalid"
+REASON_CARD_OVER_BUDGET = "card-over-budget"
+REASON_COMPOSE_OVER_BUDGET = "compose-over-budget"
+_CARD_HEADINGS = ("## 摘要", "## 关键事实", "## 决策", "## 开放问题")
+
 # #98 安全摘要:单行长度上限
 _PROVIDER_SUMMARY_MAX = 200
 _REDACT_PATTERNS: tuple[re.Pattern[str], ...] = (
@@ -53,6 +63,71 @@ _REDACT_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _fold_digests(ws) -> dict[str, str]:
+    """可 fold digest 的 path→内容 hash。"""
+    out: dict[str, str] = {}
+    for ref_id in ws.list_reference_ids():
+        man = ws.read_manifest(ref_id)
+        sc = ws.constitution.source_classes.get(man.source_class)
+        if sc is not None and not sc.fold:
+            continue
+        path = f"references/{ref_id}/digest.md"
+        digest = ws.root / path
+        if digest.is_file():
+            out[path] = _hash(digest.read_text())
+    return out
+
+
+def _fold_source_catalog(ws):
+    """含尚未生成 digest 的全部 fold reference，保证 Digest 阶段 S-id 稳定。"""
+    paths: dict[str, str] = {}
+    for ref_id in ws.list_reference_ids():
+        man = ws.read_manifest(ref_id)
+        sc = ws.constitution.source_classes.get(man.source_class)
+        if sc is not None and not sc.fold:
+            continue
+        path = f"references/{ref_id}/digest.md"
+        digest = ws.root / path
+        paths[path] = _hash(digest.read_text()) if digest.is_file() else ""
+    return build_source_catalog(ws, paths)
+
+
+def _evidence_input_hash(ws, entry, digest_hash: str) -> str:
+    return _hash(
+        "\n".join(
+            (
+                DEFAULT_EVIDENCE_CARD_PROMPT,
+                entry.source_id,
+                entry.ref_id,
+                entry.title,
+                digest_hash,
+                ws.glossary_reference(),
+            )
+        )
+    )
+
+
+def _evidence_header(entry, digest_hash: str, origin: str) -> str:
+    ref_id = entry.ref_id
+    title = re.sub(r"\s+", " ", entry.title).strip() or ref_id
+    date_match = re.match(r"\d{4}-\d{2}-\d{2}", ref_id)
+    date = date_match.group(0) if date_match else "N/A"
+    return (
+        "# 证据卡\n\n"
+        f"- ID: {entry.source_id}\n"
+        f"- Reference: {ref_id}\n"
+        f"- 标题: {title}\n"
+        f"- 日期: {date}\n"
+        f"- 来源: {entry.digest_path}\n"
+        f"- Digest hash: {digest_hash}\n"
+        f"- 生成: {origin}\n"
+    )
+
+
+def _valid_evidence_body(body: str) -> bool:
+    return all(heading in body for heading in _CARD_HEADINGS)
 
 
 def safe_provider_summary(
@@ -261,21 +336,59 @@ _OUTPUT_DISCIPLINE = (
     "- 不寻常的专名(品牌/人名)若仅单一来源支持,标 ⚠️ 待核,不要默认采信为事实。"
 )
 
+_DIGEST_EVIDENCE_START = "<KAIRO_EVIDENCE>"
+_DIGEST_EVIDENCE_END = "</KAIRO_EVIDENCE>"
+_DIGEST_BODY_START = "<KAIRO_DIGEST>"
+_DIGEST_BODY_END = "</KAIRO_DIGEST>"
+
+
+def _digest_output_protocol(card_body_limit: int) -> str:
+    return f"""
+
+[Digest 双产物输出协议]
+一次回答同时产出定长元信息与完整纪要；严格使用下列四个分隔标记，标记外不要输出任何文字：
+{_DIGEST_EVIDENCE_START}
+## 摘要
+...
+## 关键事实
+...
+## 决策
+...
+## 开放问题
+...
+{_DIGEST_EVIDENCE_END}
+{_DIGEST_BODY_START}
+完整高密度记忆纪要
+{_DIGEST_BODY_END}
+元信息段最多 {card_body_limit} 个 Unicode 字符；完整纪要不受该预算限制。
+"""
+
+
+def _parse_digest_bundle(content: str) -> tuple[str, str] | None:
+    def between(start: str, end: str) -> str | None:
+        left = content.find(start)
+        right = content.find(end, left + len(start)) if left >= 0 else -1
+        if left < 0 or right < 0:
+            return None
+        return content[left + len(start) : right].strip()
+
+    evidence = between(_DIGEST_EVIDENCE_START, _DIGEST_EVIDENCE_END)
+    digest = between(_DIGEST_BODY_START, _DIGEST_BODY_END)
+    if not evidence or not digest:
+        return None
+    return evidence, digest
+
+
 _COMPOSE_DISCIPLINE = (
     "\n- 你只产出当前这一个文档,不要内联其它文档的内容"
     "(例如 understanding 中不要写 assessment 段落)。\n"
     "- 溯源使用来源目录中的短 ID〔S-…〕与文末索引;不要在正文堆叠完整 "
     "`references/.../digest.md` 路径(索引表链接除外)。\n"
-    "- 当前文档、上游、新增 digest 在 cwd 文件中(见清单),请 Read 后把完整全文作为最终回答输出;"
-    "不要只复述清单,也不要停在「已写入文件」。\n"
-    "- 你必须输出当前文档的**完整全文**(含未改动章节);即使本轮判断无需演进,"
-    "也要原样重述全文,禁止只输出「为何不改」的变更说明或差异摘要。"
+    "- 事实层输入是全部定长证据卡,NEW/CHANGED 只是注意力标记,FOLDED 仍是有效证据;"
+    "判断层只依据有界上游文档,不要搜索 cwd 或读取原始 digest。\n"
+    "- 把材料重新综合成当前完整文档,不是历史百科;禁止输出变更说明、处理过程或差异。\n"
+    f"- 完整输出不得超过 {COMPOSE_MAX_CHARS} 个 Unicode 字符。"
 )
-
-# 退化护栏(#28):上一版充分长却被骤缩覆盖 → 极可能是 agent 吐了变更说明而非全文。
-# 阈值保守,仅拦灾难性缩水;正常的重组/修正/推翻不会触发。
-_COMPOSE_MIN_PRIOR_LEN = 2000
-_COMPOSE_DEGRADE_RATIO = 0.5
 
 
 class NormalizeRule:
@@ -387,6 +500,7 @@ class DigestRule:
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
+        entries = {e.ref_id: e for e in _fold_source_catalog(self.ws)}
         for ref_id in self.ws.list_reference_ids():
             man = self.ws.read_manifest(ref_id)
             # 源分层(#13 v2):fold=False 的类(corpus)是只读参考层,不 digest。
@@ -396,10 +510,12 @@ class DigestRule:
             body = self._read_body(man)
             key = f"references/{ref_id}/digest.md"
             if body is not None:
-                items.append(self._make(ref_id, key, man, body))
+                items.append(self._make(ref_id, key, man, body, entries[ref_id]))
         return items
 
-    def _make(self, ref_id: str, key: str, man: Manifest, body: str) -> WorkItem:
+    def _make(
+        self, ref_id: str, key: str, man: Manifest, body: str, entry
+    ) -> WorkItem:
         atts = sorted(
             (f for f in man.forms if f.role == "attachment"),
             key=lambda f: f.location,
@@ -414,6 +530,8 @@ class DigestRule:
             img_lines.append(str(p))
 
         def run(state: State) -> None:
+            placeholder_header = _evidence_header(entry, "0" * 12, "digest")
+            card_body_limit = EVIDENCE_CARD_MAX_CHARS - len(placeholder_header) - 2
             persona = self.prompt + self.ws.glossary_reference()
             if img_lines:
                 persona += (
@@ -421,19 +539,18 @@ class DigestRule:
                     "把其中与会议相关的信息(白板/幻灯/截图)并入纪要:\n"
                     + "\n".join(f"- {p}" for p in img_lines)
                 )
-            persona += _OUTPUT_DISCIPLINE
+            persona += _OUTPUT_DISCIPLINE + _digest_output_protocol(card_body_limit)
             try:
-                content = _run_agent(
+                bundle = _run_agent(
                     self.provider,
                     persona,
                     body,
-                    "digest.md",
+                    "digest.bundle.md",
                     read_dirs=[ref_dir] if img_lines else None,
                 )
             except Exception as exc:  # #98:可归属 provider 失败 → 持久化诊断,不写半成品
                 import sys
 
-                # #105:写入任务流,供 Web classify 与人读日志(超时文案含 CLI agent timeout)
                 print(
                     f"Error: provider-failed stage=digest: {exc}",
                     file=sys.stderr,
@@ -446,13 +563,51 @@ class DigestRule:
                     diagnostic=make_provider_diagnostic("digest", self.provider, exc),
                 )
                 return
-            (self.ws.root / key).write_text(content)
+            parsed = _parse_digest_bundle(bundle)
+            if parsed is None:
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_DIGEST_INVALID,
+                )
+                return
+            evidence_body, digest = parsed
+            digest = digest.rstrip() + "\n"
+            digest_hash = _hash(digest)
+            evidence_key = f"references/{ref_id}/evidence.md"
+            evidence = (
+                _evidence_header(entry, digest_hash, "digest")
+                + "\n"
+                + evidence_body
+                + "\n"
+            )
+            if not _valid_evidence_body(evidence_body):
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_CARD_INVALID,
+                )
+                return
+            if len(evidence) > EVIDENCE_CARD_MAX_CHARS:
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_CARD_OVER_BUDGET,
+                )
+                return
+            (self.ws.root / key).write_text(digest)
+            (self.ws.root / evidence_key).write_text(evidence)
+            produced_by = {
+                "provider": self.provider.name,
+                "model": self.provider.model,
+            }
             state.products[key] = ProductState(
                 input_hash=input_hash,
-                produced_by={
-                    "provider": self.provider.name,
-                    "model": self.provider.model,
-                },
+                produced_by=produced_by,
+            )
+            state.products[evidence_key] = ProductState(
+                input_hash=_evidence_input_hash(self.ws, entry, digest_hash),
+                produced_by=produced_by,
             )
 
         def is_stale(state: State) -> bool:
@@ -463,43 +618,140 @@ class DigestRule:
         return WorkItem(key, input_hash, run, is_stale)
 
 
+class LegacyEvidenceRule:
+    """#128:仅给旧 digest 零模型补 evidence；新 evidence 已由 DigestRule 同次产出。"""
+
+    def __init__(self, ws) -> None:
+        self.ws = ws
+
+    def discover(self, state: State | None = None) -> list[WorkItem]:
+        digests = _fold_digests(self.ws)
+        by_path = {e.digest_path: e for e in build_source_catalog(self.ws, digests)}
+        return [
+            self._make(
+                by_path[digest_path],
+                (self.ws.root / digest_path).read_text(),
+                digest_hash,
+            )
+            for digest_path, digest_hash in sorted(digests.items())
+        ]
+
+    def _make(self, entry, digest: str, digest_hash: str) -> WorkItem:
+        key = f"references/{entry.ref_id}/evidence.md"
+        path = self.ws.root / key
+        input_hash = _evidence_input_hash(self.ws, entry, digest_hash)
+
+        def run(state: State) -> None:
+            if path.is_file():
+                current = path.read_text()
+                if (
+                    len(current) <= EVIDENCE_CARD_MAX_CHARS
+                    and _valid_evidence_body(current)
+                    and f"- Digest hash: {digest_hash}" in current
+                ):
+                    origin_match = re.search(r"(?m)^- 生成: (.+)$", current)
+                    origin = origin_match.group(1) if origin_match else "existing"
+                    body_at = current.find("## 摘要")
+                    refreshed = (
+                        _evidence_header(entry, digest_hash, origin)
+                        + "\n"
+                        + current[body_at:].lstrip()
+                    )
+                    if len(refreshed) <= EVIDENCE_CARD_MAX_CHARS:
+                        path.write_text(refreshed)
+                        state.products[key] = ProductState(
+                            input_hash=input_hash,
+                            produced_by={"provider": "existing", "model": "existing"},
+                        )
+                        return
+            header = _evidence_header(entry, digest_hash, "legacy-derived")
+            prefix = header + "\n## 摘要\n\n[legacy-derived] "
+            suffix = (
+                "\n\n## 关键事实\n\n- N/A（旧 digest 兼容摘录）\n\n"
+                "## 决策\n\n- N/A（旧 digest 兼容摘录）\n\n"
+                "## 开放问题\n\n- N/A（旧 digest 兼容摘录）\n"
+            )
+            budget = EVIDENCE_CARD_MAX_CHARS - len(prefix) - len(suffix)
+            if budget <= 0:
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_CARD_OVER_BUDGET,
+                )
+                return
+            source = digest.strip()
+            first_heading = re.search(r"(?m)^#\s+\S", source)
+            if first_heading:
+                source = source[first_heading.start() :]
+            excerpt = source[:budget].rstrip()
+            path.write_text(prefix + (excerpt or "N/A") + suffix)
+            state.products[key] = ProductState(
+                input_hash=input_hash,
+                produced_by={
+                    "provider": "legacy-adapter",
+                    "model": "deterministic",
+                },
+            )
+
+        def is_stale(state: State) -> bool:
+            ps = state.products.get(key)
+            return ps is None or ps.input_hash != input_hash or (
+                ps.status == "ok" and not path.is_file()
+            )
+
+        return WorkItem(key, input_hash, run, is_stale)
+
+
 class ComposeRule:
-    """某 target 有未融入的 Δdigest → 一次 op 批量融入(B-批量增量,挂源)。"""
+    """#128:全量定长证据卡 → 有界事实文档 → 有界判断文档。"""
 
     def __init__(self, ws, provider) -> None:
         self.ws = ws
         self.provider = provider
 
-    def _is_fold_class(self, source_class: str) -> bool:
-        """该类源是否折叠进 target(fold=True);fold=False 为只读参考层(corpus)。"""
-        sc = self.ws.constitution.source_classes.get(source_class)
-        return sc is None or sc.fold
-
     def _all_digests(self) -> dict[str, str]:
+        return _fold_digests(self.ws)
+
+    def _all_cards(
+        self, state: State | None, all_digests: dict[str, str]
+    ) -> dict[str, str] | None:
+        """全部 digest 都有当前成功 card 才返回 path→hash；否则 compose 门禁关闭。"""
+        if state is None:
+            return None
+        expected = {
+            item.key: item.input_hash
+            for item in LegacyEvidenceRule(self.ws).discover(state)
+        }
         out: dict[str, str] = {}
-        for ref_id in self.ws.list_reference_ids():
-            # 源分层(#13 v2):只折叠 fold=True 的源;corpus(参考层)的 digest 不计入。
-            if not self._is_fold_class(self.ws.read_manifest(ref_id).source_class):
-                continue
-            d = self.ws.root / f"references/{ref_id}/digest.md"
-            if d.exists():
-                out[f"references/{ref_id}/digest.md"] = _hash(d.read_text())
+        for digest_path in all_digests:
+            ref_id = digest_path.split("/")[1]
+            key = f"references/{ref_id}/evidence.md"
+            ps = state.products.get(key)
+            path = self.ws.root / key
+            if (
+                ps is None
+                or ps.status != "ok"
+                or ps.input_hash != expected.get(key)
+                or not path.is_file()
+            ):
+                return None
+            out[key] = _hash(path.read_text())
         return out
 
-    # ---- 源分层(#13 v2):fold 类(stream)折叠;非 fold 类(corpus)作只读参考层 ----
-
-    def _delta_classes(self, delta: dict[str, str]) -> dict[str, str]:
-        """每条 delta digest path 映射到其 reference 的 class(均为 fold 类)。"""
-        out: dict[str, str] = {}
-        for p in delta:
-            ref_id = p.split("/")[1]  # references/<id>/digest.md
-            out[p] = self.ws.read_manifest(ref_id).source_class
-        return out
-
-    def _fold_label(self, cls: str) -> str:
-        """fold 块的来源标签加 ·标签(如 ·观测);仅当存在 corpus 参考层时调用。"""
-        sc = self.ws.constitution.source_classes.get(cls)
-        return f" ·{sc.label if sc else cls}"
+    def _upstreams_ready(
+        self, target, state: State, all_cards: dict[str, str]
+    ) -> bool:
+        """判断层只能在所有上游已成功覆盖当前 card 集后运行。"""
+        for dep in target.depends_on:
+            ts = state.targets.get(dep)
+            if (
+                ts is None
+                or ts.status != "ok"
+                or ts.folded != all_cards
+                or not (self.ws.root / dep).is_file()
+            ):
+                return False
+        return True
 
     def corpus_drifted(self, target_path: str, state: State) -> bool:
         """corpus 自该 target 上次折叠后是否变更(advisory;不进 staleness 循环)。"""
@@ -528,88 +780,105 @@ class ComposeRule:
         )
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
+        if state is None:
+            return []
         all_digests = self._all_digests()
+        all_cards = self._all_cards(state, all_digests)
+        if all_cards is None:
+            return []
         items: list[WorkItem] = []
         for target in self.ws.constitution.targets:
-            ts = state.targets.get(target.path) if state else None
-            folded = ts.folded if ts else {}
-            delta = {p: h for p, h in all_digests.items() if folded.get(p) != h}
+            if not self._upstreams_ready(target, state, all_cards):
+                continue
+            ts = state.targets.get(target.path)
+            cards_changed = (
+                (ts is None and bool(all_cards))
+                or (ts is not None and ts.folded != all_cards)
+            )
             materials_changed = ts is not None and ts.reason == "materials-changed"
             if (
-                delta
+                cards_changed
                 or materials_changed
                 or self._upstream_changed(target, state, ts)
                 or self._is_edited(target.path, ts)
             ):
-                items.append(self._make(target, delta, all_digests))
+                items.append(self._make(target, all_cards, all_digests))
         return items
 
-    def _make(self, target, delta: dict[str, str], all_digests: dict[str, str]) -> WorkItem:
+    def _make(
+        self,
+        target,
+        all_cards: dict[str, str],
+        all_digests: dict[str, str],
+    ) -> WorkItem:
         key = target.path
-        input_hash = _hash("".join(sorted(all_digests.values())))
+        input_hash = _hash("".join(sorted(all_cards.values())))
 
         def run(state: State) -> None:
             doc_path = self.ws.root / key
             ts0 = state.targets.get(key)
-            # #77:材料集变更 → 按剩余 digests 整篇重综合(丢当前正文/手改)
             materials_changed = ts0 is not None and ts0.reason == "materials-changed"
-            if materials_changed:
-                current = ""
-                use_delta = dict(all_digests)
-            else:
-                if (
-                    ts0
-                    and doc_path.exists()
-                    and _hash(doc_path.read_text()) != ts0.output_hash
-                ):
-                    # 检测到手改 → 暂停该文档,不静默覆盖(D-status manual-edit)
-                    ts0.status = "blocked"
-                    ts0.reason = "manual-edit"
-                    state.targets[key] = ts0
-                    return
-                current = doc_path.read_text() if doc_path.exists() else ""
-                use_delta = delta
-            # 源分层(#13 v2):corpus(fold=False)作只读参考层,不进 context 折叠块;
-            # 经 read_dirs 授读 + persona 列出文件,agent 按需 Read 校正/锚定。
-            # 存在参考层时,fold 块(stream)标 ·观测 提示需对基线校准;无 corpus 时与今天一致。
-            # #126:主材料摆进 artifact_dir,context 只留清单,禁止把旧文/Δ 内联进 prompt。
+            legacy_folded = bool(
+                ts0 and any(path.endswith("/digest.md") for path in ts0.folded)
+            )
+            if (
+                ts0
+                and not materials_changed
+                and doc_path.exists()
+                and _hash(doc_path.read_text()) != ts0.output_hash
+            ):
+                ts0.status = "blocked"
+                ts0.reason = "manual-edit"
+                state.targets[key] = ts0
+                return
+
             corpus_refs = corpus.collect(self.ws)
             has_corpus = bool(corpus_refs)
-            classes = self._delta_classes(use_delta)
             catalog = build_source_catalog(self.ws, all_digests)
-            sid_by_path = {e.digest_path: e.source_id for e in catalog}
+            layer = getattr(target, "layer", None) or "fact"
             layout: dict[str, str] = {}
-            inv: list[str] = [
-                "请 Read 下列文件,把完整文档作为最终回答输出。路径相对 cwd。",
+            inv = [
+                "请 Read 清单中的有界材料,重新综合当前完整文档。路径相对 cwd。",
                 "",
             ]
-            if current:
-                layout["current.md"] = current
-                inv.append("当前文档: current.md")
-            else:
-                inv.append("当前文档: (无,从空文综合)")
-            ups = [dep for dep in target.depends_on if (self.ws.root / dep).exists()]
+            ups = [dep for dep in target.depends_on if (self.ws.root / dep).is_file()]
             if ups:
-                inv.append("上游:")
+                inv.append("有界上游:")
                 for dep in ups:
                     name = Path(dep).name
                     layout[f"upstream/{name}"] = (self.ws.root / dep).read_text()
                     inv.append(f"- upstream/{name}")
-            inv.append(f"新增 digest({len(use_delta)} 条,批量融入):")
-            if not use_delta:
-                inv.append("- (无)")
-            for p in sorted(use_delta):
-                sid = sid_by_path.get(p, "")
-                label = self._fold_label(classes[p]) if has_corpus else ""
-                head = f"[{sid} | {p}{label}]" if sid else f"[来源:{p}{label}]"
-                layout[f"delta/{p}"] = f"{head}\n{(self.ws.root / p).read_text()}"
-                inv.append(f"- {head} → delta/{p}")
+            if layer == "judgment":
+                inv.append("判断层只读取上述有界上游,不直接读取 cards 或 digest。")
+            else:
+                inv.append(f"证据卡({len(catalog)} 张,全部读取):")
+                folded = ts0.folded if ts0 else {}
+                for entry in catalog:
+                    card_key = f"references/{entry.ref_id}/evidence.md"
+                    card_hash = all_cards[card_key]
+                    prior = folded.get(card_key)
+                    status = (
+                        "NEW"
+                        if prior is None
+                        else "FOLDED"
+                        if prior == card_hash
+                        else "CHANGED"
+                    )
+                    rel = f"cards/{entry.ref_id}.md"
+                    layout[rel] = (
+                        f"[状态:{status} | {entry.source_id}]\n"
+                        f"{(self.ws.root / card_key).read_text()}"
+                    )
+                    inv.append(f"- [{status}] {entry.source_id} → {rel}")
             reference_section = (
-                corpus.reference_section(self.ws, corpus_refs) if has_corpus else ""
+                corpus.reference_section(self.ws, corpus_refs)
+                if has_corpus and layer != "judgment"
+                else ""
             )
-            read_dirs = corpus.read_dirs(corpus_refs)
+            read_dirs = (
+                corpus.read_dirs(corpus_refs) if layer != "judgment" else []
+            )
             context = "\n".join(inv) + format_source_catalog_block(catalog)
-            layer = getattr(target, "layer", None) or "fact"
             try:
                 content = _run_agent(
                     self.provider,
@@ -624,7 +893,7 @@ class ComposeRule:
                     read_dirs=read_dirs,
                     materials=layout,
                 )
-            except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
+            except Exception as exc:
                 import sys
 
                 print(
@@ -638,21 +907,14 @@ class ComposeRule:
                 ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
                 state.targets[key] = ts
                 return
-            # 退化护栏(#28):有充分长的上一版,新输出却骤缩 → 不覆盖,标 blocked,
-            # 保留旧文档(避免单次 LLM 退化输出静默销毁整篇)。需人工 re-step 重综合。
-            # materials-changed 从空正文重综合,不适用此护栏。
-            if (
-                not materials_changed
-                and len(current) > _COMPOSE_MIN_PRIOR_LEN
-                and len(content) < _COMPOSE_DEGRADE_RATIO * len(current)
-            ):
+            if len(content) > COMPOSE_MAX_CHARS:
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
-                ts.reason = "compose-degraded"
+                ts.reason = REASON_COMPOSE_OVER_BUDGET
                 ts.diagnostic = None
                 state.targets[key] = ts
                 return
-            # #99:判断层 F-… 必须在实际的上游事实文档中声明，不能只符合格式。
+
             known_fact_ids = None
             if layer == "judgment":
                 known_fact_ids = set()
@@ -660,21 +922,27 @@ class ComposeRule:
                     dep_path = self.ws.root / dep
                     if dep_path.is_file():
                         known_fact_ids.update(fact_anchor_ids(dep_path.read_text()))
-            # 写盘前溯源结构校验;失败保留旧文,记 compose-provenance-invalid
             prov_errs = validate_provenance(
                 content, catalog, layer=layer, known_fact_ids=known_fact_ids
             )
+            missing_sources = [
+                entry.source_id for entry in catalog if entry.source_id not in content
+            ]
+            if missing_sources:
+                prov_errs.append(
+                    "document missing evidence cards: " + ", ".join(missing_sources)
+                )
             if prov_errs:
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
                 ts.reason = REASON_PROVENANCE_INVALID
                 ts.diagnostic = None
-                # 不改 output_hash / folded / 文件,便于 re-step 恢复
                 state.targets[key] = ts
                 return
+
             doc_path.write_text(content)
             ts = state.targets.get(key) or TargetState(depends_on=list(target.depends_on))
-            ts.folded = dict(all_digests)
+            ts.folded = dict(all_cards)
             ts.output_hash = _hash(content)
             ts.produced_by = {
                 "provider": self.provider.name,
@@ -686,24 +954,22 @@ class ComposeRule:
             }
             ts.status = "ok"
             ts.reason = None
-            ts.diagnostic = None  # 成功清除 #98 诊断
-            ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
-            # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
-            if ts0 is None or materials_changed:
-                ts.last_major_folded = dict(all_digests)
+            ts.diagnostic = None
+            ts.corpus_stamp = corpus.stamp(corpus_refs)
+            if ts0 is None or materials_changed or legacy_folded:
+                ts.last_major_folded = dict(all_cards)
             state.targets[key] = ts
 
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)
             doc_path = self.ws.root / key
-            # 所有可诊断的 compose 终态均不自动重试;仅显式 run/re-step 恢复。
             if ts and ts.status == "blocked" and ts.reason in (
-                "compose-degraded",
+                "compose-degraded",  # 旧 state 兼容；须显式 re-step
                 REASON_PROVIDER_FAILED,
                 REASON_PROVENANCE_INVALID,
+                REASON_COMPOSE_OVER_BUDGET,
             ):
                 return False
-            # #77:删参考后材料集变更,待运行综合
             if ts and ts.reason == "materials-changed":
                 return True
             if (
@@ -711,9 +977,8 @@ class ComposeRule:
                 and doc_path.exists()
                 and _hash(doc_path.read_text()) != ts.output_hash
             ):
-                return ts.status != "blocked"  # 手改未标 blocked → 需标记
-            folded = ts.folded if ts else {}
-            if any(folded.get(p) != h for p, h in all_digests.items()):
+                return ts.status != "blocked"
+            if ts is None or ts.folded != all_cards:
                 return True
             return self._upstream_changed(target, state, ts)
 

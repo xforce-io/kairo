@@ -10,7 +10,14 @@ import shutil
 
 from kairo.history import snapshot
 from kairo.models import REASON_PROVIDER_FAILED
-from kairo.rules import ComposeRule, DigestRule, NormalizeRule, TransformRule, _hash
+from kairo.rules import (
+    ComposeRule,
+    DigestRule,
+    LegacyEvidenceRule,
+    NormalizeRule,
+    TransformRule,
+    _hash,
+)
 from kairo.stream_index import write_stream_index
 
 MAX_ITER = 100
@@ -85,6 +92,7 @@ def _build_rules(ws, provider) -> list:
         *transform_rules,
         NormalizeRule(ws, provider),  # ASR 誊录 → 规范化全文 prose(#30),插在 Digest 前
         DigestRule(ws, provider),
+        LegacyEvidenceRule(ws),
         ComposeRule(ws, provider),
     ]
 
@@ -226,6 +234,7 @@ def delete_reference(ws, ref_id: str, *, recompose: bool = False, provider=None)
         raise ValueError("recompose 需要 provider")
 
     digest_key = f"references/{ref_id}/digest.md"
+    card_key = f"references/{ref_id}/evidence.md"
     prefix = f"references/{ref_id}/"
     state = ws.read_state()
 
@@ -234,10 +243,14 @@ def delete_reference(ws, ref_id: str, *, recompose: bool = False, provider=None)
             del state.products[key]
 
     for path, ts in list(state.targets.items()):
-        had = digest_key in ts.folded
-        ts.folded = {k: v for k, v in ts.folded.items() if k != digest_key}
+        had = digest_key in ts.folded or card_key in ts.folded
+        ts.folded = {
+            k: v for k, v in ts.folded.items() if k not in (digest_key, card_key)
+        }
         ts.last_major_folded = {
-            k: v for k, v in ts.last_major_folded.items() if k != digest_key
+            k: v
+            for k, v in ts.last_major_folded.items()
+            if k not in (digest_key, card_key)
         }
         if had and ts.status != "blocked":
             # 材料集变了:账本已诚实,正文待用户运行综合(或本次 recompose)

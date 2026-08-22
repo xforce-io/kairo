@@ -2,9 +2,19 @@ import sys
 
 import yaml
 
+from kairo.engine import step, workspace_run_plan
 from kairo.models import Form, GlossaryEntry, Manifest, State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import TransformRule, ComposeRule, DigestRule, NormalizeRule, _hash
+from kairo.rules import (
+    COMPOSE_MAX_CHARS,
+    EVIDENCE_CARD_MAX_CHARS,
+    ComposeRule,
+    DigestRule,
+    LegacyEvidenceRule,
+    NormalizeRule,
+    TransformRule,
+    _hash,
+)
 from kairo.workspace import Workspace
 
 
@@ -41,6 +51,16 @@ class _RunOnlyProvider:
         ctx = merged_agent_input(config)
         if art == "doc.md":
             content = "RUN-ONLY\n" + _stub_compose_document(config.persona, ctx)
+        elif art == "digest.bundle.md":
+            content = (
+                "<KAIRO_EVIDENCE>\n## 摘要\n\n"
+                + ctx[-400:]
+                + "\n\n## 关键事实\n\n- fact\n\n## 决策\n\n- N/A\n\n"
+                "## 开放问题\n\n- N/A\n</KAIRO_EVIDENCE>\n"
+                "<KAIRO_DIGEST>\nRUN-ONLY\n\n"
+                + ctx
+                + "\n</KAIRO_DIGEST>\n"
+            )
         else:
             content = f"RUN-ONLY\n\n{ctx}"
         (config.artifact_dir / art).write_text(content)
@@ -52,6 +72,13 @@ def _make_digest(ws, ref_id, content):
     d.parent.mkdir(parents=True, exist_ok=True)
     d.write_text(content)
     return f"references/{ref_id}/digest.md"
+
+
+def _make_cards(ws, state):
+    rule = LegacyEvidenceRule(ws)
+    for item in rule.discover(state):
+        if item.is_stale(state):
+            item.run(state)
 
 
 def _add_audio(ws, tmp_path, name="rec.m4a"):
@@ -534,18 +561,107 @@ def test_digest_skips_when_no_body_available(tmp_path):
     assert DigestRule(ws, StubProvider()).discover() == []
 
 
+# ---- Evidence card (#128) ----
+
+
+class _BundleProvider:
+    name = "bundle-fixed"
+    model = "bundle-fixed"
+
+    def __init__(self, evidence, digest="完整高密度纪要"):
+        self.evidence = evidence
+        self.digest = digest
+        self.calls = 0
+
+    def run(self, config, signal=None):
+        self.calls += 1
+        assert config.artifact == "digest.bundle.md"
+        config.artifact_dir.mkdir(parents=True, exist_ok=True)
+        content = (
+            f"<KAIRO_EVIDENCE>\n{self.evidence}\n</KAIRO_EVIDENCE>\n"
+            f"<KAIRO_DIGEST>\n{self.digest}\n</KAIRO_DIGEST>\n"
+        )
+        (config.artifact_dir / config.artifact).write_text(content)
+        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
+
+
+def _evidence_body(summary="摘要内容"):
+    return (
+        f"## 摘要\n\n{summary}\n\n"
+        "## 关键事实\n\n- 事实一\n\n"
+        "## 决策\n\n- 决策一\n\n"
+        "## 开放问题\n\n- N/A\n"
+    )
+
+
+def test_digest_single_call_writes_full_digest_and_bounded_evidence(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("原始材料")
+    rid = ws.add([t], title="能源会议")
+    state = State()
+    provider = _BundleProvider(_evidence_body())
+    DigestRule(ws, provider).discover(state)[0].run(state)
+    digest_key = f"references/{rid}/digest.md"
+    evidence_key = f"references/{rid}/evidence.md"
+    card = (ws.root / evidence_key).read_text()
+    assert provider.calls == 1
+    assert (ws.root / digest_key).read_text().strip() == "完整高密度纪要"
+    assert len(card) <= EVIDENCE_CARD_MAX_CHARS
+    assert "# 证据卡" in card and "能源会议" in card and "- 生成: digest" in card
+    assert "- ID: S-" in card and f"- Reference: {rid}" in card
+    assert all(heading in card for heading in ("## 摘要", "## 关键事实", "## 决策", "## 开放问题"))
+    assert state.products[digest_key].status == "ok"
+    assert state.products[evidence_key].status == "ok"
+
+
+def test_digest_over_budget_evidence_keeps_previous_pair(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("第一版")
+    rid = ws.add([t])
+    state = State()
+    DigestRule(ws, StubProvider()).discover(state)[0].run(state)
+    digest = ws.root / f"references/{rid}/digest.md"
+    evidence = ws.root / f"references/{rid}/evidence.md"
+    old_digest, old_evidence = digest.read_text(), evidence.read_text()
+    t.write_text("第二版")
+    provider = _BundleProvider(_evidence_body("x" * EVIDENCE_CARD_MAX_CHARS), "新纪要")
+    item = DigestRule(ws, provider).discover(state)[0]
+    item.run(state)
+    assert digest.read_text() == old_digest
+    assert evidence.read_text() == old_evidence
+    assert state.products[f"references/{rid}/digest.md"].reason == "card-over-budget"
+
+
+def test_legacy_digest_gets_zero_model_evidence(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    digest_path = _make_digest(ws, rid, "# 旧纪要\n\n历史事实")
+    state = State()
+    _make_cards(ws, state)
+    card = (ws.root / f"references/{rid}/evidence.md").read_text()
+    assert (ws.root / digest_path).read_text() == "# 旧纪要\n\n历史事实"
+    assert "legacy-derived" in card and "历史事实" in card
+    assert len(card) <= EVIDENCE_CARD_MAX_CHARS
+
+
 # ---- Compose ----
 
 
-def test_compose_discovers_target_with_unfolded_digest(tmp_path):
+def test_compose_waits_for_cards_then_discovers_fact_target(tmp_path):
     ws = Workspace.init(tmp_path)
     t = tmp_path / "m.txt"
     t.write_text("x")
     rid = ws.add([t])
     _make_digest(ws, rid, "纪要内容")
     state = State()
+    assert ComposeRule(ws, StubProvider()).discover(state) == []
+    _make_cards(ws, state)
     items = ComposeRule(ws, StubProvider()).discover(state)
-    assert [it.key for it in items] == ["understanding.md", "assessment.md"]
+    assert [it.key for it in items] == ["understanding.md"]
 
 
 def test_compose_run_folds_digest_into_understanding_with_source(tmp_path):
@@ -555,12 +671,14 @@ def test_compose_run_folds_digest_into_understanding_with_source(tmp_path):
     rid = ws.add([t])
     digest_path = _make_digest(ws, rid, "关键纪要XYZ")
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, StubProvider()).discover(state)[0].run(state)
     u = ws.root / "understanding.md"
+    card_path = f"references/{rid}/evidence.md"
     assert u.is_file()
-    assert "关键纪要XYZ" in u.read_text()  # digest 流入文档
-    assert digest_path in u.read_text()  # 挂源(来源标注)
-    assert digest_path in state.targets["understanding.md"].folded  # 记账
+    assert "关键纪要XYZ" in u.read_text()  # card 摘要流入文档
+    assert digest_path in u.read_text()  # 来源索引仍挂原 digest
+    assert card_path in state.targets["understanding.md"].folded  # 账本改记 card
 
 
 def test_compose_converges_after_folding(tmp_path):
@@ -570,10 +688,11 @@ def test_compose_converges_after_folding(tmp_path):
     rid = ws.add([t])
     _make_digest(ws, rid, "纪要")
     state = State()
+    _make_cards(ws, state)
     rule = ComposeRule(ws, StubProvider())
-    for item in rule.discover(state):  # 两层都融(understanding → assessment)
-        item.run(state)
-    # 融完后无未融入 Δ、上游未变 → 收敛
+    for _ in range(2):  # understanding 成功后下一轮才开放 assessment
+        for item in rule.discover(state):
+            item.run(state)
     assert rule.discover(state) == []
 
 
@@ -631,23 +750,24 @@ def _understanding_item(ws, prov, state):
     )
 
 
-def test_compose_blocks_degraded_output_and_keeps_prior(tmp_path):
+def test_compose_blocks_over_budget_output_and_keeps_prior(tmp_path):
     ws = Workspace.init(tmp_path)
     t = tmp_path / "m.txt"
     t.write_text("x")
     rid = ws.add([t])
     _make_digest(ws, rid, "新纪要")
-    good = "完整的判断正文。" * 400  # 远超 _COMPOSE_MIN_PRIOR_LEN
+    prior = "上一版"
     state = State()
-    state.targets["understanding.md"] = _seed_prior_understanding(ws, good)
-    prov = _FixedProvider("本轮无需演进,理由如下:略。")  # 退化的变更说明
-    _understanding_item(ws, prov, state).run(state)
-    # 旧文档原样保留、未被覆盖
-    assert (ws.root / "understanding.md").read_text() == good
+    state.targets["understanding.md"] = _seed_prior_understanding(ws, prior)
+    _make_cards(ws, state)
+    oversized = _valid_compose_doc(ws, "超长" * COMPOSE_MAX_CHARS)
+    prov = _FixedProvider(oversized)
+    item = _understanding_item(ws, prov, state)
+    item.run(state)
+    assert (ws.root / "understanding.md").read_text() == prior
     ts = state.targets["understanding.md"]
-    assert ts.status == "blocked" and ts.reason == "compose-degraded"
-    # 终态:不自动重试(否则 step 内对退化输出死循环)
-    assert _understanding_item(ws, prov, state).is_stale(state) is False
+    assert ts.status == "blocked" and ts.reason == "compose-over-budget"
+    assert item.is_stale(state) is False
 
 
 def test_compose_allows_normal_sized_update(tmp_path):
@@ -656,14 +776,21 @@ def test_compose_allows_normal_sized_update(tmp_path):
     t.write_text("x")
     rid = ws.add([t])
     _make_digest(ws, rid, "新纪要")
-    good = "完整的判断正文。" * 400
+    good = "历史百科正文。" * 4000  # 迁移前可远超新预算
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, good)
-    # 量级相当 + 合法溯源结构 → 不该拦
-    prov = _FixedProvider(_valid_compose_doc(ws, "完整的判断正文(已更新)。" * 380))
+    digest_key = f"references/{rid}/digest.md"
+    state.targets["understanding.md"].folded = {
+        digest_key: _hash((ws.root / digest_key).read_text())
+    }  # 旧 workspace 账本
+    _make_cards(ws, state)
+    prov = _FixedProvider(_valid_compose_doc(ws, "有界判断正文(已更新)。" * 100))
     _understanding_item(ws, prov, state).run(state)
     assert "已更新" in (ws.root / "understanding.md").read_text()
-    assert state.targets["understanding.md"].status == "ok"
+    ts = state.targets["understanding.md"]
+    assert ts.status == "ok"
+    assert set(ts.folded) == set(ts.last_major_folded)
+    assert all(path.endswith("/evidence.md") for path in ts.folded)
 
 
 def test_compose_from_scratch_not_guarded(tmp_path):
@@ -674,6 +801,7 @@ def test_compose_from_scratch_not_guarded(tmp_path):
     rid = ws.add([t])
     _make_digest(ws, rid, "新纪要")
     state = State()  # understanding 无既有文档
+    _make_cards(ws, state)
     content = _valid_compose_doc(ws, "短小但合法的首版正文。")
     prov = _FixedProvider(content)
     _understanding_item(ws, prov, state).run(state)
@@ -718,6 +846,7 @@ def test_compose_uses_agent_run_interface(tmp_path):
     _make_digest(ws, rid, "纪要QQQ")
     prov = _RunOnlyProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)
     assert prov.calls, "ComposeRule 应通过 run() 调用 provider"
     assert "纪要QQQ" in (ws.root / "understanding.md").read_text()
@@ -734,6 +863,7 @@ def test_compose_persona_carries_output_discipline(tmp_path):
     _make_digest(ws, rid, "纪要")
     prov = _RunOnlyProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)
     persona = prov.calls[0].persona
     assert "只输出文档正文" in persona  # P1 无旁白/提议
@@ -771,10 +901,11 @@ def test_compose_corpus_is_reference_layer_not_folded_block(tmp_path):
     _make_digest(ws, rs, "观测纪要")
     prov = _RunOnlyProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)  # [0]=understanding
     ctx = prov.calls[0].context
-    assert "·观测" in ctx  # 有参考层时 stream 块标 ·观测
-    assert "白皮书基线内容ZZZ" not in ctx  # corpus 原文不进 context 折叠块
+    assert "cards/" in ctx  # stream 以证据卡清单进入
+    assert "白皮书基线内容ZZZ" not in ctx  # corpus 原文不进 context
     persona = prov.calls[0].persona
     assert "基线参考" in persona  # 注入了基线参考前言
     assert "校正" in persona  # corpus hint(术语权威/校正)流入
@@ -790,9 +921,10 @@ def test_compose_single_class_keeps_today_behavior(tmp_path):
     _make_digest(ws, rs, "观测纪要")
     prov = _RunOnlyProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)
     ctx = prov.calls[0].context
-    assert "·观测" not in ctx  # 单类不打标签
+    assert "·观测" not in ctx  # 卡片不额外打源分类标签
     persona = prov.calls[0].persona
     assert "源分类" not in persona  # 单类不注入前言
 
@@ -806,11 +938,91 @@ def test_compose_inventory_excludes_digest_body(tmp_path):
     _make_digest(ws, rid, "关键纪要XYZ")
     prov = _RunOnlyProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)
     ctx = prov.calls[0].context
     assert "关键纪要XYZ" not in ctx
-    assert "current.md" in ctx or "(无,从空文综合)" in ctx
+    assert "current.md" not in ctx
     blob = "\n".join(prov.materials.values())
     assert "关键纪要XYZ" in blob
-    assert any(p.startswith("delta/") and p.endswith("digest.md") for p in prov.materials)
+    assert all(not p.endswith("digest.md") for p in prov.materials)
+    assert any(p.startswith("cards/") for p in prov.materials)
+
+
+def test_compose_marks_card_new_folded_then_changed(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    digest = ws.root / _make_digest(ws, rid, "第一版纪要")
+    state = State()
+    _make_cards(ws, state)
+
+    first = _RunOnlyProvider()
+    ComposeRule(ws, first).discover(state)[0].run(state)
+    assert "[状态:NEW" in "\n".join(first.materials.values())
+
+    state.targets["understanding.md"].reason = "materials-changed"
+    folded = _RunOnlyProvider()
+    ComposeRule(ws, folded).discover(state)[0].run(state)
+    assert "[状态:FOLDED" in "\n".join(folded.materials.values())
+
+    digest.write_text("第二版纪要")
+    assert ComposeRule(ws, StubProvider()).discover(state) == []  # stale card 门禁
+    _make_cards(ws, state)
+    changed = _RunOnlyProvider()
+    ComposeRule(ws, changed).discover(state)[0].run(state)
+    assert "[状态:CHANGED" in "\n".join(changed.materials.values())
+
+
+def test_judgment_reads_only_bounded_upstream(tmp_path):
+    ws = Workspace.init(tmp_path)
+    t = tmp_path / "m.txt"
+    t.write_text("x")
+    rid = ws.add([t])
+    corpus_file = tmp_path / "baseline.md"
+    corpus_file.write_text("基线全文")
+    ws.add([corpus_file], source_class="corpus")
+    _make_digest(ws, rid, "关键纪要")
+    state = State()
+    _make_cards(ws, state)
+    ComposeRule(ws, StubProvider()).discover(state)[0].run(state)
+
+    prov = _RunOnlyProvider()
+    items = ComposeRule(ws, prov).discover(state)
+    assert [item.key for item in items] == ["assessment.md"]
+    items[0].run(state)
+    assert set(prov.materials) == {"upstream/understanding.md"}
+    assert "关键纪要" not in prov.calls[0].context
+    assert prov.calls[0].read_dirs == []
+    assert "基线参考" not in prov.calls[0].persona
+
+
+def test_fifty_reference_cards_converge_within_budgets(tmp_path):
+    class CountingStub(StubProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def run(self, config, signal=None):
+            self.calls += 1
+            return super().run(config, signal)
+
+    ws = Workspace.init(tmp_path)
+    for i in range(50):
+        rid = f"2026-01-01-ref-{i:02d}"
+        (ws.references_dir() / rid).mkdir(parents=True)
+        ws.write_manifest(rid, Manifest(id=rid, title=f"材料 {i}", forms=[]))
+        _make_digest(ws, rid, f"第 {i} 条材料的关键事实与决策")
+
+    provider = CountingStub()
+    assert step(ws, provider)
+    assert provider.calls == 2  # 50 张 legacy card 零调用；仅两层 compose
+    state = ws.read_state()
+    for rid in ws.list_reference_ids():
+        card = ws.root / f"references/{rid}/evidence.md"
+        assert card.is_file() and len(card.read_text()) <= EVIDENCE_CARD_MAX_CHARS
+    for target in ("understanding.md", "assessment.md"):
+        assert len((ws.root / target).read_text()) <= COMPOSE_MAX_CHARS
+        assert len(state.targets[target].folded) == 50
+    assert workspace_run_plan(ws)["mode"] == "clean"
 

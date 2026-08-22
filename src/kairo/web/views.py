@@ -957,6 +957,9 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
             lines.append(f'<p class="muted">{t("run.done_ok")}</p>')
     # 任务结束后释放运行锁(is_running 看 done);OOB 刷新 Run 按钮以便再次发起
     btn = _run_button_ctx(request, ws, slug)
+    # 任务本身失败/取消/丢失时允许重新发起，即使 state 尚未来得及留下 stale/blocked。
+    if result.kind != "succeeded":
+        btn.update(run_mode="run", run_label=t("run.run"), run_disabled=False)
     lines.append(
         '<div id="run-btn-wrap" hx-swap-oob="true">'
         + _run_button_html(slug, btn, t)

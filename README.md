@@ -8,7 +8,7 @@ Turns the manual chain of "recording → transcription → minutes → understan
 
 ## Core mental model
 
-One `kairo step` topples the dominoes all the way down: `add` a reference → ASR/doc2text → Digest (dense memory minutes = this reference's memory) → Compose (incrementally synthesize into the fact layer `understanding.md` / the judgment layer `assessment.md`). Like `make`: it doesn't run commands, it **reconciles** toward the state declared in the constitution, running until convergence.
+One `kairo step` topples the dominoes all the way down: `add` a reference → ASR/doc2text → Digest (one model call emits both the full digest and a ≤2,000-character Evidence Card) → Compose (rebuild bounded `understanding.md` from all cards, then derive `assessment.md`; each target ≤20,000 characters). Like `make`, it **reconciles** toward the declared state until convergence. Full detail stays in digests; target documents are bounded current syntheses rather than ever-growing archives.
 
 > **Readable full-text prose (optional, [#33](https://github.com/xforce-io/kairo/issues/33) / [#60](https://github.com/xforce-io/kairo/issues/60))**: raw ASR is noisy (no punctuation, colloquial, homophone errors) and hard to read through. A normalized readable full text `prose.md` can be produced as a **human-reading archive** — punctuation, paragraphing, fixes, less filler. It is **for human reading only and never enters the digest path** (digest always from raw `transcript`). Off by default; set `pipeline.normalize.enabled: true` for batch generation on `step`, or generate on demand via Web (“Generate readable prose”) / `kairo prose <ref_id>`. Only machine-derived transcriptions (`origin≠added`); human text and corpus are untouched.
 
@@ -37,7 +37,7 @@ kairo add recording.m4a --copy   # copy into workspace first, then register
 kairo add ./meeting-folder       # directory → one multi-form reference (audio/docs/images inside)
 kairo add report.docx            # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
 kairo add whitepaper.md --corpus # register as corpus/baseline (authoritative reference material)
-kairo step                       # reconcile to convergence: ASR/doc2text → Digest → Compose (prose alongside when normalize is on)
+kairo step                       # reconcile: ASR/doc2text → Digest(+evidence) → Compose
 kairo status                     # see the fold status of each reference / document
 ```
 
@@ -73,15 +73,15 @@ Produces two layers of documents: `understanding.md` (neutral facts) and `assess
 ## Core concepts
 
 - **constitution.yaml**: this workspace's constitution — the mental model and protocol (two output layers, stream/corpus, fold, extension→role, conversion declarations) are all declared here; the engine hardcodes none of it.
-- **stream (observation) / corpus (baseline)**: the epistemic classification of a reference. A stream is folded into documents one by one, judgments evolve with it and can overturn earlier ones; a corpus is a read-only reference layer for the agent — not digested, not in the fold loop — and corrects proper nouns/terminology against the baseline when it conflicts with observations.
-- **Two output layers**: `understanding.md` (fact layer) and the `assessment.md` (judgment layer) that depends on it; neutral facts and stance judgments are not mixed.
+- **stream (observation) / corpus (baseline)**: a stream first derives a bounded evidence card, then enters bounded synthesis; a corpus is a read-only reference layer for the fact agent — not digested, not carded, and not in the fold loop.
+- **Two output layers**: `understanding.md` is rebuilt from all evidence cards; `assessment.md` depends only on that bounded fact layer. Neutral facts and stance judgments are not mixed.
 - **Convergence**: `step` is like `make` — it reconciles toward the state declared in the constitution, judging staleness by content hash, running until no further progress is made.
 - **Binary ingestion** ([#15](https://github.com/xforce-io/kairo/issues/15)): `add file.docx` (docx/pptx/xlsx/pdf) goes through `doc2text` (in-process conversion via [markitdown](https://github.com/microsoft/markitdown)) to produce `source_text`, isomorphic to ASR (`audio→transcript` ↔ `binary→source_text`), with zero downstream changes; xlsx converts to GFM tables, preserving header semantics. No machine configuration needed (markitdown is a project dependency). Stream-type processing only; corpus binaries are not converted (the baseline is read directly, read-only, not derived).
-- **blocked states**: `no-asr` (no local ASR backend configured) / `asr-failed` (transcription command failed) / `convert-failed` (binary conversion failed/empty output) / `missing-source` (source unreachable) / `manual-edit` (manual edit awaiting `accept`) / `compose-degraded` (synthesis output shrank sharply versus the previous version, suspected degraded output — the overwrite was rejected to protect the old document). After preconditions change, the next `step` retries automatically (e.g. once ASR is configured, old audio is re-transcribed); `asr-failed` / `convert-failed` / `compose-degraded` are treated as terminal and need a manual `re-step` to recompute.
+- **blocked states** include source/transform failures, `provider-failed`, invalid or over-budget evidence cards, invalid provenance, over-budget compose output, `manual-edit`, and legacy `compose-degraded`. Invalid/over-budget outputs never overwrite the last successful artifact; terminal states require an explicit retry or `re-step`.
 
 ## Domain glossary
 
-`constitution.yaml` can declare a `glossary` that pins down this domain's canonical proper nouns. It is injected into the agent prompt at every Digest / Compose (and the optional Normalize) (Issue [#20](https://github.com/xforce-io/kairo/issues/20)), to correct homophone variants and aliases produced by speech/transcription — output always uses the canonical name, and ambiguous mentions are anchored accordingly. Each entry has three keys: `name` (canonical name, the anchor), `note` (grounding for the model, optional), `aka` (known variants/aliases, reference only, optional).
+`constitution.yaml` can declare a `glossary` that pins down this domain's canonical proper nouns. It is injected into the agent prompt at every Digest / Evidence Card / Compose (and the optional Normalize) (Issue [#20](https://github.com/xforce-io/kairo/issues/20)), to correct homophone variants and aliases produced by speech/transcription — output always uses the canonical name, and ambiguous mentions are anchored accordingly. Each entry has three keys: `name` (canonical name, the anchor), `note` (grounding for the model, optional), `aka` (known variants/aliases, reference only, optional).
 
 ```yaml
 glossary:

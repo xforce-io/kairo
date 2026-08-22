@@ -21,7 +21,7 @@ from kairo.models import (
     TargetState,
 )
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import make_provider_diagnostic, safe_provider_summary
+from kairo.rules import LegacyEvidenceRule, make_provider_diagnostic, safe_provider_summary
 from kairo.workspace import Workspace
 
 
@@ -72,13 +72,9 @@ class ComposeOnlyFailProvider:
 
     def run(self, config, signal=None):
         self.calls += 1
-        art = config.artifact or "output.md"
-        if art == "doc.md":
+        if (config.artifact or "output.md") == "doc.md":
             raise RuntimeError("compose provider timeout")
-        config.artifact_dir.mkdir(parents=True, exist_ok=True)
-        content = f"DIGEST OK {self.calls}\n{config.context[:120]}"
-        (config.artifact_dir / art).write_text(content)
-        return AgentResult(artifacts=_scan_artifacts(config.artifact_dir), result_text=content)
+        return StubProvider().run(config, signal)
 
 
 def _ws_with_text(tmp_path, text: str = "会议纪要材料") -> Workspace:
@@ -87,6 +83,15 @@ def _ws_with_text(tmp_path, text: str = "会议纪要材料") -> Workspace:
     p.write_text(text)
     ws.add([p])
     return ws
+
+
+def _refresh_cards(ws):
+    state = ws.read_state()
+    rule = LegacyEvidenceRule(ws)
+    for item in rule.discover(state):
+        if item.is_stale(state):
+            item.run(state)
+    ws.write_state(state)
 
 
 def test_safe_provider_summary_redacts_and_truncates():
@@ -170,6 +175,7 @@ def test_compose_provider_failed_keeps_existing_doc(tmp_path):
         st.targets[path].status = "ok"
         st.targets[path].reason = None
     ws.write_state(st)
+    _refresh_cards(ws)  # 本测试只让 compose 失败，card 已先成功更新
     fail = FailProvider("compose network error")
     step(ws, fail)
     st2 = ws.read_state()
@@ -250,6 +256,7 @@ def test_run_workspace_recovers_compose_provider_failed(tmp_path):
     for path in st.targets:
         st.targets[path].folded = {}
     ws.write_state(st)
+    _refresh_cards(ws)
     step(ws, FailProvider("compose down"))
     assert ws.read_state().targets["understanding.md"].reason == REASON_PROVIDER_FAILED
     assert (ws.root / "understanding.md").read_text() == old

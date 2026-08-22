@@ -12,7 +12,16 @@ from kairo.provenance import (
     validate_provenance,
 )
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts, _stub_compose_document
+from kairo.rules import LegacyEvidenceRule
 from kairo.workspace import Workspace
+
+
+def _refresh_cards(ws):
+    state = ws.read_state()
+    for item in LegacyEvidenceRule(ws).discover(state):
+        if item.is_stale(state):
+            item.run(state)
+    ws.write_state(state)
 
 
 def test_source_id_stable_and_collision_extends():
@@ -153,6 +162,7 @@ def test_compose_invalid_keeps_old_document(tmp_path):
         st.targets[path].status = "ok"
         st.targets[path].reason = None
     ws.write_state(st)
+    _refresh_cards(ws)
     step(ws, BadComposeProvider())
     assert doc.read_text() == old  # 未覆盖
     ts = ws.read_state().targets["understanding.md"]
@@ -174,7 +184,10 @@ def test_compose_rejects_invented_judgment_fact_anchor(tmp_path):
         model = "invented-fact"
 
         def run(self, config, signal=None):
-            if config.artifact == "doc.md" and "判断层" in config.persona:
+            if (
+                config.artifact == "doc.md"
+                and "溯源输出协议 · 判断层" in config.persona
+            ):
                 config.artifact_dir.mkdir(parents=True, exist_ok=True)
                 text = """## 判断
 
@@ -197,6 +210,7 @@ def test_compose_rejects_invented_judgment_fact_anchor(tmp_path):
     for target in state.targets.values():
         target.folded = {}
     ws.write_state(state)
+    _refresh_cards(ws)
     step(ws, InventedFactProvider())
 
     assessment = ws.read_state().targets["assessment.md"]

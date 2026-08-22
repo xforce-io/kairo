@@ -7,7 +7,7 @@
 
 from kairo.models import Constitution, State
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import ComposeRule, DigestRule
+from kairo.rules import ComposeRule, DigestRule, LegacyEvidenceRule
 from kairo.workspace import Workspace
 
 
@@ -50,6 +50,12 @@ def _make_digest(ws, ref_id, content):
     return f"references/{ref_id}/digest.md"
 
 
+def _make_cards(ws, state):
+    for item in LegacyEvidenceRule(ws).discover(state):
+        if item.is_stale(state):
+            item.run(state)
+
+
 # ---- Increment 1:SourceClass.fold 声明源是否折叠 ----
 
 
@@ -84,10 +90,12 @@ def test_compose_excludes_corpus_digest_from_fold(tmp_path):
     stream_d = _make_digest(ws, rs, "观测纪要")
     corpus_d = _make_digest(ws, rc, "基线纪要")  # 模拟 v1 遗留
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, StubProvider()).discover(state)[0].run(state)
     folded = state.targets["understanding.md"].folded
-    assert stream_d in folded  # stream 计入折叠
-    assert corpus_d not in folded  # corpus 不计入折叠
+    assert f"references/{rs}/evidence.md" in folded  # stream card 计入折叠
+    assert f"references/{rc}/evidence.md" not in folded  # corpus 不计入折叠
+    assert stream_d not in folded and corpus_d not in folded
 
 
 # ---- Increment 4:corpus 作只读参考层(persona 列出 + read_dirs + 不进 context) ----
@@ -103,6 +111,7 @@ def test_compose_corpus_as_reference_layer(tmp_path):
     _make_digest(ws, rs, "观测纪要")
     prov = _CaptureProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)
     call = prov.calls[0]
     # persona 注入基线 hint(校正) + 列出 corpus 文件供 Read
@@ -114,8 +123,8 @@ def test_compose_corpus_as_reference_layer(tmp_path):
     assert "白皮书基线内容YYY" not in call.context
 
 
-def test_compose_labels_stream_observation_when_corpus_present(tmp_path):
-    """有 corpus 参考层时,stream 折叠块标 ·观测(提示需对基线校准)。"""
+def test_compose_marks_new_card_when_corpus_present(tmp_path):
+    """corpus 不改变 card 形态；尚未覆盖的 stream card 明确标 NEW。"""
     ws = Workspace.init(tmp_path)
     rs = _add_stream(ws, tmp_path)
     cp = tmp_path / "wp.md"
@@ -124,8 +133,9 @@ def test_compose_labels_stream_observation_when_corpus_present(tmp_path):
     _make_digest(ws, rs, "观测纪要")
     prov = _CaptureProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)
-    assert "·观测" in prov.calls[0].context
+    assert "[NEW]" in prov.calls[0].context
 
 
 def test_compose_no_corpus_keeps_today_behavior(tmp_path):
@@ -135,6 +145,7 @@ def test_compose_no_corpus_keeps_today_behavior(tmp_path):
     _make_digest(ws, rs, "观测纪要")
     prov = _CaptureProvider()
     state = State()
+    _make_cards(ws, state)
     ComposeRule(ws, prov).discover(state)[0].run(state)
     call = prov.calls[0]
     assert "·观测" not in call.context
@@ -155,6 +166,7 @@ def test_fold_records_corpus_stamp(tmp_path):
     _make_digest(ws, rs, "观测纪要")
     rule = ComposeRule(ws, StubProvider())
     state = State()
+    _make_cards(ws, state)
     rule.discover(state)[0].run(state)
     assert state.targets["understanding.md"].corpus_stamp  # 非空
     assert not rule.corpus_drifted("understanding.md", state)
@@ -170,8 +182,10 @@ def test_corpus_change_does_not_restale_but_is_advisory(tmp_path):
     _make_digest(ws, rs, "观测纪要")
     rule = ComposeRule(ws, StubProvider())
     state = State()
-    for it in rule.discover(state):
-        it.run(state)  # 折叠两层
+    _make_cards(ws, state)
+    for _ in range(2):
+        for it in rule.discover(state):
+            it.run(state)  # understanding 后下一轮 assessment
     cp.write_text("基线v2-改了关键内容")  # corpus 关键内容变更
     # 不触发自动重算:无未折叠 stream delta、上游未变
     assert rule.discover(state) == []

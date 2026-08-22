@@ -110,6 +110,12 @@ def test_skill_blocked_closed_set():
         "convert-failed",
         "missing-source",
         "manual-edit",
+        "digest-invalid",
+        "card-invalid",
+        "card-over-budget",
+        "compose-provenance-invalid",
+        "compose-over-budget",
+        "provider-failed",
         "compose-degraded",
     ):
         assert reason in text, f"blocked closed set missing {reason!r}"

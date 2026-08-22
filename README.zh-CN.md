@@ -8,7 +8,7 @@
 
 ## 核心心智
 
-一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（高密度记忆纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md` 事实层 / `assessment.md` 判断层）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
+一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（一次模型调用同时产出完整纪要与 ≤2,000 字符 Evidence Card）→ Compose（用全量证据卡重建有界 `understanding.md`，再派生 `assessment.md`；单目标 ≤20,000 字符）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。完整细节留在 digest，目标文档只承担当前综合，不再无限增长。
 
 > **可读全文 prose（可选，[#33](https://github.com/xforce-io/kairo/issues/33) / [#60](https://github.com/xforce-io/kairo/issues/60)）**：raw ASR 噪声大（无标点、口语化、同音错字），不便人通读。可旁挂规范化可读全文 `prose.md` 作**人读档案**——补标点、分段、纠错、合并口水。关键是它**只给人读、不进 digest 路径**：digest 恒从 raw `transcript` 派生（信息上界）。默认**关**；`constitution.yaml` 设 `pipeline.normalize.enabled: true` 可在 `step` 时批量生成，或在 Web 对单条参考点「生成可读文稿」/ CLI `kairo prose <ref_id>` 按需生成。只对机器派生的誊录（`origin≠added`）生效，人给文本与 corpus 不碰。
 
@@ -37,11 +37,11 @@ kairo add 录音.m4a --copy     # 先复制进工作区再登记（源删除仍�
 kairo add ./会议夹            # 目录→一条多形态参考(夹内音频/文档/图)
 kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
 kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
-kairo step                    # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)
+kairo step                    # 调和:ASR/doc2text → Digest(同次产 evidence) → Compose
 kairo status                  # 看各 reference / 文档的融入状态
 ```
 
-产出两层文档：`understanding.md`（中立事实）与 `assessment.md`（立场判断）。
+产出两层有界文档：`understanding.md`（中立事实）与 `assessment.md`（立场判断）。每条 stream reference 另有 `evidence.md` 证据卡；需要完整出处时沿卡片回看 `digest.md`。
 
 ## 命令
 
@@ -73,15 +73,15 @@ kairo status                  # 看各 reference / 文档的融入状态
 ## 核心概念
 
 - **constitution.yaml**：本 workspace 的宪法——心智与协议（两层产出、stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
-- **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进文档、判断随之演进、可推翻旧判断；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
-- **两层产出**：`understanding.md`（事实层）与依赖它的 `assessment.md`（判断层）；中立事实与立场判断不混。
+- **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 先派生定长证据卡，再进入有界综合；corpus 作事实层 agent 的只读参考层，不 digest、不生成卡，也不进 fold 循环。
+- **两层产出**：`understanding.md`（全量证据卡重建的事实层）与依赖它的 `assessment.md`（只读有界 understanding 的判断层）；中立事实与立场判断不混。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
 - **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
-- **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `convert-failed`（二进制转换失败/空产物）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）/ `compose-degraded`（综合输出相对上一版骤缩，疑为退化输出，已拒绝覆盖以保护旧文档）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）；`asr-failed` / `convert-failed` / `compose-degraded` 视为终态，需手动 `re-step` 重算。
+- **blocked 状态**：包括源/转换失败、`provider-failed`、证据卡结构无效或超 2,000 字符、溯源无效、compose 超 20,000 字符、`manual-edit`，以及旧状态 `compose-degraded`。无效或超预算产物不会覆盖上一版；终态需显式 retry / `re-step`。
 
 ## 领域真名册（glossary）
 
-`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Compose（及开启的 Normalize）时注入 agent 提示词（Issue [#20](https://github.com/xforce-io/kairo/issues/20)），用于纠正口语 / 转写产生的同音变体与别名——产出时一律用规范名，遇含糊提及按此锚定。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
+`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Evidence Card / Compose（及开启的 Normalize）时注入 agent 提示词（Issue [#20](https://github.com/xforce-io/kairo/issues/20)），用于纠正口语 / 转写产生的同音变体与别名——产出时一律用规范名，遇含糊提及按此锚定。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
 
 ```yaml
 glossary:
