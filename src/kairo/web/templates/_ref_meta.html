@@ -28,7 +28,8 @@
           hx-confirm="{{ t('ref.retry_confirm') }}">{{ t('ref.retry') }}</button>
   {% endif %}
   {% if can_generate_prose %}
-  <button type="button" class="btn btn-ghost btn-regen"
+  <button type="button" class="btn btn-ghost btn-regen" data-prose-generate
+          data-error-fallback="{{ t('prose.gen_error') }}"
           hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/prose"
           hx-target="#step-area" hx-swap="innerHTML">{{ t('prose.gen_btn') }}</button>
   {% endif %}

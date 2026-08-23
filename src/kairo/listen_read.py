@@ -69,6 +69,12 @@ def _line_body(line: str) -> str | None:
 
 def parse_units(text: str, duration: float | None = None) -> list[Unit]:
     """把 transcript 收成单元。duration 为 None 时不过滤超时长前缀。"""
+    # 部分 ASR 把连续时间戳写在同一行；按时间戳断开后，听读与普通预览共用同一单元。
+    text = re.sub(
+        r"([^\n])\s*(?=\[(?:(?:\d{1,3}:)?[0-5]\d:[0-5]\d)(?:\.\d{1,3})?\])",
+        r"\1\n",
+        text,
+    )
     leading: list[str] = []
     accepted: list[tuple[float, list[str]]] = []
     last: float | None = None

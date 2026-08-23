@@ -315,6 +315,12 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .doc pre code { background: none; padding: 0; color: inherit; }
 /* 纯文本形态(.txt 转写等):非代码,保留换行、可读字体 */
 .doc pre.doc-plain { background: none; color: var(--ink); padding: 0; margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.78; white-space: pre-wrap; word-break: break-word; }
+/* 原始 ASR:时间点退到边栏，正文按片段呼吸；不改动原文。 */
+.doc-transcript { display: flex; flex-direction: column; gap: 12px; }
+.transcript-unit { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 14px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.transcript-unit time { padding-top: .28em; font-family: var(--mono); font-size: 11.5px; color: var(--pine-deep); white-space: nowrap; }
+.transcript-unit p, .transcript-untimed { margin: 0; white-space: pre-wrap; }
+.transcript-untimed { color: var(--ink-soft); }
 .doc-img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 8px 24px -12px rgba(20,16,10,.4); }
 .doc table { border-collapse: collapse; width: 100%; margin: 18px 0; font-family: var(--sans); font-size: 14px; }
 .doc th, .doc td { border: 1px solid var(--line-2); padding: 7px 11px; text-align: left; }
@@ -478,6 +484,7 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 /* 窄屏堆叠 */
 @media (max-width: 880px) {
   .layout { grid-template-columns: 1fr; height: auto; }
+  .transcript-unit { grid-template-columns: 1fr; gap: 2px; }
   .pane-nav, .pane-panel { border: none; border-bottom: 1px solid var(--line); }
   .doc { padding: 28px 20px 60px; }
 }
