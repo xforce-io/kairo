@@ -27,6 +27,11 @@ def test_parse_valid_two_and_three_part_and_fraction():
     assert by_text["sixty two"][0] == 62
 
 
+def test_parse_inline_timestamps_as_separate_units():
+    units = parse_units("[0:00:00] first [0:00:04.92] second", duration=10)
+    assert [(u.start, u.text) for u in units] == [(0, "first"), (4.92, "second")]
+
+
 def test_parse_rejects_invalid_prefixes():
     text = "\n".join(
         [

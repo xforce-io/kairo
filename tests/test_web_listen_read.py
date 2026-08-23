@@ -71,6 +71,15 @@ def test_select_audio_shows_listen_read_zones_and_own_media(tmp_path):
     assert fb.content.startswith(b"RIFF")
 
 
+def test_select_transcript_groups_timestamped_asr_for_reading(tmp_path):
+    rid = _paired_ref(tmp_path)
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/2")
+    assert r.status_code == 200
+    assert 'class="doc-transcript"' in r.text
+    assert "0:10" in r.text
+    assert "[00:10]" not in r.text
+
+
 def test_switch_audio_swaps_transcript_and_src(tmp_path):
     rid = _paired_ref(tmp_path)
     r = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/1")

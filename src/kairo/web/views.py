@@ -143,6 +143,24 @@ def _render_doc(path: Path, *, slug: str | None = None) -> str:
     return f'<pre class="doc-plain">{escape(text)}</pre>'
 
 
+def _render_transcript(path: Path, *, slug: str | None = None) -> str:
+    """将带时间戳的原始 ASR 分段展示；无时间戳时保留原有 Markdown 呈现。"""
+    units = parse_units(path.read_text(errors="replace"))
+    if not any(unit.start is not None for unit in units):
+        return _render_doc(path, slug=slug)
+    parts = ['<div class="doc-transcript">']
+    for unit in units:
+        text = escape(unit.text)
+        if unit.start is None:
+            parts.append(f'<p class="transcript-untimed">{text}</p>')
+        else:
+            parts.append(
+                f'<section class="transcript-unit"><time>{_clock(unit.start)}</time>'
+                f'<p>{text}</p></section>'
+            )
+    return "".join(parts) + "</div>"
+
+
 def _form_preview_html(ws: Workspace, slug: str, ref_id: str, form: dict) -> str | None:
     """按 form 类型生成预览 HTML:图片走 <img>,文本走 markdown/pre。"""
     path = _form_path(ws, form["location"])
@@ -152,7 +170,7 @@ def _form_preview_html(ws: Workspace, slug: str, ref_id: str, form: dict) -> str
             f'<img class="doc-img" src="{src}" alt="{escape(path.name)}">'
         )
     if _is_text_file(path):
-        return _render_doc(path, slug=slug)
+        return _render_transcript(path, slug=slug) if form["role"] == "transcript" else _render_doc(path, slug=slug)
     return None
 
 def _clock(sec: float) -> str:
@@ -522,7 +540,11 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
     return _render(
         request,
         "_doc.html",
-        {"title": title, "html": _render_doc(path, slug=slug), "exportable": key == "digest"},
+        {
+            "title": title,
+            "html": _render_transcript(path, slug=slug) if role == "transcript" else _render_doc(path, slug=slug),
+            "exportable": key == "digest",
+        },
     )
 
 
