@@ -50,6 +50,18 @@ def test_cli_status_warns_on_corpus_drift(tmp_path, monkeypatch):
     assert "corpus" in out and "re-step" in out  # advisory
 
 
+def test_cli_run_empty_workspace_up_to_date(tmp_path, monkeypatch):
+    """#134 S2:空 workspace `kairo run` 输出 up to date,不写两篇 target。"""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    result = runner.invoke(app, ["run"])
+    assert result.exit_code == 0
+    assert "up to date" in result.output
+    assert not (tmp_path / "understanding.md").exists()
+    assert not (tmp_path / "assessment.md").exists()
+
+
 def test_cli_init_creates_workspace(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, ["init", "kidney"])
