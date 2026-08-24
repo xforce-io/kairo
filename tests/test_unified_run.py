@@ -23,6 +23,47 @@ def _ws_audio(tmp_path, monkeypatch):
     return ws, rid
 
 
+def test_empty_workspace_plan_is_clean(tmp_path):
+    """#134:空 workspace 主按钮状态机为 clean,不把 assessment 当待办。"""
+    ws = Workspace.init(tmp_path / "ws", topic="未分类")
+    plan = workspace_run_plan(ws)
+    assert plan["mode"] == "clean"
+    assert plan["pending_count"] == 0
+    assert plan["blocked_count"] == 0
+
+
+def test_empty_workspace_step_does_not_invoke_provider(tmp_path):
+    """#134:空 workspace step 无推进、不调 provider、不写 target。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+
+    class CountingProvider(StubProvider):
+        def __init__(self):
+            self.calls = 0
+
+        def run(self, config, signal=None):
+            self.calls += 1
+            return super().run(config, signal)
+
+    provider = CountingProvider()
+    assert step(ws, provider) is False
+    assert provider.calls == 0
+    assert not (ws.root / "understanding.md").exists()
+    assert not (ws.root / "assessment.md").exists()
+
+
+def test_corpus_only_workspace_plan_is_clean(tmp_path):
+    """#134:仅 corpus(不 fold)也不应让 assessment 因未记录上游而 stale。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    base = tmp_path / "base.md"
+    base.write_text("基线材料")
+    ws.add([base], source_class="corpus")
+    plan = workspace_run_plan(ws)
+    assert plan["mode"] == "clean"
+    assert plan["pending_count"] == 0
+    assert step(ws, StubProvider()) is False
+    assert not (ws.root / "assessment.md").exists()
+
+
 def test_plan_clean_after_full_step(tmp_path, monkeypatch):
     ws, rid = _ws_audio(tmp_path, monkeypatch)
     step(ws, StubProvider())
@@ -80,6 +121,26 @@ def test_web_run_clean_disabled(tmp_path, monkeypatch):
     r = TestClient(create_app(tmp_path)).get("/w/ws")
     assert "Up to date" in r.text or "已是最新" in r.text
     assert "disabled" in r.text
+
+
+def test_web_empty_workspace_run_disabled(tmp_path):
+    """#134 S1:空 workspace 页主按钮 Up to date 且 disabled。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    r = TestClient(create_app(tmp_path)).get("/w/ws")
+    assert r.status_code == 200
+    assert "Up to date" in r.text or "已是最新" in r.text
+    assert 'id="run-btn"' in r.text
+    assert "disabled" in r.text
+
+
+def test_web_empty_workspace_post_run_is_noop(tmp_path):
+    """#134:空 workspace POST /run 不启 job。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    r = TestClient(app).post("/w/ws/run")
+    assert r.status_code == 200
+    assert "Nothing to do" in r.text or "没有待办" in r.text
+    assert app.state.registry.current("ws") is None
 
 
 def test_web_run_summary_lists_blocks(tmp_path, monkeypatch):

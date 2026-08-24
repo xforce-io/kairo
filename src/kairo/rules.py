@@ -489,13 +489,17 @@ class ComposeRule:
         return ts is not None and ts.corpus_stamp != corpus.stamp(corpus.collect(self.ws))
 
     def _upstream_changed(self, target, state, ts) -> bool:
+        # 从未 compose 过的 target 不靠「未记录上游」变 stale(#134)。
+        # 首次 compose 由 delta / materials-changed / 手改驱动;级联只发生在已有账本上。
+        if ts is None:
+            return False
         for dep in target.depends_on:
             dep_out = (
                 state.targets[dep].output_hash
                 if (state and dep in state.targets)
                 else ""
             )
-            recorded = ts.upstream_hash.get(dep) if ts else None
+            recorded = ts.upstream_hash.get(dep)
             if recorded != dep_out:
                 return True
         return False

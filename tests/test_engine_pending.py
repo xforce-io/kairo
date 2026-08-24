@@ -17,6 +17,12 @@ def test_pending_counts_stale_then_empty_after_step(tmp_path, monkeypatch):
     assert pending(ws) == []
 
 
+def test_empty_workspace_has_no_pending(tmp_path):
+    """#134:刚 init、零参考 → 无 stale(assessment 不得因未记录上游而 pending)。"""
+    ws = Workspace.init(tmp_path, topic="t")
+    assert pending(ws) == []
+
+
 def test_pending_does_not_mutate_state(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = Workspace.init(tmp_path, topic="t")
