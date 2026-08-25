@@ -144,13 +144,7 @@ def test_step_done_loads_run_summary_not_full_body(tmp_path, monkeypatch):
     assert 'hx-target="#step-area"' in r.text
 
 
-def test_run_summary_failed_nonzero_exit(tmp_path, monkeypatch):
-    """#97 S1: 子进程非零退出 → 失败摘要,绝无成功/无剩余阻塞措辞;按钮可再点。"""
-    monkeypatch.setenv("KAIRO_STUB", "1")
-    ws = Workspace.init(tmp_path / "ws", topic="t")
-    app = create_app(tmp_path)
-    c = TestClient(app)
-    # 可控非零退出(不写 blocked state)——驱动真实 TaskRegistry + run-summary
+def _failing_run_task(app, ws):
     fail_argv = [
         sys.executable,
         "-c",
@@ -159,6 +153,19 @@ def test_run_summary_failed_nonzero_exit(tmp_path, monkeypatch):
     task = app.state.registry.start("ws", ws.root, fail_argv)
     _wait(task)
     assert task.exit_code == 1
+    return task
+
+
+def test_run_summary_failed_nonzero_exit(tmp_path, monkeypatch):
+    """#97 S1: 子进程非零退出 → 失败摘要,绝无成功/无剩余阻塞措辞;有待办时按钮可再点。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    # 可控非零退出(不写 blocked state)——驱动真实 TaskRegistry + run-summary
+    task = _failing_run_task(app, ws)
     r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
     assert r.status_code == 200
     body = r.text
@@ -172,6 +179,26 @@ def test_run_summary_failed_nonzero_exit(tmp_path, monkeypatch):
     assert app.state.registry.is_running("ws") is False
     assert 'id="run-btn-wrap"' in body
     assert "hx-post=" in body and "/run" in body
+
+
+def test_run_summary_failed_empty_workspace_stays_clean(tmp_path, monkeypatch):
+    """#97 失败摘要 + #134 空仓:失败后主按钮仍是 disabled Up to date。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    task = _failing_run_task(app, ws)
+    r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
+    assert r.status_code == 200
+    body = r.text
+    assert "Run failed" in body or "运行失败" in body
+    assert "No remaining blocks" not in body
+    assert "无剩余阻塞" not in body
+    assert app.state.registry.is_running("ws") is False
+    assert 'id="run-btn-wrap"' in body
+    assert "Up to date" in body or "已是最新" in body
+    assert "disabled" in body
+    assert "hx-post=" not in body
 
 
 def test_run_summary_cancelled(tmp_path, monkeypatch):

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ month_label }}{% endblock %}
+{% block body %}
+<div class="timeline cal-page">
+  <div class="tl-toolbar">
+    <div class="tl-modes">
+      <a class="{% if view == 'calendar' %}on{% endif %}" href="/timeline?day={{ day_iso }}">{{ t('tl.cal') }}</a>
+      <a class="{% if view == 'recent' %}on{% endif %}" href="/timeline?mode=recent">{{ t('tl.recent') }}</a>
+    </div>
+    {% if unknown_n %}
+    <a class="tl-unknown-chip {% if view == 'unknown' %}on{% endif %}"
+       href="/timeline?unknown=1&month={{ month_iso }}">{{ t('tl.unknown_chip').format(n=unknown_n) }}</a>
+    {% endif %}
+  </div>
+
+  {% if view == 'recent' %}
+  <div class="timeline-list">
+    {% for g in recent_groups %}
+    <section class="tl-day">
+      <div class="tl-day-head"><h2>{{ g.key }}</h2><span class="count">{{ g.entries|length }}</span></div>
+      {% for it in g.entries %}
+      <a class="tl-row" href="/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}">
+        <span class="tl-title">{{ it.title }}</span>
+        <span class="tl-ws">{{ it.topic }}</span>
+        <span class="tl-meta">{{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {% if it.occurred_at %}{{ t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) }}{% else %}{{ t('tl.occurred_unknown') }}{% endif %}</span>
+      </a>
+      {% endfor %}
+    </section>
+    {% else %}
+    <p class="tl-empty">{{ t('tl.empty_root') }}</p>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="cal-layout">
+    <section class="cal-month">
+      <div class="cal-month-head">
+        <a class="tl-nav" href="/timeline?day={{ prev_day }}">‹</a>
+        <h1>{{ month_label }}</h1>
+        <a class="tl-nav" href="/timeline?day={{ next_day }}">›</a>
+      </div>
+      <div class="cal-weekdays">
+        {% for w in weekdays %}<span>{{ w }}</span>{% endfor %}
+      </div>
+      <div class="cal-grid">
+        {% for c in cells %}
+        <a class="cal-cell{% if c.mute %} mute{% endif %}{% if c.today %} today{% endif %}{% if c.on %} on{% endif %}"
+           href="/timeline?day={{ c.iso }}">
+          <span class="cal-num">{{ c.num }}</span>
+          <span class="cal-dots">{% for _ in range(c.dots) %}<span class="cal-dot"></span>{% endfor %}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </section>
+    <aside class="cal-pane{% if view == 'unknown' %} unknown{% endif %}">
+      {% if view == 'unknown' %}
+      <section class="tl-day unknown">
+        <div class="tl-day-head"><h2>{{ t('tl.src_unknown') }}</h2><span class="count">{{ unknown_n }}</span></div>
+        {% for it in unknown_items %}
+        <a class="tl-row" href="/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}">
+          <span class="tl-title">{{ it.title }}</span>
+          <span class="tl-ws">{{ it.topic }}</span>
+          <span class="tl-meta">{{ it.id }}</span>
+        </a>
+        {% endfor %}
+      </section>
+      {% else %}
+      <section class="tl-day">
+        <div class="tl-day-head"><h2>{{ day_iso }}</h2><span class="count">{{ day_items|length }}</span></div>
+        {% for it in day_items %}
+        <a class="tl-row" href="/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}">
+          <span class="tl-title">{{ it.title }}</span>
+          <span class="tl-ws">{{ it.topic }}</span>
+          <span class="tl-meta">{{ it.id }}</span>
+        </a>
+        {% else %}
+        <p class="tl-empty">{{ t('tl.empty_day') }}</p>
+        {% endfor %}
+      </section>
+      {% endif %}
+    </aside>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import subprocess
@@ -30,6 +31,17 @@ from kairo.engine import (
 )
 from kairo.engine import accept as engine_accept
 from kairo.listen_read import pair_audio_transcripts, parse_units
+from kairo.timeline import (
+    TimelineQueryError,
+    effective_added_at,
+    effective_occurred,
+    is_fold_class,
+    month_cells,
+    parse_calendar_date,
+    resolve_timeline_query,
+    scan_timeline,
+    shift_month_day,
+)
 from kairo.web.discovery import scan_workspaces
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
@@ -52,9 +64,8 @@ def _t(request: Request):
 def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
     """统一渲染:注入 lang + t。所有 TemplateResponse 走这里。"""
     lang = resolve_lang(request)
-    return request.app.state.templates.TemplateResponse(
-        request, name, {**ctx, "lang": lang, "t": translator(lang)}
-    )
+    ctx = {"nav_active": "", **ctx, "lang": lang, "t": translator(lang)}
+    return request.app.state.templates.TemplateResponse(request, name, ctx)
 
 
 def _open(request: Request, slug: str) -> Workspace:
@@ -263,7 +274,87 @@ def healthz() -> JSONResponse:
 def dashboard(request: Request) -> HTMLResponse:
     root = request.app.state.root
     items = scan_workspaces(root)
-    return _render(request, "dashboard.html", {"items": items, "root": str(root)})
+    return _render(
+        request,
+        "dashboard.html",
+        {"items": items, "root": str(root), "nav_active": "workspaces"},
+    )
+
+
+@router.get("/timeline", response_class=HTMLResponse)
+def timeline_view(
+    request: Request,
+    month: str | None = None,
+    day: str | None = None,
+    mode: str | None = None,
+    unknown: str | None = None,
+) -> HTMLResponse:
+    t = _t(request)
+    try:
+        q = resolve_timeline_query(month=month, day=day, mode=mode, unknown=unknown)
+    except TimelineQueryError:
+        raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
+    items = scan_timeline(request.app.state.root)
+    unknown_items = [it for it in items if it.occurred_at is None]
+    counts: dict[str, int] = {}
+    for it in items:
+        if it.occurred_at is not None:
+            key = it.occurred_at.isoformat()
+            counts[key] = counts.get(key, 0) + 1
+    cells = []
+    for d in month_cells(q.month.year, q.month.month):
+        n = counts.get(d.isoformat(), 0)
+        cells.append(
+            {
+                "date": d,
+                "iso": d.isoformat(),
+                "num": d.day,
+                "mute": d.month != q.month.month,
+                "today": d == datetime.date.today(),
+                "on": q.view == "calendar" and d == q.day,
+                "dots": min(n, 3),
+            }
+        )
+    day_items = [it for it in items if it.occurred_at == q.day]
+    recent_groups = []
+    if q.view == "recent":
+        ordered = sorted(items, key=lambda it: it.added_at, reverse=True)
+        buckets: dict[str, list] = {}
+        order: list[str] = []
+        for it in ordered:
+            key = it.added_at.astimezone().date().isoformat()
+            if key not in buckets:
+                buckets[key] = []
+                order.append(key)
+            buckets[key].append(it)
+        recent_groups = [{"key": k, "entries": buckets[k]} for k in order]
+    lang = resolve_lang(request)
+    if lang == "zh":
+        month_label = f"{q.month.year}年{q.month.month}月"
+    else:
+        month_label = q.month.strftime("%B %Y")
+    prev_d = shift_month_day(q.day, -1)
+    next_d = shift_month_day(q.day, 1)
+    return _render(
+        request,
+        "timeline.html",
+        {
+            "nav_active": "timeline",
+            "view": q.view,
+            "q": q,
+            "month_label": month_label,
+            "weekdays": t("tl.weekday").split(),
+            "cells": cells,
+            "day_items": day_items,
+            "unknown_items": unknown_items,
+            "unknown_n": len(unknown_items),
+            "recent_groups": recent_groups,
+            "prev_day": prev_d.isoformat(),
+            "next_day": next_d.isoformat(),
+            "day_iso": q.day.isoformat(),
+            "month_iso": q.month.strftime("%Y-%m"),
+        },
+    )
 
 
 @router.get("/set-lang/{code}")
@@ -358,10 +449,12 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)
-def workspace_view(request: Request, slug: str) -> HTMLResponse:
+def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLResponse:
     ws = _open(request, slug)
     streams, corpus = _split_refs(ws)
     running = request.app.state.registry.current(slug)
+    ids = {r["id"] for r in streams} | {r["id"] for r in corpus}
+    select_ref = ref if ref in ids else None
     return _render(
         request,
         "workspace.html",
@@ -371,6 +464,7 @@ def workspace_view(request: Request, slug: str) -> HTMLResponse:
             "targets": _target_states(ws),
             "streams": streams,
             "corpus": corpus,
+            "select_ref": select_ref,
             "run_task_id": running.task_id if running else None,
             **_run_button_ctx(request, ws, slug),
         },
@@ -474,6 +568,10 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     else:
         empty_hint = t("ref.empty_hint")
         empty_card = False
+    occ, occ_src = effective_occurred(ref_id, man.occurred_at)
+    man_path = ws.references_dir() / ref_id / "manifest.yaml"
+    added_dt = effective_added_at(man.added_at, man_path)
+    can_edit_time = is_fold_class(ws, man.source_class)
     blocks = ref_product_blocks(ws, ref_id)
     # 基线干净指针无 blocked 时隐藏「重新处理」(避免假故障感);stream 或 blocked 仍显示
     show_retry = bool(blocks) or not is_corpus
@@ -498,8 +596,37 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "can_generate_prose": can_generate_prose(ws, ref_id),
             "blocks": blocks,
             "show_retry": show_retry,
+            "can_edit_time": can_edit_time,
+            "occurred_iso": occ.isoformat() if occ else "",
+            "occurred_src": occ_src,
+            "added_display": added_dt.astimezone().strftime("%Y-%m-%d %H:%M"),
         },
     )
+
+
+@router.post("/w/{slug}/ref/{ref_id}/occurred", response_class=HTMLResponse)
+def ref_occurred_view(
+    request: Request,
+    slug: str,
+    ref_id: str,
+    occurred_at: str = Form(""),
+) -> HTMLResponse:
+    ws = _open(request, slug)
+    t = _t(request)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    raw = (occurred_at or "").strip()
+    try:
+        if not raw:
+            ws.set_occurred(ref_id, None)
+        else:
+            parsed = parse_calendar_date(raw)
+            if parsed is None:
+                raise HTTPException(status_code=400, detail=t("tl.bad_date"))
+            ws.set_occurred(ref_id, parsed)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    return ref_view(request, slug, ref_id)
 
 
 @router.get("/w/{slug}/ref/{ref_id}/form/{key}", response_class=HTMLResponse)

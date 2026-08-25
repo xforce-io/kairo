@@ -26,6 +26,12 @@ from kairo.provider import select_provider
 from kairo.rules import ComposeRule
 from kairo.stream_index import write_stream_index
 from kairo.archive import ArchiveError, NeedChoice, archive_markdown
+from kairo.timeline import (
+    format_cli_timeline,
+    item_as_json,
+    parse_calendar_date,
+    scan_timeline,
+)
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound, delete_workspace
 
 _EPILOG = (
@@ -275,6 +281,9 @@ def add(
         "--copy",
         help="先复制进工作区(.kairo/uploads 或既有 ref 目录)再登记;默认只记路径指针",
     ),
+    occurred_at: str = typer.Option(
+        None, "--occurred", help="发生日 YYYY-MM-DD;不改 id"
+    ),
 ) -> None:
     """登记 reference。文件=指针/可选 copy;目录 stream=一条多形态;目录 --corpus=基线树指针。
 
@@ -282,12 +291,15 @@ def add(
     """
     ws = _open_ws()
     try:
+        if occurred_at and corpus:
+            raise AddError("fold=false 不能设发生时间")
         rid = ws.add(
             files,
             ref_id=ref_id,
             role=role,
             source_class="corpus" if corpus else None,
             copy=copy,
+            occurred_at=occurred_at,
         )
     except AddError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
@@ -311,6 +323,70 @@ def title(
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     typer.echo(f"titled {ref_id} → {name}")
+
+
+@app.command()
+def occurred(
+    ref_id: str = typer.Argument(..., help="reference id"),
+    day: str = typer.Argument(None, help="发生日 YYYY-MM-DD"),
+    clear: bool = typer.Option(False, "--clear", help="清空手改发生时间"),
+) -> None:
+    """修正或清空一条参考的发生时间(不改 id,不 step)。"""
+    ws = _open_ws()
+    if ref_id not in ws.list_reference_ids():
+        typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    if clear:
+        if day:
+            typer.secho("--clear 与日期互斥", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        parsed = None
+    else:
+        parsed = parse_calendar_date(day)
+        if parsed is None:
+            typer.secho(f"非法发生时间:{day}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+    try:
+        ws.set_occurred(ref_id, parsed)
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"occurred {ref_id} → {parsed.isoformat() if parsed else '-'}")
+
+
+@app.command()
+def timeline(
+    root: Path = typer.Argument(
+        None,
+        help="含多个 workspace 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd",
+    ),
+    day: str = typer.Option(None, "--day", help="只列出该发生日"),
+    recent: bool = typer.Option(False, "--recent", help="按录入时间倒序"),
+    as_json: bool = typer.Option(False, "--json", help="JSON 输出"),
+) -> None:
+    """跨 workspace 按发生日列出 fold 观测;--recent 按录入时间。"""
+    if day and recent:
+        typer.secho("--day 与 --recent 互斥", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    parsed = None
+    if day:
+        parsed = parse_calendar_date(day)
+        if parsed is None:
+            typer.secho(f"非法发生时间:{day}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+    serve = _serve_root(root)
+    if not serve.is_dir():
+        typer.secho(f"目录不存在:{serve}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    items = scan_timeline(serve)
+    if as_json:
+        if parsed is not None:
+            items = [it for it in items if it.occurred_at == parsed]
+        if recent:
+            items = sorted(items, key=lambda it: it.added_at, reverse=True)
+        typer.echo(json.dumps([item_as_json(it) for it in items], ensure_ascii=False))
+        return
+    typer.echo(format_cli_timeline(items, recent=recent, day=parsed), nl=False)
 
 
 def _exit_if_provider_failed(ws: Workspace) -> None:

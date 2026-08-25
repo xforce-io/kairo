@@ -9,8 +9,6 @@ import secrets
 from dataclasses import dataclass
 from pathlib import Path
 
-import yaml
-
 from kairo.models import ArchiveBinding, Form, Manifest
 from kairo.workspace import Workspace, WorkspaceNotFound, default_reference_title
 
@@ -232,20 +230,6 @@ def _atomic_write_text(path: Path, data: str) -> None:
     os.replace(tmp, path)
 
 
-def _commit_manifest(ws: Workspace, ref_id: str, man: Manifest) -> None:
-    path = ws.references_dir() / ref_id / "manifest.yaml"
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(
-        yaml.safe_dump(
-            man.model_dump(by_alias=True, exclude_none=True),
-            allow_unicode=True,
-            sort_keys=False,
-        ),
-        encoding="utf-8",
-    )
-    os.replace(tmp, path)
-
-
 def _write_archive(
     ws: Workspace,
     *,
@@ -300,7 +284,7 @@ def _write_archive(
                 body_sha256=digest,
             ),
         )
-    _commit_manifest(ws, ref_id, man)
+    ws.write_manifest(ref_id, man)
     if old_location:
         old = Path(old_location)
         old_path = old if old.is_absolute() else ws.root / old

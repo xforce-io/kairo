@@ -46,10 +46,11 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | 登记材料 / add | 说明路径指针 vs `--copy`、stream vs `--corpus` → 确认后 `kairo add …`；往既有参考追加形态用 `kairo add <file> --to <id> [--copy]` |
 | 归档会话 / archive 到 Kairo | 确认后 `kairo archive`（见下节）；**不要**用 `kairo add`。成功回执必须原样写回；**不**自动 `step` |
 | 改参考展示名 / title | 确认后 `kairo title <id> <新名>`（不改 id） |
+| 发生时间 / 时间轴 | 只读 `kairo timeline [root]`（`--day` / `--recent` / `--json`）；写发生时间确认后 `kairo occurred <id> YYYY-MM-DD` 或 `--clear` |
 | 删参考 / rm-ref | 说明会改 state；确认后 `kairo rm-ref <id>`（若带 `--recompose` 会立刻重综合，副作用更大，须单独确认） |
 | 生成 prose / 重建 MEETINGS 索引 | 写磁盘；确认后 `kairo prose <id>` / `kairo index` |
 
-纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`glossary list`，以及直接读 workspace 内 markdown / state。
+纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`glossary list`、`timeline`，以及直接读 workspace 内 markdown / state。
 
 ## 两层心智：怎么读知识产物
 
@@ -89,7 +90,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 ## 铁律
 
-1. **默认只读**：用户说「看看 / 什么情况 / 总结一下」→ 写类命令次数 = 0（`add` / `archive` / `step` / `run` / `re-step` / `retry-ref` / `accept` / `rollback` / `rm-ref` / `rm-ws` / `new` / `prose` / `index` / `init` / `glossary add|rm` 皆算写或副作用）
+1. **默认只读**：用户说「看看 / 什么情况 / 总结一下」→ 写类命令次数 = 0（`add` / `archive` / `step` / `run` / `re-step` / `retry-ref` / `accept` / `rollback` / `rm-ref` / `rm-ws` / `new` / `prose` / `index` / `init` / `glossary add|rm` / `occurred` 皆算写或副作用）
 2. **写操作先确认**：执行前说明命令与副作用（token、覆盖文档、丢手改、改 state）。用户本轮已明确「直接执行 / 不用问了」可跳过确认
 3. **不代批 accept**：手改接受权在人；只解释 `manual-edit`，确认后才 `accept`
 4. **不串 cwd**：始终在目标 workspace 根执行 CLI；多 workspace 禁止在 A 目录对 B 主题 step

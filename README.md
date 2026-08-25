@@ -51,8 +51,10 @@ Produces two layers of documents: `understanding.md` (neutral facts) and `assess
 | `list` | List workspaces under a serve root (`--json`; root defaults to `KAIRO_SERVE_ROOT` or cwd) [#95](https://github.com/xforce-io/kairo/issues/95) |
 | `new` | Create a workspace directory under the serve root and `init` it (Web create parity) |
 | `rm-ws` | Delete a workspace under the serve root (`--yes` skips confirm; root glossary kept) |
-| `add` | Register a reference (path pointer by default; `--copy` materializes; `--corpus` marks baseline; `--to <id>` attaches to an existing ref) |
+| `add` | Register a reference (path pointer by default; `--copy` materializes; `--corpus` marks baseline; `--to <id>` attaches; `--occurred YYYY-MM-DD` sets occurred date) |
 | `title` | Rename a reference's display title (id / directory unchanged) |
+| `occurred` | Set or clear a reference's occurred date (`--clear`; does not change id or run step) |
+| `timeline` | List fold observations across workspaces by occurred date (`--day` / `--recent` / `--json`) |
 | `step` | Run the reconciliation loop to convergence (configured endpoint → Claude CLI → stub; `KAIRO_STUB` forces stub) |
 | `run` | Clear terminal blocked then step (same as Web primary button) |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+import datetime as dt
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 DEFAULT_DIGEST_PROMPT = (
     "为这条 reference 写一份忠实、高密度的记忆纪要(不是一页纸周报,也不是转写原文)。\n\n"
@@ -213,6 +215,19 @@ class ArchiveBinding(BaseModel):
     body_sha256: str
 
 
+def _coerce_time_str(value):
+    """yaml 无引号日期/时间戳 → isoformat 字符串；脏类型 → None。datetime 须先于 date。"""
+    if value is None:
+        return None
+    if isinstance(value, dt.datetime):
+        return value.isoformat()
+    if isinstance(value, dt.date):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    return None
+
+
 class Manifest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -222,6 +237,13 @@ class Manifest(BaseModel):
     source_class: str = Field(default="stream", alias="class")
     forms: list[Form] = Field(default_factory=list)
     archive: ArchiveBinding | None = None
+    occurred_at: str | None = None
+    added_at: str | None = None
+
+    @field_validator("occurred_at", "added_at", mode="before")
+    @classmethod
+    def _time_fields(cls, value):
+        return _coerce_time_str(value)
 
 
 # ---- reconcile state (.kairo/state.json) ----

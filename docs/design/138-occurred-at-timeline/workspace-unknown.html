@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kairo console · 发生时间未知</title>
+  <link rel="stylesheet" href="../../../src/kairo/web/static/app.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="dashboard.html"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    <nav class="console-nav">
+      <a href="dashboard.html">工作区</a>
+      <a href="timeline-cal.html">时间轴</a>
+    </nav>
+    <span class="crumb">能源梳理 · 能源梳理</span>
+    <span class="lang-switch">
+      <a href="#">EN</a>
+      <a href="#" class="on">中</a>
+    </span>
+  </header>
+  <div class="layout">
+    <aside class="pane-nav">
+      <div class="nav-group">
+        <div class="nav-section">Targets</div>
+        <a class="nav-doc" href="#"><span class="dot ok"></span><span class="name">understanding.md</span></a>
+        <a class="nav-doc" href="#"><span class="dot ok"></span><span class="name">assessment.md</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-section">References</div>
+        <a class="nav-doc is-ref" href="#"><span class="name">周会</span></a>
+        <a class="nav-doc is-ref is-active" href="#"><span class="name">白板拍照（未标日期）</span></a>
+      </div>
+    </aside>
+    <main class="pane-read" id="reader">
+      <article class="doc">
+        <p class="doc-kicker"><span class="dk-title">digest</span></p>
+        <h1>白板拍照（未标日期）</h1>
+        <p>照片无文件名日期，id 也无 YYYY-MM-DD 前缀。发生时间保持未知，不进入某一天。</p>
+      </article>
+    </main>
+    <aside class="pane-panel">
+      <div class="meta">
+        <p class="meta-kicker">Reference · 观测</p>
+        <form class="meta-rename">
+          <input class="meta-title-input" value="白板拍照（未标日期）">
+        </form>
+        <p class="meta-hint">untitled-whiteboard</p>
+
+        <div class="meta-label">时间</div>
+        <div class="meta-time">
+          <div class="dlg-label">发生时间</div>
+          <div class="meta-time-row">
+            <input type="date" value="">
+            <span class="src unknown">未知</span>
+          </div>
+          <div class="dlg-label" style="margin-top:12px">录入时间</div>
+          <div class="meta-time-row">
+            <span class="added">2026-08-25 11:04</span>
+          </div>
+          <p class="meta-time-hint">填写发生日后才会出现在对应日期下。清空则回到未知，不伪造日期。</p>
+        </div>
+      </div>
+    </aside>
+  </div>
+</body>
+</html>
