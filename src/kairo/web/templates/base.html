@@ -12,6 +12,10 @@
 <body>
   <header class="top">
     <a class="brand" href="/"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    <nav class="console-nav">
+      <a href="/" class="{% if nav_active == 'workspaces' %}on{% endif %}">{{ t('nav.workspaces') }}</a>
+      <a href="/timeline" class="{% if nav_active == 'timeline' %}on{% endif %}">{{ t('nav.timeline') }}</a>
+    </nav>
     {% block topnav %}{% endblock %}
     <span class="crumb">{% block subtitle %}{% endblock %}</span>
     <span class="lang-switch">

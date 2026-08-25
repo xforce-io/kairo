@@ -103,6 +103,7 @@ def test_cli_first_archive_create_writes_one_form(tmp_path, monkeypatch):
     assert man.archive.form_index == 0
     assert len(man.forms) == 1
     assert man.forms[0].role == "source_text"
+    assert man.added_at
     loc = Path(man.forms[0].location)
     p = loc if loc.is_absolute() else ws.root / loc
     assert p.name.startswith("session.") and p.name.endswith(".md")
@@ -113,6 +114,8 @@ def test_cli_continue_updates_same_form(tmp_path, monkeypatch):
     root = _serve_ws(tmp_path)
     monkeypatch.setenv("KAIRO_SERVE_ROOT", str(root))
     rec = _create_archive(root, "hello session", workspace="topic-a")
+    ws0 = Workspace.open(root / "topic-a")
+    added0 = ws0.read_manifest(ws0.list_reference_ids()[0]).added_at
     src = tmp_path / "s2.md"
     src.write_text(f"hello session\n{rec.envelope()}\nmore talk\n")
     result = runner.invoke(app, ["archive", str(src)])
@@ -123,6 +126,7 @@ def test_cli_continue_updates_same_form(tmp_path, monkeypatch):
     man = ws.read_manifest(ids[0])
     assert len(man.forms) == 1
     assert man.archive.version == 2
+    assert man.added_at == added0
     loc = Path(man.forms[0].location)
     p = loc if loc.is_absolute() else ws.root / loc
     assert p.read_text() == "hello session\nmore talk"

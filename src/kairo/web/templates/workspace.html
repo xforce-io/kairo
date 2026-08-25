@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block subtitle %}{{ topic }} · {{ slug }}{% endblock %}
-{% block topnav %}<a class="back" href="/" title="{{ t('header.back_title') }}">{{ t('header.back_label') }}</a>{% endblock %}
+{% block topnav %}{% endblock %}
 {% block body %}
 <div class="layout">
   <aside class="pane-nav">
@@ -17,7 +17,7 @@
       <div class="nav-section">{{ t('nav.references') }}</div>
       <div id="refs-list">
         {% for r in streams %}
-        <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
+        <a class="nav-doc is-ref {% if select_ref == r.id %}is-active{% endif %}" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
           <span class="name">{{ r.title }}</span>
         </a>
         {% else %}
@@ -144,7 +144,7 @@
     <button type="button" class="btn btn-ghost btn-regen" style="margin-top:10px"
             hx-get="/w/{{ slug | urlencode }}/glossary" hx-target="#meta" hx-swap="innerHTML">{{ t('glossary.btn') }}</button>
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
-    <div id="meta"><p class="panel-hint">{{ t('panel.hint') }}</p></div>
+    <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}><p class="panel-hint">{{ t('panel.hint') }}</p></div>
   </aside>
 </div>
 <script>

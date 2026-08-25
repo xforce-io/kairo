@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kairo console · 工作区</title>
+  <link rel="stylesheet" href="../../../src/kairo/web/static/app.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    <nav class="console-nav">
+      <a class="on" href="dashboard.html">工作区</a>
+      <a href="timeline-cal.html">时间轴</a>
+    </nav>
+    <span class="crumb">/Users/xupeng/kairo · 3 个工作区</span>
+    <span class="lang-switch">
+      <a href="#">EN</a>
+      <a href="#" class="on">中</a>
+    </span>
+  </header>
+  <form class="new-ws">
+    <input placeholder="新主题名称" required>
+    <button type="button">新建工作区</button>
+  </form>
+  <div class="grid">
+    <div class="card">
+      <a class="card-main" href="#">
+        <h3>能源梳理</h3>
+        <div class="slug">能源梳理</div>
+        <div class="badges">
+          <span class="badge stream">8 观测</span>
+          <span class="badge corpus">2 基线</span>
+        </div>
+      </a>
+    </div>
+    <div class="card">
+      <a class="card-main" href="#">
+        <h3>kairo</h3>
+        <div class="slug">kairo</div>
+        <div class="badges">
+          <span class="badge stream">5 观测</span>
+        </div>
+      </a>
+    </div>
+    <div class="card">
+      <a class="card-main" href="#">
+        <h3>招聘</h3>
+        <div class="slug">招聘</div>
+        <div class="badges">
+          <span class="badge stream">3 观测</span>
+          <span class="badge stale">1 待推进</span>
+        </div>
+      </a>
+    </div>
+  </div>
+</body>
+</html>

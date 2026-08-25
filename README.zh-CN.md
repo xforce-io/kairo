@@ -51,8 +51,10 @@ kairo status                  # 看各 reference / 文档的融入状态
 | `list` | 列出 serve root 下各 workspace 摘要（`--json`；root 默认 `KAIRO_SERVE_ROOT` 或 cwd）[#95](https://github.com/xforce-io/kairo/issues/95) |
 | `new` | 在 serve root 下新建 workspace 目录并 init（对标 Web 新建） |
 | `rm-ws` | 删除 serve root 下某个 workspace（`--yes` 跳过确认；不碰 root glossary） |
-| `add` | 登记一条 reference（默认路径指针；`--copy` 物化；`--corpus` 标基线；`--to <id>` 追加到既有参考） |
+| `add` | 登记一条 reference（默认路径指针；`--copy` 物化；`--corpus` 标基线；`--to <id>` 追加；`--occurred YYYY-MM-DD` 钉发生日） |
 | `title` | 重命名参考展示名（不动 id / 目录） |
+| `occurred` | 修正或清空参考发生时间（`--clear`；不改 id、不 step） |
+| `timeline` | 跨 workspace 按发生日列出观测（`--day` / `--recent` / `--json`） |
 | `step` | 跑调和循环到收敛（endpoint 配置→Claude CLI→stub；`KAIRO_STUB` 强制 stub） |
 | `run` | 有终态 blocked 则先清再 step（与 Web 主按钮一致） |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |

@@ -16,6 +16,9 @@ venv/
 # kairo runtime state (workspaces carry their own .kairo/)
 # (none global)
 
+# git worktrees (project-local isolated checkouts)
+.worktrees/
+
 # OS
 .DS_Store
 

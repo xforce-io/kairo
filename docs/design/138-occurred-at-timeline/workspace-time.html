@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kairo console · 周会</title>
+  <link rel="stylesheet" href="../../../src/kairo/web/static/app.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="dashboard.html"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    <nav class="console-nav">
+      <a href="dashboard.html">工作区</a>
+      <a href="timeline-cal.html">时间轴</a>
+    </nav>
+    <span class="crumb">能源梳理 · 能源梳理</span>
+    <span class="lang-switch">
+      <a href="#">EN</a>
+      <a href="#" class="on">中</a>
+    </span>
+  </header>
+  <div class="layout">
+    <aside class="pane-nav">
+      <div class="nav-group">
+        <div class="nav-section">Targets</div>
+        <a class="nav-doc" href="#"><span class="dot ok"></span><span class="name">understanding.md</span></a>
+        <a class="nav-doc" href="#"><span class="dot ok"></span><span class="name">assessment.md</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-section">References</div>
+        <a class="nav-doc is-ref is-active" href="#"><span class="name">周会</span></a>
+        <a class="nav-doc is-ref" href="#"><span class="name">电网口径对齐</span></a>
+        <a class="nav-doc is-ref" href="#"><span class="name">白板拍照（未标日期）</span></a>
+      </div>
+    </aside>
+    <main class="pane-read" id="reader">
+      <article class="doc">
+        <p class="doc-kicker"><span class="dk-title">digest</span></p>
+        <h1>周会</h1>
+        <p>对齐本周电网口径与待补材料。会议实际在 8 月 24 日召开，录音于次日入库。</p>
+        <h2>结论</h2>
+        <ul>
+          <li>口径以基线文档为准，口述数字待核。</li>
+          <li>下周先补齐未标日期的白板照片发生时间。</li>
+        </ul>
+      </article>
+    </main>
+    <aside class="pane-panel">
+      <div class="meta">
+        <p class="meta-kicker">Reference · 观测</p>
+        <form class="meta-rename">
+          <input class="meta-title-input" value="周会">
+        </form>
+        <p class="meta-hint">2026-08-25-weekly</p>
+
+        <div class="meta-label">时间</div>
+        <div class="meta-time">
+          <div class="dlg-label">发生时间</div>
+          <div class="meta-time-row">
+            <input type="date" value="2026-08-24">
+            <span class="src user">手改</span>
+          </div>
+          <div class="dlg-label" style="margin-top:12px">录入时间</div>
+          <div class="meta-time-row">
+            <span class="added">2026-08-25 14:12</span>
+          </div>
+          <p class="meta-time-hint">时间轴按发生日分组。最近加入按录入时间。改发生时间不触发 step。</p>
+        </div>
+
+        <div class="meta-label">Forms</div>
+        <table class="meta-forms">
+          <tbody>
+            <tr class="is-prev"><td class="mf-role"><span class="mf-role-main">audio</span><span class="mf-name">weekly.m4a</span></td><td class="mf-actions"><span class="mf-prev">open</span></td></tr>
+            <tr class="is-prev on is-primary"><td class="mf-role"><span class="mf-role-main">digest</span><span class="mf-name">digest.md</span></td><td class="mf-actions"><span class="mf-prev">preview</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </aside>
+  </div>
+</body>
+</html>

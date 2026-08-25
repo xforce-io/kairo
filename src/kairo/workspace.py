@@ -22,6 +22,7 @@ from kairo.models import (
     State,
     _default_roles_by_ext,
 )
+from kairo.timeline import is_fold_class, parse_added_at, parse_calendar_date
 
 
 class AddError(Exception):
@@ -223,6 +224,7 @@ class Workspace:
         title: str | None,
         role: str | None,
         copy: bool,
+        occurred_at: str | None = None,
     ) -> str:
         """#67:目录 → 一条 stream 多形态 reference(夹内文件全部挂 forms)。"""
         members = self._list_stream_dir_files(d)
@@ -246,6 +248,7 @@ class Workspace:
             title=title,
             source_class="stream",
             copy=False,
+            occurred_at=occurred_at,
         )
 
     def add(
@@ -256,6 +259,7 @@ class Workspace:
         title: str | None = None,
         source_class: str | None = None,
         copy: bool = False,
+        occurred_at: str | None = None,
     ) -> str:
         """登记 reference 形态。
 
@@ -268,12 +272,20 @@ class Workspace:
         if missing:
             raise AddError(f"路径不存在:{missing[0]}")
 
+        occ = None
+        if occurred_at is not None:
+            occ = parse_calendar_date(occurred_at)
+            if occ is None:
+                raise AddError(f"非法发生时间:{occurred_at}")
+
         dirs = [f for f in files if f.is_dir()]
         if dirs:
             if len(files) != 1:
                 raise AddError("目录摄入仅支持单个目录参数(不与文件混加)")
             d = dirs[0]
             cls = source_class or self.constitution.default_class
+            if occ is not None and not is_fold_class(self, cls):
+                raise AddError("fold=false 不能设发生时间")
             if cls == "corpus":
                 if copy:
                     raise AddError(
@@ -283,7 +295,12 @@ class Workspace:
                     [d], ref_id=ref_id, title=title, source_class="corpus"
                 )
             return self._add_stream_dir(
-                d, ref_id=ref_id, title=title, role=role, copy=copy
+                d,
+                ref_id=ref_id,
+                title=title,
+                role=role,
+                copy=copy,
+                occurred_at=occurred_at,
             )
 
         if copy:
@@ -308,19 +325,28 @@ class Workspace:
             )
             for f in files
         ]
+        cls = source_class or self.constitution.default_class
+        if occ is not None and not is_fold_class(self, cls):
+            raise AddError("fold=false 不能设发生时间")
         if existing.is_file():
             # 追加到已有 ref(仅显式 ref_id):保留既有 forms,按 location 去重
             man = self.read_manifest(ref_id)
             have = {fm.location for fm in man.forms}
             man.forms.extend(fm for fm in new_forms if fm.location not in have)
+            if occ is not None:
+                if not is_fold_class(self, man.source_class):
+                    raise AddError("fold=false 不能设发生时间")
+                man.occurred_at = occ.isoformat()
         else:
             if not claimed:
                 ref_dir.mkdir(parents=True, exist_ok=True)
             man = Manifest(
                 id=ref_id,
                 title=_resolve_new_title(title),
-                source_class=source_class or self.constitution.default_class,
+                source_class=cls,
                 forms=new_forms,
+                occurred_at=occ.isoformat() if occ else None,
+                added_at=datetime.datetime.now().astimezone().isoformat(),
             )
         self.write_manifest(ref_id, man)
         return ref_id
@@ -366,6 +392,14 @@ class Workspace:
             raise ValueError("title 不能为空")
         man = self.read_manifest(ref_id)
         man.title = title
+        self.write_manifest(ref_id, man)
+
+    def set_occurred(self, ref_id: str, day: datetime.date | None) -> None:
+        """手改或清空发生时间。无时间轴资格拒绝。不触发 step。"""
+        man = self.read_manifest(ref_id)
+        if not is_fold_class(self, man.source_class):
+            raise ValueError("fold=false 不能设发生时间")
+        man.occurred_at = day.isoformat() if day is not None else None
         self.write_manifest(ref_id, man)
 
     # ---- constitution / glossary (#69) ----
@@ -414,13 +448,30 @@ class Workspace:
 
     def write_manifest(self, ref_id: str, man: Manifest) -> None:
         path = self.references_dir() / ref_id / "manifest.yaml"
-        path.write_text(
-            yaml.safe_dump(
-                man.model_dump(by_alias=True, exclude_none=True),
-                allow_unicode=True,
-                sort_keys=False,
-            )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_file():
+            old_added = None
+            try:
+                old = Manifest.model_validate(yaml.safe_load(path.read_text()) or {})
+                old_added = old.added_at if parse_added_at(old.added_at) else None
+            except Exception:
+                old_added = None
+            if old_added is not None:
+                man.added_at = old_added
+            else:
+                man.added_at = datetime.datetime.fromtimestamp(
+                    path.stat().st_mtime
+                ).astimezone().isoformat()
+        elif parse_added_at(man.added_at) is None:
+            man.added_at = datetime.datetime.now().astimezone().isoformat()
+        payload = yaml.safe_dump(
+            man.model_dump(by_alias=True, exclude_none=True),
+            allow_unicode=True,
+            sort_keys=False,
         )
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(payload, encoding="utf-8")
+        os.replace(tmp, path)
 
     def list_reference_ids(self) -> list[str]:
         d = self.references_dir()
