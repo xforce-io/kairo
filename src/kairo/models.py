@@ -204,6 +204,15 @@ class Form(BaseModel):
     origin: str = "added"
 
 
+class ArchiveBinding(BaseModel):
+    """会话归档绑定(#136)。旧 manifest 无此键 → 非归档。"""
+
+    key: str
+    version: int
+    form_index: int
+    body_sha256: str
+
+
 class Manifest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -212,6 +221,7 @@ class Manifest(BaseModel):
     # 认识论归类:corpus(基线)/ stream(观测)。yaml 键为 `class`;旧 manifest 无此键 → stream。
     source_class: str = Field(default="stream", alias="class")
     forms: list[Form] = Field(default_factory=list)
+    archive: ArchiveBinding | None = None
 
 
 # ---- reconcile state (.kairo/state.json) ----

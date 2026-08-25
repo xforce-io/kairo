@@ -416,7 +416,9 @@ class Workspace:
         path = self.references_dir() / ref_id / "manifest.yaml"
         path.write_text(
             yaml.safe_dump(
-                man.model_dump(by_alias=True), allow_unicode=True, sort_keys=False
+                man.model_dump(by_alias=True, exclude_none=True),
+                allow_unicode=True,
+                sort_keys=False,
             )
         )
 

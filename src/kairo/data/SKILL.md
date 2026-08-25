@@ -1,6 +1,6 @@
 ---
 name: kairo
-description: Use when the user wants to operate kairo topic-workspaces in a session — phrases like kairo 现在有哪些调研, 某主题现在什么情况, 事实/判断到哪了, 帮我总结 kairo 结论, 为什么卡住/blocked, 怎么推进, 推进一下/step/重算/re-step, 接受手改/accept. Not for one-off machine ASR/LLM config unless the user explicitly asks to configure.
+description: Use when the user wants to operate kairo topic-workspaces in a session — phrases like kairo 现在有哪些调研, 某主题现在什么情况, 事实/判断到哪了, 帮我总结 kairo 结论, 为什么卡住/blocked, 怎么推进, 推进一下/step/重算/re-step, 接受手改/accept, archive 到 Kairo, 归档会话. Not for one-off machine ASR/LLM config unless the user explicitly asks to configure.
 ---
 
 # kairo operator
@@ -44,6 +44,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | 接受手改 / accept | 说明将钉为新基线、解除 `manual-edit` → 确认后 `kairo accept <doc>` |
 | 回退 / rollback | 说明文档回退到快照、references 不动 → 确认后 `kairo rollback <seq>`（可先 `kairo history` / `kairo diff` 只读预览） |
 | 登记材料 / add | 说明路径指针 vs `--copy`、stream vs `--corpus` → 确认后 `kairo add …`；往既有参考追加形态用 `kairo add <file> --to <id> [--copy]` |
+| 归档会话 / archive 到 Kairo | 确认后 `kairo archive`（见下节）；**不要**用 `kairo add`。成功回执必须原样写回；**不**自动 `step` |
 | 改参考展示名 / title | 确认后 `kairo title <id> <新名>`（不改 id） |
 | 删参考 / rm-ref | 说明会改 state；确认后 `kairo rm-ref <id>`（若带 `--recompose` 会立刻重综合，副作用更大，须单独确认） |
 | 生成 prose / 重建 MEETINGS 索引 | 写磁盘；确认后 `kairo prose <id>` / `kairo index` |
@@ -88,7 +89,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 ## 铁律
 
-1. **默认只读**：用户说「看看 / 什么情况 / 总结一下」→ 写类命令次数 = 0（`add` / `step` / `run` / `re-step` / `retry-ref` / `accept` / `rollback` / `rm-ref` / `rm-ws` / `new` / `prose` / `index` / `init` / `glossary add|rm` 皆算写或副作用）
+1. **默认只读**：用户说「看看 / 什么情况 / 总结一下」→ 写类命令次数 = 0（`add` / `archive` / `step` / `run` / `re-step` / `retry-ref` / `accept` / `rollback` / `rm-ref` / `rm-ws` / `new` / `prose` / `index` / `init` / `glossary add|rm` 皆算写或副作用）
 2. **写操作先确认**：执行前说明命令与副作用（token、覆盖文档、丢手改、改 state）。用户本轮已明确「直接执行 / 不用问了」可跳过确认
 3. **不代批 accept**：手改接受权在人；只解释 `manual-edit`，确认后才 `accept`
 4. **不串 cwd**：始终在目标 workspace 根执行 CLI；多 workspace 禁止在 A 目录对 B 主题 step
@@ -113,3 +114,15 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 - 未确认就 `accept` 或 `re-step` → 钉基线或丢手改。**先说明副作用。**
 - 用户说「推进」就对所有 workspace 批量 `step` → 越界。**先列清单，确认范围。**
 - 找不到 CLI 就编造 status → **先修安装/PATH。**
+- 用户说「archive 到 Kairo」却走 `kairo add`，或把 compaction 摘要当完整会话续接 → 会错绑或分叉。**用 `kairo archive`；输入必须是宿主原始 transcript。**
+
+## 归档会话（`kairo archive`）
+
+用户说「archive 到 Kairo」时：
+
+1. 导出**宿主保存的原始 transcript**（或与之逐字等价的 Markdown）到本地文件。上下文已被 compaction 时，不得用回忆/摘要冒充完整会话去自动续接。
+2. 调用 `kairo archive SESSION.md`（serve root 与 `kairo list` 相同：`--root` / `KAIRO_SERVE_ROOT` / cwd）。不要 `cd` 进某个 workspace 再 `add`。
+3. **退出码 0**：把 stdout 整行信封原样写入本轮最终回复，独占顶层一行，不得包进代码围栏或引用块。`--json` 时只复制 `receipt`。宿主 compaction 中逐字保留该信封（best-effort）。
+4. **退出码 2**：stdout 是 JSON 清单（`need-workspace` / `need-bind` / `fork`）。转述给人，问清 workspace，以及新建（`--workspace SLUG --create`）还是绑定已有归档（`--workspace SLUG --bind REF`）。**禁止**自行挑选。
+5. **退出码 1**：转述 stderr，不编造已归档。
+6. 归档成功后**不**自动 `step`。要把该会话折进 understanding/assessment，须按铁律单独确认后再 `step`。
