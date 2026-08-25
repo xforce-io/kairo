@@ -93,6 +93,7 @@ def test_skill_write_commands_require_confirmation():
         "kairo accept",
         "kairo rollback",
         "kairo add",
+        "kairo archive",
         "retry-ref",
         "kairo rm-ref",
     ):
@@ -113,6 +114,14 @@ def test_skill_blocked_closed_set():
         "compose-degraded",
     ):
         assert reason in text, f"blocked closed set missing {reason!r}"
+
+
+def test_skill_archive_protocol():
+    text = _skill_text()
+    assert "kairo archive" in text
+    assert "原始 transcript" in text or "原始会话" in text
+    assert "--create" in text and "--bind" in text
+    assert "不" in text and "step" in text
 
 
 def test_skill_common_mistakes_and_no_auto_accept():

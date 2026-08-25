@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 
 import typer
@@ -24,6 +25,7 @@ from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
 from kairo.rules import ComposeRule
 from kairo.stream_index import write_stream_index
+from kairo.archive import ArchiveError, NeedChoice, archive_markdown
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound, delete_workspace
 
 _EPILOG = (
@@ -179,6 +181,80 @@ def rm_ws(
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     typer.echo(f"deleted {slug}")
+
+
+@app.command()
+def archive(
+    session: Path = typer.Argument(..., help="会话 Markdown 路径; - 表示 stdin"),
+    root: Path = typer.Option(
+        None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
+    ),
+    workspace: str = typer.Option(
+        None, "--workspace", help="目标 workspace slug;续接时可省略,取回执中的值"
+    ),
+    create: bool = typer.Option(False, "--create", help="在 --workspace 下新建归档"),
+    bind: str = typer.Option(
+        None, "--bind", help="覆盖该 workspace 中已有归档 reference"
+    ),
+    title: str = typer.Option(None, "--title", help="仅新建时的展示名"),
+    as_json: bool = typer.Option(False, "--json", help="成功时 stdout 为 JSON 对象"),
+) -> None:
+    """把 coding agent 会话 Markdown 归档到指定 workspace(#136)。"""
+    serve = _serve_root(root)
+    if str(session) == "-":
+        text = sys.stdin.read()
+    else:
+        try:
+            text = session.expanduser().read_text(encoding="utf-8")
+        except OSError as e:
+            typer.secho(f"无法读取会话文件:{e}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1) from None
+    try:
+        rec = archive_markdown(
+            text,
+            serve_root=serve,
+            workspace=workspace,
+            create=create,
+            bind=bind,
+            title=title,
+        )
+    except NeedChoice as e:
+        typer.echo(
+            json.dumps(
+                {
+                    "ok": False,
+                    "reason": e.reason,
+                    "workspaces": e.workspaces,
+                    "archives": e.archives,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        raise typer.Exit(2) from None
+    except ArchiveError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    except OSError as e:
+        typer.secho(f"归档写入失败:{e}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    if as_json:
+        typer.echo(
+            json.dumps(
+                {
+                    "ok": True,
+                    "receipt": rec.envelope(),
+                    "workspace": rec.workspace,
+                    "reference": rec.reference,
+                    "form_index": rec.form_index,
+                    "version": rec.version,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    typer.echo(rec.envelope())
 
 
 @app.command()
