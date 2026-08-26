@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Annotated
 from urllib.parse import quote, urlencode
 
-from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -31,16 +31,29 @@ from kairo.engine import (
 )
 from kairo.engine import accept as engine_accept
 from kairo.listen_read import pair_audio_transcripts, parse_units
+from kairo.review import (
+    ReviewError,
+    collect_digests,
+    generate_review_body,
+    prepare_range,
+    write_review_reference,
+)
 from kairo.timeline import (
+    MAX_RANGE_DAYS,
     TimelineQueryError,
+    cell_href,
     effective_added_at,
     effective_occurred,
+    filter_range,
+    format_range_label,
     is_fold_class,
     month_cells,
     parse_calendar_date,
+    range_day_count,
     resolve_timeline_query,
     scan_timeline,
     shift_month_day,
+    week_bounds,
 )
 from kairo.web.discovery import activity_label, scan_workspaces
 from kairo.web.pins import read_pins, toggle_pin
@@ -394,10 +407,19 @@ def timeline_view(
     day: str | None = None,
     mode: str | None = None,
     unknown: str | None = None,
+    start: str | None = Query(None, alias="from"),
+    end: str | None = Query(None, alias="to"),
 ) -> HTMLResponse:
     t = _t(request)
     try:
-        q = resolve_timeline_query(month=month, day=day, mode=mode, unknown=unknown)
+        q = resolve_timeline_query(
+            month=month,
+            day=day,
+            mode=mode,
+            unknown=unknown,
+            start=start,
+            end=end,
+        )
     except TimelineQueryError:
         raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
     items = scan_timeline(request.app.state.root)
@@ -407,21 +429,61 @@ def timeline_view(
         if it.occurred_at is not None:
             key = it.occurred_at.isoformat()
             counts[key] = counts.get(key, 0) + 1
+    range_on = q.start is not None and q.end is not None
+    r0, r1 = (q.start, q.end) if range_on else (q.day, q.day)
     cells = []
-    for d in month_cells(q.month.year, q.month.month):
+    weeks = []
+    month_days = month_cells(q.month.year, q.month.month)
+    for i, d in enumerate(month_days):
         n = counts.get(d.isoformat(), 0)
-        cells.append(
-            {
-                "date": d,
-                "iso": d.isoformat(),
-                "num": d.day,
-                "mute": d.month != q.month.month,
-                "today": d == datetime.date.today(),
-                "on": q.view == "calendar" and d == q.day,
-                "dots": min(n, 3),
-            }
-        )
-    day_items = [it for it in items if it.occurred_at == q.day]
+        in_range = q.view == "calendar" and r0 <= d <= r1
+        edge = in_range and (d == r0 or d == r1)
+        cell = {
+            "date": d,
+            "iso": d.isoformat(),
+            "num": d.day,
+            "mute": d.month != q.month.month,
+            "today": d == datetime.date.today(),
+            "on": (not range_on or r0 == r1) and q.view == "calendar" and d == q.day,
+            "in": in_range and not edge and range_on and r0 != r1,
+            "edge": edge and range_on and r0 != r1,
+            "dots": min(n, 3),
+            "href": cell_href(q, d),
+        }
+        cells.append(cell)
+        if i % 7 == 0:
+            w0, w1 = week_bounds(d)
+            weeks.append(
+                {
+                    "from": w0.isoformat(),
+                    "to": w1.isoformat(),
+                    "href": f"/timeline?from={w0.isoformat()}&to={w1.isoformat()}",
+                    "days": [],
+                }
+            )
+        weeks[-1]["days"].append(cell)
+    if range_on:
+        day_items = filter_range(items, q.start, q.end)
+    else:
+        day_items = [it for it in items if it.occurred_at == q.day]
+    range_groups: list[dict] = []
+    if range_on and r0 != r1:
+        buckets: dict[str, list] = {}
+        order: list[str] = []
+        for it in day_items:
+            key = it.occurred_at.isoformat() if it.occurred_at else ""
+            if key not in buckets:
+                buckets[key] = []
+                order.append(key)
+            buckets[key].append(it)
+        range_groups = [{"key": k, "entries": buckets[k]} for k in order]
+    digest_n = sum(
+        1
+        for it in day_items
+        if (Path(request.app.state.root) / it.workspace / "references" / it.id / "digest.md").is_file()
+    )
+    span = range_day_count(r0, r1) if range_on else 1
+    too_long = span > MAX_RANGE_DAYS
     recent_groups = []
     if q.view == "recent":
         ordered = sorted(items, key=lambda it: it.added_at, reverse=True)
@@ -451,6 +513,7 @@ def timeline_view(
             "month_label": month_label,
             "weekdays": t("tl.weekday").split(),
             "cells": cells,
+            "weeks": weeks,
             "day_items": day_items,
             "unknown_items": unknown_items,
             "unknown_n": len(unknown_items),
@@ -459,8 +522,82 @@ def timeline_view(
             "next_day": next_d.isoformat(),
             "day_iso": q.day.isoformat(),
             "month_iso": q.month.strftime("%Y-%m"),
+            "range_on": range_on and r0 != r1,
+            "range_from": r0.isoformat(),
+            "range_to": r1.isoformat(),
+            "range_label": format_range_label(r0, r1, zh=(lang == "zh")),
+            "range_groups": range_groups,
+            "digest_n": digest_n,
+            "no_digest_n": len(day_items) - digest_n,
+            "too_long": too_long,
+            "max_range_days": MAX_RANGE_DAYS,
+            "workspaces": scan_workspaces(request.app.state.root),
         },
     )
+
+
+@router.post("/timeline/review")
+def timeline_review(
+    request: Request,
+    start: str = Form("", alias="from"),
+    end: str = Form("", alias="to"),
+    workspace: str = Form(""),
+    topic: str = Form(""),
+):
+    t = _t(request)
+    a = parse_calendar_date(start)
+    b = parse_calendar_date(end)
+    if a is None or b is None:
+        raise HTTPException(status_code=400, detail=t("tl.bad_date"))
+    if a > b:
+        a, b = b, a
+    root = Path(request.app.state.root)
+    topic = topic.strip()
+    slug = workspace.strip()
+    if topic:
+        if len(topic) > 64:
+            raise HTTPException(status_code=400, detail=t("err.topic_too_long"))
+        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in topic):
+            raise HTTPException(status_code=400, detail=t("err.topic_control"))
+        if "/" in topic or "\\" in topic or topic.startswith(".") or topic in (".", ".."):
+            raise HTTPException(status_code=400, detail=t("err.topic_illegal"))
+        dest = (root / topic).resolve()
+        if dest.parent != root.resolve():
+            raise HTTPException(status_code=400, detail=t("err.topic_invalid"))
+        if dest.exists():
+            try:
+                ws = Workspace.open(dest)
+            except WorkspaceNotFound:
+                raise HTTPException(status_code=400, detail=t("err.topic_exists").format(topic=topic))
+        else:
+            ws = Workspace.init(dest, topic=topic)
+    else:
+        if not slug:
+            raise HTTPException(status_code=400, detail=t("tl.review_need_ws"))
+        try:
+            ws = Workspace.open(root / slug)
+        except WorkspaceNotFound:
+            raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
+    items = scan_timeline(root)
+    try:
+        found = prepare_range(items, a, b)
+        with_d, without = collect_digests(root, found)
+        body = generate_review_body(
+            with_d,
+            without,
+            artifact_dir=ws.root / ".kairo" / "review-work",
+        )
+        rid = write_review_reference(ws, a, b, body)
+    except ReviewError as e:
+        key = {
+            "range-too-long": "tl.review_too_long",
+            "empty-range": "tl.empty_range",
+            "no-digest": "tl.review_no_digest",
+            "empty": "tl.review_failed",
+        }.get(str(e), "tl.review_failed")
+        raise HTTPException(status_code=400, detail=t(key).format(n=MAX_RANGE_DAYS)) from e
+    dest = "/w/" + quote(ws.root.name) + "?ref=" + quote(rid)
+    return RedirectResponse(dest, status_code=303)
 
 
 @router.get("/set-lang/{code}")

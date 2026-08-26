@@ -32,7 +32,16 @@ from kairo.rules import (
 )
 from kairo.stream_index import write_stream_index
 from kairo.archive import ArchiveError, NeedChoice, archive_markdown
+from kairo.review import (
+    ReviewError,
+    collect_digests,
+    generate_review_body,
+    prepare_range,
+    write_review_reference,
+)
 from kairo.timeline import (
+    MAX_RANGE_DAYS,
+    filter_range,
     format_cli_timeline,
     item_as_json,
     parse_calendar_date,
@@ -375,13 +384,30 @@ def timeline(
     ),
     day: str = typer.Option(None, "--day", help="只列出该发生日"),
     recent: bool = typer.Option(False, "--recent", help="按录入时间倒序"),
+    from_day: str = typer.Option(None, "--from", help="区间起(发生日)"),
+    to_day: str = typer.Option(None, "--to", help="区间止(发生日)"),
     as_json: bool = typer.Option(False, "--json", help="JSON 输出"),
 ) -> None:
     """跨 workspace 按发生日列出 fold 观测;--recent 按录入时间。"""
     if day and recent:
         typer.secho("--day 与 --recent 互斥", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
+    if (from_day or to_day) and (day or recent):
+        typer.secho("--from/--to 与 --day/--recent 互斥", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
     parsed = None
+    start = end = None
+    if from_day or to_day:
+        if not from_day or not to_day:
+            typer.secho("--from 与 --to 必须成对", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        start = parse_calendar_date(from_day)
+        end = parse_calendar_date(to_day)
+        if start is None or end is None:
+            typer.secho("非法发生时间", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        if start > end:
+            start, end = end, start
     if day:
         parsed = parse_calendar_date(day)
         if parsed is None:
@@ -392,6 +418,8 @@ def timeline(
         typer.secho(f"目录不存在:{serve}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     items = scan_timeline(serve)
+    if start is not None and end is not None:
+        items = filter_range(items, start, end)
     if as_json:
         if parsed is not None:
             items = [it for it in items if it.occurred_at == parsed]
@@ -400,6 +428,62 @@ def timeline(
         typer.echo(json.dumps([item_as_json(it) for it in items], ensure_ascii=False))
         return
     typer.echo(format_cli_timeline(items, recent=recent, day=parsed), nl=False)
+
+
+@app.command()
+def review(
+    from_day: str = typer.Option(..., "--from", help="区间起"),
+    to_day: str = typer.Option(..., "--to", help="区间止"),
+    workspace: str = typer.Option(None, "--workspace", "-w", help="保存到该 workspace slug"),
+    root: Path = typer.Option(
+        None,
+        "--root",
+        "-r",
+        help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd",
+    ),
+) -> None:
+    """按发生日闭区间生成回顾,写入指定 workspace 的一条 stream reference。"""
+    start = parse_calendar_date(from_day)
+    end = parse_calendar_date(to_day)
+    if start is None or end is None:
+        typer.secho("非法发生时间", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    if start > end:
+        start, end = end, start
+    serve = _serve_root(root)
+    from kairo.web.discovery import scan_workspaces
+
+    if not workspace:
+        items_ws = scan_workspaces(serve)
+        typer.echo(
+            json.dumps(
+                {"reason": "need-workspace", "workspaces": [s.slug for s in items_ws]},
+                ensure_ascii=False,
+            )
+        )
+        raise typer.Exit(2)
+    try:
+        ws = Workspace.open(serve / workspace)
+    except WorkspaceNotFound:
+        typer.secho(f"workspace 不存在:{workspace}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    try:
+        found = prepare_range(scan_timeline(serve), start, end)
+        with_d, without = collect_digests(serve, found)
+        body = generate_review_body(
+            with_d, without, artifact_dir=ws.root / ".kairo" / "review-work"
+        )
+        rid = write_review_reference(ws, start, end, body)
+    except ReviewError as e:
+        msg = {
+            "range-too-long": f"一次最多 {MAX_RANGE_DAYS} 天",
+            "empty-range": "这段时间没有观测",
+            "no-digest": "还没有纪要，写不出回顾",
+            "empty": "回顾生成失败",
+        }.get(str(e), str(e))
+        typer.secho(msg, fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from e
+    typer.echo(f"review {rid} → {workspace}")
 
 
 def _exit_if_run_failed(ws: Workspace) -> None:

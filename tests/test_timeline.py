@@ -7,12 +7,17 @@ import yaml
 from kairo.models import Manifest
 from kairo.timeline import (
     TimelineQueryError,
+    cell_href,
     effective_occurred,
+    filter_range,
     format_cli_timeline,
+    format_range_label,
     parse_calendar_date,
+    range_day_count,
     resolve_timeline_query,
     scan_timeline,
     shift_month_day,
+    week_bounds,
 )
 from kairo.workspace import AddError, Workspace
 
@@ -192,7 +197,6 @@ def test_custom_fold_class_eligibility(tmp_path):
     (tmp_path / "b.txt").write_text("b")
     ws.add([tmp_path / "a.txt"], ref_id="n1", source_class="note")
     ws.add([tmp_path / "b.txt"], ref_id="s1", source_class="skip")
-    items = scan_timeline(tmp_path.parent)
     # workspace is tmp_path itself if we scan parent... scan children of parent
     # tmp_path is the ws root, scan parent to find it
     found = {it.id for it in scan_timeline(tmp_path.parent) if it.workspace == tmp_path.name}
@@ -221,6 +225,61 @@ def test_resolve_timeline_query_mutex():
 
 def test_shift_month_day_clamps():
     assert shift_month_day(dt.date(2026, 1, 31), 1) == dt.date(2026, 2, 28)
+
+
+def test_resolve_range_from_to(today=None):
+    today = dt.date(2026, 8, 25)
+    q = resolve_timeline_query(start="2026-08-24", end="2026-08-18", today=today)
+    assert q.start == dt.date(2026, 8, 18) and q.end == dt.date(2026, 8, 24)
+    assert q.day == dt.date(2026, 8, 24)
+    with pytest.raises(TimelineQueryError):
+        resolve_timeline_query(start="2026-08-18", today=today)
+    with pytest.raises(TimelineQueryError):
+        resolve_timeline_query(start="2026-08-18", end="2026-02-31", today=today)
+    with pytest.raises(TimelineQueryError):
+        resolve_timeline_query(
+            start="2026-08-18", end="2026-08-24", mode="recent", today=today
+        )
+
+
+def test_filter_range_excludes_unknown():
+    from kairo.timeline import TimelineItem
+
+    def item(oid, occ):
+        return TimelineItem(
+            workspace="w",
+            topic="t",
+            id=oid,
+            title=oid,
+            occurred_at=occ,
+            occurred_source="user" if occ else "unknown",
+            added_at=dt.datetime(2026, 8, 25, tzinfo=dt.timezone.utc),
+        )
+
+    items = [
+        item("a", dt.date(2026, 8, 18)),
+        item("b", dt.date(2026, 8, 24)),
+        item("c", None),
+        item("d", dt.date(2026, 8, 10)),
+    ]
+    got = filter_range(items, dt.date(2026, 8, 18), dt.date(2026, 8, 24))
+    assert [it.id for it in got] == ["a", "b"]
+    assert range_day_count(dt.date(2026, 8, 1), dt.date(2026, 8, 31)) == 31
+    assert range_day_count(dt.date(2026, 8, 1), dt.date(2026, 9, 1)) == 32
+    assert format_range_label(dt.date(2026, 8, 18), dt.date(2026, 8, 24), zh=True) == "8月18日 – 8月24日"
+
+
+def test_cell_href_two_click_and_week():
+    today = dt.date(2026, 8, 18)
+    q = resolve_timeline_query(day="2026-08-18", today=today)
+    assert "from=2026-08-18" in cell_href(q, dt.date(2026, 8, 24))
+    assert "to=2026-08-24" in cell_href(q, dt.date(2026, 8, 24))
+    q2 = resolve_timeline_query(start="2026-08-18", end="2026-08-24", today=today)
+    assert cell_href(q2, dt.date(2026, 8, 20)) == "/timeline?day=2026-08-20"
+    assert week_bounds(dt.date(2026, 8, 24)) == (
+        dt.date(2026, 8, 24),
+        dt.date(2026, 8, 30),
+    )
 
 
 def test_cli_format_unknown_first():
