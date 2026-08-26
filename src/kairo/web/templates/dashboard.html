@@ -50,7 +50,9 @@
       <input type="search" name="q" value="{{ q }}" placeholder="{{ t('dash.search_placeholder') }}"
              aria-label="{{ t('dash.search_placeholder') }}">
     </form>
-    <nav class="dash-filter" aria-label="{{ t('dash.filter_attention') }}">
+    <nav class="dash-filter" aria-label="{{ t('dash.filter_all') }}">
+      <a class="{% if not filter %}on{% endif %}"
+         href="/{% if q %}?q={{ q | urlencode }}{% endif %}">{{ t('dash.filter_all') }}</a>
       <a class="{% if filter == 'attention' %}on{% endif %}"
          href="{% if filter == 'attention' %}/{% if q %}?q={{ q | urlencode }}{% endif %}{% else %}/?filter=attention{% if q %}&q={{ q | urlencode }}{% endif %}{% endif %}">{{ t('dash.filter_attention') }}<span class="n">{{ attention_n }}</span></a>
       <a class="{% if filter == 'blocked' %}on{% endif %}"
