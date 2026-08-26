@@ -88,6 +88,37 @@ def test_dashboard_search_and_filters(tmp_path, monkeypatch):
     assert set(_cards(r.text)) == {"alpha", "beta"}
 
 
+def _filter_nav(html: str) -> str:
+    m = re.search(r'<nav class="dash-filter"[^>]*>.*?</nav>', html, re.S)
+    assert m, "missing dash-filter nav"
+    return m.group(0)
+
+
+def test_dashboard_all_chip_returns_from_blocked(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    _mk(tmp_path, "alpha", "Alpha planning", 100)
+    b = _mk(tmp_path, "beta", "Beta notes", 50)
+    state = b.read_state()
+    state.products["x"] = ProductState(input_hash="h", status="blocked", reason="asr-failed")
+    b.write_state(state)
+    c = _client(tmp_path)
+
+    blocked = c.get("/", params={"filter": "blocked"})
+    assert _cards(blocked.text) == ["beta"]
+    nav = _filter_nav(blocked.text)
+    assert "All" in nav
+    all_href = re.search(r'href="([^"]+)"[^>]*>All', nav)
+    assert all_href, nav
+    assert "filter=" not in all_href.group(1)
+
+    back = c.get(all_href.group(1))
+    assert set(_cards(back.text)) == {"alpha", "beta"}
+    home_nav = _filter_nav(back.text)
+    assert re.search(r'class="[^"]*\bon\b[^"]*"[^>]*>All', home_nav) or re.search(
+        r'<a class="on"[^>]*>All', home_nav
+    )
+
+
 def test_dashboard_pin_prepends_and_sections(tmp_path):
     _mk(tmp_path, "a-ws", "A", 100)
     _mk(tmp_path, "b-ws", "B", 50)
