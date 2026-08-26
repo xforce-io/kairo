@@ -1,4 +1,9 @@
-from kairo.web.discovery import scan_workspaces
+import os
+import time
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from kairo.web.discovery import activity_label, last_activity, scan_workspaces, summarize
 from kairo.workspace import Workspace
 
 
@@ -42,3 +47,69 @@ def test_summary_stale_zero_after_step(tmp_path, monkeypatch):
     step(ws, select_provider())
     s = scan_workspaces(tmp_path)[0]
     assert s.stale_count == 0
+
+
+def _utime(path: Path, ts: float) -> None:
+    os.utime(path, (ts, ts))
+
+
+def test_last_activity_is_max_of_owned_paths(tmp_path):
+    ws = _mk(tmp_path, "ws", "t")
+    early = time.time() - 3600
+    late = time.time() - 60
+    _utime(ws.root / "constitution.yaml", early)
+    _utime(ws.root / ".kairo" / "state.json", early)
+    (ws.root / "understanding.md").write_text("facts")
+    _utime(ws.root / "understanding.md", late)
+    got = last_activity(ws)
+    assert abs(got.timestamp() - late) < 2
+
+
+def test_last_activity_ignores_digest_and_ds_store(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = _mk(tmp_path, "ws", "t")
+    src = tmp_path / "m.txt"
+    src.write_text("会议")
+    rid = ws.add([src])
+    owned = [
+        ws.root / "constitution.yaml",
+        ws.root / ".kairo" / "state.json",
+        ws.root / "references" / rid / "manifest.yaml",
+    ]
+    early = time.time() - 7200
+    for p in owned:
+        _utime(p, early)
+    digest = ws.root / "references" / rid / "digest.md"
+    digest.write_text("noise")
+    _utime(digest, time.time())
+    (ws.root / ".DS_Store").write_bytes(b"x")
+    _utime(ws.root / ".DS_Store", time.time())
+    got = last_activity(ws)
+    assert abs(got.timestamp() - early) < 2
+
+
+def test_scan_keeps_slug_order_and_exposes_last_activity(tmp_path):
+    older = _mk(tmp_path, "z-ws", "zulu")
+    newer = _mk(tmp_path, "a-ws", "alpha")
+    _utime(older.root / "constitution.yaml", time.time() - 8000)
+    _utime(newer.root / "constitution.yaml", time.time() - 10)
+    out = scan_workspaces(tmp_path)
+    assert [s.slug for s in out] == ["a-ws", "z-ws"]
+    assert out[0].last_activity.timestamp() > out[1].last_activity.timestamp()
+
+
+def test_activity_label_today_yesterday_and_iso():
+    now = datetime(2026, 8, 26, 15, 30, tzinfo=timezone(timedelta(hours=8)))
+    today = now.replace(hour=9, minute=10)
+    yest = now - timedelta(days=1)
+    older = now - timedelta(days=5)
+    assert activity_label(today, now=now, today="today {t}", yesterday="yesterday") == "today 09:10"
+    assert activity_label(yest, now=now, today="today {t}", yesterday="yesterday") == "yesterday"
+    assert activity_label(older, now=now, today="today {t}", yesterday="yesterday") == "2026-08-21"
+
+
+def test_summarize_includes_last_activity(tmp_path):
+    ws = _mk(tmp_path, "ws", "t")
+    s = summarize(ws)
+    assert s.last_activity.tzinfo is not None
+    assert abs(s.last_activity.timestamp() - last_activity(ws).timestamp()) < 1

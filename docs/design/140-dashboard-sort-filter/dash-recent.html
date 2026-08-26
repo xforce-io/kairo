@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kairo console · 工作区 · 最近</title>
+  <link rel="stylesheet" href="../../../src/kairo/web/static/app.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    <nav class="console-nav">
+      <a class="on" href="dash-recent.html">工作区</a>
+      <a href="#">时间轴</a>
+    </nav>
+    <span class="crumb">/Users/xupeng/kairo · 5 个工作区</span>
+    <span class="lang-switch"><a href="#">EN</a><a href="#" class="on">中</a></span>
+  </header>
+
+  <div class="dash-head">
+    <div class="dash-find">
+      <form class="dash-search">
+        <input type="search" placeholder="搜索" aria-label="搜索工作区">
+      </form>
+      <nav class="dash-filter" aria-label="筛选">
+        <a href="dash-filter.html">待处理<span class="n">3</span></a>
+        <a href="#">阻塞<span class="n">2</span></a>
+      </nav>
+    </div>
+    <form class="new-ws">
+      <input placeholder="新主题" required>
+      <button type="button">新建</button>
+    </form>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <button type="button" class="card-pin" title="置顶" aria-label="置顶">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M12 11v10"/></svg>
+      </button>
+      <a class="card-main" href="#">
+        <h3>招聘</h3>
+        <div class="meta"><span class="when">今天 14:32</span><span class="slug">zhaopin</span></div>
+        <div class="badges">
+          <span class="badge stream">3 观测</span>
+          <span class="badge stale">1 待 step</span>
+        </div>
+      </a>
+    </div>
+    <div class="card">
+      <button type="button" class="card-pin" title="置顶" aria-label="置顶">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M12 11v10"/></svg>
+      </button>
+      <a class="card-main" href="#">
+        <h3>会议纪要</h3>
+        <div class="meta"><span class="when">今天 09:10</span><span class="slug">meetings</span></div>
+        <div class="badges">
+          <span class="badge stream">6 观测</span>
+          <span class="badge stale">2 待 step</span>
+          <span class="badge blocked">⚠ 1</span>
+        </div>
+      </a>
+    </div>
+    <div class="card">
+      <button type="button" class="card-pin" title="置顶" aria-label="置顶">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M12 11v10"/></svg>
+      </button>
+      <a class="card-main" href="#">
+        <h3>kairo</h3>
+        <div class="meta"><span class="when">昨天</span><span class="slug">kairo</span></div>
+        <div class="badges"><span class="badge stream">5 观测</span></div>
+      </a>
+    </div>
+    <div class="card">
+      <button type="button" class="card-pin" title="置顶" aria-label="置顶">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M12 11v10"/></svg>
+      </button>
+      <a class="card-main" href="#">
+        <h3>文档权限</h3>
+        <div class="meta"><span class="when">2026-08-20</span><span class="slug">doc-visibility</span></div>
+        <div class="badges">
+          <span class="badge stream">4 观测</span>
+          <span class="badge corpus">1 基线</span>
+          <span class="badge blocked">⚠ 2</span>
+        </div>
+      </a>
+    </div>
+    <div class="card">
+      <button type="button" class="card-pin" title="置顶" aria-label="置顶">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M12 11v10"/></svg>
+      </button>
+      <a class="card-main" href="#">
+        <h3>能源梳理</h3>
+        <div class="meta"><span class="when">2026-08-12</span><span class="slug">energy</span></div>
+        <div class="badges">
+          <span class="badge stream">8 观测</span>
+          <span class="badge corpus">2 基线</span>
+        </div>
+      </a>
+    </div>
+  </div>
+</body>
+</html>

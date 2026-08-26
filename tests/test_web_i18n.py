@@ -103,9 +103,9 @@ def test_language_toggle_present(tmp_path):
 def test_chrome_translates_under_zh(tmp_path):
     c = _client(tmp_path)
     en = c.get("/").text
-    assert "New workspace" in en
+    assert "New topic" in en
     zh = c.get("/", headers={"Accept-Language": "zh-CN"}).text
-    assert "新建 workspace" in zh
+    assert "新主题" in zh
 
 
 def test_create_workspace_error_is_localized(tmp_path):

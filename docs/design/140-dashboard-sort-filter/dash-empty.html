@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kairo console · 工作区 · 无匹配</title>
+  <link rel="stylesheet" href="../../../src/kairo/web/static/app.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    <nav class="console-nav">
+      <a class="on" href="dash-recent.html">工作区</a>
+      <a href="#">时间轴</a>
+    </nav>
+    <span class="crumb">/Users/xupeng/kairo · 0 / 5 个工作区</span>
+    <span class="lang-switch"><a href="#">EN</a><a href="#" class="on">中</a></span>
+  </header>
+
+  <div class="dash-head">
+    <div class="dash-find">
+      <form class="dash-search">
+        <input type="search" value="周报" placeholder="搜索" aria-label="搜索工作区">
+      </form>
+      <nav class="dash-filter" aria-label="筛选">
+        <a href="dash-filter.html">待处理<span class="n">3</span></a>
+        <a href="#">阻塞<span class="n">2</span></a>
+      </nav>
+    </div>
+    <form class="new-ws">
+      <input placeholder="新主题" required>
+      <button type="button">新建</button>
+    </form>
+  </div>
+
+  <p class="empty">没有符合条件的工作区。<a href="dash-recent.html">清除条件</a></p>
+</body>
+</html>

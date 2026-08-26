@@ -10,7 +10,7 @@ import sys
 from html import escape
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import (
@@ -42,7 +42,8 @@ from kairo.timeline import (
     scan_timeline,
     shift_month_day,
 )
-from kairo.web.discovery import scan_workspaces
+from kairo.web.discovery import activity_label, scan_workspaces
+from kairo.web.pins import read_pins, toggle_pin
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
 from kairo.web.tasks import classify_task, stream_events
@@ -270,15 +271,98 @@ def healthz() -> JSONResponse:
     return JSONResponse({"ok": True})
 
 
+def _dash_filter(raw: str | None) -> str:
+    val = (raw or "").strip()
+    return val if val in ("attention", "blocked") else ""
+
+
+def _dash_groups(items, pins: list[str], q: str, filt: str):
+    qn = (q or "").strip()
+    needle = qn.casefold()
+
+    def ok(s) -> bool:
+        if needle and needle not in s.topic.casefold() and needle not in s.slug.casefold():
+            return False
+        if filt == "attention":
+            return s.stale_count > 0 or s.blocked_count > 0
+        if filt == "blocked":
+            return s.blocked_count > 0
+        return True
+
+    matched = [s for s in items if ok(s)]
+    by_slug = {s.slug: s for s in matched}
+    pinned = [by_slug[p] for p in pins if p in by_slug]
+    pinned_set = {s.slug for s in pinned}
+    rest = [s for s in matched if s.slug not in pinned_set]
+    rest.sort(key=lambda s: (-s.last_activity.timestamp(), s.slug))
+    return pinned, rest, qn
+
+
 @router.get("/", response_class=HTMLResponse)
-def dashboard(request: Request) -> HTMLResponse:
+def dashboard(
+    request: Request,
+    q: str | None = None,
+    filter: str | None = None,
+) -> HTMLResponse:
+    t = _t(request)
     root = request.app.state.root
     items = scan_workspaces(root)
+    filt = _dash_filter(filter)
+    pinned, rest, qn = _dash_groups(items, read_pins(root), q or "", filt)
+    now = datetime.datetime.now().astimezone()
+    for s in (*pinned, *rest):
+        s.when = activity_label(
+            s.last_activity,
+            now=now,
+            today=t("dash.today"),
+            yesterday=t("dash.yesterday"),
+        )
+    match_n = len(pinned) + len(rest)
     return _render(
         request,
         "dashboard.html",
-        {"items": items, "root": str(root), "nav_active": "workspaces"},
+        {
+            "root": str(root),
+            "nav_active": "workspaces",
+            "pinned": pinned,
+            "rest": rest,
+            "q": qn,
+            "filter": filt,
+            "total_n": len(items),
+            "match_n": match_n,
+            "attention_n": sum(1 for s in items if s.stale_count or s.blocked_count),
+            "blocked_n": sum(1 for s in items if s.blocked_count),
+            "show_sections": bool(pinned) and bool(rest),
+            "has_query": bool(qn or filt),
+        },
     )
+
+
+@router.post("/workspaces/{slug}/pin")
+def pin_workspace(
+    request: Request,
+    slug: str,
+    q: str = Form(""),
+    filter: str = Form(""),
+) -> HTMLResponse:
+    t = _t(request)
+    root = Path(request.app.state.root)
+    items = scan_workspaces(root)
+    known = {s.slug for s in items}
+    if slug not in known:
+        raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
+    toggle_pin(root, slug, known)
+    params: dict[str, str] = {}
+    qn = (q or "").strip()
+    filt = _dash_filter(filter)
+    if qn:
+        params["q"] = qn
+    if filt:
+        params["filter"] = filt
+    dest = "/" if not params else "/?" + urlencode(params)
+    if request.headers.get("hx-request"):
+        return HTMLResponse("", headers={"HX-Redirect": dest})
+    return RedirectResponse(dest, status_code=303)
 
 
 @router.get("/timeline", response_class=HTMLResponse)
