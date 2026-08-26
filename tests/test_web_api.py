@@ -26,7 +26,7 @@ def test_dashboard_shows_create_workspace_entry(tmp_path):
     r = _client(tmp_path).get("/")
     assert r.status_code == 200
     assert 'hx-post="/workspaces"' in r.text
-    assert "New workspace" in r.text
+    assert "New topic" in r.text
 
 
 def test_dashboard_card_link_is_url_encoded(tmp_path):

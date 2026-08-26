@@ -327,6 +327,16 @@ def test_cli_list_scans_serve_root(tmp_path, monkeypatch):
     assert j.exit_code == 0
     data = json.loads(j.output)
     assert {x["slug"] for x in data} == {"alpha", "beta"}
+    assert [x["slug"] for x in data] == sorted(x["slug"] for x in data)
+    assert set(data[0]) == {
+        "slug",
+        "topic",
+        "path",
+        "stream",
+        "corpus",
+        "stale",
+        "blocked",
+    }
 
 
 def test_cli_list_uses_kairo_serve_root_env(tmp_path, monkeypatch):

@@ -1,17 +1,26 @@
 {% extends "base.html" %}
-{% block subtitle %}{{ root }} · {{ items|length }} {{ t('dash.workspaces_suffix') }}{% endblock %}
+{% block subtitle %}{% if has_query %}{{ root }} · {{ match_n }} / {{ total_n }} {{ t('dash.workspaces_suffix') }}{% else %}{{ root }} · {{ total_n }} {{ t('dash.workspaces_suffix') }}{% endif %}{% endblock %}
 {% block body %}
-<form class="new-ws" hx-post="/workspaces" hx-swap="none">
-  <input name="topic" placeholder="{{ t('dash.topic_placeholder') }}" required>
-  <button type="submit">{{ t('dash.new_ws_btn') }}</button>
-  <span id="ws-error" class="ws-error"></span>
-</form>
-<div class="grid">
-  {% for s in items %}
-  <div class="card">
+{% macro ws_card(s, pinned) %}
+  <div class="card{% if pinned %} pinned{% endif %}">
+    <form class="card-pin-form" method="post" action="/workspaces/{{ s.slug | urlencode }}/pin">
+      <input type="hidden" name="q" value="{{ q }}">
+      <input type="hidden" name="filter" value="{{ filter }}">
+      <button type="submit" class="card-pin{% if pinned %} on{% endif %}"
+              title="{{ t('dash.unpin') if pinned else t('dash.pin') }}"
+              aria-label="{{ t('dash.unpin') if pinned else t('dash.pin') }}">
+        <svg viewBox="0 0 24 24" width="14" height="14"
+             fill="{% if pinned %}currentColor{% else %}none{% endif %}"
+             stroke="currentColor" stroke-width="{% if pinned %}1.2{% else %}1.8{% endif %}"
+             stroke-linecap="round" aria-hidden="true">
+          <circle cx="12" cy="8" r="3"/>
+          <path d="M12 11v10"/>
+        </svg>
+      </button>
+    </form>
     <a class="card-main" href="/w/{{ s.slug | urlencode }}">
       <h3>{{ s.topic }}</h3>
-      <div class="slug">{{ s.slug }}</div>
+      <div class="meta"><span class="when">{{ s.when }}</span><span class="slug">{{ s.slug }}</span></div>
       <div class="badges">
         <span class="badge stream">{{ s.stream_count }} {{ t('dash.badge_stream') }}</span>
         <span class="badge corpus">{{ s.corpus_count }} {{ t('dash.badge_corpus') }}</span>
@@ -32,9 +41,49 @@
       </svg>
     </button>
   </div>
-  {% else %}
-  <p class="empty">{{ t('dash.empty') }}</p>
+{% endmacro %}
+
+<div class="dash-head">
+  <div class="dash-find">
+    <form class="dash-search" method="get" action="/">
+      {% if filter %}<input type="hidden" name="filter" value="{{ filter }}">{% endif %}
+      <input type="search" name="q" value="{{ q }}" placeholder="{{ t('dash.search_placeholder') }}"
+             aria-label="{{ t('dash.search_placeholder') }}">
+    </form>
+    <nav class="dash-filter" aria-label="{{ t('dash.filter_attention') }}">
+      <a class="{% if filter == 'attention' %}on{% endif %}"
+         href="{% if filter == 'attention' %}/{% if q %}?q={{ q | urlencode }}{% endif %}{% else %}/?filter=attention{% if q %}&q={{ q | urlencode }}{% endif %}{% endif %}">{{ t('dash.filter_attention') }}<span class="n">{{ attention_n }}</span></a>
+      <a class="{% if filter == 'blocked' %}on{% endif %}"
+         href="{% if filter == 'blocked' %}/{% if q %}?q={{ q | urlencode }}{% endif %}{% else %}/?filter=blocked{% if q %}&q={{ q | urlencode }}{% endif %}{% endif %}">{{ t('dash.filter_blocked') }}<span class="n">{{ blocked_n }}</span></a>
+    </nav>
+  </div>
+  <form class="new-ws" hx-post="/workspaces" hx-swap="none">
+    <input name="topic" placeholder="{{ t('dash.topic_placeholder') }}" required>
+    <button type="submit">{{ t('dash.new_ws_btn') }}</button>
+    <span id="ws-error" class="ws-error"></span>
+  </form>
+</div>
+
+<div class="grid">
+  {% if show_sections %}
+    <div class="dash-label">{{ t('dash.section_pinned') }}</div>
+  {% endif %}
+  {% for s in pinned %}
+    {{ ws_card(s, true) }}
   {% endfor %}
+  {% if show_sections %}
+    <div class="dash-label rest">{{ t('dash.section_recent') }}</div>
+  {% endif %}
+  {% for s in rest %}
+    {{ ws_card(s, false) }}
+  {% endfor %}
+  {% if not pinned and not rest %}
+    {% if total_n %}
+      <p class="empty">{{ t('dash.empty_filter') }} <a href="/">{{ t('dash.clear_filters') }}</a></p>
+    {% else %}
+      <p class="empty">{{ t('dash.empty') }}</p>
+    {% endif %}
+  {% endif %}
 </div>
 
 <dialog id="del-ws-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
@@ -94,7 +143,6 @@
       submit.setAttribute('aria-disabled', ok ? 'false' : 'true');
     }
     input.addEventListener('input', sync);
-    // 硬拦:disabled 被拔掉 / Enter 误触时仍不提交
     form.addEventListener('submit', function (e) {
       if (!matched()) {
         e.preventDefault();
@@ -109,7 +157,6 @@
       lead.textContent = leadTpl.replace('{topic}', topic);
       expectedEl.textContent = expected;
       input.value = '';
-      // 绝不把 slug 写入 placeholder(答案不得印在输入框里)
       err.hidden = true;
       err.textContent = '';
       form.setAttribute('hx-post', '/workspaces/' + encodeURIComponent(expected) + '/delete');
@@ -127,7 +174,7 @@
     });
     form.addEventListener('htmx:beforeRequest', function (e) {
       if (!matched()) {
-        e.preventDefault(); // 双保险:htmx 发请求前再拦一次
+        e.preventDefault();
         sync();
         return;
       }
