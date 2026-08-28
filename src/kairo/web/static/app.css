@@ -432,8 +432,19 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .btn-ghost:hover { background: #ece5d6; }
 .panel-hint { color: var(--muted); font-size: 13px; padding: 2px 4px; }
 
-/* step 日志面板 */
+/* step 日志面板 #157 三层:人话进度 / 运行健康 / 折叠原始日志 */
 #step-area { margin-top: 4px; }
+.run-progress {
+  color: var(--muted); font-size: 12.5px; margin: 8px 2px;
+  display: flex; align-items: center; gap: 7px;
+}
+.run-progress::before { content:""; width: 7px; height: 7px; border-radius: 50%; background: var(--pine); animation: pulse 1.1s ease-in-out infinite; flex: none; }
+.run-panel:has(#run-health:not(:empty)) .run-progress::before { background: var(--amber); }
+.run-health { color: var(--amber); font-size: 12.5px; margin: 4px 2px 8px; line-height: 1.45; }
+.run-health:empty { display: none; }
+.run-health-msg { margin: 0; }
+.run-log-details { margin: 4px 0 10px; }
+.run-log-details summary { cursor: pointer; color: var(--ink-soft); font-size: 12.5px; user-select: none; }
 #step-log {
   background: #211d17; color: #b9d8c4;
   font-family: var(--mono); font-size: 12px; line-height: 1.55;
@@ -442,8 +453,11 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   max-height: 340px; overflow: auto;
   border: 1px solid #1a1712;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.04);
+  margin-top: 8px;
 }
 #step-log:empty { display: none; }
+.log-line { min-height: 1.55em; }
+.step-done-hook { display: none; }
 .step-status { color: var(--muted); font-size: 12.5px; margin: 8px 2px; display: flex; align-items: center; gap: 7px; }
 .step-status::before { content:""; width: 7px; height: 7px; border-radius: 50%; background: var(--pine); animation: pulse 1.1s ease-in-out infinite; }
 @keyframes pulse { 0%,100%{opacity:.3} 50%{opacity:1} }

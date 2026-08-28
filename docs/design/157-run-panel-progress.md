@@ -2,7 +2,7 @@
 
 - Issue: https://github.com/xforce-io/kairo/issues/157
 - 分支: `feat/157-run-panel-progress`
-- 状态: Draft
+- 状态: Implemented
 - 日期: 2026-08-28
 - 关联 L1: https://github.com/xforce-io/kairo/issues/157#issuecomment-5449943814
 

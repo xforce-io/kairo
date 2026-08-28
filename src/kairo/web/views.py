@@ -550,6 +550,11 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
             "corpus": corpus,
             "select_ref": select_ref,
             "run_task_id": running.task_id if running else None,
+            **(
+                _step_template_vars(request, ws, slug, running)
+                if running is not None
+                else {}
+            ),
             **_run_button_ctx(request, ws, slug),
         },
     )
@@ -1061,12 +1066,52 @@ def accept_doc(request: Request, slug: str, doc: str = Form(...)) -> HTMLRespons
     return HTMLResponse(f'<span class="dot {status}"></span>{doc}: {status}')
 
 
+def _title_for_work_item(ws: Workspace, item) -> str:
+    key = getattr(item, "key", "") or ""
+    parts = key.replace("\\", "/").split("/")
+    if len(parts) >= 2 and parts[0] == "references":
+        ref_id = parts[1]
+        try:
+            title = ws.read_manifest(ref_id).title
+            if title:
+                return title
+        except Exception:
+            pass
+        return ref_id
+    return key.rsplit("/", 1)[-1] or key
+
+
+def _step_template_vars(request: Request, ws: Workspace, slug: str, task) -> dict:
+    """#157:首屏即人话进度(+已锁存则健康),不等 SSE。"""
+    from kairo.engine import pending
+    from kairo.web.tasks import render_health_html, render_progress_html
+
+    t = _t(request)
+
+    def _pending():
+        return pending(ws)
+
+    progress_html = render_progress_html(
+        task,
+        t,
+        pending_fn=_pending if task.job_kind == "reconcile" else None,
+        title_fn=lambda item: _title_for_work_item(ws, item),
+    )
+    health_html = render_health_html(t) if task.transport_seen else ""
+    return {
+        "slug": slug,
+        "task_id": task.task_id,
+        "progress_html": progress_html,
+        "health_html": health_html,
+    }
+
+
 def _step_response(
     request: Request, ws: Workspace, slug: str, task
 ) -> HTMLResponse:
     """#114:运行视图 + OOB 主按钮 disabled Running…(start 与 attach 共用)。"""
     step = _render(
-        request, "_step.html", {"slug": slug, "task_id": task.task_id}
+        request, "_step.html", _step_template_vars(request, ws, slug, task)
     ).body.decode()
     t = _t(request)
     btn = _run_button_ctx(request, ws, slug)
@@ -1100,7 +1145,7 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
             )
         argv = [sys.executable, "-m", "kairo", "run"]
     try:
-        task = reg.start(slug, ws.root, argv)
+        task = reg.start(slug, ws.root, argv, job_kind="reconcile")
     except RuntimeError:
         # 竞态:判断 is_running 与 start 之间被抢占 → 附着
         task = reg.current(slug)
@@ -1228,7 +1273,7 @@ def retry_ref(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         return _step_response(request, ws, slug, existing)
     argv = [sys.executable, "-m", "kairo", "retry-ref", ref_id]
     try:
-        task = reg.start(slug, ws.root, argv)
+        task = reg.start(slug, ws.root, argv, job_kind="reconcile")
     except RuntimeError:
         task = reg.current(slug)
         if task is None:
@@ -1259,10 +1304,10 @@ def delete_ref(
         raise HTTPException(status_code=400, detail=str(e)) from e
     if want_recompose:
         argv = [sys.executable, "-m", "kairo", "re-step"]
-        task = reg.start(slug, ws.root, argv)
+        task = reg.start(slug, ws.root, argv, job_kind="reconcile")
         # 进度进 step-area;列表/元信息/阅读区 OOB 清掉已删参考
         step = _render(
-            request, "_step.html", {"slug": slug, "task_id": task.task_id}
+            request, "_step.html", _step_template_vars(request, ws, slug, task)
         ).body.decode()
         streams, _corpus = _split_refs(ws)
         refs = _render(
@@ -1302,7 +1347,10 @@ def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         return _step_response(request, ws, slug, existing)
     argv = [sys.executable, "-m", "kairo", "prose", ref_id]
     try:
-        task = reg.start(slug, ws.root, argv)
+        title = ws.read_manifest(ref_id).title or ref_id
+        task = reg.start(
+            slug, ws.root, argv, job_kind="prose", object_title=title
+        )
     except RuntimeError:
         task = reg.current(slug)
         if task is None:
@@ -1317,7 +1365,22 @@ def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
     task = request.app.state.registry.get(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail="task not found")
-    return StreamingResponse(stream_events(task), media_type="text/event-stream")
+    ws = _open(request, slug)
+    t = _t(request)
+    from kairo.engine import pending
+
+    def _pending():
+        return pending(ws)
+
+    return StreamingResponse(
+        stream_events(
+            task,
+            t=t,
+            pending_fn=_pending if task.job_kind == "reconcile" else None,
+            title_fn=lambda item: _title_for_work_item(ws, item),
+        ),
+        media_type="text/event-stream",
+    )
 
 
 @router.post("/w/{slug}/step/{task_id}/cancel", response_class=HTMLResponse)
