@@ -23,7 +23,11 @@ from kairo.engine import workspace_run_plan
 from kairo.history import diff_worktree, list_snapshots
 from kairo.history import rollback as history_rollback
 from kairo.provider import select_provider
-from kairo.rules import ComposeRule
+from kairo.rules import (
+    REASON_COMPOSE_MIGRATION_REQUIRED,
+    REASON_COMPOSE_OVER_BUDGET,
+    ComposeRule,
+)
 from kairo.stream_index import write_stream_index
 from kairo.archive import ArchiveError, NeedChoice, archive_markdown
 from kairo.timeline import (
@@ -389,11 +393,31 @@ def timeline(
     typer.echo(format_cli_timeline(items, recent=recent, day=parsed), nl=False)
 
 
-def _exit_if_provider_failed(ws: Workspace) -> None:
-    """#105:provider-failed 后非零退出,Web TaskRegistry 才能判 failed(非假成功)。"""
+def _exit_if_run_failed(ws: Workspace) -> None:
+    """provider 或终态 target blocked 后非零退出,避免 CLI/Web 假成功。"""
     if has_provider_failed(ws):
         typer.secho(
             "Error: provider-failed — see kairo status / Web blocks",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+    blocked = [
+        item
+        for item in workspace_run_plan(ws)["blocked_targets"]
+        if not item["retryable"]
+    ]
+    if blocked:
+        item = blocked[0]
+        hint = (
+            " — run `kairo re-step understanding.md` after confirming full "
+            "re-synthesis will compress history; failures keep the old version"
+            if item["reason"]
+            in (REASON_COMPOSE_MIGRATION_REQUIRED, REASON_COMPOSE_OVER_BUDGET)
+            else " — see kairo status"
+        )
+        typer.secho(
+            f"Error: {item['path']} blocked:{item['reason']}{hint}",
             fg=typer.colors.RED,
             err=True,
         )
@@ -410,7 +434,7 @@ def step() -> None:
     ws = _open_ws()
     progressed = engine_step(ws, select_provider(require_read_dirs=True))
     typer.echo("stepped" if progressed else "no change")
-    _exit_if_provider_failed(ws)
+    _exit_if_run_failed(ws)
 
 
 @app.command(name="run")
@@ -421,11 +445,13 @@ def run_cmd() -> None:
     if plan["mode"] == "clean":
         typer.echo("up to date")
         return
+    if plan["mode"] == "attention":
+        _exit_if_run_failed(ws)
     progressed = engine_run_workspace(
         ws, select_provider(require_read_dirs=True)
     )
     typer.echo("ran" if progressed else "no change")
-    _exit_if_provider_failed(ws)
+    _exit_if_run_failed(ws)
 
 
 @app.command(name="re-step")
@@ -435,6 +461,7 @@ def re_step(
     """强制重算(文档级=整篇重综合;reference=清派生产物含 blocked 后重跑)。"""
     ws = _open_ws()
     engine_re_step(ws, select_provider(require_read_dirs=True), target)
+    _exit_if_run_failed(ws)
     typer.echo(f"re-stepped {target or '(all)'}")
 
 
@@ -544,6 +571,11 @@ def status() -> None:
             if ts.status == "blocked"
             else ""
         )
+        if ts.reason in (
+            REASON_COMPOSE_MIGRATION_REQUIRED,
+            REASON_COMPOSE_OVER_BUDGET,
+        ):
+            flag += "；确认压缩历史正文后运行 kairo re-step understanding.md（失败保留旧版）"
         if compose.corpus_drifted(target.path, state):
             flag += "  ⚠ corpus 已变,可 re-step 重算"
         typer.echo(

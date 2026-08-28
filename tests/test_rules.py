@@ -4,7 +4,17 @@ import yaml
 
 from kairo.models import Form, GlossaryEntry, Manifest, State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import TransformRule, ComposeRule, DigestRule, NormalizeRule, _hash
+from kairo.rules import (
+    REASON_COMPOSE_MIGRATION_REQUIRED,
+    REASON_COMPOSE_OVER_BUDGET,
+    REASON_EXPLICIT_RECOMPOSE,
+    UNDERSTANDING_MAX_CHARS,
+    ComposeRule,
+    DigestRule,
+    NormalizeRule,
+    TransformRule,
+    _hash,
+)
 from kairo.workspace import Workspace
 
 
@@ -607,9 +617,11 @@ class _FixedProvider:
     def __init__(self, content):
         self.content = content
         self.calls = 0
+        self.configs = []
 
     def run(self, config, signal=None):
         self.calls += 1
+        self.configs.append(config)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         (config.artifact_dir / (config.artifact or "output.md")).write_text(self.content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
@@ -636,7 +648,9 @@ def test_compose_blocks_degraded_output_and_keeps_prior(tmp_path):
     good = "完整的判断正文。" * 400  # 远超 _COMPOSE_MIN_PRIOR_LEN
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, good)
-    prov = _FixedProvider("本轮无需演进,理由如下:略。")  # 退化的变更说明
+    prov = _FixedProvider(
+        _valid_compose_doc(ws, "本轮无需演进,理由如下:略。")
+    )  # 溯源合法但灾难性骤缩
     _understanding_item(ws, prov, state).run(state)
     # 旧文档原样保留、未被覆盖
     assert (ws.root / "understanding.md").read_text() == good
@@ -644,6 +658,22 @@ def test_compose_blocks_degraded_output_and_keeps_prior(tmp_path):
     assert ts.status == "blocked" and ts.reason == "compose-degraded"
     # 终态:不自动重试(否则 step 内对退化输出死循环)
     assert _understanding_item(ws, prov, state).is_stale(state) is False
+
+
+def test_compose_reports_provenance_before_degraded(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("x")
+    rid = ws.add([source])
+    _make_digest(ws, rid, "新纪要")
+    old = "完整正文。" * 500
+    state = State()
+    state.targets["understanding.md"] = _seed_prior_understanding(ws, old)
+
+    _understanding_item(ws, _FixedProvider("短且无效〔S-deadbeef〕"), state).run(state)
+
+    assert state.targets["understanding.md"].reason == "compose-provenance-invalid"
+    assert (ws.root / "understanding.md").read_text() == old
 
 
 def test_compose_allows_normal_sized_update(tmp_path):
@@ -674,6 +704,102 @@ def test_compose_from_scratch_not_guarded(tmp_path):
     prov = _FixedProvider(content)
     _understanding_item(ws, prov, state).run(state)
     assert "短小但合法的首版正文" in (ws.root / "understanding.md").read_text()
+    assert state.targets["understanding.md"].status == "ok"
+
+
+def test_compose_old_oversized_understanding_requires_explicit_migration(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("x")
+    rid = ws.add([source])
+    _make_digest(ws, rid, "新纪要")
+    old = "旧历史" * (UNDERSTANDING_MAX_CHARS // 3 + 1)
+    state = State()
+    state.targets["understanding.md"] = _seed_prior_understanding(ws, old)
+    provider = _FixedProvider(_valid_compose_doc(ws, "不应调用"))
+
+    item = _understanding_item(ws, provider, state)
+    item.run(state)
+
+    assert provider.calls == 0
+    assert (ws.root / "understanding.md").read_text() == old
+    ts = state.targets["understanding.md"]
+    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert item.is_stale(state) is False
+
+
+def test_compose_rejects_20001_chars_and_keeps_prior(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("x")
+    rid = ws.add([source])
+    _make_digest(ws, rid, "新纪要")
+    old = "旧正文"
+    state = State()
+    state.targets["understanding.md"] = _seed_prior_understanding(ws, old)
+    provider = _FixedProvider("候选" + "x" * UNDERSTANDING_MAX_CHARS)
+
+    _understanding_item(ws, provider, state).run(state)
+
+    assert (ws.root / "understanding.md").read_text() == old
+    ts = state.targets["understanding.md"]
+    assert ts.reason == REASON_COMPOSE_OVER_BUDGET
+    assert ts.folded == {}
+
+
+def test_compose_accepts_exact_20000_chars(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("x")
+    rid = ws.add([source])
+    _make_digest(ws, rid, "新纪要")
+    base = _valid_compose_doc(ws, "# 有界理解")
+    content = base + "x" * (UNDERSTANDING_MAX_CHARS - len(base))
+    state = State()
+    provider = _FixedProvider(content)
+
+    _understanding_item(ws, provider, state).run(state)
+
+    assert len((ws.root / "understanding.md").read_text()) == UNDERSTANDING_MAX_CHARS
+    assert state.targets["understanding.md"].status == "ok"
+    assert str(UNDERSTANDING_MAX_CHARS) in provider.configs[0].persona
+
+
+def test_compose_materials_changed_keeps_existing_degrade_exception(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("x")
+    rid = ws.add([source])
+    _make_digest(ws, rid, "剩余纪要")
+    old = "旧历史正文。" * 500
+    state = State()
+    ts = _seed_prior_understanding(ws, old)
+    ts.reason = "materials-changed"
+    state.targets["understanding.md"] = ts
+    provider = _FixedProvider(_valid_compose_doc(ws, "短小但合法的全量重综合。"))
+
+    _understanding_item(ws, provider, state).run(state)
+
+    assert "短小但合法" in (ws.root / "understanding.md").read_text()
+    assert state.targets["understanding.md"].status == "ok"
+
+
+def test_compose_explicit_recompose_migrates_oversized_understanding(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("x")
+    rid = ws.add([source])
+    _make_digest(ws, rid, "新纪要")
+    old = "旧历史" * (UNDERSTANDING_MAX_CHARS // 3 + 1)
+    state = State()
+    ts = _seed_prior_understanding(ws, old)
+    ts.reason = REASON_EXPLICIT_RECOMPOSE
+    state.targets["understanding.md"] = ts
+    provider = _FixedProvider(_valid_compose_doc(ws, "迁移后的有界正文。"))
+
+    _understanding_item(ws, provider, state).run(state)
+
+    assert "迁移后的有界正文" in (ws.root / "understanding.md").read_text()
     assert state.targets["understanding.md"].status == "ok"
 
 

@@ -281,6 +281,7 @@ class TargetState(BaseModel):
     status: str = "ok"  # ok | blocked
     reason: str | None = None  # manual-edit | provider-failed | …
     diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
+    retry_reason: str | None = None  # provider-failed 前的触发语义;Run 重试后清空
 
 
 class State(BaseModel):

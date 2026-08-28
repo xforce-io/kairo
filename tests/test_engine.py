@@ -266,6 +266,32 @@ def test_re_step_document_discards_edit_and_recomposes(tmp_path):
     assert (ws.root / "understanding.md").read_text() == canonical
 
 
+def test_re_step_failure_keeps_document_and_folded(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("内容")
+    ws.add([source])
+    step(ws, StubProvider())
+    old = (ws.root / "understanding.md").read_text()
+    folded = dict(ws.read_state().targets["understanding.md"].folded)
+
+    class FailProvider:
+        name = "fail"
+        model = "fail"
+        supports_read_dirs = True
+
+        def run(self, config, signal=None):
+            raise RuntimeError("boom")
+
+    re_step(ws, FailProvider(), "understanding.md")
+
+    assert (ws.root / "understanding.md").read_text() == old
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.folded == folded
+    assert ts.status == "blocked"
+    assert ts.reason == REASON_PROVIDER_FAILED
+
+
 def test_re_step_reference_recomposes_digest_from_transcript(tmp_path, monkeypatch):
     """#33:re-step 单个 audio reference 从 transcript 重产 digest(默认无 prose 介入)。"""
     monkeypatch.setenv("KAIRO_STUB", "1")

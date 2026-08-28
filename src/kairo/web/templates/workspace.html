@@ -139,6 +139,7 @@
       <button type="button" class="btn btn-step" id="run-btn"
               hx-post="/w/{{ slug | urlencode }}/run" hx-target="#step-area" hx-swap="innerHTML">{{ run_label }}</button>
       {% endif %}
+      {% if run_blocked %}<span class="run-blocked-total">{{ t('run.blocked_total').format(n=run_blocked) }}</span>{% endif %}
     </div>
     <div id="step-area">{% if run_task_id %}{% with task_id=run_task_id %}{% include "_step.html" %}{% endwith %}{% endif %}</div>
     <button type="button" class="btn btn-ghost btn-regen" style="margin-top:10px"

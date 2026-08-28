@@ -300,6 +300,10 @@ _CATALOG_DISCIPLINE = (
 # 阈值保守,仅拦灾难性缩水;正常的重组/修正/推翻不会触发。
 _COMPOSE_MIN_PRIOR_LEN = 2000
 _COMPOSE_DEGRADE_RATIO = 0.5
+UNDERSTANDING_MAX_CHARS = 20_000
+REASON_COMPOSE_MIGRATION_REQUIRED = "compose-migration-required"
+REASON_COMPOSE_OVER_BUDGET = "compose-over-budget"
+REASON_EXPLICIT_RECOMPOSE = "explicit-recompose"
 
 
 class NormalizeRule:
@@ -590,9 +594,13 @@ class ComposeRule:
             folded = ts.folded if ts else {}
             delta = {p: h for p, h in all_digests.items() if folded.get(p) != h}
             materials_changed = ts is not None and ts.reason == "materials-changed"
+            explicit_recompose = (
+                ts is not None and ts.reason == REASON_EXPLICIT_RECOMPOSE
+            )
             if (
                 delta
                 or materials_changed
+                or explicit_recompose
                 or self._upstream_changed(target, state, ts)
                 or self._is_edited(target.path, ts)
             ):
@@ -606,24 +614,40 @@ class ComposeRule:
         def run(state: State) -> None:
             doc_path = self.ws.root / key
             ts0 = state.targets.get(key)
-            # #77:材料集变更 → 按剩余 digests 整篇重综合(丢当前正文/手改)
+            old_content = doc_path.read_text() if doc_path.exists() else ""
+            # #77:材料集变更与显式 re-step 都按全量 digests 重综合,但只有后者
+            # 表示用户确认把超长旧 understanding 迁移为有界正文。
             materials_changed = ts0 is not None and ts0.reason == "materials-changed"
-            if materials_changed:
-                current = ""
-                use_delta = dict(all_digests)
-            else:
-                if (
-                    ts0
-                    and doc_path.exists()
-                    and _hash(doc_path.read_text()) != ts0.output_hash
-                ):
-                    # 检测到手改 → 暂停该文档,不静默覆盖(D-status manual-edit)
-                    ts0.status = "blocked"
-                    ts0.reason = "manual-edit"
-                    state.targets[key] = ts0
-                    return
-                current = doc_path.read_text() if doc_path.exists() else ""
-                use_delta = delta
+            explicit_recompose = (
+                ts0 is not None and ts0.reason == REASON_EXPLICIT_RECOMPOSE
+            )
+            full_recompose = materials_changed or explicit_recompose
+            if not full_recompose and (
+                ts0 and doc_path.exists() and _hash(old_content) != ts0.output_hash
+            ):
+                # 检测到手改 → 暂停该文档,不静默覆盖(D-status manual-edit)
+                ts0.status = "blocked"
+                ts0.reason = "manual-edit"
+                ts0.retry_reason = None
+                state.targets[key] = ts0
+                return
+            if (
+                key == "understanding.md"
+                and len(old_content) > UNDERSTANDING_MAX_CHARS
+                and not explicit_recompose
+            ):
+                ts = ts0 or TargetState(
+                    depends_on=list(target.depends_on),
+                    output_hash=_hash(old_content),
+                )
+                ts.status = "blocked"
+                ts.reason = REASON_COMPOSE_MIGRATION_REQUIRED
+                ts.diagnostic = None
+                ts.retry_reason = None
+                state.targets[key] = ts
+                return
+            current = "" if full_recompose else old_content
+            use_delta = dict(all_digests) if full_recompose else delta
             # #153:材料目录 + 授读;当前文档与 Δdigest 必读,corpus 按需。不内联正文。
             corpus_refs = corpus.collect(self.ws)
             has_corpus = bool(corpus_refs)
@@ -691,6 +715,12 @@ class ComposeRule:
                 + f"\n本步必读 Δdigest:{len(use_delta)} 条。\n"
             )
             layer = getattr(target, "layer", None) or "fact"
+            budget_discipline = (
+                "\n- 完整 `understanding.md`（含标题、空白、正文、来源索引）不得超过 "
+                f"{UNDERSTANDING_MAX_CHARS} 个 Unicode 字符；不得截断句子或来源索引。"
+                if key == "understanding.md"
+                else ""
+            )
             try:
                 content = _run_agent(
                     self.provider,
@@ -700,7 +730,8 @@ class ComposeRule:
                     + reference_section
                     + _CATALOG_DISCIPLINE
                     + _OUTPUT_DISCIPLINE
-                    + _COMPOSE_DISCIPLINE,
+                    + _COMPOSE_DISCIPLINE
+                    + budget_discipline,
                     context,
                     "doc.md",
                     catalog_items=materials,
@@ -717,20 +748,22 @@ class ComposeRule:
                 ts.status = "blocked"
                 ts.reason = REASON_PROVIDER_FAILED
                 ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
+                ts.retry_reason = (
+                    REASON_EXPLICIT_RECOMPOSE
+                    if explicit_recompose
+                    else "materials-changed" if materials_changed else None
+                )
                 state.targets[key] = ts
                 return
-            # 退化护栏(#28):有充分长的上一版,新输出却骤缩 → 不覆盖,标 blocked,
-            # 保留旧文档(避免单次 LLM 退化输出静默销毁整篇)。需人工 re-step 重综合。
-            # materials-changed 从空正文重综合,不适用此护栏。
             if (
-                not materials_changed
-                and len(current) > _COMPOSE_MIN_PRIOR_LEN
-                and len(content) < _COMPOSE_DEGRADE_RATIO * len(current)
+                key == "understanding.md"
+                and len(content) > UNDERSTANDING_MAX_CHARS
             ):
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
-                ts.reason = "compose-degraded"
+                ts.reason = REASON_COMPOSE_OVER_BUDGET
                 ts.diagnostic = None
+                ts.retry_reason = None
                 state.targets[key] = ts
                 return
             # #99:判断层 F-… 必须在实际的上游事实文档中声明，不能只符合格式。
@@ -750,7 +783,21 @@ class ComposeRule:
                 ts.status = "blocked"
                 ts.reason = REASON_PROVENANCE_INVALID
                 ts.diagnostic = None
+                ts.retry_reason = None
                 # 不改 output_hash / folded / 文件,便于 re-step 恢复
+                state.targets[key] = ts
+                return
+            # 退化护栏(#28):溯源有效后再判灾难性骤缩;全量重综合沿用既有例外。
+            if (
+                not full_recompose
+                and len(current) > _COMPOSE_MIN_PRIOR_LEN
+                and len(content) < _COMPOSE_DEGRADE_RATIO * len(current)
+            ):
+                ts = ts0 or TargetState(depends_on=list(target.depends_on))
+                ts.status = "blocked"
+                ts.reason = "compose-degraded"
+                ts.diagnostic = None
+                ts.retry_reason = None
                 state.targets[key] = ts
                 return
             doc_path.write_text(content)
@@ -768,9 +815,10 @@ class ComposeRule:
             ts.status = "ok"
             ts.reason = None
             ts.diagnostic = None  # 成功清除 #98 诊断
+            ts.retry_reason = None
             ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
-            if ts0 is None or materials_changed:
+            if ts0 is None or full_recompose:
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts
 
@@ -780,12 +828,14 @@ class ComposeRule:
             # 所有可诊断的 compose 终态均不自动重试;仅显式 run/re-step 恢复。
             if ts and ts.status == "blocked" and ts.reason in (
                 "compose-degraded",
+                REASON_COMPOSE_MIGRATION_REQUIRED,
+                REASON_COMPOSE_OVER_BUDGET,
                 REASON_PROVIDER_FAILED,
                 REASON_PROVENANCE_INVALID,
             ):
                 return False
-            # #77:删参考后材料集变更,待运行综合
-            if ts and ts.reason == "materials-changed":
+            # #77 / #161:全量重综合触发
+            if ts and ts.reason in ("materials-changed", REASON_EXPLICIT_RECOMPOSE):
                 return True
             if (
                 ts

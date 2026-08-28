@@ -87,7 +87,7 @@ provider 返回 20,001 字符或更多时，target 进入 `blocked:compose-over-
 | >0 | >0 | 任意 | `run_and_retry` | 重试 retryable 并处理 pending；若仍有终态 blocked，命令最终非零 |
 | 0 | 0 | >0 | `attention` | 主按钮禁用，指向目标级 re-step |
 
-Web 同时展示总 blocked 数；CLI/Web 不把仍有 non-retryable blocked 的混合结果报告为成功。
+Web 同时展示总 blocked 数；CLI/Web 不把仍有 non-retryable blocked 的混合结果报告为成功。Compose 的 `provider-failed` 需保留失败前的触发语义：普通增量重试仍走手改/迁移/骤缩保护，`materials-changed` 与用户已确认的显式 re-step 才恢复各自原语义。
 
 ## 5. 思路与折衷
 
@@ -155,7 +155,7 @@ flowchart TD
 - 不自动扫描或重写现有 workspace；只有 Compose 被新 Δ 触发时才建立超长门禁。
 - 超长 workspace 由用户确认 `re-step understanding.md` 后迁移；成功前旧文件与 TargetState 保留。
 - 旧 constitution 中的 judgment target 继续停更；`assessment.md` 留盘不动。
-- 新 reason 对旧 state 向后兼容，均使用既有字符串字段。
+- 新 reason 对旧 state 向后兼容；TargetState 可选 `retry_reason` 仅保存 Compose provider 失败前的触发语义，旧 state 缺失时按普通增量重试。
 - 失败可直接再次 re-step；成功后如不接受压缩结果，可使用既有 history/rollback 回到迁移前快照。
 - 回滚代码后，已生成的 ≤20,000 文档仍是合法旧 target，无数据格式迁移。
 

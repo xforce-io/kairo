@@ -9,8 +9,15 @@ from __future__ import annotations
 import shutil
 
 from kairo.history import snapshot
-from kairo.models import REASON_PROVIDER_FAILED
-from kairo.rules import ComposeRule, DigestRule, NormalizeRule, TransformRule, _hash
+from kairo.models import REASON_PROVIDER_FAILED, TargetState
+from kairo.rules import (
+    REASON_EXPLICIT_RECOMPOSE,
+    ComposeRule,
+    DigestRule,
+    NormalizeRule,
+    TransformRule,
+    _hash,
+)
 from kairo.stream_index import write_stream_index
 
 MAX_ITER = 100
@@ -180,8 +187,9 @@ def clear_provider_failed_targets(ws) -> int:
             and ts.reason == REASON_PROVIDER_FAILED
         ):
             ts.status = "ok"
-            ts.reason = None
+            ts.reason = ts.retry_reason
             ts.diagnostic = None
+            ts.retry_reason = None
             state.targets[path] = ts
             n += 1
     if n:
@@ -265,17 +273,20 @@ def delete_reference(ws, ref_id: str, *, recompose: bool = False, provider=None)
         re_step(ws, provider)
 
 
+def _run_plan_mode(pending: int, retryable: int, non_retryable: int) -> str:
+    if pending > 0 and retryable > 0:
+        return "run_and_retry"
+    if pending > 0:
+        return "run"
+    if retryable > 0:
+        return "retry"
+    if non_retryable > 0:
+        return "attention"
+    return "clean"
+
+
 def workspace_run_plan(ws) -> dict:
-    """#75:主按钮状态机输入 —— pending 与 blocked 计数。
-
-    mode:
-      clean — 无待办无阻塞
-      run — 仅有 stale 待办
-      retry — 仅有 blocked(终态失败)
-      run_and_retry — 两者都有
-
-    #98:blocked 含 reference 产物失败 + target 的 provider-failed。
-    """
+    """#75/#161:主按钮状态机输入,区分总 blocked 与 Run 可重试 blocked。"""
     pending_n = len(pending(ws))
     blocked_refs: list[dict] = []
     for ref_id in ws.list_reference_ids():
@@ -285,11 +296,7 @@ def workspace_run_plan(ws) -> dict:
     blocked_targets: list[dict] = []
     live_paths = {t.path for t in ws.constitution.live_targets()}
     for path, ts in ws.read_state().targets.items():
-        if (
-            path in live_paths
-            and ts.status == "blocked"
-            and ts.reason == REASON_PROVIDER_FAILED
-        ):
+        if path in live_paths and ts.status == "blocked":
             diag = ts.diagnostic
             blocked_targets.append(
                 {
@@ -298,21 +305,19 @@ def workspace_run_plan(ws) -> dict:
                     "summary": diag.summary if diag else None,
                     "stage": diag.stage if diag else None,
                     "provider": diag.provider if diag else None,
+                    "retryable": ts.reason == REASON_PROVIDER_FAILED,
                 }
             )
-    blocked_n = sum(len(b["blocks"]) for b in blocked_refs) + len(blocked_targets)
-    if pending_n == 0 and blocked_n == 0:
-        mode = "clean"
-    elif pending_n > 0 and blocked_n == 0:
-        mode = "run"
-    elif pending_n == 0 and blocked_n > 0:
-        mode = "retry"
-    else:
-        mode = "run_and_retry"
+    blocked_ref_n = sum(len(b["blocks"]) for b in blocked_refs)
+    blocked_n = blocked_ref_n + len(blocked_targets)
+    retryable_n = blocked_ref_n + sum(b["retryable"] for b in blocked_targets)
+    non_retryable_n = blocked_n - retryable_n
+    mode = _run_plan_mode(pending_n, retryable_n, non_retryable_n)
     return {
         "mode": mode,
         "pending_count": pending_n,
         "blocked_count": blocked_n,
+        "retryable_blocked_count": retryable_n,
         "blocked_refs": blocked_refs,
         "blocked_targets": blocked_targets,
     }
@@ -329,7 +334,7 @@ def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
     """
     plan = workspace_run_plan(ws)
     if retry_blocked is None:
-        retry_blocked = plan["blocked_count"] > 0
+        retry_blocked = plan["retryable_blocked_count"] > 0
     if retry_blocked:
         for item in plan["blocked_refs"]:
             clear_reference_products(ws, item["ref_id"])
@@ -338,18 +343,30 @@ def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
 
 
 def re_step(ws, provider, target: str | None = None) -> bool:
-    """强制重算。全量 / 指定文档(整篇重综合,丢手改)/ 指定 reference(清派生产物后重跑)。"""
+    """强制重算。文档保留旧文件/账本到候选校验成功;reference 仍清派生产物。"""
     state = ws.read_state()
-    target_paths = [t.path for t in ws.constitution.live_targets()]
+    targets = {t.path: t for t in ws.constitution.live_targets()}
+
+    def mark(path: str) -> None:
+        target_config = targets[path]
+        doc = ws.root / path
+        ts = state.targets.get(path) or TargetState(
+            depends_on=list(target_config.depends_on),
+            output_hash=_hash(doc.read_text()) if doc.is_file() else "",
+        )
+        ts.status = "ok"
+        ts.reason = REASON_EXPLICIT_RECOMPOSE
+        ts.diagnostic = None
+        ts.retry_reason = None
+        state.targets[path] = ts
+
     if target is None:
-        for tp in target_paths:
-            (ws.root / tp).unlink(missing_ok=True)
-        state.targets = {}
+        for path in targets:
+            mark(path)
         ws.write_state(state)
         return step(ws, provider)
-    if target in target_paths:
-        (ws.root / target).unlink(missing_ok=True)
-        state.targets.pop(target, None)
+    if target in targets:
+        mark(target)
         ws.write_state(state)
         return step(ws, provider)
     # reference id:完整重试(含 asr-failed),不再只删 digest

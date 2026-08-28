@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from kairo.engine import (
+    clear_provider_failed_targets,
     pending,
     re_step,
     retry_reference,
@@ -15,13 +13,16 @@ from kairo.engine import (
 )
 from kairo.models import (
     FailureDiagnostic,
-    ProductState,
     REASON_PROVIDER_FAILED,
     State,
     TargetState,
 )
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
-from kairo.rules import make_provider_diagnostic, safe_provider_summary
+from kairo.rules import (
+    REASON_EXPLICIT_RECOMPOSE,
+    make_provider_diagnostic,
+    safe_provider_summary,
+)
 from kairo.workspace import Workspace
 
 
@@ -263,6 +264,45 @@ def test_run_workspace_recovers_compose_provider_failed(tmp_path):
     assert ts.reason is None
     assert ts.diagnostic is None
     assert (ws.root / "understanding.md").read_text() != old
+
+
+def test_run_retry_does_not_turn_provider_failure_into_explicit_recompose(tmp_path):
+    ws = _ws_with_text(tmp_path)
+    step(ws, StubProvider())
+    rid = ws.list_reference_ids()[0]
+    digest = ws.root / f"references/{rid}/digest.md"
+    digest.write_text("new digest body for compose")
+    state = ws.read_state()
+    state.targets["understanding.md"].folded = {}
+    ws.write_state(state)
+    step(ws, FailProvider("compose down"))
+    manual = "失败期间的人工修改"
+    (ws.root / "understanding.md").write_text(manual)
+
+    run_workspace(ws, StubProvider())
+
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.status == "blocked"
+    assert ts.reason == "manual-edit"
+    assert (ws.root / "understanding.md").read_text() == manual
+
+
+def test_provider_retry_restores_full_recompose_origin(tmp_path):
+    ws = Workspace.init(tmp_path)
+    for retry_reason in ("materials-changed", REASON_EXPLICIT_RECOMPOSE):
+        state = ws.read_state()
+        state.targets["understanding.md"] = TargetState(
+            status="blocked",
+            reason=REASON_PROVIDER_FAILED,
+            retry_reason=retry_reason,
+        )
+        ws.write_state(state)
+
+        assert clear_provider_failed_targets(ws) == 1
+        restored = ws.read_state().targets["understanding.md"]
+        assert restored.status == "ok"
+        assert restored.reason == retry_reason
+        assert restored.retry_reason is None
 
 
 def test_re_step_target_recovers_compose_failed(tmp_path):
