@@ -2,6 +2,8 @@
 
 machine (~/.config/kairo/glossary.yaml) → root (<serve-root|ws.parent>/glossary.yaml)
 → workspace constitution.glossary；同名后者覆盖。
+
+#162: 已存在但非法的文件整表拒绝；写入先校验再原子保存。
 """
 
 from __future__ import annotations
@@ -13,6 +15,18 @@ import yaml
 
 from kairo.models import GlossaryEntry
 
+ALLOWED_SCOPES = frozenset({"workspace", "shared"})
+
+
+class GlossaryError(ValueError):
+    """真名册配置或请求非法。message 含路径(若有),可直接展示。"""
+
+    def __init__(self, message: str, *, path: Path | None = None):
+        self.path = path
+        if path is not None:
+            message = f"{path}: {message}"
+        super().__init__(message)
+
 
 def machine_glossary_path() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
@@ -23,31 +37,118 @@ def root_glossary_path(root: Path) -> Path:
     return Path(root) / "glossary.yaml"
 
 
-def _parse_glossary_doc(data) -> list[GlossaryEntry]:
+def constitution_path(ws_root: Path) -> Path:
+    return Path(ws_root) / "constitution.yaml"
+
+
+def parse_scope(scope: str | None, *, default: str = "workspace") -> str:
+    """未提供 → 公开默认 workspace;显式非法值拒绝。"""
+    if scope is None:
+        return default
+    value = scope.strip()
+    if value not in ALLOWED_SCOPES:
+        raise GlossaryError(f"未知 scope:{scope!r}(workspace|shared)")
+    return value
+
+
+def _parse_entry_list(items: list, *, path: Path | None = None) -> list[GlossaryEntry]:
+    out: list[GlossaryEntry] = []
+    for i, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise GlossaryError(f"条目[{i}] 必须是 mapping", path=path)
+        name = item.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise GlossaryError(f"条目[{i}] 缺少有效 name", path=path)
+        try:
+            out.append(GlossaryEntry.model_validate(item))
+        except Exception as e:
+            raise GlossaryError(f"条目[{i}] 非法:{e}", path=path) from e
+    return out
+
+
+def _parse_glossary_doc(data, *, path: Path | None = None) -> list[GlossaryEntry]:
     if data is None:
         return []
     if isinstance(data, dict):
-        data = data.get("entries") or data.get("glossary") or []
+        if "entries" in data:
+            items = data["entries"]
+        elif "glossary" in data:
+            items = data["glossary"]
+        else:
+            raise GlossaryError("顶层必须是列表或 {entries|glossary: [...]}", path=path)
+        if not isinstance(items, list):
+            raise GlossaryError("entries/glossary 必须是列表", path=path)
+        return _parse_entry_list(items, path=path)
     if not isinstance(data, list):
-        return []
-    out: list[GlossaryEntry] = []
-    for item in data:
-        if not isinstance(item, dict) or not item.get("name"):
-            continue
-        out.append(GlossaryEntry.model_validate(item))
-    return out
+        raise GlossaryError("顶层必须是列表或 {entries|glossary: [...]}", path=path)
+    return _parse_entry_list(data, path=path)
 
 
 def load_glossary_file(path: Path) -> list[GlossaryEntry]:
     if not path.is_file():
         return []
-    return _parse_glossary_doc(yaml.safe_load(path.read_text()))
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
+    return _parse_glossary_doc(data, path=path)
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception as e:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise GlossaryError(f"保存失败:{e}", path=path) from e
 
 
 def save_glossary_file(path: Path, entries: list[GlossaryEntry]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = [e.model_dump() for e in entries]
-    path.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False))
+    _atomic_write_text(
+        path, yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
+    )
+
+
+def load_workspace_glossary(ws_root: Path) -> list[GlossaryEntry]:
+    path = constitution_path(ws_root)
+    if not path.is_file():
+        return []
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
+    if data is None or not isinstance(data, dict):
+        raise GlossaryError("constitution 顶层必须是 mapping", path=path)
+    if "glossary" not in data:
+        return []
+    items = data["glossary"]
+    if items is None:
+        return []
+    if not isinstance(items, list):
+        raise GlossaryError("glossary 必须是列表", path=path)
+    return _parse_entry_list(items, path=path)
+
+
+def write_workspace_glossary(ws_root: Path, entries: list[GlossaryEntry]) -> None:
+    path = constitution_path(ws_root)
+    if not path.is_file():
+        raise GlossaryError("constitution.yaml 不存在", path=path)
+    try:
+        data = yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
+    if data is None or not isinstance(data, dict):
+        raise GlossaryError("constitution 顶层必须是 mapping", path=path)
+    data["glossary"] = [e.model_dump() for e in entries]
+    _atomic_write_text(
+        path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
+    )
 
 
 def merge_glossary(*layers: list[GlossaryEntry]) -> list[GlossaryEntry]:

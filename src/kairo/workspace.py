@@ -418,20 +418,20 @@ class Workspace:
         tags: list[str] | None = None,
     ) -> GlossaryEntry:
         """追加一条 **workspace** 真名册;name 必填;重名拒绝。"""
-        from kairo.glossary import add_entry
+        from kairo.glossary import add_entry, load_workspace_glossary, write_workspace_glossary
 
-        con = self.constitution
-        con.glossary = add_entry(con.glossary, name, note=note, aka=aka, tags=tags)
-        self.write_constitution(con)
-        return con.glossary[-1]
+        entries = add_entry(
+            load_workspace_glossary(self.root), name, note=note, aka=aka, tags=tags
+        )
+        write_workspace_glossary(self.root, entries)
+        return entries[-1]
 
     def remove_glossary_entry(self, index: int) -> None:
         """按索引删除一条 **workspace** 真名册。"""
-        from kairo.glossary import remove_entry
+        from kairo.glossary import load_workspace_glossary, remove_entry, write_workspace_glossary
 
-        con = self.constitution
-        con.glossary = remove_entry(con.glossary, index)
-        self.write_constitution(con)
+        entries = remove_entry(load_workspace_glossary(self.root), index)
+        write_workspace_glossary(self.root, entries)
 
     def glossary_reference(self, *, serve_root: Path | None = None) -> str:
         """合并 machine + root + workspace 后渲染注入段(#71)。"""
