@@ -133,7 +133,7 @@ def test_save_replace_failure_keeps_original(tmp_path, monkeypatch):
         raise OSError("simulated replace failure")
 
     monkeypatch.setattr("kairo.glossary.os.replace", boom)
-    with pytest.raises(OSError):
+    with pytest.raises(GlossaryError, match="保存失败"):
         save_glossary_file(path, [GlossaryEntry(name="新")])
     assert path.read_bytes() == before
 
@@ -167,10 +167,63 @@ def test_workspace_save_failure_keeps_constitution(tmp_path, monkeypatch):
         raise OSError("simulated replace failure")
 
     monkeypatch.setattr("kairo.glossary.os.replace", boom)
-    with pytest.raises(OSError):
+    with pytest.raises(GlossaryError, match="保存失败"):
         ws.add_glossary_entry("天溯")
     assert con.read_bytes() == before
     assert yaml.safe_load(con.read_text())["topic"] == "t"
+
+
+def test_empty_constitution_not_rewritten(tmp_path, monkeypatch):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    con = tmp_path / "ws" / "constitution.yaml"
+    con.write_bytes(b"")
+    with pytest.raises(GlossaryError, match="mapping"):
+        ws.add_glossary_entry("新词")
+    assert con.read_bytes() == b""
+    con.write_text("null\n")
+    before = con.read_bytes()
+    with pytest.raises(GlossaryError, match="mapping"):
+        ws.remove_glossary_entry(0)
+    assert con.read_bytes() == before
+    monkeypatch.chdir(tmp_path / "ws")
+    listed = runner.invoke(app, ["glossary", "list"])
+    assert listed.exit_code != 0
+    assert con.read_bytes() == before
+
+
+def test_cli_save_failure_is_locatable(tmp_path, monkeypatch):
+    root = tmp_path / "serve"
+    root.mkdir()
+    Workspace.init(root / "ws", topic="t")
+    monkeypatch.chdir(root / "ws")
+    monkeypatch.setattr(
+        "kairo.glossary.os.replace",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("simulated replace failure")),
+    )
+    result = runner.invoke(app, ["glossary", "add", "天溯", "--scope", "shared"])
+    assert result.exit_code == 1
+    assert result.exception is None or isinstance(result.exception, SystemExit)
+    err = result.output + (result.stderr or "")
+    assert "保存失败" in err
+    assert not (root / "glossary.yaml").exists()
+
+
+def test_web_save_failure_inline_error(tmp_path, monkeypatch):
+    root = tmp_path
+    Workspace.init(root / "ws", topic="t")
+    monkeypatch.setattr(
+        "kairo.glossary.os.replace",
+        lambda *a, **k: (_ for _ in ()).throw(OSError("simulated replace failure")),
+    )
+    r = _client(root).post(
+        "/w/ws/glossary",
+        data={"name": "天溯", "note": "keep", "scope": "shared"},
+    )
+    assert r.status_code == 200
+    assert "保存失败" in r.text
+    assert "天溯" in r.text
+    assert "keep" in r.text
+    assert not (root / "glossary.yaml").exists()
 
 
 def _client(root):

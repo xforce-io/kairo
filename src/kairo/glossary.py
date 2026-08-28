@@ -100,12 +100,12 @@ def _atomic_write_text(path: Path, text: str) -> None:
     try:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
-    except Exception:
+    except Exception as e:
         try:
             tmp.unlink(missing_ok=True)
         except OSError:
             pass
-        raise
+        raise GlossaryError(f"保存失败:{e}", path=path) from e
 
 
 def save_glossary_file(path: Path, entries: list[GlossaryEntry]) -> None:
@@ -123,9 +123,7 @@ def load_workspace_glossary(ws_root: Path) -> list[GlossaryEntry]:
         data = yaml.safe_load(path.read_text())
     except yaml.YAMLError as e:
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
-    if data is None:
-        return []
-    if not isinstance(data, dict):
+    if data is None or not isinstance(data, dict):
         raise GlossaryError("constitution 顶层必须是 mapping", path=path)
     if "glossary" not in data:
         return []
@@ -145,9 +143,7 @@ def write_workspace_glossary(ws_root: Path, entries: list[GlossaryEntry]) -> Non
         data = yaml.safe_load(path.read_text())
     except yaml.YAMLError as e:
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
-    if data is None:
-        data = {}
-    if not isinstance(data, dict):
+    if data is None or not isinstance(data, dict):
         raise GlossaryError("constitution 顶层必须是 mapping", path=path)
     data["glossary"] = [e.model_dump() for e in entries]
     _atomic_write_text(
