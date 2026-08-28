@@ -267,6 +267,7 @@ class ProductState(BaseModel):
     status: str = "ok"
     reason: str | None = None
     diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
+    glossary_hash: str | None = None  # #163;缺省=旧产物
 
 
 class TargetState(BaseModel):
@@ -282,6 +283,7 @@ class TargetState(BaseModel):
     reason: str | None = None  # manual-edit | provider-failed | …
     diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
     retry_reason: str | None = None  # provider-failed 前的触发语义;Run 重试后清空
+    glossary_hash: str | None = None  # #163;缺省=旧产物
 
 
 class State(BaseModel):

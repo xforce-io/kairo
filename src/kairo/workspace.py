@@ -62,6 +62,30 @@ def delete_workspace(serve_root: Path | str, slug: str) -> None:
     shutil.rmtree(dest)
 
 
+def restep_target_for(key: str) -> str:
+    """digest 产物键 → reference id;活 target 路径原样。"""
+    prefix, suffix = "references/", "/digest.md"
+    if key.startswith(prefix) and key.endswith(suffix):
+        mid = key[len(prefix) : -len(suffix)]
+        if mid and "/" not in mid:
+            return mid
+    return key
+
+
+def stamp_serve_workspaces(serve_root: Path | str) -> None:
+    """#163:root 真名册变更后,给各 workspace 已有产物打尚未重新校正。"""
+    root = Path(serve_root)
+    if not root.is_dir():
+        return
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        if not (d / "constitution.yaml").is_file():
+            continue
+        try:
+            Workspace.open(d).stamp_glossary_pending()
+        except WorkspaceNotFound:
+            continue
+
+
 def _slug(text: str) -> str:
     # 保留中文/字母数字(unicode word),标点/空白 → -;全标点(空)回退内容 hash 保唯一
     s = re.sub(r"[^\w]+", "-", text.lower()).strip("-_")
@@ -416,29 +440,83 @@ class Workspace:
         note: str = "",
         aka: list[str] | None = None,
         tags: list[str] | None = None,
+        *,
+        serve_root: Path | None = None,
     ) -> GlossaryEntry:
-        """追加一条 **workspace** 真名册;name 必填;重名拒绝。"""
-        from kairo.glossary import add_entry, load_workspace_glossary, write_workspace_glossary
+        """追加一条 **workspace** 真名册;name 必填;重名拒绝;生效歧义拒绝。"""
+        from kairo.glossary import (
+            add_entry,
+            effective_items,
+            load_glossary_file,
+            load_workspace_glossary,
+            resolve_serve_root,
+            root_glossary_path,
+            write_workspace_glossary,
+        )
 
         entries = add_entry(
             load_workspace_glossary(self.root), name, note=note, aka=aka, tags=tags
         )
+        root = resolve_serve_root(ws_root=self.root, explicit=serve_root)
+        effective_items(load_glossary_file(root_glossary_path(root)), entries)
         write_workspace_glossary(self.root, entries)
+        self.stamp_glossary_pending()
         return entries[-1]
 
-    def remove_glossary_entry(self, index: int) -> None:
+    def remove_glossary_entry(self, index: int, *, serve_root: Path | None = None) -> None:
         """按索引删除一条 **workspace** 真名册。"""
-        from kairo.glossary import load_workspace_glossary, remove_entry, write_workspace_glossary
+        from kairo.glossary import (
+            effective_items,
+            load_glossary_file,
+            load_workspace_glossary,
+            remove_entry,
+            resolve_serve_root,
+            root_glossary_path,
+            write_workspace_glossary,
+        )
 
         entries = remove_entry(load_workspace_glossary(self.root), index)
+        root = resolve_serve_root(ws_root=self.root, explicit=serve_root)
+        effective_items(load_glossary_file(root_glossary_path(root)), entries)
         write_workspace_glossary(self.root, entries)
+        self.stamp_glossary_pending()
+
+    def stamp_glossary_pending(self) -> None:
+        """#163:已有产物缺 glossary_hash 时标脏,使尚未重新校正可见。不触发 step。"""
+        state = self.read_state()
+        dirty = False
+        for ps in state.products.values():
+            if ps.glossary_hash is None:
+                ps.glossary_hash = ""
+                dirty = True
+        for ts in state.targets.values():
+            if ts.glossary_hash is None:
+                ts.glossary_hash = ""
+                dirty = True
+        if dirty:
+            self.write_state(state)
+
+    def glossary_pending(self, *, serve_root: Path | None = None) -> list[str]:
+        """当前生效 hash 与产物记录不一致的文档/digest 路径。"""
+        from kairo.glossary import effective_hash, workspace_effective
+
+        current = effective_hash([i.entry for i in workspace_effective(self.root, serve_root=serve_root)])
+        state = self.read_state()
+        out: list[str] = []
+        for key, ps in state.products.items():
+            if ps.glossary_hash is not None and ps.glossary_hash != current:
+                out.append(key)
+        for key, ts in state.targets.items():
+            if ts.glossary_hash is not None and ts.glossary_hash != current:
+                out.append(key)
+        return out
 
     def glossary_reference(self, *, serve_root: Path | None = None) -> str:
-        """合并 machine + root + workspace 后渲染注入段(#71)。"""
-        from kairo.glossary import format_glossary_reference, merged_glossary_entries
+        """root ⊕ workspace 生效真名册渲染注入段(#163)。"""
+        from kairo.glossary import format_glossary_reference, merged_glossary_entries, load_workspace_glossary
 
         entries = merged_glossary_entries(
-            self.constitution.glossary, self.root, serve_root=serve_root
+            load_workspace_glossary(self.root), self.root, serve_root=serve_root
         )
         return format_glossary_reference(entries)
 

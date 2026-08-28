@@ -5,6 +5,8 @@
 | workspace | 一个 topic 的自包含目录，内含 constitution、参考与产物。 | 课题仓、空间 |
 | constitution | workspace 里声明期望状态的 `constitution.yaml`，step 朝它调和。 | 宪法文件 |
 | 真名册 | 按层登记的领域规范名、说明与别名表，是后续文本产物的权威输入。 | — |
+| 生效真名册 | 同一 workspace 上 root 与 workspace 两层按覆盖规则合并后的最终条目集。 | 合并表 |
+| 覆盖 | workspace 同名条目整体替换对应 root 条目，不做字段级合并。 | 字段级继承 |
 | stream | 观测型参考，digest 后 fold 进产物。 | 流水、观测流 |
 | corpus | 基线型参考，只读参考层，不 digest、不 fold。 | 语料库 |
 | digest | 一条 reference 的高密度记忆纪要，compose / 时段回顾的输入。 | 摘要、纪要原文 |

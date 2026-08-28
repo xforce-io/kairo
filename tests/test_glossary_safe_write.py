@@ -216,8 +216,8 @@ def test_web_save_failure_inline_error(tmp_path, monkeypatch):
         lambda *a, **k: (_ for _ in ()).throw(OSError("simulated replace failure")),
     )
     r = _client(root).post(
-        "/w/ws/glossary",
-        data={"name": "天溯", "note": "keep", "scope": "shared"},
+        "/glossary",
+        data={"name": "天溯", "note": "keep"},
     )
     assert r.status_code == 200
     assert "保存失败" in r.text
@@ -254,10 +254,7 @@ def test_web_legal_scope_changes_only_one_layer(tmp_path):
     root = tmp_path
     Workspace.init(root / "ws", topic="t")
     c = _client(root)
-    r = c.post(
-        "/w/ws/glossary",
-        data={"name": "公共名", "scope": "shared"},
-    )
+    r = c.post("/glossary", data={"name": "公共名"})
     assert r.status_code == 200
     assert load_glossary_file(root / "glossary.yaml")[0].name == "公共名"
     assert Workspace.open(root / "ws").constitution.glossary == []

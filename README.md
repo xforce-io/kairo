@@ -94,7 +94,7 @@ glossary:
   note: 平台名（与 corpus 基线一致）
 ```
 
-Note: correction happens in the **normalize / digest / compose stages**; ASR transcription itself is unaffected (whisper still outputs by sound). An empty table (`glossary: []`, the default) means zero behavior change; after editing the glossary for an already-generated reference, run `kairo re-step <id>` to regenerate the digest before it is re-corrected.
+Note: correction happens in the **normalize / digest / compose stages**; ASR transcription itself is unaffected (whisper still outputs by sound). An empty table (`glossary: []`, the default) means zero behavior change; after editing the glossary for an already-generated reference, run `kairo re-step <id>` to regenerate the digest before it is re-corrected. Shared entries live in `<serve-root>/glossary.yaml` and are maintained from the Root homepage; a workspace may override a name locally. Machine `~/.config/kairo/glossary.yaml` is not part of the effective glossary ([#163](https://github.com/xforce-io/kairo/issues/163)).
 
 ## Local ASR configuration
 

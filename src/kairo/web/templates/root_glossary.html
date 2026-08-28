@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ t('glossary.root_title') }}{% endblock %}
+{% block body %}
+<div class="dash-head">
+  <p class="dlg-hint">{{ t('glossary.root_impact').format(n=ws_n, o=override_ws_n) }}</p>
+</div>
+{% if success %}
+<p class="meta-hint">{{ t('glossary.saved') }}</p>
+{% endif %}
+{% if error %}
+<p class="ref-blocks glossary-error" role="alert">{{ error }}</p>
+{% endif %}
+{% if machine_hint %}
+<p class="meta-hint">{{ machine_hint }}</p>
+{% endif %}
+<div class="gl-section" style="max-width:640px;margin:16px 24px">
+  <div class="meta-label">{{ t('glossary.shared_section') }} · {{ count }}</div>
+  {% if entries %}
+  <table class="meta-forms glossary-table">
+    <tbody>
+    {% for e in entries %}
+    <tr>
+      <td class="mf-role" title="{{ e.note }}">
+        <strong>{{ e.name }}</strong>
+        {% if e.note %}<div class="gl-note">{{ e.note }}</div>{% endif %}
+        {% if e.aka %}<div class="gl-aka">{{ t('glossary.aka_prefix') }}{{ e.aka }}</div>{% endif %}
+        {% if e.tags %}<div class="gl-aka">{{ t('glossary.tags_prefix') }}{{ e.tags }}</div>{% endif %}
+      </td>
+      <td class="mf-actions">
+        <form method="post" action="/glossary/{{ loop.index0 }}/delete"
+              onsubmit="return confirm({{ t('glossary.delete_confirm') | tojson }})">
+          <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.delete') }}</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% elif not load_failed %}
+  <p class="panel-hint">{{ t('glossary.shared_empty') }}</p>
+  {% endif %}
+  <form class="dlg-form glossary-add" method="post" action="/glossary">
+    <label class="dlg-label">{{ t('glossary.add_shared') }}</label>
+    <input type="text" name="name" placeholder="{{ t('glossary.name_ph') }}" value="{{ form_name }}" required>
+    <input type="text" name="note" placeholder="{{ t('glossary.note_ph') }}" value="{{ form_note }}">
+    <input type="text" name="aka" placeholder="{{ t('glossary.aka_ph') }}" value="{{ form_aka }}">
+    <input type="text" name="tags" placeholder="{{ t('glossary.tags_ph') }}" value="{{ form_tags }}">
+    <button type="submit" class="btn btn-step dlg-go">{{ t('glossary.add_btn') }}</button>
+  </form>
+  {% if impact %}
+  <div class="meta-label" style="margin-top:18px">{{ t('glossary.override_list') }}</div>
+  <ul class="dlg-bullets">
+    {% for i in impact %}
+    <li><a href="/w/{{ i.slug | urlencode }}">{{ i.slug }}</a>
+      {% if i.local_names %} — {{ t('glossary.local_section') }}: {{ i.local_names | join(', ') }}{% endif %}
+      {% if i.overrides %} ({{ t('glossary.origin_override') }}: {{ i.overrides | join(', ') }}){% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>
+{% endblock %}
