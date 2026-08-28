@@ -83,7 +83,7 @@ kairo status                  # 看各 reference / 文档的融入状态
 
 ## 领域真名册（glossary）
 
-`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Compose（及开启的 Normalize）时注入 agent 提示词（Issue [#20](https://github.com/xforce-io/kairo/issues/20)），用于纠正口语 / 转写产生的同音变体与别名——产出时一律用规范名，遇含糊提及按此锚定。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
+`constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Compose（及开启的 Normalize）时作为结构化只读数据注入（Issue [#20](https://github.com/xforce-io/kairo/issues/20)）：仅当提及能由规范名、alias 或定义充分对应时才用规范名，否则保留原文。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
 
 ```yaml
 glossary:

@@ -371,12 +371,15 @@ class NormalizeRule:
                 )
             )
             self.ws.write_manifest(ref_id, m)
+            from kairo.glossary import current_effective_hash
+
             state.products[key] = ProductState(
                 input_hash=input_hash,
                 produced_by={
                     "provider": self.provider.name,
                     "model": self.provider.model,
                 },
+                glossary_hash=current_effective_hash(self.ws.root),
             )
 
         def is_stale(state: State) -> bool:
