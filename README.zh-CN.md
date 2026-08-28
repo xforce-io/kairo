@@ -55,7 +55,7 @@ kairo status                  # 看各 reference / 文档的融入状态
 | `title` | 重命名参考展示名（不动 id / 目录） |
 | `occurred` | 修正或清空参考发生时间（`--clear`；不改 id、不 step） |
 | `timeline` | 跨 workspace 按发生日列出观测（`--day` / `--recent` / `--json`） |
-| `step` | 跑调和循环到收敛（endpoint 配置→Claude CLI→stub；`KAIRO_STUB` 强制 stub） |
+| `step` | 跑调和循环到收敛（自动选择可读取材料的 provider，顺序见下文） |
 | `run` | 有终态 blocked 则先清再 step（与 Web 主按钮一致） |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |
 | `retry-ref` | 单条参考清派生产物后重跑 |
@@ -125,7 +125,7 @@ model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → 可用的 `grok` CLI → 已配置 `[provider.openai]` → 可用的 `claude` CLI → stub。本机已登录 Grok 时，直接 `kairo step` 默认走 `GrokProvider`。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` 强制指定。注意：Grok 无授读；Digest/Compose 的材料目录需要 `codex` 或 `claude-code`（见 [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153)）。
+Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → auto 候选 `codex` CLI → `grok` CLI → `claude` CLI → 已配置 `[provider.openai]` → stub。需要读取材料的命令会跳过不支持授读的候选，所以有效 auto 顺序为 Codex → Claude → stub；其它命令保留完整偏好顺序。选中的 provider 失败后不跨 provider 重试。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` 强制指定（见 [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153) / [#160](https://github.com/xforce-io/kairo/issues/160)）。
 
 ## 技术栈
 

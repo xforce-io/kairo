@@ -272,9 +272,16 @@ def test_cli_step_exits_nonzero_on_provider_failed(tmp_path, monkeypatch):
     src.write_text("材料")
     ws.add([src])
     monkeypatch.chdir(ws_root)
-    monkeypatch.setattr("kairo.cli.select_provider", lambda: FailProvider())
+    selection = []
+
+    def select(**kwargs):
+        selection.append(kwargs)
+        return FailProvider()
+
+    monkeypatch.setattr("kairo.cli.select_provider", select)
     result = CliRunner().invoke(app, ["step"])
     assert result.exit_code == 1, result.output
+    assert selection == [{"require_read_dirs": True}]
     out = (result.output or "") + (result.stderr or "")
     assert "provider-failed" in out.lower()
     assert has_provider_failed(Workspace.open(ws_root))

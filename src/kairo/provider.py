@@ -4,8 +4,8 @@
 agent 靠往 `artifact_dir` 写文件来通信;外壳(rules/engine)只编排与记账。
 backend:StubProvider(测试)/ GrokProvider / OpenAICompatibleProvider /
 ClaudeCodeProvider / CodexProvider。
-默认真实路径:本机 grok CLI 可用 → GrokProvider;否则 openai endpoint;
-否则 claude CLI;否则 stub。Grok 不支持授读,Digest/Compose 目录化后会 provider-failed。
+auto 偏好:Codex → Grok → Claude → OpenAI-compatible → Stub;
+材料路径会跳过不支持授读的候选。显式 provider 不过滤,仍按契约 fail-closed。
 """
 
 from __future__ import annotations
@@ -662,11 +662,11 @@ def _cli_available(cmd: str) -> bool:
         return False
 
 
-def select_provider():
-    """选 backend:KAIRO_STUB(测试隔离,最高)> KAIRO_PROVIDER(显式)> auto。
+def select_provider(*, require_read_dirs: bool = False):
+    """选 backend:强制配置不变;auto 按偏好顺序取首个满足任务能力者。
 
-    auto:grok CLI 可用 → GrokProvider;否则 OpenAI-compatible endpoint;
-    否则 claude CLI → ClaudeCodeProvider;否则 StubProvider。
+    auto:Codex → Grok → Claude → OpenAI-compatible → Stub。
+    require_read_dirs=True 时跳过不支持材料读取的候选,不做调用失败后的切换。
     """
     if os.environ.get("KAIRO_STUB"):
         return StubProvider()
@@ -678,11 +678,23 @@ def select_provider():
                 raise RuntimeError("KAIRO_PROVIDER=openai 但缺少 provider.openai 配置或 API key")
             return provider
         return _BACKENDS.get(explicit, StubProvider)()
+
+    def eligible(candidate) -> bool:
+        return not require_read_dirs or candidate.supports_read_dirs
+
+    if _cli_available("codex"):
+        candidate = CodexProvider()
+        if eligible(candidate):
+            return candidate
     if _cli_available("grok"):
-        return GrokProvider()
-    provider = _openai_provider_from_config()
-    if provider is not None:
-        return provider
+        candidate = GrokProvider()
+        if eligible(candidate):
+            return candidate
     if _cli_available("claude"):
-        return ClaudeCodeProvider()
+        candidate = ClaudeCodeProvider()
+        if eligible(candidate):
+            return candidate
+    candidate = _openai_provider_from_config()
+    if candidate is not None and eligible(candidate):
+        return candidate
     return StubProvider()
