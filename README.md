@@ -55,7 +55,7 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 | `title` | Rename a reference's display title (id / directory unchanged) |
 | `occurred` | Set or clear a reference's occurred date (`--clear`; does not change id or run step) |
 | `timeline` | List fold observations across workspaces by occurred date (`--day` / `--recent` / `--json`) |
-| `step` | Run the reconciliation loop to convergence (configured endpoint → Claude CLI → stub; `KAIRO_STUB` forces stub) |
+| `step` | Run the reconciliation loop to convergence (material-capable auto provider; selection details below) |
 | `run` | Clear terminal blocked then step (same as Web primary button) |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
 | `retry-ref` | Clear derived products for one reference and re-run |
@@ -125,7 +125,7 @@ model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → available `grok` CLI → configured `[provider.openai]` → available `claude` CLI → stub. With a local Grok login, plain `kairo step` uses `GrokProvider` by default. Set `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` to force a backend. Note: Grok cannot take granted-read catalogs; Digest/Compose need `codex` or `claude-code` (see [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153)).
+Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → auto candidates `codex` CLI → `grok` CLI → `claude` CLI → configured `[provider.openai]` → stub. Material-reading commands skip candidates that cannot read the granted catalog, so their effective auto order is Codex → Claude → stub; other commands keep the full preference order. A selected provider failure does not trigger cross-provider retry. Set `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` to force a backend (see [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153) / [#160](https://github.com/xforce-io/kairo/issues/160)).
 
 ## Tech stack
 

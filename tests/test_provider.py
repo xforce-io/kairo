@@ -13,43 +13,122 @@ from kairo.provider import (
 # ---- provider 选择 ----
 
 
-def test_select_provider_auto_prefers_grok_when_cli_available(monkeypatch):
-    """#61:auto 默认真实路径 = grok CLI。"""
+def _auto(monkeypatch, *, available=(), openai=None, require_read_dirs=False):
     monkeypatch.delenv("KAIRO_STUB", raising=False)
     monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
-    monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: None)
-    monkeypatch.setattr(
-        provider, "_cli_available", lambda cmd: cmd in {"grok", "claude"}
+    monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: openai)
+    monkeypatch.setattr(provider, "_cli_available", lambda cmd: cmd in available)
+    return select_provider(require_read_dirs=require_read_dirs)
+
+
+def test_select_provider_auto_prefers_codex(monkeypatch):
+    selected = _auto(monkeypatch, available={"codex", "grok", "claude"})
+    assert isinstance(selected, CodexProvider)
+
+
+def test_select_provider_auto_non_material_prefers_grok_before_claude(monkeypatch):
+    selected = _auto(monkeypatch, available={"grok", "claude"})
+    assert isinstance(selected, GrokProvider)
+
+
+def test_select_provider_auto_materials_skip_grok_for_claude(monkeypatch):
+    selected = _auto(
+        monkeypatch, available={"grok", "claude"}, require_read_dirs=True
     )
-    assert isinstance(select_provider(), GrokProvider)
+    assert isinstance(selected, ClaudeCodeProvider)
 
 
-def test_select_provider_auto_uses_claude_code_when_only_claude_available(monkeypatch):
-    monkeypatch.delenv("KAIRO_STUB", raising=False)
-    monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
-    monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: None)
-    monkeypatch.setattr(provider, "_cli_available", lambda cmd: cmd == "claude")
-    assert isinstance(select_provider(), ClaudeCodeProvider)
+def test_select_provider_auto_materials_prefer_codex_over_grok(monkeypatch):
+    selected = _auto(
+        monkeypatch, available={"codex", "grok", "claude"}, require_read_dirs=True
+    )
+    assert isinstance(selected, CodexProvider)
 
 
-def test_select_provider_auto_prefers_grok_over_configured_openai(monkeypatch):
-    """#61:grok 可用时优先于 openai endpoint。"""
-    monkeypatch.delenv("KAIRO_STUB", raising=False)
-    monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
-    monkeypatch.setattr(
-        provider,
-        "resolve_openai_provider_config",
-        lambda: {
+def test_select_provider_auto_prefers_claude_over_openai(monkeypatch):
+    selected = _auto(
+        monkeypatch,
+        available={"claude"},
+        openai={
             "base_url": "https://llm.example/v1",
             "model": "endpoint-model",
             "api_key": "test-key",
         },
     )
-    monkeypatch.setattr(provider, "_cli_available", lambda cmd: cmd == "grok")
-    assert isinstance(select_provider(), GrokProvider)
+    assert isinstance(selected, ClaudeCodeProvider)
 
 
-def test_select_provider_auto_uses_openai_when_no_grok(monkeypatch):
+def test_select_provider_auto_materials_prefer_claude_over_openai(monkeypatch):
+    selected = _auto(
+        monkeypatch,
+        available={"claude"},
+        openai={
+            "base_url": "https://llm.example/v1",
+            "model": "endpoint-model",
+            "api_key": "test-key",
+        },
+        require_read_dirs=True,
+    )
+    assert isinstance(selected, ClaudeCodeProvider)
+
+
+def test_select_provider_auto_materials_run_to_fold_with_selected_codex(
+    tmp_path, monkeypatch
+):
+    from kairo.engine import run_workspace
+    from kairo.workspace import Workspace
+
+    class SelectedCodex(StubProvider):
+        name = "codex"
+        model = "selected-test"
+
+    monkeypatch.setattr(provider, "CodexProvider", SelectedCodex)
+    selected = _auto(
+        monkeypatch, available={"codex", "grok", "claude"}, require_read_dirs=True
+    )
+    ws = Workspace.init(tmp_path / "ws")
+    source = tmp_path / "source.txt"
+    source.write_text("能力选择闭环事实")
+    ref_id = ws.add([source])
+
+    assert run_workspace(ws, selected)
+    state = ws.read_state()
+    digest = state.products[f"references/{ref_id}/digest.md"]
+    assert digest.produced_by == {"provider": "codex", "model": "selected-test"}
+    assert state.targets["understanding.md"].produced_by == {
+        "provider": "codex",
+        "model": "selected-test",
+    }
+
+
+def test_select_provider_auto_prefers_grok_over_configured_openai(monkeypatch):
+    """只有不支持材料读取的候选时仍保留既有非材料顺序。"""
+    selected = _auto(
+        monkeypatch,
+        available={"grok"},
+        openai={
+            "base_url": "https://llm.example/v1",
+            "model": "endpoint-model",
+            "api_key": "test-key",
+        },
+    )
+    assert isinstance(selected, GrokProvider)
+
+
+def test_select_provider_auto_materials_skip_openai_for_stub(monkeypatch):
+    selected = _auto(
+        monkeypatch,
+        openai={
+            "base_url": "https://llm.example/v1",
+            "model": "endpoint-model",
+            "api_key": "test-key",
+        },
+        require_read_dirs=True,
+    )
+    assert isinstance(selected, StubProvider)
+
+
+def test_select_provider_auto_uses_openai_when_no_cli(monkeypatch):
     monkeypatch.delenv("KAIRO_STUB", raising=False)
     monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
     monkeypatch.setattr(
@@ -96,7 +175,7 @@ def test_select_provider_explicit_codex(monkeypatch):
 def test_select_provider_explicit_grok(monkeypatch):
     monkeypatch.delenv("KAIRO_STUB", raising=False)
     monkeypatch.setenv("KAIRO_PROVIDER", "grok")
-    assert isinstance(select_provider(), GrokProvider)
+    assert isinstance(select_provider(require_read_dirs=True), GrokProvider)
 
 
 def test_select_provider_explicit_openai(monkeypatch):
@@ -111,7 +190,9 @@ def test_select_provider_explicit_openai(monkeypatch):
             "api_key": "test-key",
         },
     )
-    assert isinstance(select_provider(), OpenAICompatibleProvider)
+    assert isinstance(
+        select_provider(require_read_dirs=True), OpenAICompatibleProvider
+    )
 
 
 def test_select_provider_kairo_stub_overrides_explicit_provider(monkeypatch):

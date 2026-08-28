@@ -402,13 +402,13 @@ def _exit_if_provider_failed(ws: Workspace) -> None:
 
 @app.command()
 def step() -> None:
-    """跑调和循环到收敛(provider 自动选:grok CLI→endpoint→claude CLI→stub;KAIRO_STUB 强制 stub)。
+    """跑调和循环到收敛(provider auto:codex→grok→claude→endpoint→stub;材料路径跳过不兼容者)。
 
     注意:不自动重试 asr-failed 等终态 blocked;需要时用 run / retry-ref。
     provider-failed 时非零退出(#105),便于 Web Run 显示失败而非 Running/假成功。
     """
     ws = _open_ws()
-    progressed = engine_step(ws, select_provider())
+    progressed = engine_step(ws, select_provider(require_read_dirs=True))
     typer.echo("stepped" if progressed else "no change")
     _exit_if_provider_failed(ws)
 
@@ -421,7 +421,9 @@ def run_cmd() -> None:
     if plan["mode"] == "clean":
         typer.echo("up to date")
         return
-    progressed = engine_run_workspace(ws, select_provider())
+    progressed = engine_run_workspace(
+        ws, select_provider(require_read_dirs=True)
+    )
     typer.echo("ran" if progressed else "no change")
     _exit_if_provider_failed(ws)
 
@@ -432,7 +434,7 @@ def re_step(
 ) -> None:
     """强制重算(文档级=整篇重综合;reference=清派生产物含 blocked 后重跑)。"""
     ws = _open_ws()
-    engine_re_step(ws, select_provider(), target)
+    engine_re_step(ws, select_provider(require_read_dirs=True), target)
     typer.echo(f"re-stepped {target or '(all)'}")
 
 
@@ -443,7 +445,9 @@ def retry_ref(ref_id: str = typer.Argument(..., help="reference id")) -> None:
     if ref_id not in ws.list_reference_ids():
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
-    progressed = engine_retry_reference(ws, select_provider(), ref_id)
+    progressed = engine_retry_reference(
+        ws, select_provider(require_read_dirs=True), ref_id
+    )
     typer.echo("retried" if progressed else "no change")
 
 
@@ -464,7 +468,7 @@ def rm_ref(
             ws,
             ref_id,
             recompose=recompose,
-            provider=select_provider() if recompose else None,
+            provider=select_provider(require_read_dirs=True) if recompose else None,
         )
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
