@@ -673,47 +673,53 @@ def glossary_list(
 ) -> None:
     """列出 machine + shared + workspace 真名册(分层面;空层标注)。"""
     from kairo.glossary import (
+        GlossaryError,
         load_glossary_file,
+        load_workspace_glossary,
         machine_glossary_path,
         root_glossary_path,
     )
 
-    layers: list[tuple[str, list]] = []
-    machine = load_glossary_file(machine_glossary_path())
-    layers.append(("machine", machine))
-
     try:
-        ws = Workspace.open(Path.cwd())
-        in_ws = True
-    except WorkspaceNotFound:
-        ws = None
-        in_ws = False
+        layers: list[tuple[str, list]] = []
+        machine = load_glossary_file(machine_glossary_path())
+        layers.append(("machine", machine))
 
-    if in_ws:
-        serve = root.expanduser().resolve() if root else ws.root.parent
-        shared = load_glossary_file(root_glossary_path(serve))
-        layers.append(("shared", shared))
-        layers.append(("workspace", ws.constitution.glossary))
-    else:
-        serve = _serve_root(root)
-        shared = load_glossary_file(root_glossary_path(serve))
-        layers.append(("shared", shared))
+        try:
+            ws = Workspace.open(Path.cwd())
+            in_ws = True
+        except WorkspaceNotFound:
+            ws = None
+            in_ws = False
 
-    for label, entries in layers:
-        typer.echo(f"[{label}] ({len(entries)})")
-        if not entries:
-            typer.echo("  (empty)")
-            continue
-        for i, e in enumerate(entries):
-            extra = []
-            if e.note:
-                extra.append(e.note)
-            if e.aka:
-                extra.append("aka:" + "/".join(e.aka))
-            if e.tags:
-                extra.append("tags:" + ",".join(e.tags))
-            suffix = f"  — {' | '.join(extra)}" if extra else ""
-            typer.echo(f"  {i}: {e.name}{suffix}")
+        if in_ws:
+            serve = root.expanduser().resolve() if root else ws.root.parent
+            shared = load_glossary_file(root_glossary_path(serve))
+            layers.append(("shared", shared))
+            layers.append(("workspace", load_workspace_glossary(ws.root)))
+        else:
+            serve = _serve_root(root)
+            shared = load_glossary_file(root_glossary_path(serve))
+            layers.append(("shared", shared))
+
+        for label, entries in layers:
+            typer.echo(f"[{label}] ({len(entries)})")
+            if not entries:
+                typer.echo("  (empty)")
+                continue
+            for i, e in enumerate(entries):
+                extra = []
+                if e.note:
+                    extra.append(e.note)
+                if e.aka:
+                    extra.append("aka:" + "/".join(e.aka))
+                if e.tags:
+                    extra.append("tags:" + ",".join(e.tags))
+                suffix = f"  — {' | '.join(extra)}" if extra else ""
+                typer.echo(f"  {i}: {e.name}{suffix}")
+    except GlossaryError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
 
 
 @glossary_app.command("add")
@@ -733,6 +739,7 @@ def glossary_add(
     from kairo.glossary import (
         add_entry,
         load_glossary_file,
+        parse_scope,
         root_glossary_path,
         save_glossary_file,
     )
@@ -740,13 +747,12 @@ def glossary_add(
     aka_parts = [a.strip() for a in aka.split(",") if a.strip()] if aka else []
     tag_parts = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     try:
-        if scope == "workspace":
+        chosen = parse_scope(scope)
+        if chosen == "workspace":
             ws = _open_ws()
             ws.add_glossary_entry(name, note=note, aka=aka_parts, tags=tag_parts)
             typer.echo(f"added workspace glossary: {name}")
             return
-        if scope != "shared":
-            raise ValueError(f"未知 scope:{scope!r}(workspace|shared)")
         # shared:在 ws 内默认父目录,否则 --root / KAIRO_SERVE_ROOT
         if root is not None:
             serve = _serve_root(root)
@@ -779,20 +785,21 @@ def glossary_rm(
     """按索引删除一条真名册。"""
     from kairo.glossary import (
         load_glossary_file,
+        load_workspace_glossary,
+        parse_scope,
         remove_entry,
         root_glossary_path,
         save_glossary_file,
     )
 
     try:
-        if scope == "workspace":
+        chosen = parse_scope(scope)
+        if chosen == "workspace":
             ws = _open_ws()
-            name = ws.constitution.glossary[index].name
+            name = load_workspace_glossary(ws.root)[index].name
             ws.remove_glossary_entry(index)
             typer.echo(f"removed workspace glossary[{index}]: {name}")
             return
-        if scope != "shared":
-            raise ValueError(f"未知 scope:{scope!r}(workspace|shared)")
         if root is not None:
             serve = _serve_root(root)
         else:

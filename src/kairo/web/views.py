@@ -957,18 +957,37 @@ def _parse_tags(tags: str) -> list[str]:
     return [p.strip() for p in tags.replace("，", ",").split(",") if p.strip()]
 
 
-def _glossary_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
+def _glossary_fragment(
+    request: Request,
+    ws: Workspace,
+    slug: str,
+    *,
+    error: str | None = None,
+    error_scope: str | None = None,
+    form: dict | None = None,
+) -> HTMLResponse:
     from kairo.glossary import (
+        GlossaryError,
         load_glossary_file,
+        load_workspace_glossary,
         machine_glossary_path,
         root_glossary_path,
     )
 
     t = _t(request)
     serve_root = Path(request.app.state.root)
-    shared = load_glossary_file(root_glossary_path(serve_root))
-    machine = load_glossary_file(machine_glossary_path())
-    local = ws.constitution.glossary
+    load_failed = False
+    shared: list = []
+    machine: list = []
+    local: list = []
+    try:
+        shared = load_glossary_file(root_glossary_path(serve_root))
+        machine = load_glossary_file(machine_glossary_path())
+        local = load_workspace_glossary(ws.root)
+    except GlossaryError as e:
+        load_failed = True
+        error = error or str(e)
+    form = form or {}
     return _render(
         request,
         "_glossary.html",
@@ -981,6 +1000,13 @@ def _glossary_fragment(request: Request, ws: Workspace, slug: str) -> HTMLRespon
             "machine_count": len(machine),
             "hint": t("glossary.restep_hint"),
             "shared_hint": t("glossary.shared_hint"),
+            "error": error,
+            "error_scope": error_scope,
+            "load_failed": load_failed,
+            "form_name": form.get("name", ""),
+            "form_note": form.get("note", ""),
+            "form_aka": form.get("aka", ""),
+            "form_tags": form.get("tags", ""),
         },
     )
 
@@ -1002,13 +1028,22 @@ def glossary_add(
     scope: str = Form("workspace"),
 ) -> HTMLResponse:
     """追加一条;scope=workspace|shared(root glossary.yaml)。"""
-    from kairo.glossary import add_entry, load_glossary_file, root_glossary_path, save_glossary_file
+    from kairo.glossary import (
+        GlossaryError,
+        add_entry,
+        load_glossary_file,
+        parse_scope,
+        root_glossary_path,
+        save_glossary_file,
+    )
 
     ws = _open(request, slug)
     parts = _parse_aka(aka)
     tag_parts = _parse_tags(tags)
+    form = {"name": name, "note": note, "aka": aka, "tags": tags}
     try:
-        if scope == "shared":
+        chosen = parse_scope(scope)
+        if chosen == "shared":
             path = root_glossary_path(Path(request.app.state.root))
             entries = add_entry(
                 load_glossary_file(path), name, note=note, aka=parts, tags=tag_parts
@@ -1016,8 +1051,10 @@ def glossary_add(
             save_glossary_file(path, entries)
         else:
             ws.add_glossary_entry(name, note=note, aka=parts, tags=tag_parts)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (GlossaryError, ValueError) as e:
+        return _glossary_fragment(
+            request, ws, slug, error=str(e), error_scope=scope.strip() or None, form=form
+        )
     return _glossary_fragment(request, ws, slug)
 
 
@@ -1029,7 +1066,9 @@ def glossary_delete(
     scope: str = Form("workspace"),
 ) -> HTMLResponse:
     from kairo.glossary import (
+        GlossaryError,
         load_glossary_file,
+        parse_scope,
         remove_entry,
         root_glossary_path,
         save_glossary_file,
@@ -1037,14 +1076,17 @@ def glossary_delete(
 
     ws = _open(request, slug)
     try:
-        if scope == "shared":
+        chosen = parse_scope(scope)
+        if chosen == "shared":
             path = root_glossary_path(Path(request.app.state.root))
             entries = remove_entry(load_glossary_file(path), index)
             save_glossary_file(path, entries)
         else:
             ws.remove_glossary_entry(index)
-    except IndexError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
+    except (GlossaryError, ValueError, IndexError) as e:
+        return _glossary_fragment(
+            request, ws, slug, error=str(e), error_scope=scope.strip() or None
+        )
     return _glossary_fragment(request, ws, slug)
 
 
