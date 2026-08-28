@@ -83,7 +83,7 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 
 ## Domain glossary
 
-`constitution.yaml` can declare a `glossary` that pins down this domain's canonical proper nouns. It is injected into the agent prompt at every Digest / Compose (and the optional Normalize) (Issue [#20](https://github.com/xforce-io/kairo/issues/20)), to correct homophone variants and aliases produced by speech/transcription — output always uses the canonical name, and ambiguous mentions are anchored accordingly. Each entry has three keys: `name` (canonical name, the anchor), `note` (grounding for the model, optional), `aka` (known variants/aliases, reference only, optional).
+`constitution.yaml` can declare a `glossary` that pins down this domain's canonical proper nouns. It is injected into the agent prompt at every Digest / Compose (and the optional Normalize) (Issue [#20](https://github.com/xforce-io/kairo/issues/20)) as structured read-only data plus a conservative rule: use the canonical name only when the mention is supported by name, alias, or definition; otherwise keep the original wording. Each entry has three keys: `name` (canonical name, the anchor), `note` (grounding for the model, optional), `aka` (known variants/aliases, reference only, optional).
 
 ```yaml
 glossary:
