@@ -81,6 +81,13 @@ def test_serve_root_mismatch_rejected(tmp_path):
         resolve_serve_root(ws_root=ws.root, explicit=tmp_path / "other")
 
 
+def test_restep_target_for_digest_key():
+    from kairo.workspace import restep_target_for
+
+    assert restep_target_for("references/abc/digest.md") == "abc"
+    assert restep_target_for("understanding.md") == "understanding.md"
+
+
 def test_web_root_add_updates_uncovered_workspace(tmp_path):
     root = tmp_path
     Workspace.init(root / "a", topic="a")
@@ -90,9 +97,14 @@ def test_web_root_add_updates_uncovered_workspace(tmp_path):
     dash = c.get("/")
     assert dash.status_code == 200
     assert "/glossary" in dash.text
+    preview = c.get("/glossary")
+    assert preview.status_code == 200
+    assert "天溯" in preview.text
+    assert "b" in preview.text
     r = c.post("/glossary", data={"name": "天溯", "note": "公共"})
     assert r.status_code == 200
     assert "天溯" in r.text
+    assert "已保存" in r.text or "Saved" in r.text
     assert (root / "glossary.yaml").is_file()
     view_a = c.get("/w/a/glossary")
     assert "继承" in view_a.text or "inherited" in view_a.text
@@ -164,3 +176,7 @@ def test_glossary_change_marks_pending_without_autostep(tmp_path):
 
     items = DigestRule(ws, StubProvider()).discover()
     assert items == [] or not items[0].is_stale(ws.read_state())
+    page = TestClient(create_app(tmp_path / "root")).get("/w/ws/glossary")
+    assert page.status_code == 200
+    assert f'name="target" value="{rid}"' in page.text
+    assert f'value="{key}"' not in page.text

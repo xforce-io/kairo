@@ -12,12 +12,12 @@
   <div class="ref-blocks">
     <div class="meta-label">{{ t('glossary.pending') }}</div>
     <ul class="dlg-bullets">
-      {% for key in pending %}
+      {% for item in pending %}
       <li>
-        {{ key }}
+        {{ item.key }}
         <form hx-post="/w/{{ slug | urlencode }}/step" hx-target="#run-slot" hx-swap="innerHTML"
               hx-confirm="{{ t('target.regen_confirm') }}" style="display:inline">
-          <input type="hidden" name="target" value="{{ key }}">
+          <input type="hidden" name="target" value="{{ item.target }}">
           <button type="submit" class="btn btn-ghost btn-regen">{{ t('target.regen') }}</button>
         </form>
       </li>

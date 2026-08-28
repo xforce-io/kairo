@@ -4,6 +4,9 @@
 <div class="dash-head">
   <p class="dlg-hint">{{ t('glossary.root_impact').format(n=ws_n, o=override_ws_n) }}</p>
 </div>
+{% if success %}
+<p class="meta-hint">{{ t('glossary.saved') }}</p>
+{% endif %}
 {% if error %}
 <p class="ref-blocks glossary-error" role="alert">{{ error }}</p>
 {% endif %}
@@ -49,7 +52,8 @@
   <ul class="dlg-bullets">
     {% for i in impact %}
     <li><a href="/w/{{ i.slug | urlencode }}">{{ i.slug }}</a>
-      {% if i.overrides %} — {{ i.overrides | join(', ') }}{% endif %}
+      {% if i.local_names %} — {{ t('glossary.local_section') }}: {{ i.local_names | join(', ') }}{% endif %}
+      {% if i.overrides %} ({{ t('glossary.origin_override') }}: {{ i.overrides | join(', ') }}){% endif %}
     </li>
     {% endfor %}
   </ul>

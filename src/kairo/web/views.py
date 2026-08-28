@@ -995,8 +995,12 @@ def _glossary_fragment(
         from kairo.glossary import load_workspace_glossary
 
         local = _entry_rows(load_workspace_glossary(ws.root))
-        eff_hash = current_effective_hash(ws.root, serve_root=Path(request.app.state.root))
-        pending = ws.glossary_pending(serve_root=Path(request.app.state.root))
+        from kairo.workspace import restep_target_for
+
+        pending = [
+            {"key": k, "target": restep_target_for(k)}
+            for k in ws.glossary_pending(serve_root=Path(request.app.state.root))
+        ]
     except GlossaryError as e:
         load_failed = True
         error = error or str(e)
@@ -1100,6 +1104,7 @@ def _root_glossary_page(
     *,
     error: str | None = None,
     form: dict | None = None,
+    success: bool = False,
 ) -> HTMLResponse:
     from kairo.glossary import (
         GlossaryError,
@@ -1119,10 +1124,21 @@ def _root_glossary_page(
     try:
         entries = load_glossary_file(root_glossary_path(serve))
         names = {e.name for e in entries}
+        cand = (form.get("name") or "").strip()
+        if cand:
+            names.add(cand)
         for s in scan_workspaces(serve):
             local = load_workspace_glossary(serve / s.slug)
-            ov = [e.name for e in local if e.name in names]
-            impact.append({"slug": s.slug, "overrides": ov, "override_n": len(ov)})
+            local_names = [e.name for e in local]
+            ov = [n for n in local_names if n in names]
+            impact.append(
+                {
+                    "slug": s.slug,
+                    "overrides": ov,
+                    "override_n": len(ov),
+                    "local_names": local_names,
+                }
+            )
     except GlossaryError as e:
         load_failed = True
         error = error or str(e)
@@ -1137,6 +1153,7 @@ def _root_glossary_page(
             "override_ws_n": sum(1 for i in impact if i["override_n"]),
             "machine_hint": machine_migration_hint(),
             "error": error,
+            "success": success,
             "load_failed": load_failed,
             "form_name": form.get("name", ""),
             "form_note": form.get("note", ""),
@@ -1186,7 +1203,7 @@ def root_glossary_add(
         _stamp_serve_workspaces(serve)
     except (GlossaryError, ValueError) as e:
         return _root_glossary_page(request, error=str(e), form=form)
-    return _root_glossary_page(request)
+    return _root_glossary_page(request, success=True)
 
 
 @router.post("/glossary/{index}/delete", response_class=HTMLResponse)
@@ -1210,7 +1227,7 @@ def root_glossary_delete(request: Request, index: int) -> HTMLResponse:
         _stamp_serve_workspaces(serve)
     except (GlossaryError, ValueError, IndexError) as e:
         return _root_glossary_page(request, error=str(e))
-    return _root_glossary_page(request)
+    return _root_glossary_page(request, success=True)
 
 
 @router.post("/w/{slug}/corpus", response_class=HTMLResponse)

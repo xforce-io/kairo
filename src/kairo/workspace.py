@@ -62,6 +62,16 @@ def delete_workspace(serve_root: Path | str, slug: str) -> None:
     shutil.rmtree(dest)
 
 
+def restep_target_for(key: str) -> str:
+    """digest 产物键 → reference id;活 target 路径原样。"""
+    prefix, suffix = "references/", "/digest.md"
+    if key.startswith(prefix) and key.endswith(suffix):
+        mid = key[len(prefix) : -len(suffix)]
+        if mid and "/" not in mid:
+            return mid
+    return key
+
+
 def stamp_serve_workspaces(serve_root: Path | str) -> None:
     """#163:root 真名册变更后,给各 workspace 已有产物打尚未重新校正。"""
     root = Path(serve_root)
