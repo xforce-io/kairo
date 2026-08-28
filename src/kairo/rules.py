@@ -34,6 +34,13 @@ from kairo.provenance import (
     provenance_protocol_for,
     validate_provenance,
 )
+from kairo.catalog import (
+    CatalogItem,
+    format_catalog,
+    item_size,
+    read_dirs_for,
+    stage_files,
+)
 from kairo.provider import AgentConfig
 from kairo.workspace import _keyed_transform_filename
 
@@ -83,39 +90,67 @@ def make_provider_diagnostic(
     )
 
 
+def _form_abs(ws, form) -> Path:
+    loc = Path(form.location)
+    return loc if loc.is_absolute() else ws.root / loc
+
+
+def _form_rel(ws, form, abs_path: Path) -> str:
+    loc = form.location
+    if not Path(loc).is_absolute():
+        return loc
+    try:
+        return str(abs_path.relative_to(ws.root))
+    except ValueError:
+        return abs_path.name
+
+
 def _run_agent(
     provider,
     persona: str,
     context: str,
     artifact: str,
     read_dirs=None,
+    catalog_items=None,
     *,
     timeout_s: int | None = None,
 ) -> str:
     """跑 agent,从隔离 artifact_dir 取回产物内容。写沙箱:artifact-only;
-    read_dirs 为额外只读授权目录(corpus 参考层),agent 按需 Read。
+    材料目录的必读项复制进工作集;read_dirs 授按需 Read。
 
     #105:timeout_s 默认 DEFAULT_CLI_TIMEOUT_S;传入显式值可覆盖(测试/长任务)。
+    #153:需要授读但 provider 不支持时失败,不回退倾倒全文。
     """
-    from kairo.provider import DEFAULT_CLI_TIMEOUT_S, resolve_cli_timeout
+    from kairo.provider import resolve_cli_timeout
 
-    # timeout_s is None → 默认;显式 int 保留(含短超时测试)
-    effective = (
-        DEFAULT_CLI_TIMEOUT_S if timeout_s is None else resolve_cli_timeout(timeout_s)
-    )
+    items = list(catalog_items or [])
+    dirs: list[Path] = []
+    for p in list(read_dirs or []) + read_dirs_for(items):
+        rp = Path(p)
+        if rp not in dirs:
+            dirs.append(rp)
+    if (items or dirs) and not getattr(provider, "supports_read_dirs", False):
+        name = getattr(provider, "name", "provider")
+        raise RuntimeError(f"{name} 不支持授读(read_dirs),无法按目录引用运行")
+    # None → 默认 600s；显式值用于测试或长任务。
+    effective = resolve_cli_timeout(timeout_s)
     with tempfile.TemporaryDirectory() as d:
+        dpath = Path(d)
+        stage_files(items, dpath)
+        if items:
+            dirs.insert(0, dpath)
         provider.run(
             AgentConfig(
                 persona=persona,
                 context=context,
-                artifact_dir=Path(d),
+                artifact_dir=dpath,
                 model=provider.model,
                 artifact=artifact,
                 timeout_s=effective,
-                read_dirs=list(read_dirs or []),
+                read_dirs=dirs,
             )
         )
-        path = Path(d) / artifact
+        path = dpath / artifact
         if not path.is_file():
             raise RuntimeError(f"provider produced no artifact: {artifact}")
         return path.read_text()
@@ -246,12 +281,19 @@ _OUTPUT_DISCIPLINE = (
 )
 
 _COMPOSE_DISCIPLINE = (
-    "\n- 你只产出当前这一个文档,不要内联其它文档的内容"
-    "(例如 understanding 中不要写 assessment 段落)。\n"
+    "\n- 你只产出当前这一个文档,不要内联其它文档的内容。\n"
     "- 溯源使用来源目录中的短 ID〔S-…〕与文末索引;不要在正文堆叠完整 "
     "`references/.../digest.md` 路径(索引表链接除外)。\n"
     "- 你必须输出当前文档的**完整全文**(含未改动章节);即使本轮判断无需演进,"
     "也要原样重述全文,禁止只输出「为何不改」的变更说明或差异摘要。"
+)
+
+_CATALOG_DISCIPLINE = (
+    "\n\n[阅读纪律]\n"
+    "- 先按材料目录读完全部「必读」文件,再写产物。\n"
+    "- 「按需」仅在必读仍不足时 Read。\n"
+    "- 表格/清单只抽关键数字、口径、范围与异常,禁止整表抄入。\n"
+    "- 不要编造文件中没有的事实。"
 )
 
 # 退化护栏(#28):上一版充分长却被骤缩覆盖 → 极可能是 agent 吐了变更说明而非全文。
@@ -349,6 +391,7 @@ class DigestRule:
         self.prompt = ws.constitution.pipeline.digest.prompt
 
     def _read_body(self, man) -> str | None:
+        """拼接正文供指纹与测试;不进入 provider prompt(#153)。"""
         chunks: list[str] = []
         for role in self.ws.constitution.body_roles:
             forms = sorted(
@@ -356,16 +399,60 @@ class DigestRule:
                 key=lambda f: f.location,
             )
             for f in forms:
-                loc = Path(f.location)
-                p = loc if loc.is_absolute() else self.ws.root / loc
+                p = _form_abs(self.ws, f)
                 if not p.is_file():
                     continue
                 try:
                     text = p.read_text()
                 except UnicodeDecodeError:
-                    continue  # 误标为正文的二进制(如图片)不进 digest 正文,且不崩整条管线
+                    continue
                 chunks.append(f"# {p.name}\n\n{text}")
         return "\n\n".join(chunks) if chunks else None
+
+    def _catalog_items(self, man) -> list[CatalogItem]:
+        items: list[CatalogItem] = []
+        for role in self.ws.constitution.body_roles:
+            forms = sorted(
+                (f for f in man.forms if f.role == role),
+                key=lambda f: f.location,
+            )
+            for f in forms:
+                p = _form_abs(self.ws, f)
+                if not p.is_file():
+                    continue
+                try:
+                    p.read_text()
+                except UnicodeDecodeError:
+                    continue
+                items.append(
+                    CatalogItem(
+                        rel_path=_form_rel(self.ws, f, p),
+                        abs_path=p,
+                        role=f.role,
+                        origin=f.origin,
+                        required=True,
+                        size=item_size(p),
+                    )
+                )
+        atts = sorted(
+            (f for f in man.forms if f.role == "attachment"),
+            key=lambda f: f.location,
+        )
+        for f in atts:
+            p = _form_abs(self.ws, f)
+            if not p.is_file():
+                continue
+            items.append(
+                CatalogItem(
+                    rel_path=_form_rel(self.ws, f, p),
+                    abs_path=p,
+                    role=f.role,
+                    origin=f.origin,
+                    required=False,
+                    size=item_size(p),
+                )
+            )
+        return items
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
@@ -375,42 +462,39 @@ class DigestRule:
             sc = self.ws.constitution.source_classes.get(man.source_class)
             if sc is not None and not sc.fold:
                 continue
-            body = self._read_body(man)
-            key = f"references/{ref_id}/digest.md"
-            if body is not None:
-                items.append(self._make(ref_id, key, man, body))
+            catalog = self._catalog_items(man)
+            if any(it.required for it in catalog):
+                items.append(
+                    self._make(f"references/{ref_id}/digest.md", man, catalog)
+                )
         return items
 
-    def _make(self, ref_id: str, key: str, man: Manifest, body: str) -> WorkItem:
+    def _make(
+        self, key: str, man: Manifest, catalog: list[CatalogItem]
+    ) -> WorkItem:
         atts = sorted(
             (f for f in man.forms if f.role == "attachment"),
             key=lambda f: f.location,
         )
+        body = self._read_body(man) or ""
         fingerprint = f"{self.prompt}\n\n---正文---\n{body}" + "".join(f.hash for f in atts)
         input_hash = _hash(fingerprint)
-        ref_dir = self.ws.references_dir() / ref_id
-        img_lines = []
-        for f in atts:
-            loc = Path(f.location)
-            p = loc if loc.is_absolute() else self.ws.root / loc
-            img_lines.append(str(p))
 
         def run(state: State) -> None:
-            persona = self.prompt + self.ws.glossary_reference()
-            if img_lines:
-                persona += (
-                    "\n\n[现场图片]本会议另有以下图片,请用 Read 工具逐一查看,"
-                    "把其中与会议相关的信息(白板/幻灯/截图)并入纪要:\n"
-                    + "\n".join(f"- {p}" for p in img_lines)
-                )
-            persona += _OUTPUT_DISCIPLINE
+            persona = (
+                self.prompt
+                + self.ws.glossary_reference()
+                + _CATALOG_DISCIPLINE
+                + _OUTPUT_DISCIPLINE
+            )
+            context = format_catalog(catalog)
             try:
                 content = _run_agent(
                     self.provider,
                     persona,
-                    body,
+                    context,
                     "digest.md",
-                    read_dirs=[ref_dir] if img_lines else None,
+                    catalog_items=catalog,
                 )
             except Exception as exc:  # #98:可归属 provider 失败 → 持久化诊断,不写半成品
                 import sys
@@ -468,21 +552,6 @@ class ComposeRule:
                 out[f"references/{ref_id}/digest.md"] = _hash(d.read_text())
         return out
 
-    # ---- 源分层(#13 v2):fold 类(stream)折叠;非 fold 类(corpus)作只读参考层 ----
-
-    def _delta_classes(self, delta: dict[str, str]) -> dict[str, str]:
-        """每条 delta digest path 映射到其 reference 的 class(均为 fold 类)。"""
-        out: dict[str, str] = {}
-        for p in delta:
-            ref_id = p.split("/")[1]  # references/<id>/digest.md
-            out[p] = self.ws.read_manifest(ref_id).source_class
-        return out
-
-    def _fold_label(self, cls: str) -> str:
-        """fold 块的来源标签加 ·标签(如 ·观测);仅当存在 corpus 参考层时调用。"""
-        sc = self.ws.constitution.source_classes.get(cls)
-        return f" ·{sc.label if sc else cls}"
-
     def corpus_drifted(self, target_path: str, state: State) -> bool:
         """corpus 自该 target 上次折叠后是否变更(advisory;不进 staleness 循环)。"""
         ts = state.targets.get(target_path)
@@ -516,7 +585,7 @@ class ComposeRule:
     def discover(self, state: State | None = None) -> list[WorkItem]:
         all_digests = self._all_digests()
         items: list[WorkItem] = []
-        for target in self.ws.constitution.targets:
+        for target in self.ws.constitution.live_targets():
             ts = state.targets.get(target.path) if state else None
             folded = ts.folded if ts else {}
             delta = {p: h for p, h in all_digests.items() if folded.get(p) != h}
@@ -555,36 +624,71 @@ class ComposeRule:
                     return
                 current = doc_path.read_text() if doc_path.exists() else ""
                 use_delta = delta
-            upstream_blocks = [
-                f"---上游 {dep}---\n{(self.ws.root / dep).read_text()}"
-                for dep in target.depends_on
-                if (self.ws.root / dep).exists()
-            ]
-            # 源分层(#13 v2):corpus(fold=False)作只读参考层,不进 context 折叠块;
-            # 经 read_dirs 授读 + persona 列出文件,agent 按需 Read 校正/锚定。
-            # 存在参考层时,fold 块(stream)标 ·观测 提示需对基线校准;无 corpus 时与今天一致。
+            # #153:材料目录 + 授读;当前文档与 Δdigest 必读,corpus 按需。不内联正文。
             corpus_refs = corpus.collect(self.ws)
             has_corpus = bool(corpus_refs)
-            classes = self._delta_classes(use_delta)
+            materials: list[CatalogItem] = []
+            if current and doc_path.is_file():
+                materials.append(
+                    CatalogItem(
+                        rel_path=key,
+                        abs_path=doc_path,
+                        role="target",
+                        origin="folded",
+                        required=True,
+                        size=item_size(doc_path),
+                    )
+                )
+            for dep in target.depends_on:
+                dep_path = self.ws.root / dep
+                if dep_path.is_file():
+                    materials.append(
+                        CatalogItem(
+                            rel_path=dep,
+                            abs_path=dep_path,
+                            role="upstream",
+                            origin="target",
+                            required=True,
+                            size=item_size(dep_path),
+                        )
+                    )
+            for p in sorted(use_delta):
+                abs_p = self.ws.root / p
+                materials.append(
+                    CatalogItem(
+                        rel_path=p,
+                        abs_path=abs_p,
+                        role="digest",
+                        origin="digest",
+                        required=True,
+                        size=item_size(abs_p),
+                    )
+                )
+            for cr in corpus_refs:
+                rel = (
+                    str(cr.path.relative_to(self.ws.root))
+                    if cr.path.is_relative_to(self.ws.root)
+                    else cr.path.name
+                )
+                materials.append(
+                    CatalogItem(
+                        rel_path=rel,
+                        abs_path=cr.path,
+                        role="corpus" if cr.kind == "file" else "corpus_tree",
+                        origin="corpus",
+                        required=False,
+                        size=item_size(cr.path) if cr.kind == "file" else 0,
+                    )
+                )
             # #99:来源目录(全量 all_digests)——短 ID 稳定;context 中标注 S-…
             catalog = build_source_catalog(self.ws, all_digests)
-            sid_by_path = {e.digest_path: e.source_id for e in catalog}
-            digest_blocks = []
-            for p in sorted(use_delta):
-                sid = sid_by_path.get(p, "")
-                label = self._fold_label(classes[p]) if has_corpus else ""
-                head = f"[{sid} | {p}{label}]" if sid else f"[来源:{p}{label}]"
-                digest_blocks.append(f"{head}\n{(self.ws.root / p).read_text()}")
             reference_section = (
                 corpus.reference_section(self.ws, corpus_refs) if has_corpus else ""
             )
-            read_dirs = corpus.read_dirs(corpus_refs)
             context = (
-                f"---当前文档---\n{current}\n\n"
-                + ("\n\n".join(upstream_blocks) + "\n\n" if upstream_blocks else "")
+                format_catalog(materials)
                 + format_source_catalog_block(catalog)
-                + f"\n---新增 digest({len(use_delta)} 条,批量融入)---\n"
-                + "\n\n".join(digest_blocks)
+                + f"\n本步必读 Δdigest:{len(use_delta)} 条。\n"
             )
             layer = getattr(target, "layer", None) or "fact"
             try:
@@ -594,11 +698,12 @@ class ComposeRule:
                     + provenance_protocol_for(layer)
                     + self.ws.glossary_reference()
                     + reference_section
+                    + _CATALOG_DISCIPLINE
                     + _OUTPUT_DISCIPLINE
                     + _COMPOSE_DISCIPLINE,
                     context,
                     "doc.md",
-                    read_dirs=read_dirs,
+                    catalog_items=materials,
                 )
             except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
                 import sys

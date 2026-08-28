@@ -8,7 +8,7 @@
 
 ## 核心心智
 
-一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（高密度记忆纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md` 事实层 / `assessment.md` 判断层）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
+一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（高密度记忆纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md`）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
 
 > **可读全文 prose（可选，[#33](https://github.com/xforce-io/kairo/issues/33) / [#60](https://github.com/xforce-io/kairo/issues/60)）**：raw ASR 噪声大（无标点、口语化、同音错字），不便人通读。可旁挂规范化可读全文 `prose.md` 作**人读档案**——补标点、分段、纠错、合并口水。关键是它**只给人读、不进 digest 路径**：digest 恒从 raw `transcript` 派生（信息上界）。默认**关**；`constitution.yaml` 设 `pipeline.normalize.enabled: true` 可在 `step` 时批量生成，或在 Web 对单条参考点「生成可读文稿」/ CLI `kairo prose <ref_id>` 按需生成。只对机器派生的誊录（`origin≠added`）生效，人给文本与 corpus 不碰。
 
@@ -41,7 +41,7 @@ kairo step                    # 调和到收敛:ASR/doc2text → Digest → Comp
 kairo status                  # 看各 reference / 文档的融入状态
 ```
 
-产出两层文档：`understanding.md`（中立事实）与 `assessment.md`（立场判断）。
+产出 `understanding.md`（中立事实）。旧 workspace 里的 `assessment.md` 若仍在磁盘上则停更，不再 fold。
 
 ## 命令
 
@@ -74,9 +74,9 @@ kairo status                  # 看各 reference / 文档的融入状态
 
 ## 核心概念
 
-- **constitution.yaml**：本 workspace 的宪法——心智与协议（两层产出、stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
-- **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进文档、判断随之演进、可推翻旧判断；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
-- **两层产出**：`understanding.md`（事实层）与依赖它的 `assessment.md`（判断层）；中立事实与立场判断不混。
+- **constitution.yaml**：本 workspace 的宪法——心智与协议（stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
+- **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进 `understanding.md`；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
+- **综合产出**：`understanding.md`（事实层，中立、可标来源）。Digest / Compose 用材料目录授读，不把原文倾倒进 prompt。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
 - **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
 - **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `convert-failed`（二进制转换失败/空产物）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）/ `compose-degraded`（综合输出相对上一版骤缩，疑为退化输出，已拒绝覆盖以保护旧文档）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）；`asr-failed` / `convert-failed` / `compose-degraded` 视为终态，需手动 `re-step` 重算。
@@ -125,7 +125,7 @@ model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → 可用的 `grok` CLI → 已配置 `[provider.openai]` → 可用的 `claude` CLI → stub。本机已登录 Grok 时，直接 `kairo step` 默认走 `GrokProvider`。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` 强制指定。注意：Grok 无 `--add-dir`；依赖 corpus / 图片 `read_dirs` 的场景请用 `claude-code`（见 [#61](https://github.com/xforce-io/kairo/issues/61)）。
+Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → 可用的 `grok` CLI → 已配置 `[provider.openai]` → 可用的 `claude` CLI → stub。本机已登录 Grok 时，直接 `kairo step` 默认走 `GrokProvider`。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` 强制指定。注意：Grok 无授读；Digest/Compose 的材料目录需要 `codex` 或 `claude-code`（见 [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153)）。
 
 ## 技术栈
 

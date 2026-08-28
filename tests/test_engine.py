@@ -1,7 +1,13 @@
 import yaml
 
-from kairo.engine import accept, re_step, step
-from kairo.models import Transform
+from kairo.engine import accept, has_provider_failed, re_step, step, workspace_run_plan
+from kairo.models import (
+    DEFAULT_ASSESSMENT_FOLD,
+    REASON_PROVIDER_FAILED,
+    Target,
+    TargetState,
+    Transform,
+)
 from kairo.provider import (
     AgentResult,
     OpenAICompatibleProvider,
@@ -16,6 +22,7 @@ class _NonDeterministicProvider:
 
     name = "nondet"
     model = "nondet"
+    supports_read_dirs = True
 
     def __init__(self):
         self.n = 0
@@ -28,10 +35,16 @@ class _NonDeterministicProvider:
         art = config.artifact or "output.md"
         if art == "doc.md":
             # #99:compose 须过溯源校验;在 stub 结构上加变号保持非确定性
-            base = _stub_compose_document(config.persona, config.context)
+            base = _stub_compose_document(
+                config.persona, config.context, artifact_dir=config.artifact_dir
+            )
             content = f"OUTPUT #{self.n}\n{base}"
         else:
-            content = f"OUTPUT #{self.n}\n{config.context}"
+            from kairo.provider import _stub_required_bodies
+
+            bodies = _stub_required_bodies(config.context, config.artifact_dir)
+            extra = ("\n\n" + "\n\n".join(bodies)) if bodies else ""
+            content = f"OUTPUT #{self.n}\n{config.context}{extra}"
         (config.artifact_dir / art).write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
@@ -92,14 +105,11 @@ def test_step_runs_text_chain_with_openai_compatible_provider(tmp_path):
     step(ws, provider)
     rid = ws.list_reference_ids()[0]
     digest = ws.root / f"references/{rid}/digest.md"
-    assert digest.exists()
-    assert "ENDPOINT #1" in digest.read_text()
-    assert "endpoint 原始材料" in (ws.root / "understanding.md").read_text()
-    state = ws.read_state()
-    assert state.products[f"references/{rid}/digest.md"].produced_by == {
-        "provider": "openai",
-        "model": "endpoint-model",
-    }
+    # #153:openai 无授读,digest 记 provider-failed,不倾倒全文
+    assert not digest.exists()
+    ps = ws.read_state().products[f"references/{rid}/digest.md"]
+    assert ps.status == "blocked"
+    assert ps.reason == "provider-failed"
 
 
 def test_step_runs_text_chain_to_convergence(tmp_path):
@@ -200,46 +210,47 @@ def test_step_is_idempotent_after_convergence(tmp_path):
     assert u1 == u2  # 不抖动
 
 
-def test_step_produces_both_layers_with_upstream_flow(tmp_path):
+def test_step_produces_understanding_not_assessment(tmp_path):
     ws = Workspace.init(tmp_path)
     t = tmp_path / "m.txt"
     t.write_text("会议要点ZZZ")
     ws.add([t])
     step(ws, StubProvider())
     assert (ws.root / "understanding.md").exists()
-    assert (ws.root / "assessment.md").exists()
-    # assessment 输入含当前 understanding(上游流入)
-    assert "understanding.md" in (ws.root / "assessment.md").read_text()
-    # 级联记账:assessment 记了 upstream_hash
-    ts = ws.read_state().targets["assessment.md"]
-    assert "understanding.md" in ts.upstream_hash
+    assert not (ws.root / "assessment.md").exists()
+    assert "会议要点ZZZ" in (ws.root / "understanding.md").read_text()
 
 
-def test_assessment_cascades_when_understanding_changes(tmp_path):
+def test_step_does_not_fold_legacy_judgment_target(tmp_path):
+    """#153:constitution 仍声明 assessment 时也不 fold 判断层。"""
     ws = Workspace.init(tmp_path)
+    con = ws.constitution
+    con.targets.append(
+        Target(
+            path="assessment.md",
+            layer="judgment",
+            fold_protocol=DEFAULT_ASSESSMENT_FOLD,
+            depends_on=["understanding.md"],
+        )
+    )
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
+    ws = Workspace.open(tmp_path)
     t = tmp_path / "m.txt"
-    t.write_text("初始材料")
+    t.write_text("材料")
     ws.add([t])
     step(ws, StubProvider())
-    up1 = ws.read_state().targets["assessment.md"].upstream_hash["understanding.md"]
-    # 加新 reference → understanding 变 → assessment 上游变,级联重综合
-    t2 = tmp_path / "n.txt"
-    t2.write_text("新增材料")
-    ws.add([t2])
-    step(ws, StubProvider())
-    up2 = ws.read_state().targets["assessment.md"].upstream_hash["understanding.md"]
-    assert up2 != up1
+    assert (ws.root / "understanding.md").exists()
+    assert not (ws.root / "assessment.md").exists()
 
-
-def test_two_layer_step_is_idempotent(tmp_path):
-    ws = Workspace.init(tmp_path)
-    t = tmp_path / "m.txt"
-    t.write_text("内容")
-    ws.add([t])
-    step(ws, StubProvider())
-    a1 = (ws.root / "assessment.md").read_text()
-    assert step(ws, StubProvider()) is False  # 两层都收敛
-    assert (ws.root / "assessment.md").read_text() == a1
+    state = ws.read_state()
+    state.targets["assessment.md"] = TargetState(
+        status="blocked", reason=REASON_PROVIDER_FAILED
+    )
+    ws.write_state(state)
+    assert not has_provider_failed(ws)
+    assert workspace_run_plan(ws)["mode"] == "clean"
 
 
 def test_re_step_document_discards_edit_and_recomposes(tmp_path):
@@ -277,10 +288,8 @@ def test_re_step_all_recomposes_every_target(tmp_path):
     ws.add([t])
     step(ws, StubProvider())
     (ws.root / "understanding.md").write_text("乱改1")
-    (ws.root / "assessment.md").write_text("乱改2")
     re_step(ws, StubProvider())  # 全量
     assert "乱改" not in (ws.root / "understanding.md").read_text()
-    assert "乱改" not in (ws.root / "assessment.md").read_text()
 
 
 def test_manual_edit_blocks_compose_without_overwriting(tmp_path):

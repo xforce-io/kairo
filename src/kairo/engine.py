@@ -107,8 +107,13 @@ def has_provider_failed(ws) -> bool:
     for ps in state.products.values():
         if ps.status == "blocked" and ps.reason == REASON_PROVIDER_FAILED:
             return True
-    for ts in state.targets.values():
-        if ts.status == "blocked" and ts.reason == REASON_PROVIDER_FAILED:
+    live_paths = {t.path for t in ws.constitution.live_targets()}
+    for path, ts in state.targets.items():
+        if (
+            path in live_paths
+            and ts.status == "blocked"
+            and ts.reason == REASON_PROVIDER_FAILED
+        ):
             return True
     return False
 
@@ -167,8 +172,13 @@ def clear_provider_failed_targets(ws) -> int:
     """
     state = ws.read_state()
     n = 0
+    live_paths = {t.path for t in ws.constitution.live_targets()}
     for path, ts in list(state.targets.items()):
-        if ts.status == "blocked" and ts.reason == REASON_PROVIDER_FAILED:
+        if (
+            path in live_paths
+            and ts.status == "blocked"
+            and ts.reason == REASON_PROVIDER_FAILED
+        ):
             ts.status = "ok"
             ts.reason = None
             ts.diagnostic = None
@@ -273,8 +283,13 @@ def workspace_run_plan(ws) -> dict:
         if blocks:
             blocked_refs.append({"ref_id": ref_id, "blocks": blocks})
     blocked_targets: list[dict] = []
+    live_paths = {t.path for t in ws.constitution.live_targets()}
     for path, ts in ws.read_state().targets.items():
-        if ts.status == "blocked" and ts.reason == REASON_PROVIDER_FAILED:
+        if (
+            path in live_paths
+            and ts.status == "blocked"
+            and ts.reason == REASON_PROVIDER_FAILED
+        ):
             diag = ts.diagnostic
             blocked_targets.append(
                 {
@@ -325,7 +340,7 @@ def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
 def re_step(ws, provider, target: str | None = None) -> bool:
     """强制重算。全量 / 指定文档(整篇重综合,丢手改)/ 指定 reference(清派生产物后重跑)。"""
     state = ws.read_state()
-    target_paths = [t.path for t in ws.constitution.targets]
+    target_paths = [t.path for t in ws.constitution.live_targets()]
     if target is None:
         for tp in target_paths:
             (ws.root / tp).unlink(missing_ok=True)

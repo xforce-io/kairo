@@ -18,17 +18,15 @@ def test_init_creates_workspace_files(tmp_path):
     assert (tmp_path / ".kairo" / "state.json").is_file()
 
 
-def test_init_default_constitution_has_digest_prompt_and_two_layer_targets(tmp_path):
+def test_init_default_constitution_has_digest_prompt_and_fact_target(tmp_path):
     ws = Workspace.init(tmp_path)
     con = ws.constitution
     assert con.topic == "main"
     # #58:默认 digest 是高密度记忆纪要,不是一页纸周报
     assert "高密度" in con.pipeline.digest.prompt
     assert "宁详勿略" in con.pipeline.digest.prompt
-    assert [t.path for t in con.targets] == ["understanding.md", "assessment.md"]
+    assert [t.path for t in con.targets] == ["understanding.md"]
     assert con.targets[0].layer == "fact"
-    assert con.targets[1].layer == "judgment"
-    assert con.targets[1].depends_on == ["understanding.md"]  # 判断依赖事实
 
 
 def test_init_default_asr_transform_uses_whisper_backend(tmp_path):

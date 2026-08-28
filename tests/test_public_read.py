@@ -174,6 +174,9 @@ def _console_client(root: Path) -> TestClient:
 
 
 def _setup_workspace(root: Path, slug: str = "ws") -> Workspace:
+    import yaml
+    from kairo.models import Target
+
     ws = Workspace.init(root / slug, topic=slug)
     (ws.root / "understanding.md").write_text(
         "# Public understanding\n\nlanding priority alpha-secret-token\n",
@@ -183,7 +186,16 @@ def _setup_workspace(root: Path, slug: str = "ws") -> Workspace:
         "# Private assessment\n\nshould-not-leak\n",
         encoding="utf-8",
     )
-    return ws
+    # 公开阅读测试需要第二份 target 文档作 rebind;layer=fact 以免被 #153 跳过。
+    con = ws.constitution
+    if not any(t.path == "assessment.md" for t in con.targets):
+        con.targets.append(
+            Target(path="assessment.md", layer="fact", fold_protocol="test-only")
+        )
+        (ws.root / "constitution.yaml").write_text(
+            yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+        )
+    return Workspace.open(root / slug)
 
 
 def _add_public_reference(ws: Workspace, ref_id: str = "2026-01-01-pub") -> str:

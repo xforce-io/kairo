@@ -13,7 +13,8 @@ def test_cli_help_shows_quickstart():
     out = runner.invoke(app, ["--help"]).output
     assert "快速上手" in out
     assert "init" in out and "add" in out and "step" in out
-    assert "understanding.md" in out and "assessment.md" in out
+    assert "understanding.md" in out
+    assert "assessment.md" not in out
     assert "constitution.yaml" in out
 
 
@@ -51,7 +52,7 @@ def test_cli_status_warns_on_corpus_drift(tmp_path, monkeypatch):
 
 
 def test_cli_run_empty_workspace_up_to_date(tmp_path, monkeypatch):
-    """#134 S2:空 workspace `kairo run` 输出 up to date,不写两篇 target。"""
+    """#134 S2:空 workspace `kairo run` 输出 up to date,不写 target。"""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
@@ -89,14 +90,11 @@ def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
     assert "STUB TRANSCRIPT" in understanding
     # 文本链:Digest→Compose
     assert "三智能体定位与落地优先级" in understanding
-    # 两层文档都生成
-    assert (tmp_path / "assessment.md").is_file()
-    # understanding + assessment 各折入两条 digest
+    assert not (tmp_path / "assessment.md").exists()
     targets = json.loads(
         (tmp_path / ".kairo" / "history" / "0000" / "state.targets.json").read_text()
     )
     assert len(targets["understanding.md"]["folded"]) == 2
-    assert len(targets["assessment.md"]["folded"]) == 2
 
 
 def test_cli_prose_generates_readable_archive(tmp_path, monkeypatch):
@@ -286,9 +284,8 @@ def test_cli_e2e_corpus_dir_not_digested(tmp_path, monkeypatch):
     runner.invoke(app, ["add", str(s)])
     result = runner.invoke(app, ["step"])
     assert result.exit_code == 0
-    # 两层文档生成
     assert (tmp_path / "understanding.md").is_file()
-    assert (tmp_path / "assessment.md").is_file()
+    assert not (tmp_path / "assessment.md").exists()
     # corpus 目录引用没有 digest.md(不被 digest)
     refs = tmp_path / "references"
     corpus_ref = next(p for p in refs.iterdir() if "corpus_docs" in p.name)

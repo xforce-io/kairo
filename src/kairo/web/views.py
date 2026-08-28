@@ -259,7 +259,7 @@ def _target_states(ws: Workspace):
     """各 target 的 (path, status) —— 给左栏状态点。"""
     state = ws.read_state()
     out = []
-    for t in ws.constitution.targets:
+    for t in ws.constitution.live_targets():
         ts = state.targets.get(t.path)
         status = ts.status if ts else "missing"
         out.append({"path": t.path, "status": status})

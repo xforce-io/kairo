@@ -19,20 +19,25 @@ class _RunOnlyProvider:
 
     name = "runonly"
     model = "runonly"
+    supports_read_dirs = True
 
     def __init__(self):
         self.calls = []
 
     def run(self, config, signal=None):
-        from kairo.provider import _stub_compose_document
+        from kairo.provider import _stub_compose_document, _stub_required_bodies
 
         self.calls.append(config)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         art = config.artifact or "output.md"
         if art == "doc.md":
-            content = "RUN-ONLY\n" + _stub_compose_document(config.persona, config.context)
+            content = "RUN-ONLY\n" + _stub_compose_document(
+                config.persona, config.context, artifact_dir=config.artifact_dir
+            )
         else:
-            content = f"RUN-ONLY\n\n{config.context}"
+            bodies = _stub_required_bodies(config.context, config.artifact_dir)
+            extra = ("\n\n" + "\n\n".join(bodies)) if bodies else ""
+            content = f"RUN-ONLY\n\n{config.context}{extra}"
         (config.artifact_dir / art).write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
 
@@ -535,7 +540,7 @@ def test_compose_discovers_target_with_unfolded_digest(tmp_path):
     _make_digest(ws, rid, "纪要内容")
     state = State()
     items = ComposeRule(ws, StubProvider()).discover(state)
-    assert [it.key for it in items] == ["understanding.md", "assessment.md"]
+    assert [it.key for it in items] == ["understanding.md"]
 
 
 def test_compose_run_folds_digest_into_understanding_with_source(tmp_path):
@@ -561,7 +566,7 @@ def test_compose_converges_after_folding(tmp_path):
     _make_digest(ws, rid, "纪要")
     state = State()
     rule = ComposeRule(ws, StubProvider())
-    for item in rule.discover(state):  # 两层都融(understanding → assessment)
+    for item in rule.discover(state):
         item.run(state)
     # 融完后无未融入 Δ、上游未变 → 收敛
     assert rule.discover(state) == []
@@ -597,6 +602,7 @@ class _FixedProvider:
 
     name = "fixed"
     model = "fixed"
+    supports_read_dirs = True
 
     def __init__(self, content):
         self.content = content
@@ -763,7 +769,8 @@ def test_compose_corpus_is_reference_layer_not_folded_block(tmp_path):
     state = State()
     ComposeRule(ws, prov).discover(state)[0].run(state)  # [0]=understanding
     ctx = prov.calls[0].context
-    assert "·观测" in ctx  # 有参考层时 stream 块标 ·观测
+    assert "| 必读 | digest |" in ctx
+    assert "| 按需 | corpus |" in ctx
     assert "白皮书基线内容ZZZ" not in ctx  # corpus 原文不进 context 折叠块
     persona = prov.calls[0].persona
     assert "基线参考" in persona  # 注入了基线参考前言

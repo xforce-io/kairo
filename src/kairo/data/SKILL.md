@@ -7,7 +7,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 把会话里的调研工作区意图翻译成正确的 `kairo` CLI 调用与文件读取，并按协议把输出解读成人话。这是 CLI + workspace 文件布局之上的**薄壳**：不重实现引擎逻辑，不代替人确认写操作。
 
-命令模型：**看（status + 读两层文档）永远便宜**；**算/做（step / re-step / accept …）永远显式确认**。两层产出：`understanding.md`（中立事实）与 `assessment.md`（立场判断）——不混、不颠倒。
+命令模型：**看（status + 读综合文档）永远便宜**；**算/做（step / re-step / accept …）永远显式确认**。综合产物：`understanding.md`（中立事实）。旧 `assessment.md` 若仍在磁盘上则停更，不当判断层复述。
 
 ## 前置自检
 
@@ -36,7 +36,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | 某主题现在什么情况 / 状态 | 在目标 cwd 执行 `kairo status`（只读；可对多个 ws 各跑一次） |
 | 新建 / 删除整个 workspace | 确认后 `kairo new "<topic>"` / `kairo rm-ws <slug> --yes`（须讲清不可恢复） |
 | 真名册 / glossary | `kairo glossary list`；写操作用 `add` / `rm`（`--scope workspace|shared`）并先确认 |
-| 事实/判断到哪了 / 总结结论 / 结论是什么 | **先** `kairo status`，再读两层文档（见下节）；必要时下钻 digest，**不**把 raw transcript 当最终结论 |
+| 事实到哪了 / 总结结论 / 结论是什么 | **先** `kairo status`，再读 `understanding.md`（见下节）；必要时下钻 digest，**不**把 raw transcript 当最终结论 |
 | 为什么卡住 / blocked / 怎么推进 | 依据 `status` 的 `⚠ blocked:…` 与下表解释含义与选项；**未确认不写** |
 | 推进一下 / step / 调和 | **默认**说明副作用（烧 LLM token、可能改文档）→ 确认后 `kairo step`（不自动清终态 blocked） |
 | 与 Web 主按钮一致 / run / 含终态 blocked 一并重试 | `kairo run` 在有终态 blocked 时会先清派生产物再 step，副作用比 `step` 更重（可重烧 ASR/LLM）——**勿把口语「推进」默认落成 run**；须单独讲清并确认 |
@@ -52,22 +52,20 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 
 纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`glossary list`、`timeline`，以及直接读 workspace 内 markdown / state。
 
-## 两层心智：怎么读知识产物
+## 怎么读知识产物
 
 **读路径优先序**（固定）：
 
 1. `kairo status` — fold 进度、blocked、corpus 漂移提示
-2. `understanding.md` — **事实层**（中立、可标来源）
-3. `assessment.md` — **判断层**（立场、依赖 understanding；不可当事实复述）
-4. 需要出处/细节时再下钻 `references/<id>/` 下的 **digest**（高密度记忆纪要 = 该条 reference 的记忆）
-5. transcript / source_text / prose / 原始 form — **原料或人读档案**，不是「调研结论」
+2. `understanding.md` — **事实层**（中立、可标来源）；综合结论在这里
+3. 需要出处/细节时再下钻 `references/<id>/` 下的 **digest**（高密度记忆纪要 = 该条 reference 的记忆）
+4. transcript / source_text / prose / 原始 form — **原料或人读档案**，不是「调研结论」
 
 回复必须：
 
-- 明确区分「事实」与「判断」两段（或等价标注）
-- 给出可打开核对的文件路径（至少两层文档路径；若只存在一层则说明另一层未生成/空）
+- 给出可打开核对的文件路径（至少 `understanding.md`；未生成则说明）
 - 文件为空或不存在 → 如实说「未生成 / 空」，**不编造**结论
-- **禁止**：把 transcript 当最终结论；把 assessment 句子说成客观事实；把 corpus 基线材料当成已 fold 的观测进度
+- **禁止**：把 transcript 当最终结论；把停更的 `assessment.md` 当现行判断；把 corpus 基线材料当成已 fold 的观测进度
 
 ## blocked 闭集与下一步
 
@@ -101,7 +99,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 ## 输出解读
 
 - `status` 行形态：`reference <id>: [roles]`；blocked 时带 `⚠ …:reason`
-- `target understanding.md|assessment.md: folded N;距上次 A 已 D 条`；未生成时 `(未生成)`；手改/失败时 `⚠ blocked:reason`；corpus 变更时 advisory「corpus 已变,可 re-step 重算」——**advisory 不是自动执行**
+- `target understanding.md: folded N;距上次 A 已 D 条`；未生成时 `(未生成)`；手改/失败时 `⚠ blocked:reason`；corpus 变更时 advisory「corpus 已变,可 re-step 重算」——**advisory 不是自动执行**
 - 把上述归纳成人话：名称、进度、blocked 列表、建议下一步（问句），别贴超长原始日志
 
 命令报错 → 如实呈现 stderr 要点，不臆造 workspace 状态。
@@ -111,7 +109,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 - 想看状态却跑 `step` / `run` → 白烧 token 还可能改文档。**看用 `status` + 读 md。**
 - 把 `serve` root 当成单个 workspace 在 root 上 `status` → 失败或误导。**先 `kairo list`。**
 - 问「有哪些 spaces」却手写 `find` 扫盘 → 应用 **`kairo list`**。
-- 把 transcript / prose 摘要当成「调研结论」→ 违反两层心智。**结论在 understanding / assessment。**
+- 把 transcript / prose 摘要当成「调研结论」→ **结论在 understanding.md。**
 - 未确认就 `accept` 或 `re-step` → 钉基线或丢手改。**先说明副作用。**
 - 用户说「推进」就对所有 workspace 批量 `step` → 越界。**先列清单，确认范围。**
 - 找不到 CLI 就编造 status → **先修安装/PATH。**
@@ -126,4 +124,4 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 3. **退出码 0**：把 stdout 整行信封原样写入本轮最终回复，独占顶层一行，不得包进代码围栏或引用块。`--json` 时只复制 `receipt`。宿主 compaction 中逐字保留该信封（best-effort）。
 4. **退出码 2**：stdout 是 JSON 清单（`need-workspace` / `need-bind` / `fork`）。转述给人，问清 workspace，以及新建（`--workspace SLUG --create`）还是绑定已有归档（`--workspace SLUG --bind REF`）。**禁止**自行挑选。
 5. **退出码 1**：转述 stderr，不编造已归档。
-6. 归档成功后**不**自动 `step`。要把该会话折进 understanding/assessment，须按铁律单独确认后再 `step`。
+6. 归档成功后**不**自动 `step`。要把该会话折进 understanding，须按铁律单独确认后再 `step`。

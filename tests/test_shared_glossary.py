@@ -84,6 +84,7 @@ def test_digest_persona_gets_merged_glossary(tmp_path, monkeypatch):
     class P:
         name = "cap"
         model = "cap"
+        supports_read_dirs = True
 
         def run(self, config, signal=None):
             calls.append(config.persona)

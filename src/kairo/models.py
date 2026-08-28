@@ -34,10 +34,10 @@ DEFAULT_NORMALIZE_PROMPT = (
 
 DEFAULT_UNDERSTANDING_FOLD = (
     "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
-    "维持一张去重的术语表;未确认的挂 ⚠️;只放中立事实,判断进 assessment。\n"
+    "维持一张去重的术语表;未确认的挂 ⚠️;只放中立事实,不写立场判断。\n"
     "仅对确实无关的部分不动。\n"
     "溯源(#99):章节证据范围〔S-…〕+ 关键声明短 ID;文末「来源索引」映射到 digest;"
-    "正文不重复完整 references/.../digest.md 路径;关键事实可加 F-… 锚点供判断层引用。\n"
+    "正文不重复完整 references/.../digest.md 路径。\n"
     "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。"
 )
 
@@ -73,18 +73,12 @@ class Target(BaseModel):
 
 
 def _default_targets() -> list[Target]:
-    # 拓扑序:understanding(事实)在前,assessment(判断)depends_on 它。
+    # #153:默认只产事实层;judgment target 若仍写在旧 constitution 中则运行时跳过。
     return [
         Target(
             path="understanding.md",
             layer="fact",
             fold_protocol=DEFAULT_UNDERSTANDING_FOLD,
-        ),
-        Target(
-            path="assessment.md",
-            layer="judgment",
-            fold_protocol=DEFAULT_ASSESSMENT_FOLD,
-            depends_on=["understanding.md"],
         ),
     ]
 
@@ -185,6 +179,10 @@ class Constitution(BaseModel):
     default_class: str = "stream"  # add 不指定时的兜底归类
     targets: list[Target] = Field(default_factory=_default_targets)
     glossary: list[GlossaryEntry] = Field(default_factory=list)  # 领域真名册(#20)
+
+    def live_targets(self) -> list[Target]:
+        """活 target:跳过判断层(#153)。旧 constitution 仍可声明 assessment,但不 fold。"""
+        return [t for t in self.targets if t.layer != "judgment"]
 
     def glossary_reference(self) -> str:
         """仅 workspace 层真名册 → 权威参考段;空表 ""。

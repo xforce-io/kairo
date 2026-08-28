@@ -3,6 +3,9 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
+
+from kairo.models import Target, TargetState
 from kairo.web.discovery import activity_label, last_activity, scan_workspaces, summarize
 from kairo.workspace import Workspace
 
@@ -35,6 +38,22 @@ def test_summary_counts_refs_and_classes(tmp_path, monkeypatch):
     assert s.ref_count == 2
     assert s.stream_count == 1 and s.corpus_count == 1
     assert s.stale_count > 0  # step 前有待办
+
+
+def test_summary_ignores_legacy_judgment_block(tmp_path):
+    ws = _mk(tmp_path, "ws", "t")
+    con = ws.constitution
+    con.targets.append(Target(path="assessment.md", layer="judgment"))
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
+    )
+    ws = Workspace.open(ws.root)
+    state = ws.read_state()
+    state.targets["assessment.md"] = TargetState(
+        status="blocked", reason="provider-failed"
+    )
+    ws.write_state(state)
+    assert summarize(ws).blocked_count == 0
 
 
 def test_summary_stale_zero_after_step(tmp_path, monkeypatch):
