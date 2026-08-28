@@ -521,6 +521,7 @@ class DigestRule:
                 return
             (self.ws.root / key).write_text(content)
             from kairo.glossary import current_effective_hash
+            from kairo.glossary_review import extract_after_digest
 
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -530,6 +531,9 @@ class DigestRule:
                 },
                 glossary_hash=current_effective_hash(self.ws.root),
             )
+            ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
+            if ref_id:
+                extract_after_digest(self.ws, ref_id, content)
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试
