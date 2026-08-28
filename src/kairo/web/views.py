@@ -977,7 +977,9 @@ def _glossary_fragment(
     load_failed = False
     effective = []
     local = []
-    pending: list[str] = []
+    pending: list = []
+    candidates: list = []
+    extract_errors: dict = {}
     eff_hash = ""
     try:
         items = workspace_effective(ws.root, serve_root=Path(request.app.state.root))
@@ -1001,6 +1003,11 @@ def _glossary_fragment(
             {"key": k, "target": restep_target_for(k)}
             for k in ws.glossary_pending(serve_root=Path(request.app.state.root))
         ]
+        from kairo.glossary_review import load_review, open_candidates
+
+        review = load_review(ws.root)
+        candidates = [c.model_dump() for c in open_candidates(ws.root)]
+        extract_errors = review.extract_errors
     except GlossaryError as e:
         load_failed = True
         error = error or str(e)
@@ -1032,6 +1039,8 @@ def _glossary_fragment(
             "form_tags": form.get("tags", ""),
             "pending": pending,
             "eff_hash": eff_hash,
+            "candidates": candidates if not load_failed else [],
+            "extract_errors": extract_errors if not load_failed else {},
         },
     )
 
@@ -1099,6 +1108,76 @@ def glossary_delete(
     return _glossary_fragment(request, ws, slug)
 
 
+@router.post("/w/{slug}/glossary/candidates/{cid}/accept", response_class=HTMLResponse)
+def glossary_candidate_accept(request: Request, slug: str, cid: str) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import accept_workspace
+
+    ws = _open(request, slug)
+    try:
+        accept_workspace(ws, cid)
+    except (GlossaryError, ValueError) as e:
+        return _glossary_fragment(request, ws, slug, error=str(e))
+    return _glossary_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/glossary/candidates/{cid}/merge", response_class=HTMLResponse)
+def glossary_candidate_merge(
+    request: Request, slug: str, cid: str, existing_name: str = Form(...)
+) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import merge_workspace
+
+    ws = _open(request, slug)
+    try:
+        merge_workspace(ws, cid, existing_name)
+    except (GlossaryError, ValueError) as e:
+        return _glossary_fragment(request, ws, slug, error=str(e))
+    return _glossary_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/glossary/candidates/{cid}/ignore", response_class=HTMLResponse)
+def glossary_candidate_ignore(request: Request, slug: str, cid: str) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import ignore_candidate
+
+    ws = _open(request, slug)
+    try:
+        ignore_candidate(ws.root, cid)
+    except GlossaryError as e:
+        return _glossary_fragment(request, ws, slug, error=str(e))
+    return _glossary_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/glossary/candidates/{cid}/promote", response_class=HTMLResponse)
+def glossary_candidate_promote(request: Request, slug: str, cid: str) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import promote_candidate
+
+    ws = _open(request, slug)
+    try:
+        promote_candidate(ws.root, cid)
+    except GlossaryError as e:
+        return _glossary_fragment(request, ws, slug, error=str(e))
+    return _glossary_fragment(request, ws, slug)
+
+
+@router.post("/w/{slug}/ref/{ref_id}/glossary-extract", response_class=HTMLResponse)
+def glossary_extract_retry(request: Request, slug: str, ref_id: str) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import extract_after_digest
+
+    ws = _open(request, slug)
+    path = ws.root / "references" / ref_id / "digest.md"
+    try:
+        if not path.is_file():
+            raise GlossaryError(f"digest 不存在:{ref_id}")
+        extract_after_digest(ws, ref_id, path.read_text())
+    except GlossaryError as e:
+        return _glossary_fragment(request, ws, slug, error=str(e))
+    return _glossary_fragment(request, ws, slug)
+
+
 def _root_glossary_page(
     request: Request,
     *,
@@ -1121,6 +1200,7 @@ def _root_glossary_page(
     load_failed = False
     entries = []
     impact = []
+    promotions = []
     try:
         entries = load_glossary_file(root_glossary_path(serve))
         names = {e.name for e in entries}
@@ -1139,6 +1219,15 @@ def _root_glossary_page(
                     "local_names": local_names,
                 }
             )
+        from kairo.glossary_review import STATUS_PENDING_ROOT, load_review
+
+        promotions = []
+        for s in scan_workspaces(serve):
+            for c in load_review(serve / s.slug).candidates:
+                if c.status == STATUS_PENDING_ROOT:
+                    row = c.model_dump()
+                    row["slug"] = s.slug
+                    promotions.append(row)
     except GlossaryError as e:
         load_failed = True
         error = error or str(e)
@@ -1159,6 +1248,7 @@ def _root_glossary_page(
             "form_note": form.get("note", ""),
             "form_aka": form.get("aka", ""),
             "form_tags": form.get("tags", ""),
+            "promotions": promotions,
         },
     )
 
@@ -1226,6 +1316,46 @@ def root_glossary_delete(request: Request, index: int) -> HTMLResponse:
         save_glossary_file(path, nxt)
         _stamp_serve_workspaces(serve)
     except (GlossaryError, ValueError, IndexError) as e:
+        return _root_glossary_page(request, error=str(e))
+    return _root_glossary_page(request, success=True)
+
+
+@router.post("/glossary/candidates/{slug}/{cid}/accept", response_class=HTMLResponse)
+def root_candidate_accept(request: Request, slug: str, cid: str) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import accept_root
+
+    try:
+        accept_root(Path(request.app.state.root), slug, cid)
+    except (GlossaryError, ValueError) as e:
+        return _root_glossary_page(request, error=str(e))
+    return _root_glossary_page(request, success=True)
+
+
+@router.post("/glossary/candidates/{slug}/{cid}/merge", response_class=HTMLResponse)
+def root_candidate_merge(
+    request: Request, slug: str, cid: str, existing_name: str = Form(...)
+) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import merge_root
+
+    try:
+        merge_root(Path(request.app.state.root), slug, cid, existing_name)
+    except (GlossaryError, ValueError) as e:
+        return _root_glossary_page(request, error=str(e))
+    return _root_glossary_page(request, success=True)
+
+
+@router.post("/glossary/candidates/{slug}/{cid}/reject", response_class=HTMLResponse)
+def root_candidate_reject(
+    request: Request, slug: str, cid: str, reason: str = Form("")
+) -> HTMLResponse:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import reject_root
+
+    try:
+        reject_root(Path(request.app.state.root) / slug, cid, reason)
+    except GlossaryError as e:
         return _root_glossary_page(request, error=str(e))
     return _root_glossary_page(request, success=True)
 

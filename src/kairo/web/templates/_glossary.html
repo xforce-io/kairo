@@ -26,6 +26,54 @@
   </div>
   {% endif %}
 
+  {% if extract_errors %}
+  <div class="ref-blocks">
+    <div class="meta-label">{{ t('glossary.extract_error') }}</div>
+    {% for ref_id, msg in extract_errors.items() %}
+    <p class="dlg-hint">{{ ref_id }}: {{ msg }}</p>
+    <form hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id | urlencode }}/glossary-extract"
+          hx-target="#meta" hx-swap="innerHTML">
+      <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.extract_retry') }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="gl-section">
+    <div class="meta-label">{{ t('glossary.review_section') }} · {{ candidates | length }}</div>
+    {% if candidates %}
+    <ul class="dlg-bullets">
+      {% for c in candidates %}
+      <li>
+        <strong>{{ c.name }}</strong> ({{ c.status }})
+        <div class="gl-note">{{ c.quote }}</div>
+        <a href="/w/{{ slug | urlencode }}/ref/{{ c.ref_id }}">{{ c.ref_id }}</a>
+        {% if c.reject_reason %}<div class="gl-aka">{{ c.reject_reason }}</div>{% endif %}
+        <form hx-post="/w/{{ slug | urlencode }}/glossary/candidates/{{ c.id }}/accept"
+              hx-target="#meta" hx-swap="innerHTML" style="display:inline">
+          <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.accept') }}</button>
+        </form>
+        <form hx-post="/w/{{ slug | urlencode }}/glossary/candidates/{{ c.id }}/ignore"
+              hx-target="#meta" hx-swap="innerHTML" style="display:inline">
+          <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.ignore') }}</button>
+        </form>
+        <form hx-post="/w/{{ slug | urlencode }}/glossary/candidates/{{ c.id }}/promote"
+              hx-target="#meta" hx-swap="innerHTML" style="display:inline">
+          <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.promote') }}</button>
+        </form>
+        <form hx-post="/w/{{ slug | urlencode }}/glossary/candidates/{{ c.id }}/merge"
+              hx-target="#meta" hx-swap="innerHTML" style="display:inline">
+          <input type="text" name="existing_name" placeholder="{{ t('glossary.merge_ph') }}">
+          <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.merge') }}</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('glossary.review_empty') }}</p>
+    {% endif %}
+  </div>
+
   <div class="gl-section">
     <div class="meta-label">{{ t('glossary.effective_section') }} · {{ effective_count }}</div>
     {% if eff_hash %}<p class="dlg-hint">hash {{ eff_hash }}</p>{% endif %}

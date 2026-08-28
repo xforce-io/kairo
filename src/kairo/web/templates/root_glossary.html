@@ -58,5 +58,29 @@
     {% endfor %}
   </ul>
   {% endif %}
+  <div class="meta-label" style="margin-top:18px">{{ t('glossary.promote_section') }}</div>
+  {% if promotions %}
+  <ul class="dlg-bullets">
+    {% for c in promotions %}
+    <li>
+      <strong>{{ c.name }}</strong> ← {{ c.slug }} / {{ c.ref_id }}
+      <div class="gl-note">{{ c.quote }}</div>
+      <form method="post" action="/glossary/candidates/{{ c.slug }}/{{ c.id }}/accept" style="display:inline">
+        <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.accept') }}</button>
+      </form>
+      <form method="post" action="/glossary/candidates/{{ c.slug }}/{{ c.id }}/reject" style="display:inline">
+        <input type="text" name="reason" placeholder="{{ t('glossary.reject_ph') }}">
+        <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.reject') }}</button>
+      </form>
+      <form method="post" action="/glossary/candidates/{{ c.slug }}/{{ c.id }}/merge" style="display:inline">
+        <input type="text" name="existing_name" placeholder="{{ t('glossary.merge_ph') }}">
+        <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.merge') }}</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="panel-hint">{{ t('glossary.promote_empty') }}</p>
+  {% endif %}
 </div>
 {% endblock %}
