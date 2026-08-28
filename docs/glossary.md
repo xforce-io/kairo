@@ -8,6 +8,7 @@
 | corpus | 基线型参考，只读参考层，不 digest、不 fold。 | 语料库 |
 | digest | 一条 reference 的高密度记忆纪要，compose / 时段回顾的输入。 | 摘要、纪要原文 |
 | fold | 把 stream digest 调和进 constitution 声明的活 target（默认 `understanding.md`）。 | 融合、合并文档 |
+| 活 target | constitution 中运行时参与 fold 的 target；当前排除判断层 target。 | 活文档、活动目标 |
 | 材料目录 | Digest/Compose 写入 prompt 的表：标记（必读/按需）、角色、来源、路径、体量；不含正文。 | 文件清单、prompt 目录 |
 | 听读 | Web 上音频与带时间轴誊录联动播放、高亮、跳转的界面。 | 听写、播放器页 |
 | timed unit | 听读消费侧一条带起点（及可选终点）的誊录片段，通常对应一条 ASR cue。 | 字幕条、句子 |
