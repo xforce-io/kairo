@@ -520,13 +520,16 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
     labels = {
         "clean": t("run.clean"),
         "run": t("run.run"),
-        "retry": t("run.retry").format(n=plan["blocked_count"]),
-        "run_and_retry": t("run.run_and_retry").format(n=plan["blocked_count"]),
+        "retry": t("run.retry").format(n=plan["retryable_blocked_count"]),
+        "run_and_retry": t("run.run_and_retry").format(
+            n=plan["retryable_blocked_count"]
+        ),
+        "attention": t("run.attention"),
     }
     return {
         "run_mode": mode,
         "run_label": labels[mode],
-        "run_disabled": mode == "clean",
+        "run_disabled": mode in ("clean", "attention"),
         "run_pending": plan["pending_count"],
         "run_blocked": plan["blocked_count"],
     }
@@ -818,6 +821,10 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
             "diagnostic_stage": diag.stage if diag else None,
             "diagnostic_provider": diag.provider if diag else None,
             "has_doc": has_doc,
+            "can_regen": has_doc or (ts is not None and ts.status == "blocked"),
+            "regen_confirm": _t(request)(
+                "target.regen_confirm" if has_doc else "target.regen_confirm_empty"
+            ),
             "preview_title": path,
             "preview_html": _preview_html(ws, path, slug) if has_doc else None,
             "exportable": True,
@@ -1247,15 +1254,23 @@ def _run_button_html(slug: str, btn: dict, t) -> str:
     disabled = " disabled" if btn["run_disabled"] else ""
     cls = "btn btn-ghost" if btn["run_mode"] in ("clean", "running") else "btn btn-step"
     if btn["run_disabled"]:
-        return (
+        button = (
             f'<button type="button" class="{cls}"{disabled} '
             f'id="run-btn">{escape(btn["run_label"])}</button>'
         )
-    return (
-        f'<button type="button" class="{cls}" id="run-btn" '
-        f'hx-post="/w/{quote(slug)}/run" hx-target="#step-area" '
-        f'hx-swap="innerHTML">{escape(btn["run_label"])}</button>'
-    )
+    else:
+        button = (
+            f'<button type="button" class="{cls}" id="run-btn" '
+            f'hx-post="/w/{quote(slug)}/run" hx-target="#step-area" '
+            f'hx-swap="innerHTML">{escape(btn["run_label"])}</button>'
+        )
+    if btn["run_blocked"]:
+        button += (
+            '<span class="run-blocked-total">'
+            + escape(t("run.blocked_total").format(n=btn["run_blocked"]))
+            + "</span>"
+        )
+    return button
 
 
 @router.post("/w/{slug}/ref/{ref_id}/retry", response_class=HTMLResponse)

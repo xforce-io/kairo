@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import os
 
+import pytest
 from fastapi.testclient import TestClient
 
-from kairo.engine import run_workspace, step, workspace_run_plan
-from kairo.models import ProductState
+from kairo.engine import _run_plan_mode, run_workspace, step, workspace_run_plan
+from kairo.models import ProductState, TargetState
 from kairo.provider import StubProvider
+from kairo.rules import REASON_COMPOSE_MIGRATION_REQUIRED
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 
@@ -23,6 +25,22 @@ def _ws_audio(tmp_path, monkeypatch):
     return ws, rid
 
 
+@pytest.mark.parametrize(
+    ("pending", "retryable", "non_retryable", "expected"),
+    [
+        (0, 0, 0, "clean"),
+        (1, 0, 1, "run"),
+        (0, 1, 1, "retry"),
+        (1, 1, 1, "run_and_retry"),
+        (0, 0, 1, "attention"),
+    ],
+)
+def test_run_plan_mode_truth_table(
+    pending, retryable, non_retryable, expected
+):
+    assert _run_plan_mode(pending, retryable, non_retryable) == expected
+
+
 def test_empty_workspace_plan_is_clean(tmp_path):
     """#134:空 workspace 主按钮状态机为 clean,不把 assessment 当待办。"""
     ws = Workspace.init(tmp_path / "ws", topic="未分类")
@@ -30,6 +48,22 @@ def test_empty_workspace_plan_is_clean(tmp_path):
     assert plan["mode"] == "clean"
     assert plan["pending_count"] == 0
     assert plan["blocked_count"] == 0
+
+
+def test_plan_attention_for_non_retryable_target_block(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        status="blocked", reason=REASON_COMPOSE_MIGRATION_REQUIRED
+    )
+    ws.write_state(state)
+
+    plan = workspace_run_plan(ws)
+
+    assert plan["mode"] == "attention"
+    assert plan["blocked_count"] == 1
+    assert plan["retryable_blocked_count"] == 0
+    assert plan["blocked_targets"][0]["retryable"] is False
 
 
 def test_empty_workspace_step_does_not_invoke_provider(tmp_path):
@@ -113,6 +147,44 @@ def test_web_run_button_retry_label(tmp_path, monkeypatch):
         or "retry" in r.text.lower()
         or "重试" in r.text
     )
+
+
+def test_web_attention_button_disabled_and_regen_warning(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    old = ws.root / "understanding.md"
+    old.write_text("旧正文")
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        output_hash="old",
+        status="blocked",
+        reason=REASON_COMPOSE_MIGRATION_REQUIRED,
+    )
+    ws.write_state(state)
+
+    client = TestClient(create_app(tmp_path))
+    page = client.get("/w/ws")
+    target = client.get("/w/ws/target?path=understanding.md")
+
+    assert "Needs re-step" in page.text or "需要 re-step" in page.text
+    assert 'id="run-btn"' in page.text and "disabled" in page.text
+    assert "Blocked: 1" in page.text or "阻塞: 1" in page.text
+    assert "compress" in target.text or "压缩历史正文" in target.text
+    assert "failures keep" in target.text or "失败保留旧版" in target.text
+
+
+def test_web_first_over_budget_target_has_recovery_button(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        status="blocked", reason="compose-over-budget"
+    )
+    ws.write_state(state)
+    app = create_app(tmp_path)
+    target = TestClient(app).get("/w/ws/target?path=understanding.md")
+
+    assert 'hx-vals=\'{"target": "understanding.md"}\'' in target.text
+    assert "missing target" in target.text or "未生成产物" in target.text
+    assert app.state.registry.current("ws") is None
 
 
 def test_web_run_clean_disabled(tmp_path, monkeypatch):

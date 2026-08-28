@@ -76,10 +76,10 @@ kairo status                  # 看各 reference / 文档的融入状态
 
 - **constitution.yaml**：本 workspace 的宪法——心智与协议（stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
 - **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进 `understanding.md`；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
-- **综合产出**：`understanding.md`（事实层，中立、可标来源）。Digest / Compose 用材料目录授读，不把原文倾倒进 prompt。
+- **综合产出**：`understanding.md`（事实层，中立、可标来源），完整文件不超过 20,000 Unicode 字符。Digest / Compose 用材料目录授读，不把原文倾倒进 prompt；超长旧文档先阻塞，确认“全量重综合会压缩历史正文，失败保留旧版”后用 `kairo re-step understanding.md` 迁移。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
 - **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
-- **blocked 状态**：`no-asr`（本机未配 ASR 后端）/ `asr-failed`（转写命令失败）/ `convert-failed`（二进制转换失败/空产物）/ `missing-source`（源不可达）/ `manual-edit`（手改待 `accept`）/ `compose-degraded`（综合输出相对上一版骤缩，疑为退化输出，已拒绝覆盖以保护旧文档）。前置条件变化后下次 `step` 自动重试（如配好 ASR 后旧音频会被重转）；`asr-failed` / `convert-failed` / `compose-degraded` 视为终态，需手动 `re-step` 重算。
+- **blocked 状态**：源/转换原因（`no-asr`、`asr-failed`、`convert-failed`、`missing-source`）、`manual-edit`、`provider-failed`，以及 Compose 保护（`compose-degraded`、`compose-provenance-invalid`、`compose-migration-required`、`compose-over-budget`）。`provider-failed` 可由 Run 重试；Compose 保护是终态，旧文档与 folded 保持不变。预算原因需在确认压缩取舍后显式执行 `kairo re-step understanding.md`。
 
 ## 领域真名册（glossary）
 
