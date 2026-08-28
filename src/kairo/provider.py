@@ -5,7 +5,7 @@ agent 靠往 `artifact_dir` 写文件来通信;外壳(rules/engine)只编排与�
 backend:StubProvider(测试)/ GrokProvider / OpenAICompatibleProvider /
 ClaudeCodeProvider / CodexProvider。
 默认真实路径:本机 grok CLI 可用 → GrokProvider;否则 openai endpoint;
-否则 claude CLI;否则 stub。Grok 无 --add-dir,read_dirs 场景请用 claude-code。
+否则 claude CLI;否则 stub。Grok 不支持授读,Digest/Compose 目录化后会 provider-failed。
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ class AgentConfig:
     schema: dict | None = None  # 结构化输出契约(api backend 用;CLI 可忽略)
     artifact: str | None = None  # schema/产物落到哪个文件名
     timeout_s: int | None = None  # None → runner 使用 DEFAULT_CLI_TIMEOUT_S(#105)
-    read_dirs: list[Path] = field(default_factory=list)  # 只读授权目录(corpus 参考层 → --add-dir)
+    read_dirs: list[Path] = field(default_factory=list)  # agent 可读目录；provider 不得扩大源目录写权限
 
 
 @dataclass
@@ -59,6 +59,7 @@ class AgentProvider(Protocol):
 
     name: str
     model: str
+    supports_read_dirs: bool
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult: ...
 
@@ -104,8 +105,10 @@ def _digest_bodies_from_context(context: str) -> list[str]:
     return bodies
 
 
-def _stub_compose_document(persona: str, context: str) -> str:
-    """#99:stub 产出可通过溯源校验的紧凑文档(确定性,依赖 persona+context)。"""
+def _stub_compose_document(
+    persona: str, context: str, artifact_dir: Path | None = None
+) -> str:
+    """#99:stub 产出可通过溯源校验的紧凑文档(确定性,依赖 persona+context+必读文件)。"""
     seed = f"{persona}\n{context}"
     digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
     catalog = _parse_stub_catalog(context)
@@ -126,7 +129,16 @@ def _stub_compose_document(persona: str, context: str) -> str:
         )
     sids = [c[0] for c in catalog]
     scope = " ".join(f"〔{s}〕" for s in sorted(sids))
-    bodies = _digest_bodies_from_context(context)
+    glossary_bit = ""
+    if "[领域真名册]" in persona:
+        glossary_bit = (
+            persona[persona.find("[领域真名册]") :]
+            .split("[阅读纪律]", 1)[0]
+            .strip()
+        )
+    bodies = _stub_required_bodies(context, artifact_dir)
+    if not bodies:
+        bodies = _digest_bodies_from_context(context)
     body_bits = [
         f"⚠️ STUB {'ASSESSMENT' if judgment else 'UNDERSTANDING'} [{digest}]",
         "",
@@ -135,21 +147,26 @@ def _stub_compose_document(persona: str, context: str) -> str:
         f"证据范围:{scope}",
         "",
     ]
+    if glossary_bit:
+        body_bits += [glossary_bit, ""]
     for i, (sid, title, path) in enumerate(catalog):
         core = sid[2:]
         fid = f"F-{core}-01"
         snippet = bodies[i] if i < len(bodies) else ""
         # 去掉 digest 内可能的路径泄漏,避免校验失败
         snippet = snippet.replace("references/", "ref:")
+        if len(snippet) > 800:
+            # stub digest 把正文附在末尾;截头会丢掉信息上界
+            snippet = snippet[:400] + "\n...\n" + snippet[-400:]
         if judgment:
             body_bits.append(
                 f"基于材料「{title}」的判断成立〔依据:{fid}〕。"
-                + (f" 摘要:{snippet[:400]}" if snippet else "")
+                + (f" 摘要:{snippet}" if snippet else "")
             )
         else:
             body_bits.append(
                 f'<a id="{fid}"></a>与「{title}」相关的关键事实〔{sid}〕。'
-                + (f"\n\n{snippet[:800]}" if snippet else "")
+                + (f"\n\n{snippet}" if snippet else "")
             )
         body_bits.append("")
     # 判断层应能看到上游 understanding 路径名(测试依赖)
@@ -181,27 +198,58 @@ def _stub_compose_document(persona: str, context: str) -> str:
     return "\n".join(body_bits) + "\n"
 
 
+def _stub_required_bodies(context: str, artifact_dir: Path | None = None) -> list[str]:
+    """#153:stub 从材料目录「必读」行读取文件正文(工作集 required/<相对路径> 或绝对路径)。"""
+    bodies: list[str] = []
+    for line in context.splitlines():
+        if "| 必读 |" not in line:
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) < 6:
+            continue
+        loc = cells[4]
+        candidates: list[Path] = []
+        if artifact_dir is not None:
+            candidates.append(artifact_dir / loc)
+        p = Path(loc)
+        candidates.append(p)
+        for c in candidates:
+            if c.is_file():
+                try:
+                    bodies.append(c.read_text())
+                except (OSError, UnicodeDecodeError):
+                    continue
+                break
+    return bodies
+
+
 class StubProvider:
     """确定性 Fake:离线 + 测试。echo 输入 + STUB 标记,只验骨牌链、不被当真。
 
-    输出只依赖 (persona, context),不依赖 artifact_dir 路径 —— 否则破坏收敛幂等。
+    digest 会并入材料目录必读文件正文,以便测试断言信息上界仍到达产物。
     #99:compose(doc.md) 产出紧凑溯源结构,以便写盘前校验可通过。
     """
 
     name = "stub"
     model = "stub"
+    supports_read_dirs = True
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         art = config.artifact or "output.md"
         if art == "doc.md":
-            content = _stub_compose_document(config.persona, config.context)
+            content = _stub_compose_document(
+                config.persona, config.context, artifact_dir=config.artifact_dir
+            )
         else:
             seed = f"{config.persona}\n{config.context}"
             digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
+            bodies = _stub_required_bodies(config.context, config.artifact_dir)
+            extra = ("\n\n" + "\n\n".join(bodies)) if bodies else ""
             content = (
                 f"⚠️ STUB OUTPUT [{digest}]\n\n"
                 f"{config.persona.strip()}\n\n{config.context.strip()}"
+                f"{extra}"
             )
         (config.artifact_dir / art).write_text(content)
         return AgentResult(
@@ -241,6 +289,12 @@ def resolve_openai_provider_config() -> dict | None:
     return {"base_url": base_url, "model": model, "api_key": api_key}
 
 
+def _reject_unsupported_read(config: AgentConfig, name: str) -> None:
+    """#153:无授读能力的 provider 不得把全文倾倒回 prompt,直接失败。"""
+    if config.read_dirs:
+        raise RuntimeError(f"{name} 不支持授读(read_dirs),无法按目录引用运行")
+
+
 class OpenAICompatibleProvider:
     """OpenAI-compatible Chat Completions endpoint provider。
 
@@ -249,6 +303,7 @@ class OpenAICompatibleProvider:
     """
 
     name = "openai"
+    supports_read_dirs = False
 
     def __init__(
         self, *, base_url: str, api_key: str, model: str, client=None
@@ -269,6 +324,7 @@ class OpenAICompatibleProvider:
         return self._client
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
+        _reject_unsupported_read(config, self.name)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
         (config.artifact_dir / "_prompt.md").write_text(prompt)
@@ -446,6 +502,7 @@ class ClaudeCodeProvider:
     """驱动 `claude -p` CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。"""
 
     name = "claude-code"
+    supports_read_dirs = True
 
     def __init__(self, model: str = "opus", runner=None) -> None:
         self.model = model
@@ -490,6 +547,7 @@ class CodexProvider:
     """驱动 `codex exec` CLI。runner 可注入便于测试。"""
 
     name = "codex"
+    supports_read_dirs = True
 
     def __init__(self, model: str = "", runner=None) -> None:
         self.model = model
@@ -512,6 +570,7 @@ class CodexProvider:
         ]
         if self.model.strip():
             args += ["-m", self.model]
+        # Codex sandbox 本就可读绝对路径；--add-dir 会把源目录升级为可写，禁止使用。
         self._runner(
             "codex",
             args,
@@ -532,17 +591,19 @@ class CodexProvider:
 class GrokProvider:
     """驱动 `grok -p` CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
 
-    #61:Grok 无 --add-dir;read_dirs(corpus/附件)忽略,相关场景请用 claude-code。
+    #153:Grok 无授读;read_dirs 非空则失败,不回退倾倒全文。
     JSON 成功字段为 text;错误为 {"type":"error","message":...},写产物前拦截(#8)。
     """
 
     name = "grok"
+    supports_read_dirs = False
 
     def __init__(self, model: str = "", runner=None) -> None:
         self.model = model
         self._runner = runner or _default_cli_runner
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
+        _reject_unsupported_read(config, self.name)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
         (config.artifact_dir / "_prompt.md").write_text(prompt)

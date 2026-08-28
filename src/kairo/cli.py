@@ -38,8 +38,8 @@ _EPILOG = (
     '快速上手:kairo init "<topic>" → kairo add <file>'
     "(--corpus 标基线,默认 stream 观测)→ kairo step(调和到收敛)。\n\n"
     "多 workspace:kairo list [root] / kairo new \"topic\" / kairo serve [root]。\n\n"
-    "产出两层:understanding.md(事实) / assessment.md(判断)。\n\n"
-    "心智与协议(两层产出、stream/corpus、fold)定义在 constitution.yaml。"
+    "产出 understanding.md(中立事实)。\n\n"
+    "心智与协议(stream/corpus、fold)定义在 constitution.yaml。"
 )
 
 app = typer.Typer(help="step 驱动的增量知识构建引擎", epilog=_EPILOG)
@@ -529,7 +529,7 @@ def status() -> None:
         ]
         flag = f"  ⚠ {','.join(blocked)}" if blocked else ""
         typer.echo(f"reference {ref_id}{title_s}: [{roles}]{flag}")
-    for target in ws.constitution.targets:
+    for target in ws.constitution.live_targets():
         ts = state.targets.get(target.path)
         if ts is None:
             typer.echo(f"target {target.path}: (未生成)")

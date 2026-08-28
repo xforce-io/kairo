@@ -16,6 +16,7 @@ class _CaptureProvider:
 
     name = "capture"
     model = "capture"
+    supports_read_dirs = True
 
     def __init__(self):
         self.calls = []
@@ -92,7 +93,7 @@ def test_compose_excludes_corpus_digest_from_fold(tmp_path):
 
 
 def test_compose_corpus_as_reference_layer(tmp_path):
-    """corpus:persona 注入基线 hint + 列出文件;read_dirs 含其目录;内容不作折叠块进 context。"""
+    """corpus:persona 注入基线 hint；单文件进临时工作集，不授权源目录。"""
     ws = Workspace.init(tmp_path)
     rs = _add_stream(ws, tmp_path, body="会议观测X")
     cp = tmp_path / "wp.md"
@@ -106,14 +107,14 @@ def test_compose_corpus_as_reference_layer(tmp_path):
     # persona 注入基线 hint(校正) + 列出 corpus 文件供 Read
     assert "校正" in call.persona
     assert "wp.md" in call.persona
-    # read_dirs 含 corpus 文件所在目录(供 --add-dir 授读)
-    assert str(tmp_path) in [str(p) for p in call.read_dirs]
+    # 单文件复制进临时工作集，不把包含其它文件的源目录授给 agent。
+    assert str(tmp_path) not in [str(p) for p in call.read_dirs]
     # corpus 原文不作折叠块塞进 context(只在参考层,agent 按需 Read)
     assert "白皮书基线内容YYY" not in call.context
 
 
-def test_compose_labels_stream_observation_when_corpus_present(tmp_path):
-    """有 corpus 参考层时,stream 折叠块标 ·观测(提示需对基线校准)。"""
+def test_compose_catalog_marks_corpus_optional_when_present(tmp_path):
+    """有 corpus 时材料目录含按需 corpus 与必读 digest。"""
     ws = Workspace.init(tmp_path)
     rs = _add_stream(ws, tmp_path)
     cp = tmp_path / "wp.md"
@@ -123,11 +124,13 @@ def test_compose_labels_stream_observation_when_corpus_present(tmp_path):
     prov = _CaptureProvider()
     state = State()
     ComposeRule(ws, prov).discover(state)[0].run(state)
-    assert "·观测" in prov.calls[0].context
+    ctx = prov.calls[0].context
+    assert "| 必读 | digest |" in ctx
+    assert "| 按需 | corpus |" in ctx
 
 
-def test_compose_no_corpus_keeps_today_behavior(tmp_path):
-    """纯 stream(无 corpus 参考层):不注入参考段、不标 ·观测、read_dirs 空,与今天一致。"""
+def test_compose_no_corpus_omits_baseline_section(tmp_path):
+    """纯 stream(无 corpus):不注入基线参考段,目录无 corpus 行。"""
     ws = Workspace.init(tmp_path)
     rs = _add_stream(ws, tmp_path)
     _make_digest(ws, rs, "观测纪要")
@@ -135,9 +138,8 @@ def test_compose_no_corpus_keeps_today_behavior(tmp_path):
     state = State()
     ComposeRule(ws, prov).discover(state)[0].run(state)
     call = prov.calls[0]
-    assert "·观测" not in call.context
     assert "基线参考" not in call.persona
-    assert list(call.read_dirs) == []
+    assert "| 按需 | corpus |" not in call.context
 
 
 # ---- Increment 6:corpus 版本戳(advisory,不进 staleness 循环) ----

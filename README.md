@@ -8,7 +8,7 @@ Turns the manual chain of "recording → transcription → minutes → understan
 
 ## Core mental model
 
-One `kairo step` topples the dominoes all the way down: `add` a reference → ASR/doc2text → Digest (dense memory minutes = this reference's memory) → Compose (incrementally synthesize into the fact layer `understanding.md` / the judgment layer `assessment.md`). Like `make`: it doesn't run commands, it **reconciles** toward the state declared in the constitution, running until convergence.
+One `kairo step` topples the dominoes all the way down: `add` a reference → ASR/doc2text → Digest (dense memory minutes = this reference's memory) → Compose (incrementally synthesize into `understanding.md`). Like `make`: it doesn't run commands, it **reconciles** toward the state declared in the constitution, running until convergence.
 
 > **Readable full-text prose (optional, [#33](https://github.com/xforce-io/kairo/issues/33) / [#60](https://github.com/xforce-io/kairo/issues/60))**: raw ASR is noisy (no punctuation, colloquial, homophone errors) and hard to read through. A normalized readable full text `prose.md` can be produced as a **human-reading archive** — punctuation, paragraphing, fixes, less filler. It is **for human reading only and never enters the digest path** (digest always from raw `transcript`). Off by default; set `pipeline.normalize.enabled: true` for batch generation on `step`, or generate on demand via Web (“Generate readable prose”) / `kairo prose <ref_id>`. Only machine-derived transcriptions (`origin≠added`); human text and corpus are untouched.
 
@@ -41,7 +41,7 @@ kairo step                       # reconcile to convergence: ASR/doc2text → Di
 kairo status                     # see the fold status of each reference / document
 ```
 
-Produces two layers of documents: `understanding.md` (neutral facts) and `assessment.md` (stance/judgment).
+Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk, if any, is frozen and no longer folded.
 
 ## Commands
 
@@ -74,9 +74,9 @@ Produces two layers of documents: `understanding.md` (neutral facts) and `assess
 
 ## Core concepts
 
-- **constitution.yaml**: this workspace's constitution — the mental model and protocol (two output layers, stream/corpus, fold, extension→role, conversion declarations) are all declared here; the engine hardcodes none of it.
-- **stream (observation) / corpus (baseline)**: the epistemic classification of a reference. A stream is folded into documents one by one, judgments evolve with it and can overturn earlier ones; a corpus is a read-only reference layer for the agent — not digested, not in the fold loop — and corrects proper nouns/terminology against the baseline when it conflicts with observations.
-- **Two output layers**: `understanding.md` (fact layer) and the `assessment.md` (judgment layer) that depends on it; neutral facts and stance judgments are not mixed.
+- **constitution.yaml**: this workspace's constitution — the mental model and protocol (stream/corpus, fold, extension→role, conversion declarations) are all declared here; the engine hardcodes none of it.
+- **stream (observation) / corpus (baseline)**: the epistemic classification of a reference. A stream is folded into `understanding.md` one by one; a corpus is a read-only reference layer for the agent — not digested, not in the fold loop — and corrects proper nouns/terminology against the baseline when it conflicts with observations.
+- **Synthesis output**: `understanding.md` (fact layer). Digest/Compose feed the agent a materials catalog with granted reads instead of dumping source text into the prompt.
 - **Convergence**: `step` is like `make` — it reconciles toward the state declared in the constitution, judging staleness by content hash, running until no further progress is made.
 - **Binary ingestion** ([#15](https://github.com/xforce-io/kairo/issues/15)): `add file.docx` (docx/pptx/xlsx/pdf) goes through `doc2text` (in-process conversion via [markitdown](https://github.com/microsoft/markitdown)) to produce `source_text`, isomorphic to ASR (`audio→transcript` ↔ `binary→source_text`), with zero downstream changes; xlsx converts to GFM tables, preserving header semantics. No machine configuration needed (markitdown is a project dependency). Stream-type processing only; corpus binaries are not converted (the baseline is read directly, read-only, not derived).
 - **blocked states**: `no-asr` (no local ASR backend configured) / `asr-failed` (transcription command failed) / `convert-failed` (binary conversion failed/empty output) / `missing-source` (source unreachable) / `manual-edit` (manual edit awaiting `accept`) / `compose-degraded` (synthesis output shrank sharply versus the previous version, suspected degraded output — the overwrite was rejected to protect the old document). After preconditions change, the next `step` retries automatically (e.g. once ASR is configured, old audio is re-transcribed); `asr-failed` / `convert-failed` / `compose-degraded` are treated as terminal and need a manual `re-step` to recompute.
@@ -125,7 +125,7 @@ model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
 ```
 
-Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → available `grok` CLI → configured `[provider.openai]` → available `claude` CLI → stub. With a local Grok login, plain `kairo step` uses `GrokProvider` by default. Set `KAIRO_PROVIDER=openai` / `claude-code` / `grok` to force a backend. Note: Grok has no `--add-dir`; corpus / image `read_dirs` paths still need `claude-code` (see [#61](https://github.com/xforce-io/kairo/issues/61)).
+Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → available `grok` CLI → configured `[provider.openai]` → available `claude` CLI → stub. With a local Grok login, plain `kairo step` uses `GrokProvider` by default. Set `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` to force a backend. Note: Grok cannot take granted-read catalogs; Digest/Compose need `codex` or `claude-code` (see [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153)).
 
 ## Tech stack
 

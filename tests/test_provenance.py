@@ -133,6 +133,7 @@ def test_compose_invalid_keeps_old_document(tmp_path):
     class BadComposeProvider:
         name = "bad"
         model = "bad"
+        supports_read_dirs = True
 
         def run(self, config, signal=None):
             config.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -160,49 +161,15 @@ def test_compose_invalid_keeps_old_document(tmp_path):
     assert ts.reason == REASON_PROVENANCE_INVALID
 
 
-def test_compose_rejects_invented_judgment_fact_anchor(tmp_path):
-    """判断层的 F-… 必须是本轮 understanding 实际声明的事实锚点。"""
+def test_compose_does_not_run_judgment_layer(tmp_path):
+    """#153:默认不再 fold assessment。"""
     ws = Workspace.init(tmp_path / "ws")
     source = tmp_path / "m.txt"
     source.write_text("材料正文")
     ws.add([source])
     step(ws, StubProvider())
-    old_assessment = (ws.root / "assessment.md").read_text()
-
-    class InventedFactProvider:
-        name = "invented-fact"
-        model = "invented-fact"
-
-        def run(self, config, signal=None):
-            if config.artifact == "doc.md" and "判断层" in config.persona:
-                config.artifact_dir.mkdir(parents=True, exist_ok=True)
-                text = """## 判断
-
-伪造的依据〔依据:F-deadbeef-99〕。
-
-## 依据事实索引
-
-| 锚点 | 来源 |
-|---|---|
-| F-deadbeef-99 | 不存在的事实 |
-"""
-                (config.artifact_dir / "doc.md").write_text(text)
-                return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
-            return StubProvider().run(config, signal)
-
-    # 制造新 delta，使 understanding 先正常更新、assessment 再消费伪造输出。
-    rid = ws.list_reference_ids()[0]
-    (ws.root / f"references/{rid}/digest.md").write_text("新材料")
-    state = ws.read_state()
-    for target in state.targets.values():
-        target.folded = {}
-    ws.write_state(state)
-    step(ws, InventedFactProvider())
-
-    assessment = ws.read_state().targets["assessment.md"]
-    assert assessment.status == "blocked"
-    assert assessment.reason == REASON_PROVENANCE_INVALID
-    assert (ws.root / "assessment.md").read_text() == old_assessment
+    assert not (ws.root / "assessment.md").exists()
+    assert "assessment.md" not in ws.read_state().targets
 
 
 def test_compose_valid_writes_without_body_path_stack(tmp_path):

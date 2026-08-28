@@ -30,7 +30,7 @@ def last_activity(ws: Workspace) -> datetime.datetime:
     state = root / ".kairo" / "state.json"
     if state.is_file():
         paths.append(state)
-    for target in ws.constitution.targets:
+    for target in ws.constitution.live_targets():
         body = root / target.path
         if body.is_file():
             paths.append(body)
@@ -78,7 +78,12 @@ def summarize(ws: Workspace) -> WorkspaceSummary:
         else:
             stream += 1
     blocked = sum(1 for p in state.products.values() if p.status == "blocked")
-    blocked += sum(1 for t in state.targets.values() if t.status == "blocked")
+    live_paths = {t.path for t in con.live_targets()}
+    blocked += sum(
+        1
+        for path, target in state.targets.items()
+        if path in live_paths and target.status == "blocked"
+    )
     return WorkspaceSummary(
         slug=ws.root.name,
         topic=con.topic,

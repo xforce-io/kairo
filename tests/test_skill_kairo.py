@@ -65,17 +65,15 @@ def test_claude_skill_is_symlink_to_canonical():
     assert (CLAUDE_SKILL_LINK / "SKILL.md").resolve() == PACKAGED_SKILL.resolve()
 
 
-def test_skill_covers_discovery_status_and_two_layers():
+def test_skill_covers_discovery_status_and_understanding():
     text = _skill_text()
     for needle in (
         "constitution.yaml",
         "kairo status",
         "understanding.md",
-        "assessment.md",
     ):
         assert needle in text, f"skill must mention {needle!r}"
-    # fact vs judgment mental model
-    assert "事实" in text and "判断" in text
+    assert "事实" in text
     # read order / not treating transcript as conclusion
     assert "transcript" in text.lower()
     assert "结论" in text or "最终结论" in text

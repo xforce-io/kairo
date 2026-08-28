@@ -30,6 +30,7 @@ class FailProvider:
 
     name = "fail-prov"
     model = "fail-model"
+    supports_read_dirs = True
 
     def __init__(self, msg: str = "Grok request failed status 502"):
         self.msg = msg
@@ -45,6 +46,7 @@ class FlakyProvider:
 
     name = "flaky"
     model = "flaky"
+    supports_read_dirs = True
 
     def __init__(self, fail_times: int = 1):
         self.fail_times = fail_times
@@ -66,6 +68,7 @@ class ComposeOnlyFailProvider:
 
     name = "compose-fail"
     model = "cf"
+    supports_read_dirs = True
 
     def __init__(self):
         self.calls = 0

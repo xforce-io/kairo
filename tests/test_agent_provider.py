@@ -281,30 +281,25 @@ def test_grok_provider_omits_model_flag_when_empty(tmp_path):
     assert "-m" not in calls[0]
 
 
-def test_grok_provider_ignores_read_dirs(tmp_path):
-    """#61:Grok 无 --add-dir；有 read_dirs 时不伪造授权旗标。"""
-    calls = []
-
-    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
-        calls.append(args)
-        Path(stdout_file).write_text(json.dumps({"text": "OK"}))
-
+def test_grok_provider_rejects_read_dirs(tmp_path):
+    """#153:Grok 无授读,read_dirs 非空则失败,不回退倾倒。"""
     ref = tmp_path / "corpus"
     ref.mkdir()
-    GrokProvider(runner=fake_runner).run(
-        AgentConfig(
-            persona="P",
-            context="C",
-            artifact_dir=tmp_path,
-            model="",
-            artifact="out.md",
-            read_dirs=[ref],
+    try:
+        GrokProvider().run(
+            AgentConfig(
+                persona="P",
+                context="C",
+                artifact_dir=tmp_path,
+                model="",
+                artifact="out.md",
+                read_dirs=[ref],
+            )
         )
-    )
-    args = calls[0]
-    assert "--add-dir" not in args
-    assert "--allowedTools" not in args
-    assert str(ref) not in args
+    except RuntimeError as exc:
+        assert "授读" in str(exc) or "read_dirs" in str(exc).lower()
+    else:
+        raise AssertionError("expected RuntimeError")
 
 
 def test_grok_provider_identity():

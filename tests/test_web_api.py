@@ -55,7 +55,8 @@ def test_workspace_view_lists_targets_and_refs(tmp_path, monkeypatch):
     _ws_with_step(tmp_path, monkeypatch)
     r = TestClient(create_app(tmp_path)).get("/w/ws")
     assert r.status_code == 200
-    assert "understanding.md" in r.text and "assessment.md" in r.text
+    assert "understanding.md" in r.text
+    assert "assessment.md" not in r.text
 
 
 def test_workspace_view_404_for_unknown(tmp_path):
@@ -80,7 +81,7 @@ def test_target_doc_has_export_button(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "doc-export" in r.text and "kairoPrintDoc()" in r.text
     # 路径二:选中产物 → /target 的 OOB 预览
-    r = c.get("/w/ws/target", params={"path": "assessment.md"})
+    r = c.get("/w/ws/target", params={"path": "understanding.md"})
     assert r.status_code == 200
     assert "doc-export" in r.text and "kairoPrintDoc()" in r.text
 
