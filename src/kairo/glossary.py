@@ -1,14 +1,17 @@
-"""共享 + workspace 真名册合并(#71)。
+"""root + workspace 两级真名册(#163)。
 
-machine (~/.config/kairo/glossary.yaml) → root (<serve-root|ws.parent>/glossary.yaml)
-→ workspace constitution.glossary；同名后者覆盖。
+root (<serve-root>/glossary.yaml) → workspace constitution.glossary；同名整体覆盖。
+machine 文件不再进入生效结果。
 
 #162: 已存在但非法的文件整表拒绝；写入先校验再原子保存。
 """
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
@@ -16,6 +19,9 @@ import yaml
 from kairo.models import GlossaryEntry
 
 ALLOWED_SCOPES = frozenset({"workspace", "shared"})
+ORIGIN_INHERITED = "inherited"
+ORIGIN_LOCAL = "local"
+ORIGIN_OVERRIDE = "override"
 
 
 class GlossaryError(ValueError):
@@ -183,14 +189,128 @@ def format_glossary_reference(entries: list[GlossaryEntry]) -> str:
     )
 
 
+def resolve_serve_root(
+    *, ws_root: Path | None = None, explicit: Path | None = None
+) -> Path:
+    """解析唯一 serve root。workspace 归属与显式/环境不一致时拒绝。"""
+    env = os.environ.get("KAIRO_SERVE_ROOT")
+    env_path = Path(env).expanduser().resolve() if env else None
+    exp = explicit.expanduser().resolve() if explicit is not None else None
+    if ws_root is not None:
+        parent = Path(ws_root).resolve().parent
+        for cand, label in ((exp, "--root"), (env_path, "KAIRO_SERVE_ROOT")):
+            if cand is not None and cand != parent:
+                raise GlossaryError(
+                    f"{label} {cand} 与 workspace 归属 {parent} 不一致"
+                )
+        return parent
+    if exp is not None:
+        return exp
+    if env_path is not None:
+        return env_path
+    return Path.cwd().resolve()
+
+
+def validate_entries(
+    entries: list[GlossaryEntry], *, path: Path | None = None
+) -> None:
+    names = [e.name for e in entries]
+    if len(names) != len(set(names)):
+        raise GlossaryError("规范名重复", path=path)
+    name_set = set(names)
+    owner: dict[str, str] = {}
+    for e in entries:
+        for raw in e.aka:
+            alias = raw.strip()
+            if not alias:
+                continue
+            if alias == e.name or alias in name_set:
+                raise GlossaryError(f"alias {alias!r} 与规范名冲突", path=path)
+            prev = owner.get(alias)
+            if prev is not None and prev != e.name:
+                raise GlossaryError(
+                    f"alias {alias!r} 指向多个规范名:{prev} 与 {e.name}", path=path
+                )
+            owner[alias] = e.name
+
+
+@dataclass(frozen=True)
+class EffectiveItem:
+    entry: GlossaryEntry
+    origin: str  # inherited | local | override
+
+
+def effective_items(
+    root_entries: list[GlossaryEntry],
+    workspace_entries: list[GlossaryEntry],
+    *,
+    path: Path | None = None,
+) -> list[EffectiveItem]:
+    validate_entries(root_entries, path=path)
+    validate_entries(workspace_entries, path=path)
+    root_by = {e.name: e for e in root_entries}
+    ws_by = {e.name: e for e in workspace_entries}
+    out: list[EffectiveItem] = []
+    for e in root_entries:
+        if e.name in ws_by:
+            out.append(EffectiveItem(ws_by[e.name], ORIGIN_OVERRIDE))
+        else:
+            out.append(EffectiveItem(e, ORIGIN_INHERITED))
+    for e in workspace_entries:
+        if e.name not in root_by:
+            out.append(EffectiveItem(e, ORIGIN_LOCAL))
+    validate_entries([i.entry for i in out], path=path)
+    return out
+
+
+def effective_hash(entries: list[GlossaryEntry]) -> str:
+    payload = [
+        {"name": e.name, "note": e.note or "", "aka": sorted(e.aka)}
+        for e in entries
+    ]
+    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def workspace_effective(
+    ws_root: Path, *, serve_root: Path | None = None
+) -> list[EffectiveItem]:
+    root = resolve_serve_root(ws_root=ws_root, explicit=serve_root)
+    return effective_items(
+        load_glossary_file(root_glossary_path(root)),
+        load_workspace_glossary(ws_root),
+        path=constitution_path(ws_root),
+    )
+
+
+def current_effective_hash(ws_root: Path, *, serve_root: Path | None = None) -> str:
+    return effective_hash([i.entry for i in workspace_effective(ws_root, serve_root=serve_root)])
+
+
+def machine_migration_hint() -> str | None:
+    path = machine_glossary_path()
+    if not path.is_file():
+        return None
+    try:
+        n = len(load_glossary_file(path))
+    except GlossaryError as e:
+        return f"本机真名册不再进入正式产物且无法读取:{e}"
+    return f"本机 {path} ({n} 条)不再进入正式产物;请迁到 root 或 workspace"
+
+
 def resolve_shared_layers(
     ws_root: Path, *, serve_root: Path | None = None
 ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
-    """返回 (machine_entries, root_entries)。root = serve_root 或 ws 父目录。"""
-    machine = load_glossary_file(machine_glossary_path())
-    root_path = root_glossary_path(serve_root) if serve_root else root_glossary_path(ws_root.parent)
-    root_entries = load_glossary_file(root_path)
-    return machine, root_entries
+    """返回 (machine_entries, root_entries)。machine 仅供提示,不进入生效。"""
+    hint_entries: list[GlossaryEntry] = []
+    path = machine_glossary_path()
+    if path.is_file():
+        try:
+            hint_entries = load_glossary_file(path)
+        except GlossaryError:
+            hint_entries = []
+    root = resolve_serve_root(ws_root=ws_root, explicit=serve_root)
+    return hint_entries, load_glossary_file(root_glossary_path(root))
 
 
 def merged_glossary_entries(
@@ -199,8 +319,14 @@ def merged_glossary_entries(
     *,
     serve_root: Path | None = None,
 ) -> list[GlossaryEntry]:
-    machine, root = resolve_shared_layers(ws_root, serve_root=serve_root)
-    return merge_glossary(machine, root, workspace_entries)
+    items = effective_items(
+        load_glossary_file(
+            root_glossary_path(resolve_serve_root(ws_root=ws_root, explicit=serve_root))
+        ),
+        workspace_entries,
+        path=constitution_path(ws_root),
+    )
+    return [i.entry for i in items]
 
 
 def add_entry(
@@ -216,6 +342,7 @@ def add_entry(
     tag_list = [t.strip() for t in (tags or []) if t and t.strip()]
     entries = list(entries)
     entries.append(GlossaryEntry(name=name, note=(note or "").strip(), aka=aka_list, tags=tag_list))
+    validate_entries(entries)
     return entries
 
 

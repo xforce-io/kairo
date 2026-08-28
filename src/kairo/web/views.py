@@ -968,38 +968,57 @@ def _glossary_fragment(
 ) -> HTMLResponse:
     from kairo.glossary import (
         GlossaryError,
-        load_glossary_file,
-        load_workspace_glossary,
-        machine_glossary_path,
-        root_glossary_path,
+        current_effective_hash,
+        machine_migration_hint,
+        workspace_effective,
     )
 
     t = _t(request)
-    serve_root = Path(request.app.state.root)
     load_failed = False
-    shared: list = []
-    machine: list = []
-    local: list = []
+    effective = []
+    local = []
+    pending: list[str] = []
+    eff_hash = ""
     try:
-        shared = load_glossary_file(root_glossary_path(serve_root))
-        machine = load_glossary_file(machine_glossary_path())
-        local = load_workspace_glossary(ws.root)
+        items = workspace_effective(ws.root, serve_root=Path(request.app.state.root))
+        effective = [
+            {
+                "name": i.entry.name,
+                "note": i.entry.note,
+                "aka": ", ".join(i.entry.aka),
+                "tags": ", ".join(i.entry.tags),
+                "origin": i.origin,
+            }
+            for i in items
+        ]
+        local = _entry_rows([i.entry for i in items if i.origin != "inherited"])
+        from kairo.glossary import load_workspace_glossary
+
+        local = _entry_rows(load_workspace_glossary(ws.root))
+        eff_hash = current_effective_hash(ws.root, serve_root=Path(request.app.state.root))
+        pending = ws.glossary_pending(serve_root=Path(request.app.state.root))
     except GlossaryError as e:
         load_failed = True
         error = error or str(e)
     form = form or {}
+    origin_label = {
+        "inherited": t("glossary.origin_inherited"),
+        "local": t("glossary.origin_local"),
+        "override": t("glossary.origin_override"),
+    }
+    for row in effective:
+        row["origin_label"] = origin_label.get(row["origin"], row["origin"])
     return _render(
         request,
         "_glossary.html",
         {
             "slug": slug,
-            "shared_entries": _entry_rows(shared),
-            "local_entries": _entry_rows(local),
-            "shared_count": len(shared),
+            "effective_entries": effective,
+            "local_entries": local,
             "local_count": len(local),
-            "machine_count": len(machine),
+            "effective_count": len(effective),
+            "machine_hint": machine_migration_hint(),
             "hint": t("glossary.restep_hint"),
-            "shared_hint": t("glossary.shared_hint"),
             "error": error,
             "error_scope": error_scope,
             "load_failed": load_failed,
@@ -1007,13 +1026,15 @@ def _glossary_fragment(
             "form_note": form.get("note", ""),
             "form_aka": form.get("aka", ""),
             "form_tags": form.get("tags", ""),
+            "pending": pending,
+            "eff_hash": eff_hash,
         },
     )
 
 
 @router.get("/w/{slug}/glossary", response_class=HTMLResponse)
 def glossary_view(request: Request, slug: str) -> HTMLResponse:
-    """#69/#71:右栏真名册面板(公共 root + 本工作区)。"""
+    """#163:右栏真名册(生效视图 + 本 workspace)。"""
     return _glossary_fragment(request, _open(request, slug), slug)
 
 
@@ -1027,15 +1048,8 @@ def glossary_add(
     tags: str = Form(""),
     scope: str = Form("workspace"),
 ) -> HTMLResponse:
-    """追加一条;scope=workspace|shared(root glossary.yaml)。"""
-    from kairo.glossary import (
-        GlossaryError,
-        add_entry,
-        load_glossary_file,
-        parse_scope,
-        root_glossary_path,
-        save_glossary_file,
-    )
+    """只写 workspace 层;shared 请走 Root /glossary。"""
+    from kairo.glossary import GlossaryError, parse_scope
 
     ws = _open(request, slug)
     parts = _parse_aka(aka)
@@ -1043,14 +1057,15 @@ def glossary_add(
     form = {"name": name, "note": note, "aka": aka, "tags": tags}
     try:
         chosen = parse_scope(scope)
-        if chosen == "shared":
-            path = root_glossary_path(Path(request.app.state.root))
-            entries = add_entry(
-                load_glossary_file(path), name, note=note, aka=parts, tags=tag_parts
-            )
-            save_glossary_file(path, entries)
-        else:
-            ws.add_glossary_entry(name, note=note, aka=parts, tags=tag_parts)
+        if chosen != "workspace":
+            raise GlossaryError("workspace 真名册只能写本层;公共条目请到 Root 首页")
+        ws.add_glossary_entry(
+            name,
+            note=note,
+            aka=parts,
+            tags=tag_parts,
+            serve_root=Path(request.app.state.root),
+        )
     except (GlossaryError, ValueError) as e:
         return _glossary_fragment(
             request, ws, slug, error=str(e), error_scope=scope.strip() or None, form=form
@@ -1065,29 +1080,137 @@ def glossary_delete(
     index: int,
     scope: str = Form("workspace"),
 ) -> HTMLResponse:
-    from kairo.glossary import (
-        GlossaryError,
-        load_glossary_file,
-        parse_scope,
-        remove_entry,
-        root_glossary_path,
-        save_glossary_file,
-    )
+    from kairo.glossary import GlossaryError, parse_scope
 
     ws = _open(request, slug)
     try:
         chosen = parse_scope(scope)
-        if chosen == "shared":
-            path = root_glossary_path(Path(request.app.state.root))
-            entries = remove_entry(load_glossary_file(path), index)
-            save_glossary_file(path, entries)
-        else:
-            ws.remove_glossary_entry(index)
+        if chosen != "workspace":
+            raise GlossaryError("workspace 真名册只能写本层;公共条目请到 Root 首页")
+        ws.remove_glossary_entry(index, serve_root=Path(request.app.state.root))
     except (GlossaryError, ValueError, IndexError) as e:
         return _glossary_fragment(
             request, ws, slug, error=str(e), error_scope=scope.strip() or None
         )
     return _glossary_fragment(request, ws, slug)
+
+
+def _root_glossary_page(
+    request: Request,
+    *,
+    error: str | None = None,
+    form: dict | None = None,
+) -> HTMLResponse:
+    from kairo.glossary import (
+        GlossaryError,
+        load_glossary_file,
+        load_workspace_glossary,
+        machine_migration_hint,
+        root_glossary_path,
+    )
+    from kairo.web.discovery import scan_workspaces
+
+    t = _t(request)
+    serve = Path(request.app.state.root)
+    form = form or {}
+    load_failed = False
+    entries = []
+    impact = []
+    try:
+        entries = load_glossary_file(root_glossary_path(serve))
+        names = {e.name for e in entries}
+        for s in scan_workspaces(serve):
+            local = load_workspace_glossary(serve / s.slug)
+            ov = [e.name for e in local if e.name in names]
+            impact.append({"slug": s.slug, "overrides": ov, "override_n": len(ov)})
+    except GlossaryError as e:
+        load_failed = True
+        error = error or str(e)
+    return _render(
+        request,
+        "root_glossary.html",
+        {
+            "entries": _entry_rows(entries),
+            "count": len(entries),
+            "impact": impact,
+            "ws_n": len(impact),
+            "override_ws_n": sum(1 for i in impact if i["override_n"]),
+            "machine_hint": machine_migration_hint(),
+            "error": error,
+            "load_failed": load_failed,
+            "form_name": form.get("name", ""),
+            "form_note": form.get("note", ""),
+            "form_aka": form.get("aka", ""),
+            "form_tags": form.get("tags", ""),
+        },
+    )
+
+
+@router.get("/glossary", response_class=HTMLResponse)
+def root_glossary_view(request: Request) -> HTMLResponse:
+    """#163:Root 首页公共真名册。"""
+    return _root_glossary_page(request)
+
+
+@router.post("/glossary", response_class=HTMLResponse)
+def root_glossary_add(
+    request: Request,
+    name: str = Form(...),
+    note: str = Form(""),
+    aka: str = Form(""),
+    tags: str = Form(""),
+) -> HTMLResponse:
+    from kairo.workspace import stamp_serve_workspaces as _stamp_serve_workspaces
+    from kairo.glossary import (
+        GlossaryError,
+        add_entry,
+        load_glossary_file,
+        root_glossary_path,
+        save_glossary_file,
+        validate_entries,
+    )
+
+    serve = Path(request.app.state.root)
+    form = {"name": name, "note": note, "aka": aka, "tags": tags}
+    try:
+        path = root_glossary_path(serve)
+        entries = add_entry(
+            load_glossary_file(path),
+            name,
+            note=note,
+            aka=_parse_aka(aka),
+            tags=_parse_tags(tags),
+        )
+        validate_entries(entries, path=path)
+        save_glossary_file(path, entries)
+        _stamp_serve_workspaces(serve)
+    except (GlossaryError, ValueError) as e:
+        return _root_glossary_page(request, error=str(e), form=form)
+    return _root_glossary_page(request)
+
+
+@router.post("/glossary/{index}/delete", response_class=HTMLResponse)
+def root_glossary_delete(request: Request, index: int) -> HTMLResponse:
+    from kairo.workspace import stamp_serve_workspaces as _stamp_serve_workspaces
+    from kairo.glossary import (
+        GlossaryError,
+        load_glossary_file,
+        remove_entry,
+        root_glossary_path,
+        save_glossary_file,
+        validate_entries,
+    )
+
+    serve = Path(request.app.state.root)
+    try:
+        path = root_glossary_path(serve)
+        nxt = remove_entry(load_glossary_file(path), index)
+        validate_entries(nxt, path=path)
+        save_glossary_file(path, nxt)
+        _stamp_serve_workspaces(serve)
+    except (GlossaryError, ValueError, IndexError) as e:
+        return _root_glossary_page(request, error=str(e))
+    return _root_glossary_page(request)
 
 
 @router.post("/w/{slug}/corpus", response_class=HTMLResponse)

@@ -517,12 +517,15 @@ class DigestRule:
                 )
                 return
             (self.ws.root / key).write_text(content)
+            from kairo.glossary import current_effective_hash
+
             state.products[key] = ProductState(
                 input_hash=input_hash,
                 produced_by={
                     "provider": self.provider.name,
                     "model": self.provider.model,
                 },
+                glossary_hash=current_effective_hash(self.ws.root),
             )
 
         def is_stale(state: State) -> bool:
@@ -817,6 +820,9 @@ class ComposeRule:
             ts.diagnostic = None  # 成功清除 #98 诊断
             ts.retry_reason = None
             ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
+            from kairo.glossary import current_effective_hash
+
+            ts.glossary_hash = current_effective_hash(self.ws.root)
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:
                 ts.last_major_folded = dict(all_digests)

@@ -5,53 +5,51 @@
   {% if error %}
   <p class="ref-blocks glossary-error" role="alert">{{ error }}</p>
   {% endif %}
-  {% if machine_count %}
-  <p class="meta-hint">{{ t('glossary.machine_note') }} ({{ machine_count }})</p>
+  {% if machine_hint %}
+  <p class="meta-hint">{{ machine_hint }}</p>
+  {% endif %}
+  {% if pending %}
+  <div class="ref-blocks">
+    <div class="meta-label">{{ t('glossary.pending') }}</div>
+    <ul class="dlg-bullets">
+      {% for key in pending %}
+      <li>
+        {{ key }}
+        <form hx-post="/w/{{ slug | urlencode }}/step" hx-target="#run-slot" hx-swap="innerHTML"
+              hx-confirm="{{ t('target.regen_confirm') }}" style="display:inline">
+          <input type="hidden" name="target" value="{{ key }}">
+          <button type="submit" class="btn btn-ghost btn-regen">{{ t('target.regen') }}</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
   {% endif %}
 
-  {# ---- 公共 root ---- #}
   <div class="gl-section">
-    <div class="meta-label">{{ t('glossary.shared_section') }} · {{ shared_count }}</div>
-    <p class="dlg-hint">{{ shared_hint }}</p>
-    {% if shared_entries %}
+    <div class="meta-label">{{ t('glossary.effective_section') }} · {{ effective_count }}</div>
+    {% if eff_hash %}<p class="dlg-hint">hash {{ eff_hash }}</p>{% endif %}
+    {% if effective_entries %}
     <table class="meta-forms glossary-table">
       <tbody>
-      {% for e in shared_entries %}
+      {% for e in effective_entries %}
       <tr>
         <td class="mf-role" title="{{ e.note }}">
           <strong>{{ e.name }}</strong>
+          <div class="gl-aka">{{ e.origin_label }}</div>
           {% if e.note %}<div class="gl-note">{{ e.note }}</div>{% endif %}
           {% if e.aka %}<div class="gl-aka">{{ t('glossary.aka_prefix') }}{{ e.aka }}</div>{% endif %}
           {% if e.tags %}<div class="gl-aka">{{ t('glossary.tags_prefix') }}{{ e.tags }}</div>{% endif %}
-        </td>
-        <td class="mf-actions">
-          <form hx-post="/w/{{ slug | urlencode }}/glossary/{{ loop.index0 }}/delete"
-                hx-target="#meta" hx-swap="innerHTML"
-                hx-confirm="{{ t('glossary.delete_confirm') }}">
-            <input type="hidden" name="scope" value="shared">
-            <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.delete') }}</button>
-          </form>
         </td>
       </tr>
       {% endfor %}
       </tbody>
     </table>
     {% elif not load_failed %}
-    <p class="panel-hint">{{ t('glossary.shared_empty') }}</p>
+    <p class="panel-hint">{{ t('glossary.effective_empty') }}</p>
     {% endif %}
-    <form class="dlg-form glossary-add" hx-post="/w/{{ slug | urlencode }}/glossary"
-          hx-target="#meta" hx-swap="innerHTML">
-      <input type="hidden" name="scope" value="shared">
-      <label class="dlg-label">{{ t('glossary.add_shared') }}</label>
-      <input type="text" name="name" placeholder="{{ t('glossary.name_ph') }}" value="{{ form_name if error and error_scope != 'workspace' else '' }}" required>
-      <input type="text" name="note" placeholder="{{ t('glossary.note_ph') }}" value="{{ form_note if error and error_scope != 'workspace' else '' }}">
-      <input type="text" name="aka" placeholder="{{ t('glossary.aka_ph') }}" value="{{ form_aka if error and error_scope != 'workspace' else '' }}">
-      <input type="text" name="tags" placeholder="{{ t('glossary.tags_ph') }}" value="{{ form_tags if error and error_scope != 'workspace' else '' }}">
-      <button type="submit" class="btn btn-step dlg-go">{{ t('glossary.add_btn') }}</button>
-    </form>
   </div>
 
-  {# ---- 本工作区 ---- #}
   <div class="gl-section" style="margin-top:18px">
     <div class="meta-label">{{ t('glossary.local_section') }} · {{ local_count }}</div>
     {% if local_entries %}
@@ -84,10 +82,10 @@
           hx-target="#meta" hx-swap="innerHTML">
       <input type="hidden" name="scope" value="workspace">
       <label class="dlg-label">{{ t('glossary.add_title') }}</label>
-      <input type="text" name="name" placeholder="{{ t('glossary.name_ph') }}" value="{{ form_name if error and error_scope != 'shared' else '' }}" required>
-      <input type="text" name="note" placeholder="{{ t('glossary.note_ph') }}" value="{{ form_note if error and error_scope != 'shared' else '' }}">
-      <input type="text" name="aka" placeholder="{{ t('glossary.aka_ph') }}" value="{{ form_aka if error and error_scope != 'shared' else '' }}">
-      <input type="text" name="tags" placeholder="{{ t('glossary.tags_ph') }}" value="{{ form_tags if error and error_scope != 'shared' else '' }}">
+      <input type="text" name="name" placeholder="{{ t('glossary.name_ph') }}" value="{{ form_name if error else '' }}" required>
+      <input type="text" name="note" placeholder="{{ t('glossary.note_ph') }}" value="{{ form_note if error else '' }}">
+      <input type="text" name="aka" placeholder="{{ t('glossary.aka_ph') }}" value="{{ form_aka if error else '' }}">
+      <input type="text" name="tags" placeholder="{{ t('glossary.tags_ph') }}" value="{{ form_tags if error else '' }}">
       <button type="submit" class="btn btn-step dlg-go">{{ t('glossary.add_btn') }}</button>
     </form>
   </div>

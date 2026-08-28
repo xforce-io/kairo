@@ -44,7 +44,7 @@ def test_load_save_glossary_file(tmp_path):
     assert load_glossary_file(tmp_path / "g2.yaml")[0].name == "X"
 
 
-def test_workspace_glossary_reference_merges_parent_and_machine(tmp_path, monkeypatch):
+def test_workspace_glossary_reference_merges_parent_not_machine(tmp_path, monkeypatch):
     root = tmp_path / "kairo-root"
     ws_dir = root / "能源业务"
     root.mkdir()
@@ -60,10 +60,9 @@ def test_workspace_glossary_reference_merges_parent_and_machine(tmp_path, monkey
 
     ws.add_glossary_entry("天溯", note="本区覆盖")  # 覆盖 root 同名
     ref = ws.glossary_reference()
-    assert "本机词" in ref
+    assert "本机词" not in ref
     assert "共享词" in ref
     assert "本区覆盖" in ref  # workspace wins
-    assert ref.index("本机词") < ref.index("共享词") or "本机词" in ref
 
 
 def test_digest_persona_gets_merged_glossary(tmp_path, monkeypatch):
@@ -103,8 +102,8 @@ def test_web_shared_and_local_glossary(tmp_path):
     ws = Workspace.init(root / "ws", topic="t")
     c = TestClient(create_app(root))
     r = c.post(
-        "/w/ws/glossary",
-        data={"name": "公共名", "note": "shared", "scope": "shared", "tags": "org"},
+        "/glossary",
+        data={"name": "公共名", "note": "shared", "tags": "org"},
     )
     assert r.status_code == 200
     assert "公共名" in r.text
@@ -120,7 +119,7 @@ def test_web_shared_and_local_glossary(tmp_path):
     assert "本区名" in r2.text
     assert any(e.name == "本区名" for e in Workspace.open(root / "ws").constitution.glossary)
 
-    # delete shared
-    r3 = c.post("/w/ws/glossary/0/delete", data={"scope": "shared"})
+    r3 = c.post("/glossary/0/delete")
     assert r3.status_code == 200
     assert load_glossary_file(root / "glossary.yaml") == []
+    assert any(e.name == "本区名" for e in Workspace.open(root / "ws").constitution.glossary)

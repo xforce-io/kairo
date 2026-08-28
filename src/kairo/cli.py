@@ -665,25 +665,34 @@ def connect() -> None:
         raise typer.Exit(1) from None
 
 
+def _stamp_serve_workspaces(serve: Path) -> None:
+    from kairo.workspace import stamp_serve_workspaces
+
+    stamp_serve_workspaces(serve)
+
+
 @glossary_app.command("list")
 def glossary_list(
     root: Path = typer.Option(
         None, "--root", "-r", help="shared 所在 serve root;默认 ws 父目录 / 环境变量"
     ),
 ) -> None:
-    """列出 machine + shared + workspace 真名册(分层面;空层标注)。"""
+    """列出 shared + workspace 真名册;machine 仅提示。"""
     from kairo.glossary import (
         GlossaryError,
+        current_effective_hash,
         load_glossary_file,
         load_workspace_glossary,
-        machine_glossary_path,
+        machine_migration_hint,
+        resolve_serve_root,
         root_glossary_path,
+        workspace_effective,
     )
 
     try:
-        layers: list[tuple[str, list]] = []
-        machine = load_glossary_file(machine_glossary_path())
-        layers.append(("machine", machine))
+        hint = machine_migration_hint()
+        if hint:
+            typer.secho(hint, fg=typer.colors.YELLOW, err=True)
 
         try:
             ws = Workspace.open(Path.cwd())
@@ -692,13 +701,14 @@ def glossary_list(
             ws = None
             in_ws = False
 
+        layers: list[tuple[str, list]] = []
         if in_ws:
-            serve = root.expanduser().resolve() if root else ws.root.parent
+            serve = resolve_serve_root(ws_root=ws.root, explicit=root)
             shared = load_glossary_file(root_glossary_path(serve))
             layers.append(("shared", shared))
             layers.append(("workspace", load_workspace_glossary(ws.root)))
         else:
-            serve = _serve_root(root)
+            serve = resolve_serve_root(explicit=root)
             shared = load_glossary_file(root_glossary_path(serve))
             layers.append(("shared", shared))
 
@@ -717,6 +727,11 @@ def glossary_list(
                     extra.append("tags:" + ",".join(e.tags))
                 suffix = f"  — {' | '.join(extra)}" if extra else ""
                 typer.echo(f"  {i}: {e.name}{suffix}")
+        if in_ws:
+            items = workspace_effective(ws.root, serve_root=root)
+            typer.echo(f"[effective] ({len(items)}) {current_effective_hash(ws.root, serve_root=root)}")
+            for it in items:
+                typer.echo(f"  {it.origin}: {it.entry.name}")
     except GlossaryError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
@@ -740,8 +755,10 @@ def glossary_add(
         add_entry,
         load_glossary_file,
         parse_scope,
+        resolve_serve_root,
         root_glossary_path,
         save_glossary_file,
+        validate_entries,
     )
 
     aka_parts = [a.strip() for a in aka.split(",") if a.strip()] if aka else []
@@ -750,22 +767,23 @@ def glossary_add(
         chosen = parse_scope(scope)
         if chosen == "workspace":
             ws = _open_ws()
-            ws.add_glossary_entry(name, note=note, aka=aka_parts, tags=tag_parts)
+            ws.add_glossary_entry(
+                name, note=note, aka=aka_parts, tags=tag_parts, serve_root=root
+            )
             typer.echo(f"added workspace glossary: {name}")
             return
-        # shared:在 ws 内默认父目录,否则 --root / KAIRO_SERVE_ROOT
-        if root is not None:
-            serve = _serve_root(root)
-        else:
-            try:
-                serve = Workspace.open(Path.cwd()).root.parent
-            except WorkspaceNotFound:
-                serve = _serve_root(None)
+        try:
+            ws = Workspace.open(Path.cwd())
+            serve = resolve_serve_root(ws_root=ws.root, explicit=root)
+        except WorkspaceNotFound:
+            serve = resolve_serve_root(explicit=root)
         path = root_glossary_path(serve)
         entries = add_entry(
             load_glossary_file(path), name, note=note, aka=aka_parts, tags=tag_parts
         )
+        validate_entries(entries, path=path)
         save_glossary_file(path, entries)
+        _stamp_serve_workspaces(serve)
         typer.echo(f"added shared glossary: {name} → {path}")
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
@@ -788,8 +806,10 @@ def glossary_rm(
         load_workspace_glossary,
         parse_scope,
         remove_entry,
+        resolve_serve_root,
         root_glossary_path,
         save_glossary_file,
+        validate_entries,
     )
 
     try:
@@ -797,20 +817,21 @@ def glossary_rm(
         if chosen == "workspace":
             ws = _open_ws()
             name = load_workspace_glossary(ws.root)[index].name
-            ws.remove_glossary_entry(index)
+            ws.remove_glossary_entry(index, serve_root=root)
             typer.echo(f"removed workspace glossary[{index}]: {name}")
             return
-        if root is not None:
-            serve = _serve_root(root)
-        else:
-            try:
-                serve = Workspace.open(Path.cwd()).root.parent
-            except WorkspaceNotFound:
-                serve = _serve_root(None)
+        try:
+            ws = Workspace.open(Path.cwd())
+            serve = resolve_serve_root(ws_root=ws.root, explicit=root)
+        except WorkspaceNotFound:
+            serve = resolve_serve_root(explicit=root)
         path = root_glossary_path(serve)
         entries = load_glossary_file(path)
         name = entries[index].name
-        save_glossary_file(path, remove_entry(entries, index))
+        nxt = remove_entry(entries, index)
+        validate_entries(nxt, path=path)
+        save_glossary_file(path, nxt)
+        _stamp_serve_workspaces(serve)
         typer.echo(f"removed shared glossary[{index}]: {name}")
     except (ValueError, IndexError) as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
