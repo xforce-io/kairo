@@ -1,10 +1,17 @@
-<div hx-ext="sse" sse-connect="/w/{{ slug }}/step/{{ task_id }}/stream">
-  <div id="step-log" sse-swap="message" hx-swap="beforeend"></div>
-  {# #75/#97:结束后按 task 终态进结果摘要(非仅 workspace plan);并 OOB 刷新主按钮 #}
-  <div class="step-status"
+<div class="run-panel" hx-ext="sse" sse-connect="/w/{{ slug }}/step/{{ task_id }}/stream">
+  <div id="run-progress" class="run-progress" role="status" aria-live="polite"
+       sse-swap="progress" hx-swap="innerHTML">{{ progress_html | default('') | safe }}</div>
+  <div id="run-health" class="run-health" role="status" aria-live="polite"
+       sse-swap="health" hx-swap="innerHTML">{{ health_html | default('') | safe }}</div>
+  <details class="run-log-details">
+    <summary>{{ t('run.log_summary') }}</summary>
+    <div id="step-log" sse-swap="message" hx-swap="beforeend"></div>
+  </details>
+  {# #75/#97:结束后按 task 终态进结果摘要;隐藏触发器,不显示 Running… #}
+  <div class="step-done-hook"
        hx-get="/w/{{ slug }}/run-summary?task_id={{ task_id }}"
        hx-trigger="sse:done"
        hx-target="#step-area"
-       hx-swap="innerHTML">{{ t('step.running') }}</div>
+       hx-swap="innerHTML"></div>
   <button class="btn btn-ghost" hx-post="/w/{{ slug }}/step/{{ task_id }}/cancel" hx-target="#step-area">{{ t('step.cancel') }}</button>
 </div>

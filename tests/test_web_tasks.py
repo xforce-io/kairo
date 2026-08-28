@@ -5,13 +5,19 @@ import time
 from fastapi.testclient import TestClient
 
 from kairo.web.server import create_app
+from kairo.web.i18n import translator
 from kairo.web.tasks import (
     StepTask,
     TaskRegistry,
     classify_task,
+    is_transport_line,
+    phrase_for_work_key,
     redact_sensitive,
+    render_progress_html,
+    resolve_progress_phrase,
     safe_error_summary,
     stream_events,
+    wrap_log_line,
 )
 from kairo.workspace import Workspace
 
@@ -57,8 +63,9 @@ def test_stream_events_replays_then_done():
     t.done = True
     t.exit_code = 0
     out = list(stream_events(t))
-    assert "data: line1\n\n" in out
-    assert "data: line2\n\n" in out
+    assert out[0].startswith("event: progress\ndata: ")
+    assert "log-line" in out[1] and "line1" in out[1]
+    assert "log-line" in out[2] and "line2" in out[2]
     assert out[-1].startswith("event: done\ndata: ")
     assert '"kind": "succeeded"' in out[-1] or '"kind":"succeeded"' in out[-1]
 
@@ -355,6 +362,191 @@ def test_workspace_page_prefills_running_step(tmp_path, monkeypatch):
     _wait(task, timeout=5)
 
 
+
+
+def test_wrap_log_line_escapes_and_is_block():
+    html = wrap_log_line('<script>x</script>')
+    assert "<script>" not in html
+    assert "&lt;script&gt;" in html
+    assert html.startswith('<div class="log-line">')
+    assert "\n" not in html
+    empty = wrap_log_line("")
+    assert empty == '<div class="log-line"></div>'
+    cr = wrap_log_line("a\r\nb")
+    assert "\n" not in cr and "\r" not in cr
+
+
+def test_is_transport_line_and_not_fatal():
+    assert is_transport_line("ERROR: Reconnecting… 5/5")
+    assert is_transport_line("warning: Falling back from WebSockets to HTTPS transport")
+    assert is_transport_line("request timed out")
+    assert not is_transport_line("INFO: step progressed")
+    assert not is_transport_line("")
+    assert not is_transport_line("hook: SessionStart")
+    running = StepTask(task_id="d", slug="ws", done=False, lines=["request timed out"])
+    assert classify_task(running).kind == "running"
+
+
+def test_phrase_transcript_not_source_text():
+    t = translator("zh")
+    a = phrase_for_work_key("references/x/transcript.md", "R", t)
+    b = phrase_for_work_key("references/x/source_text.md", "R", t)
+    assert "转写" in a and "提取" not in a
+    assert "提取" in b and "转写" not in b
+
+
+def test_resolve_phrase_finishing_only_after_pending():
+    t = translator("zh")
+    task = StepTask(task_id="a", slug="ws", job_kind="reconcile")
+    assert "启动" in resolve_progress_phrase(task, t, pending_fn=lambda: [])
+    class Item:
+        key = "references/aaa/digest.md"
+    task2 = StepTask(task_id="b", slug="ws", job_kind="reconcile")
+    resolve_progress_phrase(
+        task2, t, pending_fn=lambda: [Item()], title_fn=lambda i: "Alpha"
+    )
+    assert task2.saw_pending
+    assert "收尾" in resolve_progress_phrase(task2, t, pending_fn=lambda: [])
+    never = StepTask(task_id="c", slug="ws", job_kind="reconcile")
+    assert "收尾" not in resolve_progress_phrase(never, t, pending_fn=lambda: [])
+
+
+def test_progress_html_escapes_title():
+    t = translator("en")
+    task = StepTask(task_id="a", slug="ws", job_kind="prose", object_title="<x>")
+    html = render_progress_html(task, t, now=task.created_at)
+    assert "<x>" not in html
+    assert "&lt;x&gt;" in html
+    assert "\n" not in html
+
+
+def test_stream_health_before_message_replay():
+    t = StepTask(task_id="t1", slug="ws", done=True, exit_code=0)
+    t.lines = ["ok", "ERROR: Reconnecting… 5/5"]
+    t.transport_seen = True
+    out = list(stream_events(t, t=translator("en")))
+    kinds = []
+    for chunk in out:
+        if chunk.startswith("event: progress"):
+            kinds.append("progress")
+        elif chunk.startswith("event: health"):
+            kinds.append("health")
+        elif chunk.startswith("event: done"):
+            kinds.append("done")
+        elif chunk.startswith("data:"):
+            kinds.append("message")
+    assert kinds[0] == "progress"
+    assert kinds[1] == "health"
+    assert "message" in kinds
+    assert kinds.index("health") < kinds.index("message")
+    assert classify_task(StepTask(task_id="r", slug="ws", done=False)).kind == "running"
+
+
+def test_progress_first_stale_not_second():
+    class Item:
+        def __init__(self, key):
+            self.key = key
+    task = StepTask(task_id="t", slug="ws", job_kind="reconcile", done=True, exit_code=0)
+    items = [Item("references/aaa/digest.md"), Item("references/bbb/digest.md")]
+    out = list(
+        stream_events(
+            task,
+            t=translator("zh"),
+            pending_fn=lambda: items,
+            title_fn=lambda i: i.key.split("/")[1],
+        )
+    )
+    prog = next(c for c in out if c.startswith("event: progress"))
+    assert "aaa" in prog
+    assert "bbb" not in prog
+
+
+def test_pending_failure_still_reaches_done():
+    task = StepTask(task_id="t", slug="ws", job_kind="reconcile", done=True, exit_code=0)
+    task.lines = ["x"]
+
+    def boom():
+        raise RuntimeError("discover failed")
+
+    out = list(stream_events(task, t=translator("en"), pending_fn=boom))
+    assert any(c.startswith("event: done") for c in out)
+    assert any("log-line" in c and "x" in c for c in out)
+    prog = next(c for c in out if c.startswith("event: progress"))
+    assert "Starting" in prog or "启动" in prog
+
+
+def test_prose_progress_ignores_other_pending():
+    class Item:
+        key = "references/ccc/digest.md"
+    task = StepTask(
+        task_id="t",
+        slug="ws",
+        job_kind="prose",
+        object_title="Memo",
+        done=True,
+        exit_code=0,
+    )
+    out = list(
+        stream_events(
+            task,
+            t=translator("zh"),
+            pending_fn=lambda: [Item()],
+            title_fn=lambda i: "ccc",
+        )
+    )
+    prog = next(c for c in out if c.startswith("event: progress"))
+    assert "Memo" in prog
+    assert "ccc" not in prog
+    assert "消化" not in prog
+
+
+def test_run_first_paint_has_progress_and_collapsed_log(tmp_path, monkeypatch):
+    """#157 S3:POST /run 首屏人话+时长,原始日志折叠,无 Running… 状态句。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    (tmp_path / "m.txt").write_text("会议内容")
+    ws.add([tmp_path / "m.txt"])
+    c = TestClient(create_app(tmp_path))
+    r = c.post("/w/ws/run")
+    assert r.status_code == 200
+    body = r.text
+    assert 'id="run-progress"' in body
+    assert "run-progress-text" in body
+    assert "秒" in body or "s" in body or "Starting" in body or "启动" in body
+    assert 'class="run-log-details"' in body
+    assert "<details" in body
+    assert "open" not in body.split("run-log-details", 1)[1].split(">", 1)[0]
+    assert 'sse-swap="done"' not in body
+    # 状态区禁止无修饰 step.running;主按钮仍可用 Running…
+    assert "Running…" not in body.split('id="run-progress"')[1].split("run-btn-wrap")[0]
+    import re
+    m = re.search(r"/w/ws/step/([0-9a-f]+)/stream", body)
+    assert m
+    stream = c.get(f"/w/ws/step/{m.group(1)}/stream").text
+    assert "event: progress" in stream
+    assert "event: done" in stream
+    assert '<div class="log-line">' in stream
+
+
+def test_stream_table_lines_are_separate_blocks(tmp_path):
+    """#157 S1:目录表每行一块级节点。"""
+    rows = [
+        "| 标题 | 类型 | digest |",
+        "|---|---|---|",
+        "| a | 观测 | d1 |",
+        "| b | 观测 | d2 |",
+        "| c | 观测 | d3 |",
+        "one",
+        "two",
+        "three",
+        "four",
+        "five",
+    ]
+    task = StepTask(task_id="t", slug="ws", done=True, exit_code=0, lines=rows)
+    out = list(stream_events(task, t=translator("en")))
+    msgs = [c for c in out if c.startswith("data: ") and "log-line" in c]
+    assert len(msgs) >= 10
+    assert sum(1 for c in msgs if "| 标题 |" in c or "|---|" in c or "| a |" in c) >= 3
 
 
 def test_step_with_target_triggers_restep(tmp_path, monkeypatch):

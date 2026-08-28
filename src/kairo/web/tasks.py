@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -14,7 +15,7 @@ import subprocess
 import threading
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -36,6 +37,17 @@ _REDACT_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 
 TaskKind = Literal["running", "succeeded", "failed", "cancelled", "missing"]
+JobKind = Literal["reconcile", "prose", "other"]
+
+KIND_RECONCILE: JobKind = "reconcile"
+KIND_PROSE: JobKind = "prose"
+KIND_OTHER: JobKind = "other"
+
+_TRANSPORT_RE = re.compile(
+    r"(?i)(reconnecting|falling back from websockets to https|request timed out)"
+)
+_PENDING_BUDGET_S = 0.5
+_PROGRESS_EVERY_S = 1.0
 
 
 @dataclass
@@ -57,6 +69,12 @@ class StepTask:
     cancel_requested: bool = False
     proc: subprocess.Popen | None = None
     lock: threading.Lock = field(default_factory=threading.Lock)
+    created_at: float = field(default_factory=time.time)
+    job_kind: JobKind = KIND_OTHER
+    object_title: str | None = None
+    transport_seen: bool = False
+    saw_pending: bool = False
+    last_phrase: str | None = None
 
 
 def redact_sensitive(text: str) -> str:
@@ -120,6 +138,117 @@ def is_fatal_agent_line(line: str) -> bool:
 
 def has_fatal_agent_error(lines: list[str]) -> bool:
     return any(is_fatal_agent_line(ln) for ln in lines)
+
+
+def is_transport_line(line: str) -> bool:
+    """#157:运行中传输不稳识别;不进入 is_fatal_agent_line。"""
+    if not line or not str(line).strip():
+        return False
+    return bool(_TRANSPORT_RE.search(str(line)))
+
+
+def infer_job_kind(argv: Sequence[str]) -> JobKind:
+    rest = list(argv)
+    if "kairo" in rest:
+        rest = rest[rest.index("kairo") + 1 :]
+    if rest and rest[0] == "prose":
+        return KIND_PROSE
+    if rest and rest[0] in {"run", "step", "re-step", "retry-ref"}:
+        return KIND_RECONCILE
+    return KIND_OTHER
+
+
+def wrap_log_line(line: str) -> str:
+    """一行一块级 HTML,片段内无 LF;空行仍占一行高(CSS min-height)。"""
+    raw = str(line).rstrip("\r\n")
+    raw = raw.replace("\r", " ").replace("\n", " ")
+    return f'<div class="log-line">{html.escape(raw, quote=True)}</div>'
+
+
+def format_elapsed(seconds: float, t: Callable[[str], str]) -> str:
+    n = max(0, int(seconds))
+    if n < 60:
+        return t("progress.elapsed_s").format(n=n)
+    return t("progress.elapsed_m").format(n=n // 60)
+
+
+def phrase_for_work_key(key: str, title: str, t: Callable[[str], str]) -> str:
+    base = key.replace("\\", "/").rsplit("/", 1)[-1]
+    title_e = html.escape(title, quote=True)
+    if base.startswith("transcript"):
+        return t("progress.transcribing").format(title=title_e)
+    if base.startswith("source_text"):
+        return t("progress.extracting").format(title=title_e)
+    if base == "digest.md":
+        return t("progress.digesting").format(title=title_e)
+    if base == "prose.md":
+        return t("progress.prose").format(title=title_e)
+    if key.endswith("understanding.md") or key.endswith("assessment.md"):
+        return t("progress.composing").format(name=html.escape(base, quote=True))
+    return t("progress.running")
+
+
+def _try_pending(pending_fn: Callable[[], list] | None) -> list | None:
+    if pending_fn is None:
+        return None
+    start = time.monotonic()
+    try:
+        items = list(pending_fn())
+    except Exception:
+        return None
+    if time.monotonic() - start > _PENDING_BUDGET_S:
+        return items
+    return items
+
+
+def resolve_progress_phrase(
+    task: StepTask,
+    t: Callable[[str], str],
+    *,
+    pending_fn: Callable[[], list] | None = None,
+    title_fn: Callable[[object], str] | None = None,
+) -> str:
+    if task.job_kind == KIND_PROSE:
+        if task.object_title:
+            return t("progress.prose").format(
+                title=html.escape(task.object_title, quote=True)
+            )
+        return t("progress.running")
+    if task.job_kind != KIND_RECONCILE:
+        return t("progress.running")
+    items = _try_pending(pending_fn)
+    if items is None:
+        return task.last_phrase or t("progress.starting")
+    if items:
+        task.saw_pending = True
+        item = items[0]
+        key = getattr(item, "key", "") or ""
+        title = title_fn(item) if title_fn is not None else key
+        phrase = phrase_for_work_key(key, title or key, t)
+        task.last_phrase = phrase
+        return phrase
+    if task.saw_pending:
+        return t("progress.finishing")
+    return task.last_phrase or t("progress.starting")
+
+
+def render_progress_html(
+    task: StepTask,
+    t: Callable[[str], str],
+    *,
+    pending_fn: Callable[[], list] | None = None,
+    title_fn: Callable[[object], str] | None = None,
+    now: float | None = None,
+) -> str:
+    phrase = resolve_progress_phrase(task, t, pending_fn=pending_fn, title_fn=title_fn)
+    elapsed = format_elapsed((now if now is not None else time.time()) - task.created_at, t)
+    return (
+        f'<span class="run-progress-text">{phrase} · {html.escape(elapsed, quote=True)}</span>'
+    )
+
+
+def render_health_html(t: Callable[[str], str]) -> str:
+    return f'<p class="run-health-msg">{html.escape(t("health.unstable"), quote=True)}</p>'
 
 
 def classify_task(task: StepTask | None) -> TaskResult:
@@ -190,7 +319,15 @@ class TaskRegistry:
                 return None
             return task
 
-    def start(self, slug: str, cwd: Path, argv: list[str]) -> StepTask:
+    def start(
+        self,
+        slug: str,
+        cwd: Path,
+        argv: list[str],
+        *,
+        job_kind: JobKind | None = None,
+        object_title: str | None = None,
+    ) -> StepTask:
         with self._guard:
             tid = self._running_by_slug.get(slug)
             if tid is not None and not self._tasks[tid].done:
@@ -205,7 +342,13 @@ class TaskRegistry:
                 bufsize=1,
                 start_new_session=True,
             )
-            task = StepTask(task_id=task_id, slug=slug, proc=proc)
+            task = StepTask(
+                task_id=task_id,
+                slug=slug,
+                proc=proc,
+                job_kind=job_kind or infer_job_kind(argv),
+                object_title=object_title,
+            )
             self._tasks[task_id] = task
             self._running_by_slug[slug] = task_id
         threading.Thread(target=self._pump, args=(task,), daemon=True).start()
@@ -214,8 +357,10 @@ class TaskRegistry:
     def _pump(self, task: StepTask) -> None:
         assert task.proc is not None and task.proc.stdout is not None
         for raw in task.proc.stdout:
-            line = raw.rstrip("\n")
+            line = raw.rstrip("\r\n")
             with task.lock:
+                if is_transport_line(line):
+                    task.transport_seen = True
                 task.lines.append(line)
                 if len(task.lines) > self._max_lines:
                     del task.lines[: len(task.lines) - self._max_lines]
@@ -240,25 +385,67 @@ class TaskRegistry:
         return True
 
 
-def stream_events(task: StepTask) -> Iterator[str]:
-    """SSE:先回放已缓冲行,再 tail 新行,进程结束推 done(结构化终态)。
+def stream_events(
+    task: StepTask,
+    *,
+    t: Callable[[str], str] | None = None,
+    pending_fn: Callable[[], list] | None = None,
+    title_fn: Callable[[object], str] | None = None,
+) -> Iterator[str]:
+    """SSE:#157 连接后先 progress、(已锁存则) health,再回放 message;结束推 done。
 
     客户端断开时生成器继续在 threadpool 线程中轮询直到 task.done(单用户本地可接受;
     _pump 独立线程,无子进程泄漏)。
     """
+    if t is None:
+        from kairo.web.i18n import translator
+
+        t = translator("en")
+
+    def _progress() -> str:
+        html_frag = render_progress_html(
+            task, t, pending_fn=pending_fn, title_fn=title_fn
+        )
+        return f"event: progress\ndata: {html_frag}\n\n"
+
+    def _health() -> str:
+        return f"event: health\ndata: {render_health_html(t)}\n\n"
+
+    yield _progress()
+    with task.lock:
+        latched = task.transport_seen or any(is_transport_line(x) for x in task.lines)
+        if latched:
+            task.transport_seen = True
+    health_sent = False
+    if latched:
+        yield _health()
+        health_sent = True
+
     idx = 0
+    last_progress = time.monotonic()
     while True:
         with task.lock:
             new = task.lines[idx:]
             done = task.done
+            latched = task.transport_seen
+        hit = any(is_transport_line(line) for line in new)
+        if hit:
+            with task.lock:
+                task.transport_seen = True
+            latched = True
+        if latched and not health_sent:
+            yield _health()
+            health_sent = True
         for line in new:
-            yield f"data: {line}\n\n"
+            yield f"data: {wrap_log_line(line)}\n\n"
         idx += len(new)
+        now = time.monotonic()
+        if now - last_progress >= _PROGRESS_EVERY_S:
+            yield _progress()
+            last_progress = now
         if done:
             result = classify_task(task)
-            # 兼容旧客户端:data 仍可解析为退出码;同时附带 kind/message JSON
             payload = result_payload(result)
-            # 第一字段保持 exit_code 整数可读性:若只要 code 的旧逻辑,JSON 中仍有 exit_code
             yield f"event: done\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
             return
         time.sleep(0.1)
