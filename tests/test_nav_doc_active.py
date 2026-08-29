@@ -48,19 +48,11 @@ def test_workspace_template_toggles_nav_doc_is_active_on_click():
 
 
 def test_workspace_template_clears_nav_active_on_glossary():
-    """打开真名册时清掉左侧 is-active。"""
+    """#174: 课题模板不再 hx-get 打开真名册面板，待办提示走统一页。"""
     html = _WORKSPACE.read_text(encoding="utf-8")
-    # 真名册入口存在
-    assert "/glossary" in html
-    # 与清除 is-active 在同一脚本区有关联（glossary 路径或按钮 + remove is-active）
-    assert "is-active" in html
-    # 真名册按钮或 glossary 路径附近应触发清除
-    assert "glossary" in html.lower()
-    # 具体契约：存在清除所有 nav-doc is-active 的逻辑，且脚本里提到 glossary 相关选择
-    # （实现可用 btn 的 hx-get 含 glossary，或 class 钩子）
-    idx_gl = html.find("/glossary")
-    assert idx_gl >= 0
-    # 脚本中有 querySelectorAll('.nav-doc') 或等价的全量清除
+    assert "hx-get=\"/w/{{ slug | urlencode }}/glossary\"" not in html
+    assert "gl-todo-hint" in html
+    assert "/glossary?workspace=" in html
     assert "querySelectorAll" in html
     assert ".nav-doc" in html
 

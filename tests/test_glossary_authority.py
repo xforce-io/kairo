@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -99,19 +101,25 @@ def test_web_root_add_updates_uncovered_workspace(tmp_path):
     assert "/glossary" in dash.text
     preview = c.get("/glossary")
     assert preview.status_code == 200
-    assert "天溯" in preview.text
     assert "b" in preview.text
+    preview_b = c.get("/glossary?workspace=b")
+    assert "天溯" in preview_b.text
     r = c.post("/glossary", data={"name": "天溯", "note": "公共"})
     assert r.status_code == 200
     assert "天溯" in r.text
     assert "已保存" in r.text or "Saved" in r.text
     assert (root / "glossary.yaml").is_file()
-    view_a = c.get("/w/a/glossary")
-    assert "继承" in view_a.text or "inherited" in view_a.text
-    assert "公共" in view_a.text
-    view_b = c.get("/w/b/glossary")
-    assert "覆盖" in view_b.text or "override" in view_b.text
-    assert "本地" in view_b.text
+    view_a = c.get("/glossary?workspace=a")
+    panel_a = re.search(r'<section class="gl-ws-panel".*?</section>', view_a.text, re.S)
+    assert panel_a
+    assert "天溯" not in panel_a.group(0)
+    shared = re.search(r'<section class="gl-shared".*?</section>', view_a.text, re.S)
+    assert shared and "天溯" in shared.group(0)
+    view_b = c.get("/glossary?workspace=b")
+    panel_b = re.search(r'<section class="gl-ws-panel".*?</section>', view_b.text, re.S)
+    assert panel_b
+    assert "天溯" in panel_b.group(0)
+    assert 'action="/w/b/glossary' in panel_b.group(0)
 
 
 def test_web_workspace_cannot_write_shared(tmp_path):
@@ -176,7 +184,10 @@ def test_glossary_change_marks_pending_without_autostep(tmp_path):
 
     items = DigestRule(ws, StubProvider()).discover()
     assert items == [] or not items[0].is_stale(ws.read_state())
-    page = TestClient(create_app(tmp_path / "root")).get("/w/ws/glossary")
+    page = TestClient(create_app(tmp_path / "root")).get("/glossary?workspace=ws")
     assert page.status_code == 200
     assert f'name="target" value="{rid}"' in page.text
     assert f'value="{key}"' not in page.text
+    ws_page = TestClient(create_app(tmp_path / "root")).get("/w/ws")
+    assert 'hx-post="/w/ws/step"' not in ws_page.text or 'name="target"' not in ws_page.text
+    assert f'name="target" value="{rid}"' not in ws_page.text

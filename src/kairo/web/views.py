@@ -559,6 +559,7 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
                 else {}
             ),
             **_run_button_ctx(request, ws, slug),
+            "glossary_todo_n": _glossary_todo_n(ws, Path(request.app.state.root)),
         },
     )
 
@@ -957,7 +958,18 @@ def _parse_tags(tags: str) -> list[str]:
     return [p.strip() for p in tags.replace("，", ",").split(",") if p.strip()]
 
 
-def _glossary_fragment(
+def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
+    from kairo.glossary import GlossaryError
+    from kairo.glossary_review import todo_count
+
+    try:
+        pending = ws.glossary_pending(serve_root=serve_root)
+    except GlossaryError:
+        pending = ["unreadable"]
+    return todo_count(ws.root, pending=pending)
+
+
+def _workspace_glossary_ctx(
     request: Request,
     ws: Workspace,
     slug: str,
@@ -965,36 +977,17 @@ def _glossary_fragment(
     error: str | None = None,
     error_scope: str | None = None,
     form: dict | None = None,
-) -> HTMLResponse:
-    from kairo.glossary import (
-        GlossaryError,
-        machine_migration_hint,
-        workspace_effective,
-    )
+) -> dict:
+    from kairo.glossary import GlossaryError, load_workspace_glossary, workspace_effective
 
     t = _t(request)
     load_failed = False
-    effective = []
     local = []
     pending: list = []
     candidates: list = []
     extract_errors: dict = {}
-    eff_hash = ""
     try:
-        items = workspace_effective(ws.root, serve_root=Path(request.app.state.root))
-        effective = [
-            {
-                "name": i.entry.name,
-                "note": i.entry.note,
-                "aka": ", ".join(i.entry.aka),
-                "tags": ", ".join(i.entry.tags),
-                "origin": i.origin,
-            }
-            for i in items
-        ]
-        local = _entry_rows([i.entry for i in items if i.origin != "inherited"])
-        from kairo.glossary import load_workspace_glossary
-
+        workspace_effective(ws.root, serve_root=Path(request.app.state.root))
         local = _entry_rows(load_workspace_glossary(ws.root))
         from kairo.workspace import restep_target_for
 
@@ -1015,43 +1008,49 @@ def _glossary_fragment(
         load_failed = True
         error = error or str(e)
     form = form or {}
-    origin_label = {
-        "inherited": t("glossary.origin_inherited"),
-        "local": t("glossary.origin_local"),
-        "override": t("glossary.origin_override"),
+    return {
+        "slug": slug,
+        "local_entries": local,
+        "local_count": len(local),
+        "error": error,
+        "error_scope": error_scope,
+        "load_failed": load_failed,
+        "form_name": form.get("name", ""),
+        "form_note": form.get("note", ""),
+        "form_aka": form.get("aka", ""),
+        "form_tags": form.get("tags", ""),
+        "pending": pending,
+        "candidates": candidates if not load_failed else [],
+        "extract_errors": extract_errors if not load_failed else {},
     }
-    for row in effective:
-        row["origin_label"] = origin_label.get(row["origin"], row["origin"])
-    return _render(
+
+
+def _glossary_fragment(
+    request: Request,
+    ws: Workspace,
+    slug: str,
+    *,
+    error: str | None = None,
+    error_scope: str | None = None,
+    form: dict | None = None,
+) -> HTMLResponse:
+    """写完后回到统一维护页，并选中刚写入的 workspace。"""
+    return _root_glossary_page(
         request,
-        "_glossary.html",
-        {
-            "slug": slug,
-            "effective_entries": effective,
-            "local_entries": local,
-            "local_count": len(local),
-            "effective_count": len(effective),
-            "machine_hint": machine_migration_hint(),
-            "hint": t("glossary.restep_hint"),
-            "error": error,
-            "error_scope": error_scope,
-            "load_failed": load_failed,
-            "form_name": form.get("name", ""),
-            "form_note": form.get("note", ""),
-            "form_aka": form.get("aka", ""),
-            "form_tags": form.get("tags", ""),
-            "pending": pending,
-            "eff_hash": eff_hash,
-            "candidates": candidates if not load_failed else [],
-            "extract_errors": extract_errors if not load_failed else {},
-        },
+        selected_slug=slug,
+        ws_error=error,
+        ws_error_scope=error_scope,
+        ws_form=form,
     )
 
 
-@router.get("/w/{slug}/glossary", response_class=HTMLResponse)
-def glossary_view(request: Request, slug: str) -> HTMLResponse:
-    """#163:右栏真名册(生效视图 + 本 workspace)。"""
-    return _glossary_fragment(request, _open(request, slug), slug)
+@router.get("/w/{slug}/glossary")
+def glossary_view(request: Request, slug: str) -> RedirectResponse:
+    """旧右栏入口转到统一维护页。"""
+    _open(request, slug)
+    return RedirectResponse(
+        url=f"/glossary?workspace={quote(slug)}", status_code=303
+    )
 
 
 @router.post("/w/{slug}/glossary", response_class=HTMLResponse)
@@ -1188,6 +1187,10 @@ def _root_glossary_page(
     error: str | None = None,
     form: dict | None = None,
     success: bool = False,
+    selected_slug: str | None = None,
+    ws_error: str | None = None,
+    ws_error_scope: str | None = None,
+    ws_form: dict | None = None,
 ) -> HTMLResponse:
     from kairo.glossary import (
         GlossaryError,
@@ -1204,28 +1207,38 @@ def _root_glossary_page(
     entries = []
     impact = []
     promotions = []
+    scanned = []
     try:
+        scanned = list(scan_workspaces(serve))
+        slugs = {s.slug for s in scanned}
+        query_ws = (selected_slug or request.query_params.get("workspace") or "").strip()
+        selected_slug = query_ws if query_ws in slugs else None
         entries = load_glossary_file(root_glossary_path(serve))
         names = {e.name for e in entries}
         cand = (form.get("name") or "").strip()
         if cand:
             names.add(cand)
-        for s in scan_workspaces(serve):
+        for s in scanned:
             local = load_workspace_glossary(serve / s.slug)
             local_names = [e.name for e in local]
             ov = [n for n in local_names if n in names]
+            try:
+                todo_n = _glossary_todo_n(_open(request, s.slug), serve)
+            except HTTPException:
+                todo_n = 0
             impact.append(
                 {
                     "slug": s.slug,
                     "overrides": ov,
                     "override_n": len(ov),
                     "local_names": local_names,
+                    "todo_n": todo_n,
                 }
             )
         from kairo.glossary_review import STATUS_PENDING_ROOT, load_review
 
         promotions = []
-        for s in scan_workspaces(serve):
+        for s in scanned:
             for c in load_review(serve / s.slug).candidates:
                 if c.status == STATUS_PENDING_ROOT:
                     row = c.model_dump()
@@ -1234,26 +1247,53 @@ def _root_glossary_page(
     except GlossaryError as e:
         load_failed = True
         error = error or str(e)
-    return _render(
-        request,
-        "root_glossary.html",
-        {
-            "entries": _entry_rows(entries),
-            "count": len(entries),
-            "impact": impact,
-            "ws_n": len(impact),
-            "override_ws_n": sum(1 for i in impact if i["override_n"]),
-            "machine_hint": machine_migration_hint(),
-            "error": error,
-            "success": success,
-            "load_failed": load_failed,
-            "form_name": form.get("name", ""),
-            "form_note": form.get("note", ""),
-            "form_aka": form.get("aka", ""),
-            "form_tags": form.get("tags", ""),
-            "promotions": promotions,
-        },
-    )
+        selected_slug = None
+    ctx = {
+        "nav_active": "glossary",
+        "entries": _entry_rows(entries),
+        "count": len(entries),
+        "impact": impact,
+        "ws_n": len(impact),
+        "override_ws_n": sum(1 for i in impact if i["override_n"]),
+        "machine_hint": machine_migration_hint(),
+        "error": error,
+        "success": success,
+        "load_failed": load_failed,
+        "shared_form_name": form.get("name", ""),
+        "shared_form_note": form.get("note", ""),
+        "shared_form_aka": form.get("aka", ""),
+        "shared_form_tags": form.get("tags", ""),
+        "form_name": "",
+        "form_note": "",
+        "form_aka": "",
+        "form_tags": "",
+        "promotions": promotions,
+        "selected_slug": selected_slug,
+        "slug": selected_slug or "",
+        "local_entries": [],
+        "local_count": 0,
+        "pending": [],
+        "candidates": [],
+        "extract_errors": {},
+        "error_scope": ws_error_scope,
+        "ws_panel_error": None,
+    }
+    if selected_slug and not load_failed:
+        ws_ctx = _workspace_glossary_ctx(
+            request,
+            _open(request, selected_slug),
+            selected_slug,
+            error=ws_error,
+            error_scope=ws_error_scope,
+            form=ws_form,
+        )
+        root_error = ctx["error"]
+        ctx.update(ws_ctx)
+        ctx["ws_panel_error"] = ws_ctx.get("error")
+        ctx["error"] = root_error
+    elif ws_error:
+        ctx["error"] = ctx["error"] or ws_error
+    return _render(request, "root_glossary.html", ctx)
 
 
 @router.get("/glossary", response_class=HTMLResponse)

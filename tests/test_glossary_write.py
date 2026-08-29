@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import yaml
 
 from kairo.workspace import Workspace
@@ -55,12 +57,89 @@ def _client(root):
     return TestClient(create_app(root))
 
 
+def _console_nav(html: str) -> str:
+    m = re.search(r'<nav class="console-nav"[^>]*>.*?</nav>', html, re.S)
+    assert m, "missing console-nav"
+    return m.group(0)
+
+
+def _header(html: str) -> str:
+    m = re.search(r"<header class=\"top\">.*?</header>", html, re.S)
+    assert m, "missing header"
+    return m.group(0)
+
+
+def _ws_panel(html: str) -> str | None:
+    m = re.search(r'<section class="gl-ws-panel".*?</section>', html, re.S)
+    return m.group(0) if m else None
+
+
 def test_web_glossary_button_on_workspace(tmp_path):
+    """#174 S2: 课题页无维护按钮；顶栏弱链去 /glossary，不进主导航。"""
     Workspace.init(tmp_path / "ws", topic="t")
     r = _client(tmp_path).get("/w/ws")
     assert r.status_code == 200
-    assert 'hx-get="/w/ws/glossary"' in r.text
-    assert "真名册" in r.text or "Glossary" in r.text
+    assert 'hx-get="/w/ws/glossary"' not in r.text
+    assert 'class="gl-todo-hint"' not in r.text
+    nav = _console_nav(r.text)
+    assert 'href="/glossary"' not in nav
+    header = _header(r.text)
+    assert re.search(r'href="/glossary"', header)
+    assert "Glossary" in header or "真名册" in header
+
+
+def test_workspace_todo_hint_is_one_line(tmp_path):
+    """#174 S2: 有待办时恰好一行，href 含 ?workspace=。"""
+    from kairo.glossary_review import ingest_candidates
+
+    root = tmp_path
+    ws = Workspace.init(root / "ws", topic="t")
+    src = root / "n.txt"
+    src.write_text("讨论天溯系统")
+    rid = ws.add([src])
+    digest = ws.root / "references" / rid / "digest.md"
+    digest.parent.mkdir(parents=True, exist_ok=True)
+    digest.write_text("天溯系统\n")
+    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    html = _client(root).get("/w/ws").text
+    hints = re.findall(
+        r'<a class="gl-todo-hint"[^>]*href="([^"]+)"', html
+    )
+    assert len(hints) == 1
+    assert hints[0] == "/glossary?workspace=ws"
+    assert 'hx-get="/w/ws/glossary"' not in html
+    assert 'name="scope" value="workspace"' not in html
+
+
+def test_glossary_page_hides_local_until_workspace_selected(tmp_path):
+    """#174 S1: 未选工作区无本地表；?workspace= 只展开该区。"""
+    Workspace.init(tmp_path / "a", topic="a")
+    wb = Workspace.init(tmp_path / "b", topic="b")
+    wb.add_glossary_entry("本区乙", note="仅 b")
+    c = _client(tmp_path)
+    bare = c.get("/glossary")
+    assert bare.status_code == 200
+    assert 'action="/glossary"' in bare.text
+    assert _ws_panel(bare.text) is None
+    assert "本区乙" not in bare.text
+    assert 'href="/glossary?workspace=a"' in bare.text
+    assert 'href="/glossary?workspace=b"' in bare.text
+    selected = c.get("/glossary?workspace=b")
+    panel = _ws_panel(selected.text)
+    assert panel is not None
+    assert "本区乙" in panel
+    assert 'action="/w/b/glossary"' in panel
+    a_page = c.get("/glossary?workspace=a")
+    a_panel = _ws_panel(a_page.text)
+    assert a_panel is not None
+    assert "本区乙" not in a_panel
+    assert 'action="/w/a/glossary"' in a_panel
+
+
+def test_glossary_invalid_workspace_query_not_selected(tmp_path):
+    Workspace.init(tmp_path / "ws", topic="t")
+    html = _client(tmp_path).get("/glossary?workspace=nope").text
+    assert _ws_panel(html) is None
 
 
 def test_web_glossary_add_and_delete(tmp_path):
