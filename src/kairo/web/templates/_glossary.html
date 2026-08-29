@@ -45,10 +45,13 @@
     <ul class="dlg-bullets">
       {% for c in candidates %}
       <li>
-        <strong>{{ c.name }}</strong> ({{ c.status }})
+        <strong>{{ c.name }}</strong> ({{ c.status_label }})
         <div class="gl-note">{{ c.quote }}</div>
         <a href="/w/{{ slug | urlencode }}/ref/{{ c.ref_id }}">{{ c.ref_id }}</a>
         {% if c.reject_reason %}<div class="gl-aka">{{ c.reject_reason }}</div>{% endif %}
+        {% if c.status == 'pending_root' %}
+        <div class="dlg-hint">{{ t('glossary.awaiting_root_hint') }}</div>
+        {% else %}
         <form hx-post="/w/{{ slug | urlencode }}/glossary/candidates/{{ c.id }}/accept"
               hx-target="#meta" hx-swap="innerHTML" style="display:inline">
           <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.accept') }}</button>
@@ -66,6 +69,7 @@
           <input type="text" name="existing_name" placeholder="{{ t('glossary.merge_ph') }}">
           <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.merge') }}</button>
         </form>
+        {% endif %}
       </li>
       {% endfor %}
     </ul>

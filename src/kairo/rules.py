@@ -533,7 +533,7 @@ class DigestRule:
             )
             ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
             if ref_id:
-                extract_after_digest(self.ws, ref_id, content)
+                extract_after_digest(self.ws, ref_id, content, provider=self.provider)
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试

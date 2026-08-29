@@ -241,6 +241,9 @@ class StubProvider:
             content = _stub_compose_document(
                 config.persona, config.context, artifact_dir=config.artifact_dir
             )
+        elif art == "candidates.yaml":
+            # 候选提取需要模型语义；离线 stub 保守地不提出任何候选。
+            content = "[]\n"
         else:
             seed = f"{config.persona}\n{config.context}"
             digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]

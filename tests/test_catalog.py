@@ -165,7 +165,7 @@ def test_digest_context_is_catalog_not_body(tmp_path):
     t = tmp_path / "meeting.txt"
     t.write_text("会议正文内容ABC")
     ws.add([t])
-    captured = {}
+    captured = []
 
     class Probe:
         name = "probe"
@@ -173,18 +173,24 @@ def test_digest_context_is_catalog_not_body(tmp_path):
         supports_read_dirs = True
 
         def run(self, config, signal=None):
-            captured["context"] = config.context
-            captured["read_dirs"] = list(config.read_dirs)
+            captured.append(
+                {
+                    "artifact": config.artifact,
+                    "context": config.context,
+                    "read_dirs": list(config.read_dirs),
+                }
+            )
             dest = config.artifact_dir / (config.artifact or "digest.md")
             dest.write_text("D")
             return None
 
     DigestRule(ws, Probe()).discover()[0].run(State())
-    ctx = captured["context"]
+    digest_call = next(call for call in captured if call["artifact"] == "digest.md")
+    ctx = digest_call["context"]
     assert "会议正文内容ABC" not in ctx
     assert "材料目录" in ctx
     assert "必读" in ctx
-    assert captured["read_dirs"]
+    assert digest_call["read_dirs"]
 
 
 def test_compose_skips_judgment_target(tmp_path):
