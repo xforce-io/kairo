@@ -1,7 +1,5 @@
 """#182 知识条目、匹配器、审核与 Web 主路径。"""
 
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from kairo.engine import step

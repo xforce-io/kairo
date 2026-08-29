@@ -464,14 +464,16 @@ def test_normalize_persona_carries_readability_discipline_and_glossary(tmp_path,
     con.glossary = [GlossaryEntry(name="灵犀系统", aka=["灵西"])]
     _save_constitution(ws, con)
     ws2 = Workspace(ws.root)
-    _stub_asr_transcript(ws2, tmp_path, monkeypatch)
+    rid = _stub_asr_transcript(ws2, tmp_path, monkeypatch)
+    transcript = ws2.root / f"references/{rid}/transcript.md"
+    transcript.write_text(transcript.read_text() + "\n灵西\n")
     prov = _RunOnlyProvider()
     NormalizeRule(ws2, prov).discover()[0].run(State())
     persona = prov.calls[0].persona
     assert "易读" in persona  # 可读优化目标(prose 供人通读)
     assert "不是纪要" in persona  # 与 digest 区分:这是全文,不是摘要
     assert "只输出文档正文" in persona  # 输出纪律 P1
-    assert "灵犀系统" in persona  # 真名册注入
+    assert "灵犀系统" in persona  # 命中的 legacy 真名册按需迁为知识上下文
 
 
 # ---- Digest ----
@@ -968,4 +970,3 @@ def test_compose_single_class_keeps_today_behavior(tmp_path):
     assert "·观测" not in ctx  # 单类不打标签
     persona = prov.calls[0].persona
     assert "源分类" not in persona  # 单类不注入前言
-
