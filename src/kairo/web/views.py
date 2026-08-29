@@ -970,11 +970,15 @@ def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
     from kairo.glossary import GlossaryError
     from kairo.glossary_review import todo_count
 
+    knowledge_todos = 0
     try:
+        from kairo.knowledge_review import todo_count as knowledge_todo_count
+
+        knowledge_todos = knowledge_todo_count(ws.root)
         pending = ws.glossary_pending(serve_root=serve_root)
     except GlossaryError:
         pending = ["unreadable"]
-    return todo_count(ws.root, pending=pending)
+    return knowledge_todos + todo_count(ws.root, pending=pending)
 
 
 def _workspace_glossary_ctx(
@@ -1309,8 +1313,19 @@ def _root_glossary_page(
 
 
 @router.get("/glossary", response_class=HTMLResponse)
-def root_glossary_view(request: Request) -> HTMLResponse:
+def root_glossary_view(request: Request):
     """#163:Root 首页公共真名册。"""
+    # #182：一旦已写入 v2，旧书签进入同一知识维护面；尚未迁移的旧册继续可读。
+    from kairo.knowledge import load_global
+
+    serve = Path(request.app.state.root)
+    try:
+        _document, legacy = load_global(serve)
+        if (serve / "glossary.yaml").is_file() and not legacy:
+            query = request.url.query
+            return RedirectResponse(f"/knowledge{('?' + query) if query else ''}", status_code=303)
+    except Exception:
+        pass
     return _root_glossary_page(request)
 
 
@@ -1446,6 +1461,185 @@ def root_candidate_reject(
     return _root_glossary_page(
         request, success=True, selected_slug=workspace or None
     )
+
+
+# #182 统一知识页。旧 /glossary 保留为兼容维护入口；新的写入和候选闭环只走此页。
+def _knowledge_page(
+    request: Request, *, selected_slug: str | None = None, error: str | None = None, success: bool = False
+) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError, load_global, load_workspace
+    from kairo.knowledge_review import load_review
+
+    serve = Path(request.app.state.root)
+    slugs = [item.slug for item in scan_workspaces(serve)]
+    selected = selected_slug or request.query_params.get("workspace")
+    selected = selected if selected in slugs else None
+    global_entries = []
+    local_entries = []
+    candidates = []
+    extract_errors = {}
+    promotions = []
+    try:
+        global_entries = load_global(serve)[0].entries
+        for slug in slugs:
+            review = load_review(serve / slug)
+            for candidate in review.candidates:
+                if candidate.status == "pending_global":
+                    row = candidate.model_dump()
+                    row["slug"] = slug
+                    promotions.append(row)
+        if selected:
+            local_entries = load_workspace(serve / selected)[0].entries
+            review = load_review(serve / selected)
+            for candidate in review.candidates:
+                row = candidate.model_dump()
+                row["available"] = (serve / selected / candidate.path).is_file()
+                candidates.append(row)
+            extract_errors = review.extract_errors
+            for entry in local_entries:
+                for source in entry.sources:
+                    # 模型允许额外显示字段；不写回存储。
+                    source.__dict__["available"] = (serve / selected / source.path).is_file()
+    except KnowledgeError as exc:
+        error = error or str(exc)
+    return _render(
+        request,
+        "knowledge.html",
+        {
+            "nav_active": "knowledge",
+            "slugs": slugs,
+            "selected_slug": selected,
+            "global_entries": global_entries,
+            "local_entries": local_entries,
+            "candidates": candidates,
+            "promotions": promotions,
+            "extract_errors": extract_errors,
+            "error": error,
+            "success": success,
+        },
+    )
+
+
+@router.get("/knowledge", response_class=HTMLResponse)
+def knowledge_view(request: Request) -> HTMLResponse:
+    return _knowledge_page(request)
+
+
+def _knowledge_aliases(raw: str):
+    from kairo.knowledge import KnowledgeAlias
+
+    return [KnowledgeAlias(value=value) for value in _parse_aka(raw)]
+
+
+@router.post("/knowledge/global", response_class=HTMLResponse)
+def knowledge_global_add(
+    request: Request,
+    title: str = Form(...),
+    description: str = Form(""),
+    aliases: str = Form(""),
+    tags: str = Form(""),
+    workspace: str = Form(""),
+) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError, load_global, new_entry, save_global, validate_entries
+
+    serve = Path(request.app.state.root)
+    try:
+        document, _ = load_global(serve)
+        entry = new_entry(title=title, scope="global", aliases=_knowledge_aliases(aliases), description=description, tags=_parse_tags(tags))
+        validate_entries([*document.entries, entry], scope="global")
+        document.entries.append(entry)
+        save_global(serve, document)
+    except (KnowledgeError, ValueError) as exc:
+        return _knowledge_page(request, selected_slug=workspace or None, error=str(exc))
+    return _knowledge_page(request, selected_slug=workspace or None, success=True)
+
+
+@router.post("/w/{slug}/knowledge", response_class=HTMLResponse)
+def knowledge_workspace_add(
+    request: Request, slug: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form("")
+) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError, load_workspace, new_entry, save_workspace, validate_entries
+
+    ws = _open(request, slug)
+    try:
+        document, _ = load_workspace(ws.root)
+        entry = new_entry(title=title, scope="workspace", aliases=_knowledge_aliases(aliases), description=description, tags=_parse_tags(tags))
+        validate_entries([*document.entries, entry], scope="workspace")
+        document.entries.append(entry)
+        save_workspace(ws.root, document)
+    except (KnowledgeError, ValueError) as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
+
+
+@router.post("/w/{slug}/knowledge/{entry_id}/obsolete", response_class=HTMLResponse)
+def knowledge_obsolete(request: Request, slug: str, entry_id: str) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError
+    from kairo.knowledge_review import set_obsolete
+
+    try:
+        set_obsolete(_open(request, slug).root, entry_id)
+    except KnowledgeError as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
+
+
+@router.post("/w/{slug}/knowledge/{entry_id}", response_class=HTMLResponse)
+def knowledge_update(
+    request: Request, slug: str, entry_id: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form("")
+) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError
+    from kairo.knowledge_review import update_workspace_entry
+
+    try:
+        update_workspace_entry(_open(request, slug).root, entry_id, title=title, description=description, aliases=_knowledge_aliases(aliases), tags=_parse_tags(tags))
+    except KnowledgeError as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
+
+
+@router.post("/w/{slug}/knowledge/candidates/{candidate_id}/{action}", response_class=HTMLResponse)
+def knowledge_candidate_action(request: Request, slug: str, candidate_id: str, action: str, entry_id: str = Form("")) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError
+    from kairo.knowledge_review import accept_workspace, ignore, merge_workspace, promote
+
+    try:
+        root = _open(request, slug).root
+        if action == "accept":
+            accept_workspace(root, candidate_id)
+        elif action == "ignore":
+            ignore(root, candidate_id)
+        elif action == "promote":
+            promote(root, candidate_id)
+        elif action == "merge":
+            merge_workspace(root, candidate_id, entry_id)
+        else:
+            raise KnowledgeError(f"未知候选动作:{action}")
+    except KnowledgeError as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
+
+
+@router.post("/knowledge/candidates/{slug}/{candidate_id}/{action}", response_class=HTMLResponse)
+def knowledge_global_action(
+    request: Request, slug: str, candidate_id: str, action: str, reason: str = Form(""), entry_id: str = Form("")
+) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError
+    from kairo.knowledge_review import accept_global, merge_global, reject_global
+
+    try:
+        root = _open(request, slug).root
+        if action == "accept":
+            accept_global(Path(request.app.state.root), root, candidate_id)
+        elif action == "merge":
+            merge_global(Path(request.app.state.root), root, candidate_id, entry_id)
+        elif action == "reject":
+            reject_global(root, candidate_id, reason)
+        else:
+            raise KnowledgeError(f"未知公共审核动作:{action}")
+    except KnowledgeError as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
 
 
 @router.post("/w/{slug}/corpus", response_class=HTMLResponse)
@@ -1640,6 +1834,21 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
             lines.append("</ul>")
         else:
             lines.append(f'<p class="muted">{t("run.done_ok")}</p>')
+        try:
+            from kairo.knowledge_review import load_review
+
+            review = load_review(ws.root)
+            pending_knowledge = sum(c.status in {"pending", "pending_global"} for c in review.candidates)
+            if pending_knowledge:
+                lines.append(
+                    f'<p class="run-summary-meta"><a href="/knowledge?workspace={quote(slug)}">知识候选 {pending_knowledge} 项待处理</a></p>'
+                )
+            elif review.extract_errors:
+                lines.append('<p class="run-summary-meta">Digest/Compose 已完成；知识候选提取失败，可重试。</p>')
+            else:
+                lines.append('<p class="run-summary-meta">未命中已确认知识，未注入知识上下文，或本次无新候选。</p>')
+        except Exception:
+            pass
     # 任务结束后释放运行锁;OOB 刷新主按钮、活 target 圆点与元信息(#180)
     lines.append(_run_status_oob(request, ws, slug, t))
     return HTMLResponse("".join(lines))

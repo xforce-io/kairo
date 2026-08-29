@@ -74,18 +74,18 @@ def _ws_panel(html: str) -> str | None:
     return m.group(0) if m else None
 
 
-def test_web_glossary_button_on_workspace(tmp_path):
-    """#174 S2: 课题页无维护按钮；顶栏弱链去 /glossary，不进主导航。"""
+def test_web_knowledge_button_on_workspace(tmp_path):
+    """#182: 课题页无维护按钮；顶栏弱链去 /knowledge，不进主导航。"""
     Workspace.init(tmp_path / "ws", topic="t")
     r = _client(tmp_path).get("/w/ws")
     assert r.status_code == 200
     assert 'hx-get="/w/ws/glossary"' not in r.text
     assert 'class="gl-todo-hint"' not in r.text
     nav = _console_nav(r.text)
-    assert 'href="/glossary"' not in nav
+    assert 'href="/knowledge"' not in nav
     header = _header(r.text)
-    assert re.search(r'href="/glossary"', header)
-    assert "Glossary" in header or "真名册" in header
+    assert re.search(r'href="/knowledge"', header)
+    assert "Knowledge" in header or "知识" in header
 
 
 def test_workspace_todo_hint_is_one_line(tmp_path):
@@ -106,7 +106,7 @@ def test_workspace_todo_hint_is_one_line(tmp_path):
         r'<a class="gl-todo-hint"[^>]*href="([^"]+)"', html
     )
     assert len(hints) == 1
-    assert hints[0] == "/glossary?workspace=ws"
+    assert hints[0] == "/knowledge?workspace=ws"
     assert 'hx-get="/w/ws/glossary"' not in html
     assert 'name="scope" value="workspace"' not in html
 

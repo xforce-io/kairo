@@ -62,6 +62,35 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
+def _knowledge_context(ws, text: str) -> tuple[str, str | None]:
+    """#182：调用方决定扫描范围；知识损坏时不注入不完整集合。"""
+    try:
+        from kairo.knowledge import current_hash, effective_entries, load_global, load_workspace
+        from kairo.knowledge_matcher import KnowledgeMatcher, format_knowledge_context
+
+        entries = effective_entries(ws.root.parent, ws.root)
+        result = KnowledgeMatcher(entries).match(text)
+        # 旧真名册尚未写入 v2 前保留既有提示契约；首次知识写入后不再全量注入。
+        legacy = load_global(ws.root.parent)[1] or load_workspace(ws.root)[1]
+        try:
+            prefix = ws.glossary_reference() if legacy else ""
+        except Exception:
+            prefix = ""
+        return prefix + format_knowledge_context(result), current_hash(ws.root.parent, ws.root)
+    except Exception:
+        return "", None
+
+
+def _legacy_glossary_hash(ws) -> str | None:
+    """迁移后 v2 文件不再可由旧真名册读取；保留旧 advisory 的兼容空值。"""
+    try:
+        from kairo.glossary import current_effective_hash
+
+        return current_effective_hash(ws.root)
+    except Exception:
+        return None
+
+
 def safe_provider_summary(
     exc: BaseException | str, *, max_len: int = _PROVIDER_SUMMARY_MAX
 ) -> str:
@@ -388,15 +417,13 @@ class NormalizeRule:
                 )
             )
             self.ws.write_manifest(ref_id, m)
-            from kairo.glossary import current_effective_hash
-
             state.products[key] = ProductState(
                 input_hash=input_hash,
                 produced_by={
                     "provider": self.provider.name,
                     "model": self.provider.model,
                 },
-                glossary_hash=current_effective_hash(self.ws.root),
+                glossary_hash=_legacy_glossary_hash(self.ws),
             )
 
         def is_stale(state: State) -> bool:
@@ -505,9 +532,10 @@ class DigestRule:
         input_hash = _hash(fingerprint)
 
         def run(state: State) -> None:
+            knowledge_context, knowledge_hash = _knowledge_context(self.ws, body)
             persona = (
                 self.prompt
-                + self.ws.glossary_reference()
+                + knowledge_context
                 + _CATALOG_DISCIPLINE
                 + _OUTPUT_DISCIPLINE
             )
@@ -537,8 +565,7 @@ class DigestRule:
                 )
                 return
             (self.ws.root / key).write_text(content)
-            from kairo.glossary import current_effective_hash
-            from kairo.glossary_review import extract_after_digest
+            from kairo.knowledge_review import extract_after_success
 
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -546,11 +573,26 @@ class DigestRule:
                     "provider": self.provider.name,
                     "model": self.provider.model,
                 },
-                glossary_hash=current_effective_hash(self.ws.root),
+                glossary_hash=_legacy_glossary_hash(self.ws),
+                knowledge_hash=knowledge_hash,
             )
             ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
             if ref_id:
-                extract_after_digest(self.ws, ref_id, content, provider=self.provider)
+                extract_after_success(
+                    self.ws.root,
+                    self.ws.root.parent,
+                    source_kind="digest",
+                    path=key,
+                    text=content,
+                    provider=self.provider,
+                )
+                # 旧审核文件仅在未迁移 workspace 的兼容期继续填充。
+                from kairo.knowledge import load_workspace
+
+                if load_workspace(self.ws.root)[1]:
+                    from kairo.glossary_review import extract_after_digest
+
+                    extract_after_digest(self.ws, ref_id, content, provider=self.provider)
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试
@@ -741,6 +783,13 @@ class ComposeRule:
                 + format_source_catalog_block(catalog)
                 + f"\n本步必读 Δdigest:{len(use_delta)} 条。\n"
             )
+            # #182：即使显式全量重综合，也只按本轮 delta 取知识上下文。
+            delta_text = "\n\n".join(
+                (self.ws.root / path).read_text()
+                for path in sorted(delta)
+                if (self.ws.root / path).is_file()
+            )
+            knowledge_context, knowledge_hash = _knowledge_context(self.ws, delta_text)
             layer = getattr(target, "layer", None) or "fact"
             budget_discipline = (
                 "\n- 完整 `understanding.md`（含标题、空白、正文、来源索引）不得超过 "
@@ -753,7 +802,7 @@ class ComposeRule:
                     self.provider,
                     target.fold_protocol
                     + provenance_protocol_for(layer)
-                    + self.ws.glossary_reference()
+                    + knowledge_context
                     + reference_section
                     + _CATALOG_DISCIPLINE
                     + _OUTPUT_DISCIPLINE
@@ -844,13 +893,22 @@ class ComposeRule:
             ts.diagnostic = None  # 成功清除 #98 诊断
             ts.retry_reason = None
             ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
-            from kairo.glossary import current_effective_hash
-
-            ts.glossary_hash = current_effective_hash(self.ws.root)
+            ts.glossary_hash = _legacy_glossary_hash(self.ws)
+            ts.knowledge_hash = knowledge_hash
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts
+            from kairo.knowledge_review import extract_after_success
+
+            extract_after_success(
+                self.ws.root,
+                self.ws.root.parent,
+                source_kind="compose",
+                path=key,
+                text=content,
+                provider=self.provider,
+            )
 
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)

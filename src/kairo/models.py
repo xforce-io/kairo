@@ -268,6 +268,7 @@ class ProductState(BaseModel):
     reason: str | None = None
     diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
     glossary_hash: str | None = None  # #163;缺省=旧产物
+    knowledge_hash: str | None = None  # #182;仅 advisory，不进入 input_hash
 
 
 class TargetState(BaseModel):
@@ -284,6 +285,7 @@ class TargetState(BaseModel):
     diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
     retry_reason: str | None = None  # provider-failed 前的触发语义;Run 重试后清空
     glossary_hash: str | None = None  # #163;缺省=旧产物
+    knowledge_hash: str | None = None  # #182;仅 advisory，不进入 input_hash
 
 
 class State(BaseModel):

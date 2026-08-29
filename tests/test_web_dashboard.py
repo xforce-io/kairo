@@ -208,31 +208,30 @@ def _header(html: str) -> str:
     return m.group(0)
 
 
-def test_glossary_is_header_utility_not_console_nav(tmp_path):
-    """#174: 真名册在顶栏弱链，不进主导航，不在 dash-head。"""
+def test_knowledge_is_header_utility_not_console_nav(tmp_path):
+    """#182: 知识在顶栏弱链，不进主导航，不在 dash-head。"""
     Workspace.init(tmp_path / "ws", topic="t")
     html = _client(tmp_path).get("/").text
     nav = _console_nav(html)
-    assert 'href="/glossary"' not in nav
+    assert 'href="/knowledge"' not in nav
     header = _header(html)
-    assert re.search(r'href="/glossary"', header)
-    assert "Glossary" in header
+    assert re.search(r'href="/knowledge"', header)
+    assert "Knowledge" in header
     start = html.find('class="dash-head"')
     end = html.find('class="grid"')
     assert start != -1 and end != -1 and start < end
-    assert 'href="/glossary"' not in html[start:end]
+    assert 'href="/knowledge"' not in html[start:end]
 
 
-def test_glossary_page_marks_utility_on(tmp_path):
-    """#174: /glossary 弱链为当前项，主导航不选中。"""
+def test_knowledge_page_marks_utility_on(tmp_path):
+    """#182: /knowledge 弱链为当前项，主导航不选中。"""
     Workspace.init(tmp_path / "ws", topic="t")
-    html = _client(tmp_path).get("/glossary").text
+    html = _client(tmp_path).get("/knowledge").text
     nav = _console_nav(html)
-    assert 'href="/glossary"' not in nav
+    assert 'href="/knowledge"' not in nav
     assert re.search(r'<a href="/" class="on">', nav) is None
     assert re.search(r'<a href="/timeline" class="on">', nav) is None
-    assert re.search(r'href="/glossary"[^>]*\bon\b', _header(html))
+    assert re.search(r'href="/knowledge"[^>]*\bon\b', _header(html))
     crumb = re.search(r'<span class="crumb">(.*?)</span>', html, re.S)
     assert crumb is not None
-    assert "Shared glossary" not in crumb.group(1)
-    assert "公共真名册" not in crumb.group(1)
+    assert "知识" in crumb.group(1)

@@ -47,12 +47,12 @@ def test_workspace_template_toggles_nav_doc_is_active_on_click():
     assert "closest" in html and "nav-doc" in html
 
 
-def test_workspace_template_clears_nav_active_on_glossary():
-    """#174: 课题模板不再 hx-get 打开真名册面板，待办提示走统一页。"""
+def test_workspace_template_clears_nav_active_on_knowledge():
+    """#182: 课题模板不再 hx-get 打开真名册面板，待办提示走统一知识页。"""
     html = _WORKSPACE.read_text(encoding="utf-8")
     assert "hx-get=\"/w/{{ slug | urlencode }}/glossary\"" not in html
     assert "gl-todo-hint" in html
-    assert "/glossary?workspace=" in html
+    assert "/knowledge?workspace=" in html
     assert "querySelectorAll" in html
     assert ".nav-doc" in html
 
@@ -67,7 +67,7 @@ def test_workspace_page_ships_nav_active_script(tmp_path):
     assert "is-active" in body
     assert "classList.add" in body
     assert "classList.remove" in body
-    assert "/glossary" in body
+    assert "/knowledge" in body
     # 静态 CSS 经服务可访问且含选中规则
     css = _client(tmp_path).get("/static/app.css")
     assert css.status_code == 200
