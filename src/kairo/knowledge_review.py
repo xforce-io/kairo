@@ -504,15 +504,32 @@ def _transaction(workspace_root: Path) -> dict:
         return {}
 
 
+def _entry_hash(entry: KnowledgeEntry) -> str:
+    """journal 的可比对 authority 后态，不依赖可能已消失的候选来源。"""
+    payload = yaml.safe_dump(entry.model_dump(), allow_unicode=True, sort_keys=True)
+    return _hash(payload)
+
+
+def _prepared_transaction(*, kind: str, candidate: KnowledgeCandidate, target: KnowledgeEntry, source_entry_id: str, serve_root: Path) -> dict:
+    return {
+        "kind": kind,
+        "candidate_id": candidate.id,
+        "target_entry_id": target.id,
+        "source_entry_id": source_entry_id,
+        "serve_root": str(serve_root),
+        "expected_entry_hash": _entry_hash(target),
+        "stage": "prepared",
+    }
+
+
 def _recover_transaction(workspace_root: Path) -> None:
     """在任何 stale/status 判断前收敛已落盘的跨 authority 操作。"""
     tx = _transaction(workspace_root)
     kind = str(tx.get("kind", ""))
     if kind not in {"accept_workspace", "merge_workspace", "accept_global", "merge_global"}:
         return
-    # 只有 authority 成功落盘后才允许把候选收敛为终态；prepared 不能把已有 merge target
-    # 误认作已合并。
-    if tx.get("stage") not in {"authority-written", "authority_written", ""}:
+    stage = str(tx.get("stage", ""))
+    if stage not in {"prepared", "authority-written", "authority_written", ""}:
         return
     serve_value = str(tx.get("serve_root", ""))
     candidate_id = str(tx.get("candidate_id", ""))
@@ -524,12 +541,18 @@ def _recover_transaction(workspace_root: Path) -> None:
         authority_written = False
         if kind in {"accept_workspace", "merge_workspace"}:
             local_doc, _ = load_workspace(workspace_root)
-            authority_written = any(item.id == entry_id for item in local_doc.entries)
+            target = next((item for item in local_doc.entries if item.id == entry_id), None)
+            authority_written = target is not None and (
+                stage != "prepared" or bool(tx.get("expected_entry_hash")) and _entry_hash(target) == tx["expected_entry_hash"]
+            )
         else:
             if not serve_value:
                 return
             global_doc, _ = load_global(Path(serve_value))
-            authority_written = any(item.id == entry_id for item in global_doc.entries)
+            target = next((item for item in global_doc.entries if item.id == entry_id), None)
+            authority_written = target is not None and (
+                stage != "prepared" or bool(tx.get("expected_entry_hash")) and _entry_hash(target) == tx["expected_entry_hash"]
+            )
             if not authority_written:
                 return
             local_doc, _ = load_workspace(workspace_root)
@@ -588,7 +611,7 @@ def accept_workspace(workspace_root: Path, candidate_id: str) -> KnowledgeEntry:
     )
     validate_entries([*document.entries, entry], scope="workspace")
     document.entries.append(entry)
-    transaction = {"kind": "accept_workspace", "candidate_id": candidate.id, "target_entry_id": entry.id, "source_entry_id": "", "serve_root": str(Path(workspace_root).parent), "stage": "prepared"}
+    transaction = _prepared_transaction(kind="accept_workspace", candidate=candidate, target=entry, source_entry_id="", serve_root=Path(workspace_root).parent)
     _write_transaction(workspace_root, transaction)
     save_workspace(workspace_root, document)
     _write_transaction(workspace_root, {**transaction, "stage": "authority-written"})
@@ -685,7 +708,7 @@ def accept_global(serve_root: Path, workspace_root: Path, candidate_id: str) -> 
             sources = _append_source(sources, _source(candidate, workspace_root))
         entry = local_entry.model_copy(update={"scope": "global", "sources": sources, "updated_at": _now()})
         validate_entries([*document.entries, entry], scope="global")
-        transaction = {"kind": "accept_global", "candidate_id": candidate.id, "target_entry_id": entry.id, "source_entry_id": candidate.entry_id, "serve_root": str(serve_root), "stage": "prepared"}
+        transaction = _prepared_transaction(kind="accept_global", candidate=candidate, target=entry, source_entry_id=candidate.entry_id, serve_root=serve_root)
         _write_transaction(workspace_root, transaction)
         document.entries.append(entry)
         save_global(serve_root, document)
@@ -735,7 +758,7 @@ def merge_workspace(workspace_root: Path, candidate_id: str, entry_id: str) -> N
     })
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="workspace")
-    transaction = {"kind": "merge_workspace", "candidate_id": candidate.id, "target_entry_id": entry_id, "source_entry_id": "", "serve_root": str(Path(workspace_root).parent), "stage": "prepared"}
+    transaction = _prepared_transaction(kind="merge_workspace", candidate=candidate, target=replacement, source_entry_id="", serve_root=Path(workspace_root).parent)
     _write_transaction(workspace_root, transaction)
     save_workspace(workspace_root, document)
     _write_transaction(workspace_root, {**transaction, "stage": "authority-written"})
@@ -775,7 +798,7 @@ def merge_global(serve_root: Path, workspace_root: Path, candidate_id: str, entr
     })
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="global")
-    transaction = {"kind": "merge_global", "candidate_id": candidate.id, "target_entry_id": entry_id, "source_entry_id": candidate.entry_id, "serve_root": str(serve_root), "stage": "prepared"}
+    transaction = _prepared_transaction(kind="merge_global", candidate=candidate, target=replacement, source_entry_id=candidate.entry_id, serve_root=serve_root)
     _write_transaction(workspace_root, transaction)
     save_global(serve_root, document)
     _write_transaction(workspace_root, {**transaction, "stage": "authority-written"})

@@ -3,6 +3,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -540,6 +542,69 @@ def test_transaction_replay_covers_workspace_and_global_merge_after_source_remov
     assert next(item for item in load_review(ws.root).candidates if item.id == promotion.id).status == "merged"
 
 
+@pytest.mark.parametrize("operation", ["accept_workspace", "merge_workspace", "accept_global", "merge_global"])
+@pytest.mark.parametrize("remove_source", [False, True])
+def test_prepared_journal_recovers_when_second_transaction_write_fails(tmp_path, monkeypatch, operation, remove_source):
+    """P1-1：四种动作第二次 journal 写失败后，以预期 authority 后态收敛。"""
+    from kairo.knowledge_review import merge_global, merge_workspace
+
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": f"候选-{operation}", "quote": "证据"}])
+    candidate = load_review(ws.root).candidates[0]
+    target_id = ""
+    if operation == "merge_workspace":
+        target = new_entry(title="本地目标", scope="workspace")
+        save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [target]}))
+        target_id = target.id
+        def call():
+            return merge_workspace(ws.root, candidate.id, target_id)
+    elif operation == "accept_workspace":
+        def call():
+            return accept_workspace(ws.root, candidate.id)
+    else:
+        local = accept_workspace(ws.root, candidate.id)
+        candidate = promote(ws.root, local.id)
+        if operation == "accept_global":
+            def call():
+                return accept_global(root, ws.root, candidate.id)
+        else:
+            target = new_entry(title="公共目标", scope="global")
+            from kairo.knowledge import KnowledgeDocument
+            save_global(root, KnowledgeDocument(entries=[target]))
+            target_id = target.id
+            def call():
+                return merge_global(root, ws.root, candidate.id, target_id)
+    import kairo.knowledge_review as module
+
+    original = module._write_transaction
+
+    def fail_second(path, payload):
+        if payload.get("stage") == "authority-written":
+            raise OSError("injected second journal write")
+        return original(path, payload)
+
+    monkeypatch.setattr(module, "_write_transaction", fail_second)
+    with pytest.raises(OSError, match="second journal"):
+        call()
+    if remove_source:
+        digest.unlink()
+    monkeypatch.setattr(module, "_write_transaction", original)
+    replayed = call()
+    review = load_review(ws.root)
+    terminal = next(item for item in review.candidates if item.id == candidate.id)
+    assert terminal.status == ("accepted" if operation.startswith("accept") else "merged")
+    assert not (ws.root / ".kairo/knowledge_transaction.yaml").exists()
+    if operation == "accept_workspace":
+        assert replayed.id == terminal.merged_into
+    if operation in {"accept_global", "merge_global"}:
+        assert not any(entry.id == candidate.entry_id for entry in load_workspace(ws.root)[0].entries)
+
+
 def test_extract_errors_are_keyed_by_kind_and_path_and_clear_independently(tmp_path):
     """P1-4：Digest 与 Compose 相同路径可各自重试、各自清除。"""
     from kairo.knowledge_review import extract_error_key, mark_extract_error
@@ -580,6 +645,28 @@ def test_legacy_root_candidate_keeps_gc_route_and_stable_local_entry(tmp_path):
     update_workspace_entry(ws.root, rejected.entry_id, title="退回条目已编辑", description="可再次提升", aliases=[], tags=[])
     refreshed = promote(ws.root, rejected.entry_id)
     assert refreshed.id == rejected.id and refreshed.status == "pending_global" and not refreshed.reject_reason
+
+
+def test_legacy_root_rejected_gc_promote_route_reuses_editable_entry(tmp_path):
+    """P1-2：真实旧 gc-* promote URL 对 root_rejected 不会重复 accept。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("旧证据")
+    (ws.root / ".kairo").mkdir(exist_ok=True)
+    (ws.root / ".kairo/glossary_review.yaml").write_text(
+        "candidates:\n  - id: gc-rejected-route\n    name: 旧退回\n    ref_id: r\n    quote: 旧证据\n    status: root_rejected\n",
+        encoding="utf-8",
+    )
+    rejected = load_review(ws.root).candidates[0]
+    from kairo.knowledge_review import update_workspace_entry
+    update_workspace_entry(ws.root, rejected.entry_id, title="已编辑旧退回", description="", aliases=[], tags=[])
+    response = TestClient(create_app(root)).post("/w/ws/glossary/candidates/gc-rejected-route/promote")
+    assert response.status_code == 200
+    promoted = next(item for item in load_review(ws.root).candidates if item.legacy_id == "gc-rejected-route")
+    assert promoted.id == rejected.id and promoted.entry_id == rejected.entry_id and promoted.status == "pending_global"
 
 
 def test_promotion_preserves_all_sources_when_one_source_disappears(tmp_path):
@@ -626,6 +713,21 @@ def test_matcher_display_scope_renderer_budget_and_semantic_projection():
     assert semantic_hash([changed_quote]) == semantic_hash([same_path])
 
 
+def test_matcher_scope_filters_owners_before_ambiguity_and_keeps_normalized_term():
+    """P2-3：scope 内唯一 owner 不应被另一范围同 alias 误判歧义。"""
+    global_entry = new_entry(title="全球", scope="global", aliases=[KnowledgeAlias(value="共享别名")])
+    local_entry = new_entry(title="本地", scope="workspace", aliases=[KnowledgeAlias(value="共享别名")])
+    # ㍿ 经 NFKC 变为「株式会社」，排序依赖规范化词而非原始兼容字符。
+    kabushiki = new_entry(title="㍿甲", scope="workspace")
+    matcher = KnowledgeMatcher([global_entry, local_entry, kabushiki])
+    global_hit = matcher.match("共享别名", scope="global").matches[0]
+    local_hit = matcher.match("共享别名 株式会社甲", scope="workspace").matches
+    assert global_hit.entry.id == global_entry.id and not matcher.match("共享别名", scope="global").ambiguities
+    assert local_hit[0].entry.id == kabushiki.id or local_hit[0].entry.id == local_entry.id
+    alias_hit = next(hit for hit in local_hit if hit.entry.id == local_entry.id)
+    assert alias_hit.normalized_term == "共享别名" and alias_hit.display_term == "共享别名"
+
+
 def test_knowledge_filter_and_global_source_link_include_availability(tmp_path):
     """P2-6：同一筛选覆盖 global/local/candidate，global 出处回链到实际 workspace。"""
     root = tmp_path / "root"
@@ -639,6 +741,66 @@ def test_knowledge_filter_and_global_source_link_include_availability(tmp_path):
     save_global(root, KnowledgeDocument(entries=[new_entry(title="只查我", scope="global", sources=[source])]))
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws&filter=%E5%8F%AA%E6%9F%A5%E6%88%91")
     assert page.status_code == 200 and "只查我" in page.text and '/w/ws?ref=r' in page.text
+
+
+def test_promotion_card_renders_entry_fields_and_all_source_links(tmp_path):
+    """P2-4：全局审核卡从 entry_id 展示完整条目，而非过期候选快照。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    first = ws.root / "references/a/digest.md"
+    second = ws.root / "references/b/digest.md"
+    first.parent.mkdir(parents=True)
+    second.parent.mkdir(parents=True)
+    first.write_text("甲来源")
+    second.write_text("乙来源")
+    import hashlib
+    entry = new_entry(title="待提升完整", scope="workspace", description="完整说明", tags=["能源", "审核"], aliases=[KnowledgeAlias(value="别名关闭", auto_match=False)], sources=[
+        KnowledgeSource(kind="digest", path="references/a/digest.md", quote="甲来源", content_hash=hashlib.sha256("甲来源".encode()).hexdigest(), workspace_slug="ws"),
+        KnowledgeSource(kind="digest", path="references/b/digest.md", quote="乙来源", content_hash=hashlib.sha256("乙来源".encode()).hexdigest(), workspace_slug="ws"),
+    ])
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    promote(ws.root, entry.id)
+    page = TestClient(create_app(root)).get("/knowledge?workspace=ws")
+    assert page.status_code == 200
+    for value in ("完整说明", "能源", "审核", "别名关闭", "not auto-matched", "references/a/digest.md", "references/b/digest.md"):
+        assert value in page.text
+    assert '/w/ws?ref=a' in page.text and '/w/ws?ref=b' in page.text
+
+
+def test_knowledge_web_errors_are_localized_without_exception_chinese(tmp_path, monkeypatch):
+    """P2-5：严格 YAML、scope、重复、候选状态、保存/迁移错误均走英文 catalog。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    Workspace.init(root / "ws")
+    client = TestClient(create_app(root))
+    headers = {"accept-language": "en"}
+    client.post("/knowledge/global", data={"title": "duplicate"}, headers=headers)
+    duplicate = client.post("/knowledge/global", data={"title": "duplicate"}, headers=headers)
+    duplicate_error = duplicate.text.split('role="alert">', 1)[1].split("</p>", 1)[0]
+    assert "canonical title or alias conflicts" in duplicate_error and not re.search(r"[\u4e00-\u9fff]", duplicate_error)
+    from starlette.requests import Request
+    from kairo.web.views import _knowledge_error_text
+    scope_request = Request({"type": "http", "headers": [(b"accept-language", b"en")]})
+    assert _knowledge_error_text(scope_request, "未知 scope 'shared'") == "This action is not permitted in the selected knowledge scope."
+    stale = client.post("/w/ws/knowledge/candidates/kc-00000000000000000000/accept", headers=headers)
+    assert "no longer available" in stale.text
+    import kairo.knowledge as knowledge_module
+    original_save = knowledge_module.save_global
+    from kairo.knowledge import KnowledgeError
+    monkeypatch.setattr(knowledge_module, "save_global", lambda *_: (_ for _ in ()).throw(KnowledgeError("保存失败")))
+    save_failed = client.post("/knowledge/global", data={"title": "save-failed"}, headers=headers)
+    save_error = save_failed.text.split('role="alert">', 1)[1].split("</p>", 1)[0]
+    assert "could not be saved" in save_error and not re.search(r"[\u4e00-\u9fff]", save_error)
+    monkeypatch.setattr(knowledge_module, "save_global", original_save)
+    (root / "glossary.yaml").write_text("version: 2\nentries: [", encoding="utf-8")
+    invalid = client.get("/knowledge", headers=headers)
+    assert "Knowledge document is invalid" in invalid.text
+    # 迁移非法也不能把异常文本直接泄漏到英文页面。
+    (root / "glossary.yaml").write_text("- missing-name\n", encoding="utf-8")
+    migration = client.post("/knowledge/global", data={"title": "migration"}, headers=headers)
+    migration_error = migration.text.split('role="alert">', 1)[1].split("</p>", 1)[0]
+    assert not re.search(r"[\u4e00-\u9fff]", migration_error)
 
 
 def test_legacy_workspace_write_rejects_unrelated_serve_root(tmp_path):

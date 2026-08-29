@@ -119,8 +119,9 @@ def test_doc_rejects_path_traversal(tmp_path, monkeypatch):
 
 
 def test_ref_detail_shows_forms(tmp_path, monkeypatch):
-    _ws_with_step(tmp_path, monkeypatch)
-    ref_id = next(iter(__import__("os").listdir(tmp_path / "ws" / "references")))
+    ws = _ws_with_step(tmp_path, monkeypatch)
+    # references/ 也包含生成的 MEETINGS.md，不是 reference id。
+    ref_id = ws.list_reference_ids()[0]
     r = TestClient(create_app(tmp_path)).get(f"/w/ws/ref/{ref_id}")
     assert r.status_code == 200 and ("transcript" in r.text or "digest" in r.text)
 

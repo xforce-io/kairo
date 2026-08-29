@@ -21,10 +21,16 @@ class MatchBudget:
 @dataclass(frozen=True)
 class KnowledgeMatch:
     entry: KnowledgeEntry
-    term: str
+    normalized_term: str
+    display_term: str
     is_title: bool
     start: int
     end: int
+
+    @property
+    def term(self) -> str:
+        """兼容旧调用方；展示与 renderer 始终使用原始词。"""
+        return self.display_term
 
 
 @dataclass(frozen=True)
@@ -141,29 +147,33 @@ class KnowledgeMatcher:
                 end = index + 1
                 if not _ascii_boundary(normalized, start, end, term):
                     continue
-                owners = self._terms[term]
+                # scope 是业务契约的一部分：先裁剪 owner，再判断是否真歧义。
+                owners = [
+                    owner for owner in self._terms[term]
+                    if scope is None or self._entries[owner[0]].scope == scope
+                ]
+                if not owners:
+                    continue
                 unique = {entry_id for entry_id, _, _ in owners}
                 if len(unique) != 1:
                     ambiguities.add(term)
                     continue
                 entry_id, is_title, display = owners[0]
                 entry = self._entries[entry_id]
-                if scope is not None and entry.scope != scope:
-                    continue
-                raw.append(KnowledgeMatch(entry.model_copy(deep=True), display, is_title, start, end))
+                raw.append(KnowledgeMatch(entry.model_copy(deep=True), term, display, is_title, start, end))
         # Keep an entry once, choosing its best deterministic match.
         best: dict[str, KnowledgeMatch] = {}
         for hit in raw:
             prior = best.get(hit.entry.id)
-            if prior is None or (hit.is_title, len(hit.term), -hit.start) > (prior.is_title, len(prior.term), -prior.start):
+            if prior is None or (hit.is_title, len(hit.normalized_term), -hit.start) > (prior.is_title, len(prior.normalized_term), -prior.start):
                 best[hit.entry.id] = hit
         ordered = sorted(
             best.values(),
             key=lambda hit: (
                 0 if hit.entry.scope == "workspace" else 1,
                 0 if hit.is_title else 1,
-                -len(hit.term),
-                hit.entry.title,
+                -len(hit.normalized_term),
+                normalize_term(hit.entry.title),
                 hit.entry.id,
             ),
         )
@@ -180,7 +190,10 @@ class KnowledgeMatcher:
         return MatchResult(
             matches=tuple(selected),
             ambiguities=tuple(sorted(ambiguities)),
-            skipped_terms=tuple(sorted(term for term in self._ownership if term not in self._terms)),
+            skipped_terms=tuple(sorted(
+                term for term, owners in self._ownership.items()
+                if term not in self._terms and (scope is None or any(self._entries[owner[0]].scope == scope for owner in owners))
+            )),
             truncated_count=len(ordered) - len(selected),
             version=self.version,
         )

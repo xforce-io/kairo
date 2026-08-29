@@ -70,6 +70,24 @@ def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
     return request.app.state.templates.TemplateResponse(request, name, ctx)
 
 
+def _knowledge_error_text(request: Request, raw: str) -> str:
+    """知识域错误在 Web 边界按稳定类别本地化，绝不把中文异常原文带入英文页。"""
+    value = str(raw)
+    if any(token in value for token in ("YAML", "无法解析", "严格", "时间", "content_hash")):
+        key = "knowledge.error_invalid_document"
+    elif "scope" in value or "范围" in value:
+        key = "knowledge.error_scope"
+    elif any(token in value for token in ("title 重复", "title 不能为空", "规范标题", "规范化", "alias", "别名", "冲突")):
+        key = "knowledge.error_duplicate_name"
+    elif "候选" in value and any(token in value for token in ("不可", "不存在", "状态")):
+        key = "knowledge.error_candidate_state"
+    elif any(token in value for token in ("保存", "写入", "迁移", "transaction")):
+        key = "knowledge.error_save"
+    else:
+        key = "knowledge.error_unknown"
+    return _t(request)(key)
+
+
 def _open(request: Request, slug: str) -> Workspace:
     try:
         return Workspace.open(Path(request.app.state.root) / slug)
@@ -1098,9 +1116,15 @@ def _glossary_fragment(
 
 
 @router.get("/w/{slug}/glossary")
-def glossary_view(request: Request, slug: str) -> RedirectResponse:
+def glossary_view(request: Request, slug: str):
     """旧右栏入口转到统一维护页。"""
     _open(request, slug)
+    try:
+        from kairo.knowledge import load_global
+
+        load_global(Path(request.app.state.root))
+    except ValueError as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc), localize_error=False)
     return RedirectResponse(
         url=f"/knowledge?workspace={quote(slug)}", status_code=303
     )
@@ -1118,10 +1142,10 @@ def glossary_add(
 ) -> HTMLResponse:
     """兼容 POST：写入唯一 KnowledgeStore。"""
     if not name.strip():
-        return _knowledge_page(request, selected_slug=slug, error="name 不能为空")
+        return _knowledge_page(request, selected_slug=slug, error="name 不能为空", localize_error=False)
     if scope.strip() != "workspace":
-        return _knowledge_page(request, selected_slug=slug, error=f"{name}（{note}）未保存：未知 scope {scope!r}，workspace 知识只能写本层")
-    return knowledge_workspace_add(request, slug, title=name, description=note, aliases=aka, tags=tags)
+        return _knowledge_page(request, selected_slug=slug, error=f"{name}（{note}）未保存：未知 scope {scope!r}，workspace 知识只能写本层", localize_error=False)
+    return knowledge_workspace_add(request, slug, title=name, description=note, aliases=aka, tags=tags, localize_error=False)
 
 
 @router.post("/w/{slug}/glossary/{index}/delete", response_class=HTMLResponse)
@@ -1187,11 +1211,20 @@ def glossary_candidate_ignore(request: Request, slug: str, cid: str) -> HTMLResp
 @router.post("/w/{slug}/glossary/candidates/{cid}/promote", response_class=HTMLResponse)
 def glossary_candidate_promote(request: Request, slug: str, cid: str) -> HTMLResponse:
     try:
-        from kairo.knowledge_review import accept_workspace, promote_entry
+        from kairo.knowledge import KnowledgeError
+        from kairo.knowledge_review import accept_workspace, load_review, promote_entry
 
         root = _open(request, slug).root
-        entry = accept_workspace(root, cid)
-        promote_entry(root, entry.id)
+        candidate = next((item for item in load_review(root).candidates if item.id == cid or item.legacy_id == cid), None)
+        if candidate is None:
+            raise KnowledgeError(f"知识候选不存在:{cid}")
+        # root_rejected 已有本地 ke-* authority；旧 gc URL 不能再走一次 accept。
+        if candidate.status == "rejected_global" and candidate.entry_id:
+            promote_entry(root, candidate.entry_id)
+        elif candidate.status == "pending":
+            promote_entry(root, accept_workspace(root, cid).id)
+        else:
+            raise KnowledgeError(f"候选不可提升:{candidate.status}")
     except (ValueError, OSError) as e:
         return _knowledge_page(request, selected_slug=slug, error=str(e))
     return _knowledge_page(request, selected_slug=slug, success=True)
@@ -1346,7 +1379,7 @@ def root_glossary_add(
     workspace: str = Form(""),
 ) -> HTMLResponse:
     """兼容 POST：公共 glossary 写入 global KnowledgeStore。"""
-    return knowledge_global_add(request, title=name, description=note, aliases=aka, tags=tags, workspace=workspace)
+    return knowledge_global_add(request, title=name, description=note, aliases=aka, tags=tags, workspace=workspace, localize_error=False)
 
 
 @router.post("/glossary/{index}/delete", response_class=HTMLResponse)
@@ -1361,7 +1394,7 @@ def root_glossary_delete(
         document.entries.pop(index)
         save_global(serve, document)
     except (KnowledgeError, IndexError) as e:
-        return _knowledge_page(request, selected_slug=workspace or None, error=str(e))
+        return _knowledge_page(request, selected_slug=workspace or None, error=str(e), localize_error=False)
     return _knowledge_page(request, selected_slug=workspace or None, success=True)
 
 
@@ -1374,8 +1407,8 @@ def root_candidate_accept(
 
         accept_global(Path(request.app.state.root), _open(request, slug).root, cid)
     except (ValueError, OSError) as e:
-        return _knowledge_page(request, selected_slug=workspace or slug, error=str(e))
-    return _knowledge_page(request, selected_slug=workspace or slug, success=True)
+        return _knowledge_page(request, selected_slug=slug, error=str(e), localize_error=False)
+    return _knowledge_page(request, selected_slug=slug, success=True)
 
 
 @router.post("/glossary/candidates/{slug}/{cid}/merge", response_class=HTMLResponse)
@@ -1417,7 +1450,7 @@ def root_candidate_reject(
 
 # #182 统一知识页。旧 /glossary 保留为兼容维护入口；新的写入和候选闭环只走此页。
 def _knowledge_page(
-    request: Request, *, selected_slug: str | None = None, error: str | None = None, success: bool = False
+    request: Request, *, selected_slug: str | None = None, error: str | None = None, success: bool = False, localize_error: bool = True
 ) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError, load_global, load_workspace
     from kairo.knowledge_review import invalidate_stale
@@ -1442,10 +1475,29 @@ def _knowledge_page(
             global_entries = [entry for entry in global_entries if filter_text in " ".join([entry.title, entry.description, entry.status, *entry.tags, *(source.path for source in entry.sources)]).lower()]
         for slug in slugs:
             review = invalidate_stale(serve / slug)
+            promotion_entries = {entry.id: entry for entry in load_workspace(serve / slug)[0].entries}
             for candidate in review.candidates:
                 if candidate.status == "pending_global":
                     row = candidate.model_dump()
                     row["slug"] = slug
+                    # promotion 必须显示当前 entry_id 对应的完整可审字段，候选快照只是兼容回退。
+                    entry = promotion_entries.get(candidate.entry_id)
+                    if entry is not None:
+                        row.update({
+                            "title": entry.title,
+                            "description": entry.description,
+                            "tags": entry.tags,
+                            "aliases": [alias.model_dump() for alias in entry.aliases],
+                            "sources": [
+                                {**source.model_dump(), "available": (serve / slug / source.path).is_file()}
+                                for source in entry.sources
+                            ],
+                        })
+                    else:
+                        row["sources"] = [
+                            {**source.model_dump(), "available": (serve / slug / source.path).is_file()}
+                            for source in candidate.sources
+                        ]
                     if not filter_text or filter_text in " ".join([candidate.title, candidate.description, candidate.status, *candidate.tags, candidate.path]).lower():
                         promotions.append(row)
         if selected:
@@ -1494,6 +1546,8 @@ def _knowledge_page(
                     source.__dict__["available"] = (serve / selected / source.path).is_file()
     except KnowledgeError as exc:
         error = error or str(exc)
+    if error and localize_error:
+        error = _knowledge_error_text(request, error)
     return _render(
         request,
         "knowledge.html",
@@ -1534,6 +1588,7 @@ def knowledge_global_add(
     aliases: str = Form(""),
     tags: str = Form(""),
     workspace: str = Form(""),
+    localize_error: bool = True,
 ) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError, load_global, new_entry, save_global, validate_entries
 
@@ -1545,13 +1600,13 @@ def knowledge_global_add(
         document.entries.append(entry)
         save_global(serve, document)
     except (KnowledgeError, ValueError) as exc:
-        return _knowledge_page(request, selected_slug=workspace or None, error=f"{title}（{description}）未保存：{exc}")
+        return _knowledge_page(request, selected_slug=workspace or None, error=f"{title}（{description}）未保存：{exc}", localize_error=localize_error)
     return _knowledge_page(request, selected_slug=workspace or None, success=True)
 
 
 @router.post("/w/{slug}/knowledge", response_class=HTMLResponse)
 def knowledge_workspace_add(
-    request: Request, slug: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form("")
+    request: Request, slug: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form(""), localize_error: bool = True
 ) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError, load_workspace, new_entry, save_workspace, validate_entries
 
@@ -1563,7 +1618,7 @@ def knowledge_workspace_add(
         document.entries.append(entry)
         save_workspace(ws.root, document)
     except (KnowledgeError, ValueError) as exc:
-        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+        return _knowledge_page(request, selected_slug=slug, error=str(exc), localize_error=localize_error)
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
