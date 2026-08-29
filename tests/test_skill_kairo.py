@@ -110,8 +110,23 @@ def test_skill_blocked_closed_set():
         "missing-source",
         "manual-edit",
         "compose-degraded",
+        "compose-migration-required",
+        "compose-over-budget",
+        "compose-provenance-invalid",
+        "provider-failed",
     ):
         assert reason in text, f"blocked closed set missing {reason!r}"
+
+
+def test_skill_web_attention_button_is_not_runnable():
+    """#178:灰色 Needs re-step 是 attention 状态,不是可点 Run。"""
+    text = _skill_text()
+    assert "Needs re-step" in text and "需要 re-step" in text
+    assert "attention" in text
+    assert "disabled" in text or "不可点" in text
+    assert "kairo status" in text
+    assert "kairo re-step understanding.md" in text
+    assert "主按钮" in text or "ACTIONS" in text
 
 
 def test_skill_archive_protocol():
