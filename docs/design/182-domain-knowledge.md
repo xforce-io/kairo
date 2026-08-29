@@ -227,6 +227,6 @@ CLI 的 `glossary list/add/rm` 继续可用但输出“知识”语义，并映�
 
 - Issue [#182](https://github.com/xforce-io/kairo/issues/182)
 - L1 历史评论：[Draft L1](https://github.com/xforce-io/kairo/issues/182#issuecomment-5461374589)
-- PR：创建后补充稳定链接
+- Draft PR [#183](https://github.com/xforce-io/kairo/pull/183)
 - [#163](https://github.com/xforce-io/kairo/issues/163) / [#164](https://github.com/xforce-io/kairo/issues/164) / [#165](https://github.com/xforce-io/kairo/issues/165) / [#174](https://github.com/xforce-io/kairo/issues/174)
 - [163-glossary-authority-scopes.md](163-glossary-authority-scopes.md)、[165-glossary-candidate-review.md](165-glossary-candidate-review.md)、[161-bounded-understanding.md](161-bounded-understanding.md)、[157-run-panel-progress.md](157-run-panel-progress.md)
