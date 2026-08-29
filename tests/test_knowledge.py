@@ -235,6 +235,59 @@ def test_v2_rejects_missing_audit_or_source_hash_and_matcher_snapshot_isolated(t
     assert refreshed is not matcher and matcher.version != refreshed.version
 
 
+def test_global_accept_replays_journal_before_stale_after_local_failure(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("evidence")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="evidence", drafts=[{"title": "global", "quote": "evidence"}])
+    local = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    promotion = promote(ws.root, local.id)
+    import kairo.knowledge_review as module
+
+    original = module.save_workspace
+    calls = {"n": 0}
+
+    def fail_once(path, document):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("local save failed")
+        return original(path, document)
+
+    monkeypatch.setattr(module, "save_workspace", fail_once)
+    import pytest
+    with pytest.raises(OSError):
+        accept_global(root, ws.root, promotion.id)
+    digest.unlink()
+    entry = accept_global(root, ws.root, promotion.id)
+    assert entry.id == local.id
+    assert not any(item.id == local.id for item in load_workspace(ws.root)[0].entries)
+    assert next(item for item in load_review(ws.root).candidates if item.id == promotion.id).status == "accepted"
+
+
+def test_extract_static_route_precedes_entry_and_preserves_compose_kind(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    path = ws.root / "references/r/digest.md"
+    path.parent.mkdir(parents=True)
+    path.write_text("done")
+    from kairo.knowledge_review import mark_extract_error
+    mark_extract_error(ws.root, "references/r/digest.md", "safe", source_kind="compose")
+    seen = {}
+    import kairo.knowledge_review as module
+
+    def fake_extract(*args, **kwargs):
+        seen.update(kwargs)
+
+    monkeypatch.setattr(module, "extract_after_success", fake_extract)
+    response = TestClient(create_app(root)).post("/w/ws/knowledge/extract", data={"path": "references/r/digest.md"})
+    assert response.status_code == 200 and seen["source_kind"] == "compose"
+    assert TestClient(create_app(root)).post("/w/ws/knowledge/extract", data={"path": "constitution.yaml"}).status_code == 200
+
+
 def test_matcher_suggest_keeps_short_and_manual_aliases_out_of_auto_match():
     entry = _entry("A", aliases=["XY", "manual"])
     entry = entry.model_copy(update={"aliases": [KnowledgeAlias(value="XY", auto_match=False), KnowledgeAlias(value="manual", auto_match=False)]})

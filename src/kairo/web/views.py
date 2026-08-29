@@ -983,30 +983,39 @@ def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
             for value in [*state.products.values(), *state.targets.values()]
         )
         pending = ws.glossary_pending(serve_root=serve_root)
-    except GlossaryError:
+    except (GlossaryError, ValueError):
         pending = ["unreadable"]
     return knowledge_todos + todo_count(ws.root, pending=pending)
 
 
-def _capture_knowledge_run_boundary(ws: Workspace, task) -> None:
-    """启动运行前的内存快照，供结果页隔离本 run；失败时宁可为空也不读累计队列。"""
+def _knowledge_run_boundary(ws: Workspace) -> dict:
+    """纯数据快照：必须在 reg.start 前取得，避免极速子进程先写完。"""
     try:
         from kairo.knowledge_review import load_review
 
         review = load_review(ws.root)
-        task.knowledge_before_candidates = frozenset(candidate.id for candidate in review.candidates)
-        task.knowledge_before_errors = frozenset(review.extract_errors)
-        task.knowledge_before_error_versions = dict(review.extract_error_versions)
         state = ws.read_state()
-        task.knowledge_before_products = {
+        return {
+            "candidates": frozenset(candidate.id for candidate in review.candidates),
+            "errors": frozenset(review.extract_errors),
+            "error_versions": dict(review.extract_error_versions),
+            "products": {
             key: value.knowledge_generation for key, value in state.products.items()
-        }
-        task.knowledge_before_targets = {
+            },
+            "targets": {
             key: value.knowledge_generation for key, value in state.targets.items()
+            },
         }
     except Exception:
-        # diagnostics 不能影响 Run 主路径；空边界不会回退为累计 pending。
-        pass
+        return {}
+
+
+def _apply_knowledge_run_boundary(task, boundary: dict) -> None:
+    task.knowledge_before_candidates = boundary.get("candidates", frozenset())
+    task.knowledge_before_errors = boundary.get("errors", frozenset())
+    task.knowledge_before_error_versions = boundary.get("error_versions", {})
+    task.knowledge_before_products = boundary.get("products", {})
+    task.knowledge_before_targets = boundary.get("targets", {})
 
 
 def _workspace_glossary_ctx(
@@ -1565,6 +1574,12 @@ def knowledge_entry_promote(request: Request, slug: str, entry_id: str) -> HTMLR
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
+@router.post("/w/{slug}/knowledge/extract", response_class=HTMLResponse)
+def knowledge_extract_retry_early(request: Request, slug: str, path: str = Form(...)) -> HTMLResponse:
+    """静态路由必须先于 `{entry_id}`，否则 FastAPI 会把 extract 当条目 id。"""
+    return _knowledge_extract_retry_impl(request, slug, path)
+
+
 @router.post("/w/{slug}/knowledge/{entry_id}", response_class=HTMLResponse)
 def knowledge_update(
     request: Request, slug: str, entry_id: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form("")
@@ -1611,8 +1626,7 @@ def knowledge_candidate_update(request: Request, slug: str, candidate_id: str, t
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
-@router.post("/w/{slug}/knowledge/extract", response_class=HTMLResponse)
-def knowledge_extract_retry(request: Request, slug: str, path: str = Form(...)) -> HTMLResponse:
+def _knowledge_extract_retry_impl(request: Request, slug: str, path: str) -> HTMLResponse:
     """仅重试已完成产物的候选提取，不重跑 Digest/Compose。"""
     from kairo.knowledge import KnowledgeError
     from kairo.knowledge_review import extract_after_success
@@ -1621,12 +1635,17 @@ def knowledge_extract_retry(request: Request, slug: str, path: str = Form(...)) 
     ws = _open(request, slug)
     try:
         candidate_path = Path(path)
-        if candidate_path.is_absolute() or ".." in candidate_path.parts:
+        allowed_digest = len(candidate_path.parts) == 3 and candidate_path.parts[0] == "references" and candidate_path.name == "digest.md"
+        if candidate_path.is_absolute() or ".." in candidate_path.parts or not (path == "understanding.md" or allowed_digest):
             raise KnowledgeError("候选提取 path 非法")
         source = ws.root / candidate_path
         if not source.is_file():
             raise KnowledgeError("候选提取来源不存在")
-        extract_after_success(ws.root, Path(request.app.state.root), source_kind="compose" if path == "understanding.md" else "digest", path=path, text=source.read_text(encoding="utf-8"), provider=select_provider())
+        from kairo.knowledge_review import load_review
+
+        review = load_review(ws.root)
+        source_kind = review.extract_error_meta.get(path, {}).get("source_kind", "compose" if path == "understanding.md" else "digest")
+        extract_after_success(ws.root, Path(request.app.state.root), source_kind=source_kind, path=path, text=source.read_text(encoding="utf-8"), provider=select_provider())
     except (KnowledgeError, OSError) as exc:
         return _knowledge_page(request, selected_slug=slug, error=str(exc))
     return _knowledge_page(request, selected_slug=slug, success=True)
@@ -1759,27 +1778,9 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
         argv = [sys.executable, "-m", "kairo", "run"]
     try:
         # 必须在子进程实际工作前建立边界，避免历史候选被说成本次产出。
-        boundary: dict[str, object] = {}
-        try:
-            from kairo.knowledge_review import load_review
-
-            review = load_review(ws.root)
-            boundary = {
-                "candidates": frozenset(candidate.id for candidate in review.candidates),
-                "errors": frozenset(review.extract_errors),
-                "error_versions": dict(review.extract_error_versions),
-                "products": {key: value.knowledge_generation for key, value in ws.read_state().products.items()},
-                "targets": {key: value.knowledge_generation for key, value in ws.read_state().targets.items()},
-            }
-        except Exception:
-            pass
+        boundary = _knowledge_run_boundary(ws)
         task = reg.start(slug, ws.root, argv, job_kind="reconcile")
-        _capture_knowledge_run_boundary(ws, task)
-        task.knowledge_before_candidates = boundary.get("candidates", frozenset())  # type: ignore[assignment]
-        task.knowledge_before_errors = boundary.get("errors", frozenset())  # type: ignore[assignment]
-        task.knowledge_before_error_versions = boundary.get("error_versions", {})  # type: ignore[assignment]
-        task.knowledge_before_products = boundary.get("products", {})  # type: ignore[assignment]
-        task.knowledge_before_targets = boundary.get("targets", {})  # type: ignore[assignment]
+        _apply_knowledge_run_boundary(task, boundary)
     except RuntimeError:
         # 竞态:判断 is_running 与 start 之间被抢占 → 附着
         task = reg.current(slug)
@@ -2006,8 +2007,9 @@ def retry_ref(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         return _step_response(request, ws, slug, existing)
     argv = [sys.executable, "-m", "kairo", "retry-ref", ref_id]
     try:
+        boundary = _knowledge_run_boundary(ws)
         task = reg.start(slug, ws.root, argv, job_kind="reconcile")
-        _capture_knowledge_run_boundary(ws, task)
+        _apply_knowledge_run_boundary(task, boundary)
     except RuntimeError:
         task = reg.current(slug)
         if task is None:
@@ -2038,8 +2040,9 @@ def delete_ref(
         raise HTTPException(status_code=400, detail=str(e)) from e
     if want_recompose:
         argv = [sys.executable, "-m", "kairo", "re-step"]
+        boundary = _knowledge_run_boundary(ws)
         task = reg.start(slug, ws.root, argv, job_kind="reconcile")
-        _capture_knowledge_run_boundary(ws, task)
+        _apply_knowledge_run_boundary(task, boundary)
         # 进度进 step-area;列表/元信息/阅读区 OOB 清掉已删参考
         step = _render(
             request, "_step.html", _step_template_vars(request, ws, slug, task)
@@ -2083,10 +2086,11 @@ def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     argv = [sys.executable, "-m", "kairo", "prose", ref_id]
     try:
         title = ws.read_manifest(ref_id).title or ref_id
+        boundary = _knowledge_run_boundary(ws)
         task = reg.start(
             slug, ws.root, argv, job_kind="prose", object_title=title
         )
-        _capture_knowledge_run_boundary(ws, task)
+        _apply_knowledge_run_boundary(task, boundary)
     except RuntimeError:
         task = reg.current(slug)
         if task is None:
@@ -2099,7 +2103,7 @@ def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
 @router.get("/w/{slug}/step/{task_id}/stream")
 def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
     task = request.app.state.registry.get(task_id)
-    if task is None:
+    if task is None or task.slug != slug:
         raise HTTPException(status_code=404, detail="task not found")
     ws = _open(request, slug)
     t = _t(request)
@@ -2121,6 +2125,9 @@ def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
 
 @router.post("/w/{slug}/step/{task_id}/cancel", response_class=HTMLResponse)
 def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
+    task = request.app.state.registry.get(task_id)
+    if task is None or task.slug != slug:
+        raise HTTPException(status_code=404, detail="task not found")
     ok = request.app.state.registry.cancel(task_id)
     t = _t(request)
     msg = t("step.canceled") if ok else t("step.cannot_cancel")

@@ -63,6 +63,7 @@ class KnowledgeReview(BaseModel):
     candidates: list[KnowledgeCandidate] = Field(default_factory=list)
     extract_errors: dict[str, str] = Field(default_factory=dict)
     extract_error_versions: dict[str, int] = Field(default_factory=dict)
+    extract_error_meta: dict[str, dict[str, str]] = Field(default_factory=dict)
 
 
 Extractor = Callable[[str, list[KnowledgeEntry], str], list[dict]]
@@ -243,6 +244,7 @@ def ingest_candidates(
     review = invalidate_stale(workspace_root)
     review.extract_errors.pop(path, None)
     review.extract_error_versions.pop(path, None)
+    review.extract_error_meta.pop(path, None)
     existing = {c.fingerprint for c in review.candidates}
     source_hash = _hash(source_text)
     for draft in drafts:
@@ -280,10 +282,11 @@ def ingest_candidates(
     return review
 
 
-def mark_extract_error(workspace_root: Path, path: str, message: str) -> None:
+def mark_extract_error(workspace_root: Path, path: str, message: str, *, source_kind: str = "digest") -> None:
     review = load_review(workspace_root)
     review.extract_errors[path] = message
     review.extract_error_versions[path] = review.extract_error_versions.get(path, 0) + 1
+    review.extract_error_meta[path] = {"source_kind": source_kind}
     save_review(workspace_root, review)
 
 
@@ -339,12 +342,13 @@ def extract_after_success(
         try:
             from kairo.rules import safe_provider_summary
 
-            mark_extract_error(workspace_root, path, safe_provider_summary(exc))
+            mark_extract_error(workspace_root, path, safe_provider_summary(exc), source_kind=source_kind)
         except Exception:
             pass
 
 
 def _candidate(workspace_root: Path, candidate_id: str) -> tuple[KnowledgeReview, int, KnowledgeCandidate]:
+    _recover_transaction(workspace_root)
     review = invalidate_stale(workspace_root)
     for index, candidate in enumerate(review.candidates):
         if candidate.id == candidate_id:
@@ -405,6 +409,38 @@ def _transaction(workspace_root: Path) -> dict:
         return value if isinstance(value, dict) else {}
     except yaml.YAMLError:
         return {}
+
+
+def _recover_transaction(workspace_root: Path) -> None:
+    """在任何 stale/status 判断前收敛已落盘的跨 authority 操作。"""
+    tx = _transaction(workspace_root)
+    if tx.get("kind") != "accept_global":
+        return
+    serve_value = str(tx.get("serve_root", ""))
+    candidate_id = str(tx.get("candidate_id", ""))
+    entry_id = str(tx.get("entry_id", ""))
+    if not serve_value or not candidate_id or not entry_id:
+        return
+    try:
+        global_doc, _ = load_global(Path(serve_value))
+        if not any(item.id == entry_id for item in global_doc.entries):
+            return
+        local_doc, _ = load_workspace(workspace_root)
+        if any(item.id == entry_id for item in local_doc.entries):
+            local_doc.entries = [item for item in local_doc.entries if item.id != entry_id]
+            save_workspace(workspace_root, local_doc)
+        review = load_review(workspace_root)
+        for index, candidate in enumerate(review.candidates):
+            if candidate.id == candidate_id:
+                review.candidates[index] = candidate.model_copy(
+                    update={"status": "accepted", "merged_into": entry_id, "updated_at": _now()}
+                )
+                save_review(workspace_root, review)
+                _clear_transaction(workspace_root)
+                return
+    except (KnowledgeError, OSError):
+        # 保留 journal，下一次显式动作继续恢复；绝不先 stale 掉候选。
+        return
 
 
 def _set_candidate(review: KnowledgeReview, index: int, candidate: KnowledgeCandidate, **changes) -> KnowledgeCandidate:
@@ -510,6 +546,11 @@ def promote(workspace_root: Path, entry_id: str) -> KnowledgeCandidate:
 
 def accept_global(serve_root: Path, workspace_root: Path, candidate_id: str) -> KnowledgeEntry:
     review, index, candidate = _candidate(workspace_root, candidate_id)
+    if candidate.status == "accepted" and candidate.merged_into:
+        document, _ = load_global(serve_root)
+        prior = next((item for item in document.entries if item.id == candidate.merged_into), None)
+        if prior is not None:
+            return prior
     if candidate.status != "pending_global":
         raise KnowledgeError(f"候选不在全局待审核:{candidate.status}")
     if not candidate.entry_id:
@@ -526,7 +567,7 @@ def accept_global(serve_root: Path, workspace_root: Path, candidate_id: str) -> 
             sources = _append_source(sources, _source(candidate, workspace_root))
         entry = local_entry.model_copy(update={"scope": "global", "sources": sources, "updated_at": _now()})
         validate_entries([*document.entries, entry], scope="global")
-        _write_transaction(workspace_root, {"kind": "accept_global", "candidate_id": candidate.id, "entry_id": entry.id})
+        _write_transaction(workspace_root, {"kind": "accept_global", "candidate_id": candidate.id, "entry_id": entry.id, "serve_root": str(serve_root)})
         document.entries.append(entry)
         save_global(serve_root, document)
     # 第二步移除 local 独立 authority；重试也会收敛到同一最终状态。

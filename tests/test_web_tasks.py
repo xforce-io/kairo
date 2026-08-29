@@ -663,3 +663,14 @@ def test_run_summary_isolates_this_task_knowledge_diagnostics(tmp_path):
     assert "Knowledge context: 0 matched" not in c.get("/w/ws/run-summary?task_id=old").text
     page = c.get("/w/ws/run-summary?task_id=new")
     assert "Knowledge context: 1 matched, 1 ambiguous, 2 truncated, 3 skipped" in page.text
+
+
+def test_task_stream_and_cancel_reject_cross_workspace_task_id(tmp_path):
+    Workspace.init(tmp_path / "a", topic="a")
+    Workspace.init(tmp_path / "b", topic="b")
+    app = create_app(tmp_path)
+    task = StepTask(task_id="only-a", slug="a", done=False)
+    app.state.registry._tasks[task.task_id] = task
+    client = TestClient(app)
+    assert client.get("/w/b/step/only-a/stream").status_code == 404
+    assert client.post("/w/b/step/only-a/cancel").status_code == 404
