@@ -106,6 +106,15 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 - `target understanding.md: folded N;距上次 A 已 D 条`；未生成时 `(未生成)`；手改/失败时 `⚠ blocked:reason`；corpus 变更时 advisory「corpus 已变,可 re-step 重算」——**advisory 不是自动执行**
 - 把上述归纳成人话：名称、进度、blocked 列表、建议下一步（问句），别贴超长原始日志
 
+### Web ACTIONS 主按钮
+
+灰色 **Needs re-step** / **需要 re-step**（`disabled`）+ **Blocked: N** = `plan=attention`：只有不可自动重试的终态 blocked。这是状态，不是动作。
+
+- **不是**按钮坏了；**不是** METADATA 里当前选中的 reference 要重跑
+- **不要**点主按钮，**不要**把「点 re-step」落成 `kairo run`（attention 下普通 run 不会综合）
+- 先 `kairo status` 看 `⚠ blocked:reason`
+- `compose-migration-required`（含超长 leftover `compose-degraded`）：恢复入口在左边活 target（`understanding.md`）的「重新生成」，或讲清压缩代价后确认 `kairo re-step understanding.md`（失败保留旧版）
+
 命令报错 → 如实呈现 stderr 要点，不臆造 workspace 状态。
 
 ## Common mistakes
@@ -118,6 +127,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 - 用户说「推进」就对所有 workspace 批量 `step` → 越界。**先列清单，确认范围。**
 - 找不到 CLI 就编造 status → **先修安装/PATH。**
 - 用户说「archive 到 Kairo」却走 `kairo add`，或把 compaction 摘要当完整会话续接 → 会错绑或分叉。**用 `kairo archive`；输入必须是宿主原始 transcript。**
+- 把灰色 **Needs re-step** / **需要 re-step** 当成可点 Run，或当成当前选中 reference 的 retry → **先 `kairo status` 看 reason**；主按钮在 attention 下故意不可点。
 
 ## 归档会话（`kairo archive`）
 
