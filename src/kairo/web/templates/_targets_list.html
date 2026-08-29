@@ -1,0 +1,6 @@
+{% for tgt in targets %}
+<a class="nav-doc" href="#" hx-get="/w/{{ slug | urlencode }}/target?path={{ tgt.path | urlencode }}" hx-target="#meta">
+  <span class="dot {% if tgt.status == 'blocked' %}blocked{% elif tgt.status == 'missing' %}stale{% else %}ok{% endif %}"></span>
+  <span class="name">{{ tgt.path }}</span>
+</a>
+{% endfor %}

@@ -6,12 +6,7 @@
   <aside class="pane-nav">
     <div class="nav-group">
       <div class="nav-section">{{ t('nav.targets') }}</div>
-      {% for tgt in targets %}
-      <a class="nav-doc" href="#" hx-get="/w/{{ slug | urlencode }}/target?path={{ tgt.path | urlencode }}" hx-target="#meta">
-        <span class="dot {% if tgt.status == 'blocked' %}blocked{% elif tgt.status == 'missing' %}stale{% else %}ok{% endif %}"></span>
-        <span class="name">{{ tgt.path }}</span>
-      </a>
-      {% endfor %}
+      <div id="targets-list">{% include "_targets_list.html" %}</div>
     </div>
     <div class="nav-group">
       <div class="nav-section">{{ t('nav.references') }}</div>
