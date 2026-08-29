@@ -54,6 +54,12 @@ class ReviewStore(BaseModel):
 
 Extractor = Callable[[str, list[GlossaryEntry], str], list[dict]]
 
+_EXTRACT_PERSONA = """从一份已完成的 digest 中提取值得人工审核的领域专名候选。
+
+只提出 digest 原文中有直接证据、且不在现有生效真名册中的名称；不要猜测、不要自动纠正。
+每项 quote 必须逐字出现在 digest 中，长度应尽量短但足以作为证据。输出 YAML 列表，
+每项仅可含 name、note、aka、quote；无候选时输出 []。不要输出 Markdown 围栏或解释。"""
+
 
 def review_path(ws_root: Path) -> Path:
     return Path(ws_root) / ".kairo" / "glossary_review.yaml"
@@ -127,6 +133,30 @@ def default_extractor(
 ) -> list[dict]:
     """无 provider 时的保守空提取。测试可替换。"""
     return []
+
+
+def provider_extractor(provider) -> Extractor:
+    """将候选提取交给当前 Digest provider；产物仍须经过证据校验。"""
+
+    def extract(digest: str, effective: list[GlossaryEntry], ref_id: str) -> list[dict]:
+        from kairo.rules import _run_agent
+
+        glossary = yaml.safe_dump(
+            [entry.model_dump() for entry in effective],
+            allow_unicode=True,
+            sort_keys=False,
+        )
+        context = (
+            f"reference: {ref_id}\n\n"
+            "现有生效真名册（只读；其中名称或别称不得再次提出）：\n"
+            f"{glossary or '[]'}\n\n"
+            "digest：\n"
+            f"{digest}"
+        )
+        text = _run_agent(provider, _EXTRACT_PERSONA, context, "candidates.yaml")
+        return parse_extract_yaml(text)
+
+    return extract
 
 
 def ingest_candidates(
@@ -327,12 +357,13 @@ def extract_after_digest(
     digest_text: str,
     *,
     extractor: Extractor | None = None,
+    provider=None,
 ) -> None:
     from kairo.glossary import workspace_effective
 
     try:
         effective = [i.entry for i in workspace_effective(ws.root)]
-        fn = extractor or default_extractor
+        fn = extractor or (provider_extractor(provider) if provider is not None else default_extractor)
         drafts = fn(digest_text, effective, ref_id)
         ingest_candidates(ws.root, ref_id, drafts, effective=effective)
     except Exception as e:

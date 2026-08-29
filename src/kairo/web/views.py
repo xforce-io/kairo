@@ -968,7 +968,6 @@ def _glossary_fragment(
 ) -> HTMLResponse:
     from kairo.glossary import (
         GlossaryError,
-        current_effective_hash,
         machine_migration_hint,
         workspace_effective,
     )
@@ -1007,6 +1006,10 @@ def _glossary_fragment(
 
         review = load_review(ws.root)
         candidates = [c.model_dump() for c in open_candidates(ws.root)]
+        for candidate in candidates:
+            candidate["status_label"] = t(
+                f"glossary.status_{candidate['status']}"
+            )
         extract_errors = review.extract_errors
     except GlossaryError as e:
         load_failed = True
@@ -1166,13 +1169,14 @@ def glossary_candidate_promote(request: Request, slug: str, cid: str) -> HTMLRes
 def glossary_extract_retry(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     from kairo.glossary import GlossaryError
     from kairo.glossary_review import extract_after_digest
+    from kairo.provider import select_provider
 
     ws = _open(request, slug)
     path = ws.root / "references" / ref_id / "digest.md"
     try:
         if not path.is_file():
             raise GlossaryError(f"digest 不存在:{ref_id}")
-        extract_after_digest(ws, ref_id, path.read_text())
+        extract_after_digest(ws, ref_id, path.read_text(), provider=select_provider())
     except GlossaryError as e:
         return _glossary_fragment(request, ws, slug, error=str(e))
     return _glossary_fragment(request, ws, slug)
@@ -1194,7 +1198,6 @@ def _root_glossary_page(
     )
     from kairo.web.discovery import scan_workspaces
 
-    t = _t(request)
     serve = Path(request.app.state.root)
     form = form or {}
     load_failed = False

@@ -10,7 +10,6 @@ from kairo.engine import step
 from kairo.glossary import load_glossary_file, load_workspace_glossary
 from kairo.glossary_review import (
     STATUS_IGNORED,
-    STATUS_PENDING,
     STATUS_PENDING_ROOT,
     STATUS_ROOT_REJECTED,
     accept_root,
@@ -20,12 +19,11 @@ from kairo.glossary_review import (
     ingest_candidates,
     invalidate_stale,
     load_review,
-    mark_extract_error,
     open_candidates,
     promote_candidate,
     reject_root,
 )
-from kairo.provider import StubProvider
+from kairo.provider import AgentResult, StubProvider
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 
@@ -92,6 +90,33 @@ def test_extract_error_does_not_change_digest(tmp_path):
     assert "extract-boom" in load_review(ws.root).extract_errors[rid]
 
 
+def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
+    class CandidateProvider(StubProvider):
+        def run(self, config, signal=None):
+            if config.artifact == "candidates.yaml":
+                config.artifact_dir.mkdir(parents=True, exist_ok=True)
+                path = config.artifact_dir / "candidates.yaml"
+                path.write_text(
+                    "- name: 天溯\n  note: 系统名称\n  quote: 天溯系统\n"
+                )
+                return AgentResult(artifacts=[path], result_text=path.read_text())
+            return super().run(config, signal)
+
+    ws, rid, _ = _ws_with_digest(tmp_path)
+    # 重新处理 digest，验证正式规则链路而不是直接调用存储层。
+    ws.root.joinpath("references", rid, "digest.md").unlink()
+    state = ws.read_state()
+    del state.products[f"references/{rid}/digest.md"]
+    ws.write_state(state)
+
+    step(ws, provider=CandidateProvider())
+
+    candidates = open_candidates(ws.root)
+    assert len(candidates) == 1
+    assert candidates[0].name == "天溯"
+    assert candidates[0].quote == "天溯系统"
+
+
 def test_delete_ref_invalidates_pending(tmp_path):
     ws, rid, _ = _ws_with_digest(tmp_path)
     ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
@@ -137,3 +162,18 @@ def test_web_review_actions(tmp_path):
     r = c.post(f"/w/ws/glossary/candidates/{cid}/ignore")
     assert r.status_code == 200
     assert open_candidates(ws.root) == []
+
+
+def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
+    ws, rid, root = _ws_with_digest(tmp_path)
+    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    cid = open_candidates(ws.root)[0].id
+    promote_candidate(ws.root, cid)
+
+    page = TestClient(create_app(root)).get("/w/ws/glossary")
+
+    assert page.status_code == 200
+    assert "awaiting root review" in page.text
+    assert f"/candidates/{cid}/accept" not in page.text
+    assert f"/candidates/{cid}/ignore" not in page.text
+    assert f"/candidates/{cid}/promote" not in page.text
