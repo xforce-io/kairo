@@ -1572,6 +1572,27 @@ def knowledge_candidate_update(request: Request, slug: str, candidate_id: str, t
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
+@router.post("/w/{slug}/knowledge/extract", response_class=HTMLResponse)
+def knowledge_extract_retry(request: Request, slug: str, path: str = Form(...)) -> HTMLResponse:
+    """仅重试已完成产物的候选提取，不重跑 Digest/Compose。"""
+    from kairo.knowledge import KnowledgeError
+    from kairo.knowledge_review import extract_after_success
+    from kairo.provider import select_provider
+
+    ws = _open(request, slug)
+    try:
+        candidate_path = Path(path)
+        if candidate_path.is_absolute() or ".." in candidate_path.parts:
+            raise KnowledgeError("候选提取 path 非法")
+        source = ws.root / candidate_path
+        if not source.is_file():
+            raise KnowledgeError("候选提取来源不存在")
+        extract_after_success(ws.root, Path(request.app.state.root), source_kind="compose" if path == "understanding.md" else "digest", path=path, text=source.read_text(encoding="utf-8"), provider=select_provider())
+    except (KnowledgeError, OSError) as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
+
+
 @router.post("/knowledge/candidates/{slug}/{candidate_id}/{action}", response_class=HTMLResponse)
 def knowledge_global_action(
     request: Request, slug: str, candidate_id: str, action: str, reason: str = Form(""), entry_id: str = Form("")
@@ -1793,12 +1814,12 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
             pending_knowledge = sum(c.status in {"pending", "pending_global"} for c in review.candidates)
             if pending_knowledge:
                 lines.append(
-                    f'<p class="run-summary-meta"><a href="/knowledge?workspace={quote(slug)}">知识候选 {pending_knowledge} 项待处理</a></p>'
+                    f'<p class="run-summary-meta"><a href="/knowledge?workspace={quote(slug)}">{escape(t("knowledge.run_pending").format(n=pending_knowledge))}</a></p>'
                 )
             elif review.extract_errors:
-                lines.append('<p class="run-summary-meta">Digest/Compose 已完成；知识候选提取失败，可重试。</p>')
+                lines.append(f'<p class="run-summary-meta">{escape(t("knowledge.run_extract_failed"))}</p>')
             else:
-                lines.append('<p class="run-summary-meta">未命中已确认知识，未注入知识上下文，或本次无新候选。</p>')
+                lines.append(f'<p class="run-summary-meta">{escape(t("knowledge.run_empty"))}</p>')
         except Exception:
             pass
     # 任务结束后释放运行锁;OOB 刷新主按钮、活 target 圆点与元信息(#180)

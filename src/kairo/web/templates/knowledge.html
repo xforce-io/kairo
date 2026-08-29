@@ -76,7 +76,7 @@
         <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/merge" style="display:inline"><select name="entry_id" aria-label="合并目标">{% for entry in local_entries if entry.status == 'confirmed' %}<option value="{{ entry.id }}">{{ entry.title }}</option>{% endfor %}</select><button class="btn btn-ghost btn-regen">合并</button></form>
         {% elif candidate.status == 'pending_global' %}<span class="gl-aka">等待 global 审核</span>{% elif candidate.status == 'rejected_global' %}<span class="gl-aka">全局审核已拒绝：{{ candidate.reject_reason }}；本地条目仍可编辑后再次提升。</span>{% else %}<span class="gl-aka">已完成：{{ candidate.status }}</span>{% endif %}
       </li>{% endfor %}</ul>{% else %}<p class="panel-hint">本次没有待审核知识候选。</p>{% endif %}
-    {% if extract_errors %}<div class="ref-blocks" role="alert">Digest/Compose 已完成；知识候选提取失败，可重试：{% for path, message in extract_errors.items() %}<div>{{ path }}：{{ message }}</div>{% endfor %}</div>{% endif %}
+    {% if extract_errors %}<div class="ref-blocks" role="alert">Digest/Compose 已完成；知识候选提取失败，可重试：{% for path, message in extract_errors.items() %}<div>{{ path }}：{{ message }} <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/extract" style="display:inline"><input type="hidden" name="path" value="{{ path }}"><button class="btn btn-ghost btn-regen">重试提取</button></form></div>{% endfor %}</div>{% endif %}
   </section>{% endif %}
 </div>
 {% endblock %}
