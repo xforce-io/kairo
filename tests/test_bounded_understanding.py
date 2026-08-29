@@ -13,6 +13,7 @@ from kairo.rules import (
     DigestRule,
     _hash,
 )
+from kairo.engine import workspace_run_plan
 from kairo.workspace import Workspace
 
 
@@ -51,6 +52,43 @@ class _LongProvider:
         path = config.artifact_dir / (config.artifact or "output.md")
         path.write_text(content)
         return AgentResult(artifacts=_scan_artifacts(config.artifact_dir))
+
+
+def test_cli_status_and_run_leftover_oversized_degraded(tmp_path, monkeypatch):
+    """#176:status/run 把超长 leftover compose-degraded 当成既有迁移门禁。"""
+    ws = Workspace.init(tmp_path / "ws", topic="leftover")
+    old = "旧历史" * (UNDERSTANDING_MAX_CHARS // 3 + 1)
+    understanding = ws.root / "understanding.md"
+    understanding.write_text(old)
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        output_hash=_hash(old),
+        folded={},
+        status="blocked",
+        reason="compose-degraded",
+    )
+    ws.write_state(state)
+    monkeypatch.chdir(ws.root)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+
+    status = CliRunner().invoke(app, ["status"])
+    assert status.exit_code == 0, status.output
+    assert REASON_COMPOSE_MIGRATION_REQUIRED in status.output
+    assert "re-step understanding.md" in status.output
+    assert "compose-degraded" not in status.output
+    assert understanding.read_text() == old
+
+    prior = understanding.read_bytes()
+    gated = CliRunner().invoke(app, ["run"])
+    assert gated.exit_code == 1, gated.output
+    assert REASON_COMPOSE_MIGRATION_REQUIRED in gated.output
+    assert "re-step understanding.md" in gated.output
+    assert understanding.read_bytes() == prior
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert ts.status == "blocked"
+    plan = workspace_run_plan(ws)
+    assert plan["blocked_targets"][0]["reason"] == REASON_COMPOSE_MIGRATION_REQUIRED
 
 
 def test_cli_run_gates_legacy_document_then_re_step_migrates(

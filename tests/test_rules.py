@@ -2,7 +2,7 @@ import sys
 
 import yaml
 
-from kairo.models import Form, GlossaryEntry, Manifest, State, TargetState
+from kairo.models import Form, GlossaryEntry, Manifest, ProductState, State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import (
     REASON_COMPOSE_MIGRATION_REQUIRED,
@@ -13,6 +13,7 @@ from kairo.rules import (
     DigestRule,
     NormalizeRule,
     TransformRule,
+    _COMPOSE_MIN_PRIOR_LEN,
     _hash,
 )
 from kairo.workspace import Workspace
@@ -646,6 +647,7 @@ def test_compose_blocks_degraded_output_and_keeps_prior(tmp_path):
     rid = ws.add([t])
     _make_digest(ws, rid, "新纪要")
     good = "完整的判断正文。" * 400  # 远超 _COMPOSE_MIN_PRIOR_LEN
+    assert _COMPOSE_MIN_PRIOR_LEN < len(good) <= UNDERSTANDING_MAX_CHARS
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, good)
     prov = _FixedProvider(
@@ -705,6 +707,54 @@ def test_compose_from_scratch_not_guarded(tmp_path):
     _understanding_item(ws, prov, state).run(state)
     assert "短小但合法的首版正文" in (ws.root / "understanding.md").read_text()
     assert state.targets["understanding.md"].status == "ok"
+
+
+def test_leftover_degraded_oversized_is_observed_as_migration(tmp_path):
+    """#176:超长 leftover compose-degraded 走既有 20k 迁移门禁,不调 compose。"""
+    from kairo.engine import step, workspace_run_plan
+
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("x")
+    rid = ws.add([source])
+    digest_key = _make_digest(ws, rid, "新纪要")
+    old = "旧历史" * (UNDERSTANDING_MAX_CHARS // 3 + 1)
+    assert len(old) > UNDERSTANDING_MAX_CHARS
+    (ws.root / "understanding.md").write_text(old)
+    state = ws.read_state()
+    digest_item = next(
+        it
+        for it in DigestRule(ws, StubProvider()).discover(state)
+        if it.key == digest_key
+    )
+    state.products[digest_key] = ProductState(
+        input_hash=digest_item.input_hash, status="ok"
+    )
+    state.targets["understanding.md"] = TargetState(
+        depends_on=[],
+        output_hash=_hash(old),
+        folded={digest_key: digest_item.input_hash},
+        status="blocked",
+        reason="compose-degraded",
+    )
+    ws.write_state(state)
+
+    plan = workspace_run_plan(ws)
+    assert plan["mode"] == "attention"
+    assert plan["pending_count"] == 0
+    assert plan["blocked_count"] == 1
+    assert plan["retryable_blocked_count"] == 0
+    assert plan["blocked_targets"][0]["reason"] == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert plan["blocked_targets"][0]["retryable"] is False
+
+    provider = _FixedProvider("不应调用")
+    step(ws, provider)
+
+    assert provider.calls == 0
+    assert (ws.root / "understanding.md").read_text() == old
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.status == "blocked"
+    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
 
 
 def test_compose_old_oversized_understanding_requires_explicit_migration(tmp_path):

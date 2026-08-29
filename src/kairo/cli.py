@@ -15,6 +15,7 @@ from kairo.engine import accept as engine_accept
 from kairo.engine import delete_reference as engine_delete_reference
 from kairo.engine import generate_prose as engine_generate_prose
 from kairo.engine import has_provider_failed
+from kairo.engine import promote_oversized_degraded
 from kairo.engine import re_step as engine_re_step
 from kairo.engine import retry_reference as engine_retry_reference
 from kairo.engine import run_workspace as engine_run_workspace
@@ -27,6 +28,7 @@ from kairo.rules import (
     REASON_COMPOSE_MIGRATION_REQUIRED,
     REASON_COMPOSE_OVER_BUDGET,
     ComposeRule,
+    effective_compose_block_reason,
 )
 from kairo.stream_index import write_stream_index
 from kairo.archive import ArchiveError, NeedChoice, archive_markdown
@@ -395,6 +397,7 @@ def timeline(
 
 def _exit_if_run_failed(ws: Workspace) -> None:
     """provider 或终态 target blocked 后非零退出,避免 CLI/Web 假成功。"""
+    promote_oversized_degraded(ws)
     if has_provider_failed(ws):
         typer.secho(
             "Error: provider-failed — see kairo status / Web blocks",
@@ -566,12 +569,13 @@ def status() -> None:
             typer.echo(f"target {target.path}: (未生成)")
             continue
         drift = len(ts.folded) - len(ts.last_major_folded)
+        reason = effective_compose_block_reason(ws, target.path, ts)
         flag = (
-            f"  ⚠ blocked:{_format_block_diag(ts.reason, ts.diagnostic)}"
+            f"  ⚠ blocked:{_format_block_diag(reason, ts.diagnostic)}"
             if ts.status == "blocked"
             else ""
         )
-        if ts.reason in (
+        if reason in (
             REASON_COMPOSE_MIGRATION_REQUIRED,
             REASON_COMPOSE_OVER_BUDGET,
         ):
