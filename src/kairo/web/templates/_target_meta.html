@@ -28,4 +28,6 @@
     </tbody>
   </table>
 </div>
+{% if include_reader|default(true) %}
 {% include "_reader_oob.html" %}
+{% endif %}

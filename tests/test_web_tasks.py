@@ -19,6 +19,12 @@ from kairo.web.tasks import (
     stream_events,
     wrap_log_line,
 )
+from kairo.models import TargetState
+from kairo.rules import (
+    REASON_COMPOSE_MIGRATION_REQUIRED,
+    UNDERSTANDING_MAX_CHARS,
+    _hash,
+)
 from kairo.workspace import Workspace
 
 
@@ -252,6 +258,72 @@ def test_run_summary_succeeded_shows_plan(tmp_path, monkeypatch):
     assert rid in r.text
     # 成功标题可以有,但不得出现失败标题冒充
     assert "Run failed" not in r.text and "运行失败" not in r.text
+
+
+def _finished_ok_task(app, ws):
+    task = app.state.registry.start(
+        "ws", ws.root, [sys.executable, "-c", "print('ok')"]
+    )
+    _wait(task)
+    assert task.exit_code == 0
+    return task
+
+
+def test_run_summary_clean_oob_refreshes_meta_and_nav(tmp_path, monkeypatch):
+    """#180 S1: plan=clean 的成功 run-summary OOB 刷新元信息与左栏圆点。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    body = "已收敛的理解正文"
+    (ws.root / "understanding.md").write_text(body)
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        output_hash=_hash(body),
+        status="ok",
+        reason=None,
+    )
+    ws.write_state(state)
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    task = _finished_ok_task(app, ws)
+    r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
+    assert r.status_code == 200
+    text = r.text
+    assert "Up to date" in text or "已是最新" in text
+    assert "No remaining blocks" in text or "无剩余阻塞" in text
+    assert 'id="run-btn-wrap"' in text and "hx-swap-oob" in text
+    assert 'id="targets-list"' in text and "hx-swap-oob" in text
+    assert 'id="meta"' in text and "hx-swap-oob" in text
+    assert "compose-migration-required" not in text
+    assert "compose-degraded" not in text
+    assert "dot blocked" not in text
+    assert "meta-st blocked" not in text
+
+
+def test_run_summary_still_blocked_keeps_meta_and_nav(tmp_path, monkeypatch):
+    """#180 S2: 仍终态 blocked 时 run-summary 不得把 target 画成 ok。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    old = "旧历史" * (UNDERSTANDING_MAX_CHARS // 3 + 1)
+    (ws.root / "understanding.md").write_text(old)
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        output_hash=_hash(old),
+        status="blocked",
+        reason=REASON_COMPOSE_MIGRATION_REQUIRED,
+    )
+    ws.write_state(state)
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    task = _finished_ok_task(app, ws)
+    r = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
+    assert r.status_code == 200
+    text = r.text
+    assert REASON_COMPOSE_MIGRATION_REQUIRED in text
+    assert "dot blocked" in text
+    assert "meta-st blocked" in text
+    assert "Needs re-step" in text or "需要 re-step" in text
+    assert "No remaining blocks" not in text
+    assert "无剩余阻塞" not in text
 
 
 def test_run_summary_missing_task_not_success(tmp_path, monkeypatch):

@@ -801,37 +801,44 @@ def ref_form_open(request: Request, slug: str, ref_id: str, key: str) -> JSONRes
     return JSONResponse({"ok": True, "path": str(path)})
 
 
+def _target_meta_vars(
+    request: Request, ws: Workspace, slug: str, path: str, *, include_reader: bool
+) -> dict:
+    ts = ws.read_state().targets.get(path)
+    status = ts.status if ts else "missing"
+    has_doc = (ws.root / path).is_file()
+    diag = ts.diagnostic if ts else None
+    return {
+        "slug": slug,
+        "path": path,
+        "status": status,
+        "reason": effective_compose_block_reason(ws, path, ts),
+        "diagnostic_summary": diag.summary if diag else None,
+        "diagnostic_stage": diag.stage if diag else None,
+        "diagnostic_provider": diag.provider if diag else None,
+        "has_doc": has_doc,
+        "can_regen": has_doc or (ts is not None and ts.status == "blocked"),
+        "regen_confirm": _t(request)(
+            "target.regen_confirm" if has_doc else "target.regen_confirm_empty"
+        ),
+        "preview_title": path,
+        "preview_html": _preview_html(ws, path, slug) if has_doc else None,
+        "exportable": True,
+        "empty_hint": _t(request)("target.empty_hint"),
+        "include_reader": include_reader,
+    }
+
+
 @router.get("/w/{slug}/target", response_class=HTMLResponse)
 def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     """右栏产物元信息(状态/blocked 原因) + (OOB)中间预览正文。"""
     ws = _open(request, slug)
     if path not in {t.path for t in ws.constitution.targets}:
         raise HTTPException(status_code=404, detail="target not found")
-    ts = ws.read_state().targets.get(path)
-    status = ts.status if ts else "missing"
-    has_doc = (ws.root / path).is_file()
-    diag = ts.diagnostic if ts else None
     return _render(
         request,
         "_target_meta.html",
-        {
-            "slug": slug,
-            "path": path,
-            "status": status,
-            "reason": effective_compose_block_reason(ws, path, ts),
-            "diagnostic_summary": diag.summary if diag else None,
-            "diagnostic_stage": diag.stage if diag else None,
-            "diagnostic_provider": diag.provider if diag else None,
-            "has_doc": has_doc,
-            "can_regen": has_doc or (ts is not None and ts.status == "blocked"),
-            "regen_confirm": _t(request)(
-                "target.regen_confirm" if has_doc else "target.regen_confirm_empty"
-            ),
-            "preview_title": path,
-            "preview_html": _preview_html(ws, path, slug) if has_doc else None,
-            "exportable": True,
-            "empty_hint": _t(request)("target.empty_hint"),
-        },
+        _target_meta_vars(request, ws, slug, path, include_reader=True),
     )
 
 
@@ -1633,14 +1640,35 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
             lines.append("</ul>")
         else:
             lines.append(f'<p class="muted">{t("run.done_ok")}</p>')
-    # 任务结束后释放运行锁(is_running 看 done);OOB 刷新 Run 按钮以便再次发起
+    # 任务结束后释放运行锁;OOB 刷新主按钮、活 target 圆点与元信息(#180)
+    lines.append(_run_status_oob(request, ws, slug, t))
+    return HTMLResponse("".join(lines))
+
+
+def _run_status_oob(request: Request, ws: Workspace, slug: str, t) -> str:
+    """run-summary 后把 ACTIONS / 左栏圆点 / METADATA 换成当前 state。"""
     btn = _run_button_ctx(request, ws, slug)
-    lines.append(
+    nav = _render(
+        request,
+        "_targets_list.html",
+        {"slug": slug, "targets": _target_states(ws)},
+    ).body.decode()
+    parts = [
         '<div id="run-btn-wrap" hx-swap-oob="true">'
         + _run_button_html(slug, btn, t)
-        + "</div>"
-    )
-    return HTMLResponse("".join(lines))
+        + "</div>",
+        f'<div id="targets-list" hx-swap-oob="true">{nav}</div>',
+    ]
+    live = [item.path for item in ws.constitution.live_targets()]
+    if live:
+        path = "understanding.md" if "understanding.md" in live else live[0]
+        meta = _render(
+            request,
+            "_target_meta.html",
+            _target_meta_vars(request, ws, slug, path, include_reader=False),
+        ).body.decode()
+        parts.append(f'<div id="meta" hx-swap-oob="true">{meta}</div>')
+    return "".join(parts)
 
 
 def _run_button_html(slug: str, btn: dict, t) -> str:
