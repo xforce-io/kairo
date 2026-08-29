@@ -5,6 +5,8 @@ from __future__ import annotations
 import fcntl
 import os
 
+import pytest
+
 from typer.testing import CliRunner
 
 from kairo.backup import push_named, read_result, result_path, verify_generation
@@ -28,11 +30,8 @@ def test_push_named_writes_status_and_keeps_current_on_failure(tmp_path, monkeyp
     assert rec["last_success_at"]
     bid = first.backup_id
     (tmp_path / "ext-audio.m4a").unlink()
-    try:
+    with pytest.raises(Exception):
         push_named("reader", serve)
-        raise AssertionError("expected failure")
-    except Exception:
-        pass
     rec2 = read_result("reader")
     assert rec2 is not None
     assert rec2["status"] == "failed"
@@ -60,6 +59,18 @@ def test_overlap_skip_exit_3(tmp_path, monkeypatch):
     finally:
         fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
+
+
+def test_corrupt_result_status_fails(tmp_path, monkeypatch):
+    _write_remote_config(tmp_path, "reader", tmp_path / "remote")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    path = result_path("reader")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[]", encoding="utf-8")
+    st = runner.invoke(app, ["backup", "status", "reader"])
+    assert st.exit_code == 1
+    assert "不可读" in st.output
 
 
 def test_backup_status_empty_and_ok(tmp_path, monkeypatch):

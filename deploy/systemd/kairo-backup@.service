@@ -4,5 +4,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/bin/kairo backup push %i
+# 按本机修改 User、ExecStart、KAIRO_SERVE_ROOT（见 README.md）
 User=kairo
+Environment=KAIRO_SERVE_ROOT=
+ExecStart=kairo backup push %i

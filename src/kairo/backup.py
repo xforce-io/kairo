@@ -690,6 +690,9 @@ def result_path(name: str) -> Path:
     return _state_dir() / f"{name}.json"
 
 
+_RESULT_STATUSES = frozenset({"pushed", "unchanged", "failed", "skipped"})
+
+
 def read_result(name: str) -> dict | None:
     path = result_path(name)
     if not path.is_file():
@@ -698,47 +701,94 @@ def read_result(name: str) -> dict | None:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise BackupError("status", "最近结果不可读") from exc
+    if not isinstance(data, dict):
+        raise BackupError("status", "最近结果不可读")
     if data.get("schema_version") != RESULT_SCHEMA:
         raise BackupError("status", "最近结果版本未知")
+    status = data.get("status")
+    if status not in _RESULT_STATUSES:
+        raise BackupError("status", "最近结果不可读")
+    for key in ("last_attempt_at", "last_success_at", "backup_id"):
+        if key not in data:
+            raise BackupError("status", "最近结果不可读")
     return data
 
 
-def _write_result(payload: dict) -> None:
+def _write_result(payload: dict, *, unless_newer_than: str | None = None) -> None:
     path = result_path(payload["remote"])
-    tmp = path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(tmp, path)
+    if unless_newer_than is not None and path.is_file():
+        try:
+            current = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            current = None
+        if isinstance(current, dict):
+            existing = current.get("last_attempt_at") or ""
+            if existing > unless_newer_than:
+                return
+    fd, tmp_name = tempfile.mkstemp(prefix=path.stem + ".", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+        os.replace(tmp_name, path)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def push_named(name: str, serve_root: Path) -> PublishResult:
-    """带源侧锁与最近结果的 push(#156)。重叠跳过 code=3。"""
-    spec = load_remote(name)
-    prev = None
+def _prev_fields(name: str) -> tuple[dict | None, str, str]:
     try:
         prev = read_result(name)
     except BackupError:
         prev = None
+        path = result_path(name)
+        if path.is_file():
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raw = None
+            if isinstance(raw, dict):
+                return None, str(raw.get("last_success_at") or ""), str(raw.get("backup_id") or "")
+        return None, "", ""
+    if prev is None:
+        return None, "", ""
+    return prev, str(prev.get("last_success_at") or ""), str(prev.get("backup_id") or "")
+
+
+def push_named(name: str, serve_root: Path) -> PublishResult:
+    """带源侧锁与最近结果的 push(#156)。重叠跳过 code=3。"""
+    spec = load_remote(name)
+    prev, prev_success, prev_id = _prev_fields(name)
+    prev_attempt = (prev or {}).get("last_attempt_at") or ""
     lock_fd = os.open(_state_dir() / f"{name}.lock", os.O_CREAT | os.O_RDWR, 0o644)
     try:
         fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except BlockingIOError as exc:
-        _write_result(
-            {
-                "schema_version": RESULT_SCHEMA,
-                "remote": name,
-                "last_attempt_at": _now(),
-                "last_success_at": (prev or {}).get("last_success_at") or "",
-                "backup_id": (prev or {}).get("backup_id") or "",
-                "status": "skipped",
-                "summary": "重叠跳过",
-            }
-        )
         os.close(lock_fd)
-        raise BackupError("lock", "重叠跳过", code=3) from exc
+        lock_fd = os.open(_state_dir() / f"{name}.lock", os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            os.close(lock_fd)
+            _write_result(
+                {
+                    "schema_version": RESULT_SCHEMA,
+                    "remote": name,
+                    "last_attempt_at": _now(),
+                    "last_success_at": prev_success,
+                    "backup_id": prev_id,
+                    "status": "skipped",
+                    "summary": "重叠跳过",
+                },
+                unless_newer_than=prev_attempt,
+            )
+            raise BackupError("lock", "重叠跳过", code=3) from exc
     attempt = _now()
     try:
         result = publish(serve_root, Path(spec.path))
@@ -760,10 +810,23 @@ def push_named(name: str, serve_root: Path) -> PublishResult:
                 "schema_version": RESULT_SCHEMA,
                 "remote": name,
                 "last_attempt_at": attempt,
-                "last_success_at": (prev or {}).get("last_success_at") or "",
-                "backup_id": (prev or {}).get("backup_id") or "",
+                "last_success_at": prev_success,
+                "backup_id": prev_id,
                 "status": "failed",
                 "summary": f"{exc.stage}: {exc.message}",
+            }
+        )
+        raise
+    except Exception as exc:
+        _write_result(
+            {
+                "schema_version": RESULT_SCHEMA,
+                "remote": name,
+                "last_attempt_at": attempt,
+                "last_success_at": prev_success,
+                "backup_id": prev_id,
+                "status": "failed",
+                "summary": type(exc).__name__,
             }
         )
         raise
