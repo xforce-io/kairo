@@ -314,3 +314,35 @@ def test_workspace_accept_replays_journal_after_review_failure(tmp_path, monkeyp
     assert entry.title == "可恢复"
     assert load_review(ws.root).candidates[0].status == "accepted"
     assert not (ws.root / ".kairo/knowledge_transaction.yaml").exists()
+
+
+def test_unicode_workspace_slug_is_retained_in_source(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "能源梳理")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "中文范围", "quote": "证据"}])
+    entry = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    assert entry.sources[0].workspace_slug == "能源梳理"
+
+
+def test_candidate_provider_only_receives_current_product_and_redacts_error(tmp_path, monkeypatch):
+    from kairo.knowledge_review import extract_after_success, provider_extractor
+
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    seen = {}
+
+    def fake_run(_provider, persona, context, artifact):
+        seen.update(persona=persona, context=context, artifact=artifact)
+        return "[]"
+
+    monkeypatch.setattr("kairo.rules._run_agent", fake_run)
+    provider_extractor(object())("本次产物", [_entry("不应泄露的已知知识")], "references/r/digest.md")
+    assert "不应泄露" not in seen["context"] and "本次产物" in seen["context"]
+    extract_after_success(ws.root, root, source_kind="digest", path="references/r/digest.md", text="正文", extractor=lambda *_: (_ for _ in ()).throw(RuntimeError("Authorization: Bearer super-secret-token api_key=hidden")))
+    error = load_review(ws.root).extract_errors["references/r/digest.md"]
+    assert "super-secret-token" not in error and "hidden" not in error and "[redacted]" in error
