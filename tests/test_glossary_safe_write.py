@@ -265,7 +265,9 @@ def test_web_legal_scope_changes_only_one_layer(tmp_path):
     )
     assert r2.status_code == 200
     assert [e.name for e in load_glossary_file(root / "glossary.yaml")] == ["公共名"]
-    assert Workspace.open(root / "ws").constitution.glossary[0].name == "本区名"
+    from kairo.knowledge import load_workspace
+
+    assert load_workspace(root / "ws")[0].entries[0].title == "本区名"
 
 
 def test_web_get_corrupt_shared_shows_error_not_empty_success(tmp_path):

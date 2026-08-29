@@ -64,7 +64,7 @@
       <label class="dlg-label">添加本地知识</label><input name="title" required placeholder="规范标题"><input name="description" placeholder="简短说明（可选）"><input name="aliases" placeholder="别名，逗号分隔（可选)"><input name="tags" placeholder="标签，逗号分隔（可选)"><button class="btn btn-step dlg-go">添加</button>
     </form>
 
-    <div class="meta-label" style="margin-top:18px">待审核知识候选 · {{ candidates | length }}</div>
+    <div class="meta-label" style="margin-top:18px">待审核知识候选 · {{ candidate_open_count }}</div>
     {% if candidates %}<ul class="dlg-bullets">{% for candidate in candidates %}
       <li><strong>{{ candidate.title }}</strong> <span class="gl-aka">来自 {{ candidate.source_kind }} · {{ candidate.status }}</span>
         <div class="gl-note">{{ candidate.quote }}</div><div class="gl-aka">{{ candidate.path }}{% if not candidate.available %} · 出处已不可用{% endif %}</div>
@@ -72,7 +72,7 @@
         <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/accept" style="display:inline"><button class="btn btn-ghost btn-regen">采纳到本工作区</button></form>
         <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/ignore" style="display:inline"><button class="btn btn-ghost btn-regen">忽略</button></form>
         <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/merge" style="display:inline"><select name="entry_id" aria-label="合并目标">{% for entry in local_entries if entry.status == 'confirmed' %}<option value="{{ entry.id }}">{{ entry.title }}</option>{% endfor %}</select><button class="btn btn-ghost btn-regen">合并</button></form>
-        {% else %}<span class="gl-aka">等待 global 审核</span>{% endif %}
+        {% elif candidate.status == 'pending_global' %}<span class="gl-aka">等待 global 审核</span>{% elif candidate.status == 'rejected_global' %}<span class="gl-aka">全局审核已拒绝：{{ candidate.reject_reason }}；本地条目仍可编辑后再次提升。</span>{% else %}<span class="gl-aka">已完成：{{ candidate.status }}</span>{% endif %}
       </li>{% endfor %}</ul>{% else %}<p class="panel-hint">本次没有待审核知识候选。</p>{% endif %}
     {% if extract_errors %}<div class="ref-blocks" role="alert">Digest/Compose 已完成；知识候选提取失败，可重试：{% for path, message in extract_errors.items() %}<div>{{ path }}：{{ message }}</div>{% endfor %}</div>{% endif %}
   </section>{% endif %}

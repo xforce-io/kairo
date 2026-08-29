@@ -1080,8 +1080,10 @@ def glossary_add(
     scope: str = Form("workspace"),
 ) -> HTMLResponse:
     """兼容 POST：写入唯一 KnowledgeStore。"""
+    if not name.strip():
+        return _knowledge_page(request, selected_slug=slug, error="name 不能为空")
     if scope.strip() != "workspace":
-        return _knowledge_page(request, selected_slug=slug, error="workspace 知识只能写本层")
+        return _knowledge_page(request, selected_slug=slug, error=f"{name}（{note}）未保存：未知 scope {scope!r}，workspace 知识只能写本层")
     return knowledge_workspace_add(request, slug, title=name, description=note, aliases=aka, tags=tags)
 
 
@@ -1092,19 +1094,18 @@ def glossary_delete(
     index: int,
     scope: str = Form("workspace"),
 ) -> HTMLResponse:
-    from kairo.glossary import GlossaryError, parse_scope
-
     ws = _open(request, slug)
     try:
-        chosen = parse_scope(scope)
-        if chosen != "workspace":
-            raise GlossaryError("workspace 真名册只能写本层;公共条目请到 Root 首页")
-        ws.remove_glossary_entry(index, serve_root=Path(request.app.state.root))
-    except (GlossaryError, ValueError, IndexError) as e:
-        return _glossary_fragment(
-            request, ws, slug, error=str(e), error_scope=scope.strip() or None
-        )
-    return _glossary_fragment(request, ws, slug)
+        from kairo.knowledge import KnowledgeError, migrate_workspace, save_workspace
+
+        if scope.strip() != "workspace":
+            raise KnowledgeError(f"未知 scope {scope!r}，workspace 知识只能写本层")
+        document = migrate_workspace(ws.root)
+        document.entries.pop(index)
+        save_workspace(ws.root, document)
+    except (KnowledgeError, IndexError) as e:
+        return _knowledge_page(request, selected_slug=slug, error=str(e))
+    return _knowledge_page(request, selected_slug=slug, success=True)
 
 
 @router.post("/w/{slug}/glossary/candidates/{cid}/accept", response_class=HTMLResponse)
@@ -1454,6 +1455,7 @@ def _knowledge_page(
             "global_entries": global_entries,
             "local_entries": local_entries,
             "candidates": candidates,
+            "candidate_open_count": sum(item["status"] in {"pending", "pending_global"} for item in candidates),
             "promotions": promotions,
             "extract_errors": extract_errors,
             "error": error,
@@ -1492,7 +1494,7 @@ def knowledge_global_add(
         document.entries.append(entry)
         save_global(serve, document)
     except (KnowledgeError, ValueError) as exc:
-        return _knowledge_page(request, selected_slug=workspace or None, error=str(exc))
+        return _knowledge_page(request, selected_slug=workspace or None, error=f"{title}（{description}）未保存：{exc}")
     return _knowledge_page(request, selected_slug=workspace or None, success=True)
 
 

@@ -119,21 +119,21 @@ def test_glossary_page_hides_local_until_workspace_selected(tmp_path):
     c = _client(tmp_path)
     bare = c.get("/glossary")
     assert bare.status_code == 200
-    assert 'action="/glossary"' in bare.text
+    assert 'action="/knowledge/global"' in bare.text
     assert _ws_panel(bare.text) is None
     assert "本区乙" not in bare.text
-    assert 'href="/glossary?workspace=a"' in bare.text
-    assert 'href="/glossary?workspace=b"' in bare.text
+    assert 'href="/knowledge?workspace=a"' in bare.text
+    assert 'href="/knowledge?workspace=b"' in bare.text
     selected = c.get("/glossary?workspace=b")
     panel = _ws_panel(selected.text)
     assert panel is not None
     assert "本区乙" in panel
-    assert 'action="/w/b/glossary"' in panel
+    assert 'action="/w/b/knowledge"' in panel
     a_page = c.get("/glossary?workspace=a")
     a_panel = _ws_panel(a_page.text)
     assert a_panel is not None
     assert "本区乙" not in a_panel
-    assert 'action="/w/a/glossary"' in a_panel
+    assert 'action="/w/a/knowledge"' in a_panel
 
 
 def test_glossary_invalid_workspace_query_not_selected(tmp_path):
@@ -151,10 +151,10 @@ def test_workspace_write_redirects_to_console_get(tmp_path):
         data={"name": "甲", "scope": "workspace"},
         follow_redirects=False,
     )
-    assert r.status_code == 303
-    assert r.headers["location"] == "/glossary?workspace=ws"
-    followed = c.get(r.headers["location"])
-    panel = _ws_panel(followed.text)
+    # 兼容 POST 返回统一知识页，旧路由不再形成第二个维护面。
+    assert r.status_code == 200
+    assert "甲" in r.text
+    panel = _ws_panel(r.text)
     assert panel and "甲" in panel
 
 
@@ -168,8 +168,9 @@ def test_web_glossary_add_and_delete(tmp_path):
     assert r.status_code == 200
     assert "中山医院" in r.text
     assert "中山一" in r.text
-    ws = Workspace.open(tmp_path / "ws")
-    assert ws.constitution.glossary[0].aka == ["中山一", "中山医院联会"]
+    from kairo.knowledge import load_workspace
+
+    assert [a.value for a in load_workspace(tmp_path / "ws")[0].entries[0].aliases] == ["中山一", "中山医院联会"]
 
     r2 = c.post("/w/ws/glossary/0/delete")
     assert r2.status_code == 200

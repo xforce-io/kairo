@@ -97,6 +97,15 @@ def load_glossary_file(path: Path) -> list[GlossaryEntry]:
         data = yaml.safe_load(path.read_text())
     except yaml.YAMLError as e:
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
+    # 旧公开 reader 的兼容投影：v2 仍只有 KnowledgeStore 是权威。
+    if isinstance(data, dict) and data.get("version") == 2:
+        try:
+            from kairo.knowledge import _parse_document
+
+            document, _legacy = _parse_document(data, scope="global", path=path)
+            return [GlossaryEntry(name=item.title, note=item.description, aka=[alias.value for alias in item.aliases], tags=item.tags) for item in document.entries]
+        except Exception as exc:
+            raise GlossaryError(f"v2 知识文档非法:{exc}", path=path) from exc
     return _parse_glossary_doc(data, path=path)
 
 
