@@ -194,3 +194,45 @@ def test_write_moves_unpinned_forward_pinned_stays(tmp_path, monkeypatch):
     pinned.add([src2])
     after = _cards(c.get("/").text)
     assert after[0] == "pin-ws"
+
+
+def _console_nav(html: str) -> str:
+    m = re.search(r'<nav class="console-nav"[^>]*>.*?</nav>', html, re.S)
+    assert m, "missing console-nav"
+    return m.group(0)
+
+
+def _header(html: str) -> str:
+    m = re.search(r"<header class=\"top\">.*?</header>", html, re.S)
+    assert m, "missing header"
+    return m.group(0)
+
+
+def test_glossary_is_header_utility_not_console_nav(tmp_path):
+    """#174: 真名册在顶栏弱链，不进主导航，不在 dash-head。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    html = _client(tmp_path).get("/").text
+    nav = _console_nav(html)
+    assert 'href="/glossary"' not in nav
+    header = _header(html)
+    assert re.search(r'href="/glossary"', header)
+    assert "Glossary" in header
+    start = html.find('class="dash-head"')
+    end = html.find('class="grid"')
+    assert start != -1 and end != -1 and start < end
+    assert 'href="/glossary"' not in html[start:end]
+
+
+def test_glossary_page_marks_utility_on(tmp_path):
+    """#174: /glossary 弱链为当前项，主导航不选中。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    html = _client(tmp_path).get("/glossary").text
+    nav = _console_nav(html)
+    assert 'href="/glossary"' not in nav
+    assert re.search(r'<a href="/" class="on">', nav) is None
+    assert re.search(r'<a href="/timeline" class="on">', nav) is None
+    assert re.search(r'href="/glossary"[^>]*\bon\b', _header(html))
+    crumb = re.search(r'<span class="crumb">(.*?)</span>', html, re.S)
+    assert crumb is not None
+    assert "Shared glossary" not in crumb.group(1)
+    assert "公共真名册" not in crumb.group(1)

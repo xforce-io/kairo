@@ -22,6 +22,7 @@ from kairo.glossary_review import (
     open_candidates,
     promote_candidate,
     reject_root,
+    todo_count,
 )
 from kairo.provider import AgentResult, StubProvider
 from kairo.web.server import create_app
@@ -151,17 +152,48 @@ def test_root_accept_writes_root_not_local(tmp_path):
     assert load_workspace_glossary(ws.root) == []
 
 
+def test_todo_count_sums_open_extract_and_pending(tmp_path):
+    ws, rid, _ = _ws_with_digest(tmp_path)
+    assert todo_count(ws.root, pending=[]) == 0
+    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    assert todo_count(ws.root, pending=[]) == 1
+    store = load_review(ws.root)
+    store.extract_errors[rid] = "boom"
+    from kairo.glossary_review import save_review
+
+    save_review(ws.root, store)
+    assert todo_count(ws.root, pending=["references/x/digest.md"]) == 3
+
+
 def test_web_review_actions(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
     ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
     cid = open_candidates(ws.root)[0].id
     c = TestClient(create_app(root))
-    page = c.get("/w/ws/glossary")
+    page = c.get("/glossary?workspace=ws")
     assert page.status_code == 200
     assert "天溯" in page.text
     r = c.post(f"/w/ws/glossary/candidates/{cid}/ignore")
     assert r.status_code == 200
     assert open_candidates(ws.root) == []
+
+
+def test_web_promote_then_root_reject_on_console(tmp_path):
+    """#174 S4: 提交公共出现在上半待提升；拒绝退回该区待审核。"""
+    ws, rid, root = _ws_with_digest(tmp_path)
+    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    cid = open_candidates(ws.root)[0].id
+    c = TestClient(create_app(root))
+    r = c.post(f"/w/ws/glossary/candidates/{cid}/promote")
+    assert r.status_code == 200
+    bare = c.get("/glossary")
+    assert f"/glossary/candidates/ws/{cid}/reject" in bare.text
+    assert "天溯" in bare.text
+    c.post(f"/glossary/candidates/ws/{cid}/reject", data={"reason": "本课题专用"})
+    selected = c.get("/glossary?workspace=ws")
+    assert "returned from root review" in selected.text
+    assert "本课题专用" in selected.text
+    assert load_review(ws.root).candidates[0].status == STATUS_ROOT_REJECTED
 
 
 def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
@@ -170,7 +202,7 @@ def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
     cid = open_candidates(ws.root)[0].id
     promote_candidate(ws.root, cid)
 
-    page = TestClient(create_app(root)).get("/w/ws/glossary")
+    page = TestClient(create_app(root)).get("/glossary?workspace=ws")
 
     assert page.status_code == 200
     assert "awaiting root review" in page.text

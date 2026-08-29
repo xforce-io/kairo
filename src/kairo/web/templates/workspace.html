@@ -142,8 +142,9 @@
       {% if run_blocked %}<span class="run-blocked-total">{{ t('run.blocked_total').format(n=run_blocked) }}</span>{% endif %}
     </div>
     <div id="step-area">{% if run_task_id %}{% with task_id=run_task_id %}{% include "_step.html" %}{% endwith %}{% endif %}</div>
-    <button type="button" class="btn btn-ghost btn-regen" style="margin-top:10px"
-            hx-get="/w/{{ slug | urlencode }}/glossary" hx-target="#meta" hx-swap="innerHTML">{{ t('glossary.btn') }}</button>
+    {% if glossary_todo_n %}
+    <a class="gl-todo-hint" href="/glossary?workspace={{ slug | urlencode }}">{{ t('glossary.todo_hint').format(n=glossary_todo_n) }}</a>
+    {% endif %}
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
     <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}><p class="panel-hint">{{ t('panel.hint') }}</p></div>
   </aside>
@@ -217,9 +218,6 @@
       nav.classList.add('is-active');
       return;
     }
-    // 真名册按钮 hx-get …/glossary → 中间/右栏切到非列表入口
-    var gl = e.target.closest('button[hx-get*="/glossary"], [hx-get*="/glossary"]');
-    if (gl) kairoClearNavActive();
   });
   // 导出 PDF:复用浏览器打印(@media print 只留阅读区正文)。
   // 临时把阅读区标题写入 document.title,使另存 PDF 的默认文件名即产物标题。
