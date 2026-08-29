@@ -2,7 +2,7 @@
 
 - Issue: [#154](https://github.com/xforce-io/kairo/issues/154)
 - 分支: `feat/154-remote-full-backup`
-- 状态: Draft
+- 状态: Approved
 - 最后更新: 2026-08-28
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/154#issuecomment-5448359922)
 

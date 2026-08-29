@@ -21,6 +21,11 @@ def _config_path() -> Path:
     return Path(base) / "kairo" / "config.toml"
 
 
+def config_path() -> Path:
+    """machine config 路径:XDG 优先,否则 ~/.config/kairo/config.toml。"""
+    return _config_path()
+
+
 def resolve_asr(backend: str) -> tuple[str, str] | None:
     """按 transform 的 backend 解析转写命令,返回 (cmd_template, origin),无配置则 None。
 
