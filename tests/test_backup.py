@@ -129,6 +129,7 @@ def test_cli_backup_push_verify_restore(tmp_path, monkeypatch):
     remote = tmp_path / "remote"
     _write_remote_config(tmp_path, "reader", remote)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     result = runner.invoke(app, ["backup", "push", "reader", str(serve)])
     assert result.exit_code == 0, result.output
     assert "pushed" in result.output

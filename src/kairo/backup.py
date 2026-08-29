@@ -672,3 +672,101 @@ def restore_generation(
             dest.rmdir()
         tmp.replace(dest)
     return PublishResult("restored", result.backup_id, result.files, result.bytes)
+
+
+RESULT_SCHEMA = 1
+
+
+def _state_dir() -> Path:
+    base = os.environ.get("XDG_STATE_HOME") or os.path.expanduser("~/.local/state")
+    path = Path(base) / "kairo" / "backup"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def result_path(name: str) -> Path:
+    if not REMOTE_NAME_RE.fullmatch(name):
+        raise BackupError("config", f"非法 remote 名:{name}", code=2)
+    return _state_dir() / f"{name}.json"
+
+
+def read_result(name: str) -> dict | None:
+    path = result_path(name)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BackupError("status", "最近结果不可读") from exc
+    if data.get("schema_version") != RESULT_SCHEMA:
+        raise BackupError("status", "最近结果版本未知")
+    return data
+
+
+def _write_result(payload: dict) -> None:
+    path = result_path(payload["remote"])
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def push_named(name: str, serve_root: Path) -> PublishResult:
+    """带源侧锁与最近结果的 push(#156)。重叠跳过 code=3。"""
+    spec = load_remote(name)
+    prev = None
+    try:
+        prev = read_result(name)
+    except BackupError:
+        prev = None
+    lock_fd = os.open(_state_dir() / f"{name}.lock", os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        _write_result(
+            {
+                "schema_version": RESULT_SCHEMA,
+                "remote": name,
+                "last_attempt_at": _now(),
+                "last_success_at": (prev or {}).get("last_success_at") or "",
+                "backup_id": (prev or {}).get("backup_id") or "",
+                "status": "skipped",
+                "summary": "重叠跳过",
+            }
+        )
+        os.close(lock_fd)
+        raise BackupError("lock", "重叠跳过", code=3) from exc
+    attempt = _now()
+    try:
+        result = publish(serve_root, Path(spec.path))
+        _write_result(
+            {
+                "schema_version": RESULT_SCHEMA,
+                "remote": name,
+                "last_attempt_at": attempt,
+                "last_success_at": _now(),
+                "backup_id": result.backup_id,
+                "status": result.status,
+                "summary": "",
+            }
+        )
+        return result
+    except BackupError as exc:
+        _write_result(
+            {
+                "schema_version": RESULT_SCHEMA,
+                "remote": name,
+                "last_attempt_at": attempt,
+                "last_success_at": (prev or {}).get("last_success_at") or "",
+                "backup_id": (prev or {}).get("backup_id") or "",
+                "status": "failed",
+                "summary": f"{exc.stage}: {exc.message}",
+            }
+        )
+        raise
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)

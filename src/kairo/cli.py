@@ -689,17 +689,37 @@ def backup_push(
         None, help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
     ),
 ) -> None:
-    """把 serve root 完整备份到 remote 并原子切换 current(#154)。"""
-    from kairo.backup import BackupError, load_remote, publish
+    """把 serve root 完整备份到 remote 并原子切换 current(#154/#156)。"""
+    from kairo.backup import BackupError, push_named
 
     try:
-        spec = load_remote(remote)
-        result = publish(_serve_root(root), Path(spec.path))
+        result = push_named(remote, _serve_root(root))
     except BackupError as exc:
         _backup_fail(exc)
     typer.echo(
         f"{result.status} remote={remote} backup_id={result.backup_id} "
         f"files={result.files} bytes={result.bytes}"
+    )
+
+
+@backup_app.command("status")
+def backup_status(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+) -> None:
+    """显示该 remote 最近结果(#156)。"""
+    from kairo.backup import BackupError, read_result
+
+    try:
+        data = read_result(remote)
+    except BackupError as exc:
+        _backup_fail(exc)
+    if data is None:
+        typer.echo(f"empty remote={remote}")
+        return
+    typer.echo(
+        f"status={data.get('status')} last_attempt_at={data.get('last_attempt_at')} "
+        f"last_success_at={data.get('last_success_at') or '-'} "
+        f"backup_id={data.get('backup_id') or '-'}"
     )
 
 

@@ -1,0 +1,8 @@
+[Unit]
+Description=Kairo remote backup (%i)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kairo backup push %i
+User=kairo

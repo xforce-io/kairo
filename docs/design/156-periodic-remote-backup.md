@@ -2,7 +2,7 @@
 
 - Issue: [#156](https://github.com/xforce-io/kairo/issues/156)
 - 分支: `feat/156-periodic-remote-backup`
-- 状态: Draft
+- 状态: Approved
 - 最后更新: 2026-08-28
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/156#issuecomment-5448360744)
 
