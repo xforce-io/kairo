@@ -241,6 +241,24 @@ def test_cross_scope_conflict_is_local_ambiguity_not_global_disable():
     assert [hit.entry.title for hit in result.matches] == ["仍可用"]
 
 
+def test_rejected_entry_repromotes_without_duplicate_and_manual_source_stays_empty(tmp_path):
+    from kairo.knowledge_review import promote_entry, reject_global
+
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "中文空间")
+    entry = new_entry(title="人工条目", scope="workspace")
+    from kairo.knowledge import KnowledgeDocument, save_workspace
+
+    save_workspace(ws.root, KnowledgeDocument(entries=[entry]))
+    first = promote_entry(ws.root, entry.id)
+    reject_global(ws.root, first.id, "仅本地")
+    second = promote_entry(ws.root, entry.id)
+    assert second.id == first.id and second.status == "pending_global" and not second.reject_reason
+    promoted = accept_global(root, ws.root, second.id)
+    assert promoted.id == entry.id and promoted.sources == []
+
+
 def test_legacy_list_is_read_only_and_v2_legacy_delete_keeps_v2(tmp_path, monkeypatch):
     root = tmp_path / "root"
     root.mkdir()

@@ -894,14 +894,25 @@ class ComposeRule:
             state.targets[key] = ts
             from kairo.knowledge_review import extract_after_success
 
-            # 跨材料候选的证据只取本轮 digest；非 understanding target 不伪装为 understanding。
-            if use_delta:
+            # 每个 delta digest 独立保留可定位出处；成功 target 也可提出跨材料变化。
+            for digest_path in sorted(use_delta):
+                digest_file = self.ws.root / digest_path
+                if digest_file.is_file():
+                    extract_after_success(
+                        self.ws.root,
+                        self.ws.root.parent,
+                        source_kind="compose",
+                        path=digest_path,
+                        text=digest_file.read_text(),
+                        provider=self.provider,
+                    )
+            if key == "understanding.md":
                 extract_after_success(
                     self.ws.root,
                     self.ws.root.parent,
                     source_kind="compose",
-                    path=sorted(use_delta)[0],
-                    text=knowledge_text,
+                    path=key,
+                    text=content,
                     provider=self.provider,
                 )
 

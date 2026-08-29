@@ -118,6 +118,13 @@ def validate_entries(entries: list[KnowledgeEntry], *, scope: str) -> None:
         titles.add(title)
         if entry.status not in {"pending", "confirmed", "obsolete"}:
             raise KnowledgeError(f"条目状态非法:{entry.status}")
+        for label, value in (("created_at", entry.created_at), ("updated_at", entry.updated_at)):
+            if value:
+                try:
+                    if datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is None:
+                        raise ValueError
+                except ValueError as exc:
+                    raise KnowledgeError(f"条目 {label} 必须是带时区 ISO-8601") from exc
         seen_aliases: set[str] = set()
         for alias in entry.aliases:
             term = normalize_term(alias.value)
