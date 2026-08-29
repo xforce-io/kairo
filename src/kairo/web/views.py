@@ -77,7 +77,9 @@ def _knowledge_error_text(request: Request, raw: str) -> str:
         key = "knowledge.error_invalid_document"
     elif "scope" in value or "范围" in value:
         key = "knowledge.error_scope"
-    elif any(token in value for token in ("title 重复", "title 不能为空", "规范标题", "规范化", "alias", "别名", "冲突")):
+    elif any(token in value for token in ("name 不能为空", "title 不能为空")):
+        key = "knowledge.error_title_required"
+    elif any(token in value for token in ("title 重复", "规范标题", "规范化", "alias", "别名", "冲突")):
         key = "knowledge.error_duplicate_name"
     elif "候选" in value and any(token in value for token in ("不可", "不存在", "状态")):
         key = "knowledge.error_candidate_state"
@@ -1124,7 +1126,7 @@ def glossary_view(request: Request, slug: str):
 
         load_global(Path(request.app.state.root))
     except ValueError as exc:
-        return _knowledge_page(request, selected_slug=slug, error=str(exc), localize_error=False)
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
     return RedirectResponse(
         url=f"/knowledge?workspace={quote(slug)}", status_code=303
     )
@@ -1142,10 +1144,10 @@ def glossary_add(
 ) -> HTMLResponse:
     """兼容 POST：写入唯一 KnowledgeStore。"""
     if not name.strip():
-        return _knowledge_page(request, selected_slug=slug, error="name 不能为空", localize_error=False)
+        return _knowledge_page(request, selected_slug=slug, error="name 不能为空")
     if scope.strip() != "workspace":
-        return _knowledge_page(request, selected_slug=slug, error=f"{name}（{note}）未保存：未知 scope {scope!r}，workspace 知识只能写本层", localize_error=False)
-    return knowledge_workspace_add(request, slug, title=name, description=note, aliases=aka, tags=tags, localize_error=False)
+        return _knowledge_page(request, selected_slug=slug, error=f"{name}（{note}）未保存：未知 scope {scope!r}，workspace 知识只能写本层")
+    return knowledge_workspace_add(request, slug, title=name, description=note, aliases=aka, tags=tags)
 
 
 @router.post("/w/{slug}/glossary/{index}/delete", response_class=HTMLResponse)
@@ -1379,7 +1381,7 @@ def root_glossary_add(
     workspace: str = Form(""),
 ) -> HTMLResponse:
     """兼容 POST：公共 glossary 写入 global KnowledgeStore。"""
-    return knowledge_global_add(request, title=name, description=note, aliases=aka, tags=tags, workspace=workspace, localize_error=False)
+    return knowledge_global_add(request, title=name, description=note, aliases=aka, tags=tags, workspace=workspace)
 
 
 @router.post("/glossary/{index}/delete", response_class=HTMLResponse)
@@ -1394,7 +1396,7 @@ def root_glossary_delete(
         document.entries.pop(index)
         save_global(serve, document)
     except (KnowledgeError, IndexError) as e:
-        return _knowledge_page(request, selected_slug=workspace or None, error=str(e), localize_error=False)
+        return _knowledge_page(request, selected_slug=workspace or None, error=str(e))
     return _knowledge_page(request, selected_slug=workspace or None, success=True)
 
 
@@ -1407,7 +1409,7 @@ def root_candidate_accept(
 
         accept_global(Path(request.app.state.root), _open(request, slug).root, cid)
     except (ValueError, OSError) as e:
-        return _knowledge_page(request, selected_slug=slug, error=str(e), localize_error=False)
+        return _knowledge_page(request, selected_slug=slug, error=str(e))
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
@@ -1450,7 +1452,7 @@ def root_candidate_reject(
 
 # #182 统一知识页。旧 /glossary 保留为兼容维护入口；新的写入和候选闭环只走此页。
 def _knowledge_page(
-    request: Request, *, selected_slug: str | None = None, error: str | None = None, success: bool = False, localize_error: bool = True
+    request: Request, *, selected_slug: str | None = None, error: str | None = None, success: bool = False
 ) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError, load_global, load_workspace
     from kairo.knowledge_review import invalidate_stale
@@ -1546,7 +1548,7 @@ def _knowledge_page(
                     source.__dict__["available"] = (serve / selected / source.path).is_file()
     except KnowledgeError as exc:
         error = error or str(exc)
-    if error and localize_error:
+    if error:
         error = _knowledge_error_text(request, error)
     return _render(
         request,
@@ -1588,7 +1590,6 @@ def knowledge_global_add(
     aliases: str = Form(""),
     tags: str = Form(""),
     workspace: str = Form(""),
-    localize_error: bool = True,
 ) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError, load_global, new_entry, save_global, validate_entries
 
@@ -1600,13 +1601,13 @@ def knowledge_global_add(
         document.entries.append(entry)
         save_global(serve, document)
     except (KnowledgeError, ValueError) as exc:
-        return _knowledge_page(request, selected_slug=workspace or None, error=f"{title}（{description}）未保存：{exc}", localize_error=localize_error)
+        return _knowledge_page(request, selected_slug=workspace or None, error=f"{title}（{description}）未保存：{exc}")
     return _knowledge_page(request, selected_slug=workspace or None, success=True)
 
 
 @router.post("/w/{slug}/knowledge", response_class=HTMLResponse)
 def knowledge_workspace_add(
-    request: Request, slug: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form(""), localize_error: bool = True
+    request: Request, slug: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form("")
 ) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError, load_workspace, new_entry, save_workspace, validate_entries
 
@@ -1618,7 +1619,7 @@ def knowledge_workspace_add(
         document.entries.append(entry)
         save_workspace(ws.root, document)
     except (KnowledgeError, ValueError) as exc:
-        return _knowledge_page(request, selected_slug=slug, error=str(exc), localize_error=localize_error)
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 

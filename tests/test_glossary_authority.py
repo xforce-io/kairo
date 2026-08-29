@@ -128,7 +128,7 @@ def test_web_workspace_cannot_write_shared(tmp_path):
     c = TestClient(create_app(root))
     r = c.post("/w/ws/glossary", data={"name": "公共名", "scope": "shared"})
     assert r.status_code == 200
-    assert "Root" in r.text or "本层" in r.text
+    assert "not permitted in the selected knowledge scope" in r.text
     assert not (root / "glossary.yaml").exists()
 
 

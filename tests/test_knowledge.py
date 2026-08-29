@@ -803,6 +803,29 @@ def test_knowledge_web_errors_are_localized_without_exception_chinese(tmp_path, 
     assert not re.search(r"[\u4e00-\u9fff]", migration_error)
 
 
+def test_legacy_glossary_http_errors_use_knowledge_catalog_in_english(tmp_path):
+    """最终 P2：旧 workspace/root 写删与候选端点也不输出中文异常。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    Workspace.init(root / "ws")
+    client = TestClient(create_app(root))
+    headers = {"accept-language": "en"}
+
+    def error_of(response):
+        assert response.status_code == 200
+        error = response.text.split('role="alert">', 1)[1].split("</p>", 1)[0]
+        assert not re.search(r"[\u4e00-\u9fff]", error)
+        return error
+
+    assert "scope" in error_of(client.post("/w/ws/glossary", data={"name": "x", "scope": "global"}, headers=headers))
+    client.post("/glossary", data={"name": "duplicate"}, headers=headers)
+    assert "canonical title or alias conflicts" in error_of(client.post("/glossary", data={"name": "duplicate"}, headers=headers))
+    assert "operation failed" in error_of(client.post("/w/ws/glossary/9/delete", headers=headers))
+    assert "operation failed" in error_of(client.post("/glossary/9/delete", headers=headers))
+    assert "candidate" in error_of(client.post("/w/ws/glossary/candidates/kc-00000000000000000000/accept", headers=headers))
+    assert "candidate" in error_of(client.post("/glossary/candidates/ws/kc-00000000000000000000/accept", headers=headers))
+
+
 def test_legacy_workspace_write_rejects_unrelated_serve_root(tmp_path):
     """P2-9：兼容 add/remove 在读写前校验显式 root 归属。"""
     import pytest

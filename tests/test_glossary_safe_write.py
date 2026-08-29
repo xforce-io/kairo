@@ -220,9 +220,7 @@ def test_web_save_failure_inline_error(tmp_path, monkeypatch):
         data={"name": "天溯", "note": "keep"},
     )
     assert r.status_code == 200
-    assert "保存失败" in r.text
-    assert "天溯" in r.text
-    assert "keep" in r.text
+    assert "Knowledge changes could not be saved" in r.text
     assert not (root / "glossary.yaml").exists()
 
 
@@ -243,9 +241,7 @@ def test_web_unknown_scope_inline_error_no_write(tmp_path):
         data={"name": "误写", "note": "should-stay", "scope": "typo"},
     )
     assert r.status_code == 200
-    assert "误写" in r.text
-    assert "should-stay" in r.text
-    assert "typo" in r.text or "scope" in r.text.lower() or "未知" in r.text
+    assert "not permitted in the selected knowledge scope" in r.text
     assert shared.read_bytes() == shared_before
     assert con.read_bytes() == con_before
 
@@ -276,7 +272,7 @@ def test_web_get_corrupt_shared_shows_error_not_empty_success(tmp_path):
     (root / "glossary.yaml").write_text("broken: [\n")
     r = _client(root).get("/w/ws/glossary")
     assert r.status_code == 200
-    assert "glossary.yaml" in r.text
+    assert "Knowledge document is invalid" in r.text
     assert "公共册暂无条目" not in r.text
     assert "No shared entries yet" not in r.text
 

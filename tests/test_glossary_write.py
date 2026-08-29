@@ -183,5 +183,5 @@ def test_web_glossary_empty_name_stays_inline(tmp_path):
     Workspace.init(tmp_path / "ws", topic="t")
     r = _client(tmp_path).post("/w/ws/glossary", data={"name": "  "})
     assert r.status_code == 200
-    assert "name 不能为空" in r.text
+    assert "A canonical title is required" in r.text
     assert Workspace.open(tmp_path / "ws").constitution.glossary == []
