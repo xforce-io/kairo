@@ -334,7 +334,9 @@ def extract_after_success(
     except Exception as exc:
         # 提取永远是旁路：即使审核 YAML 损坏或写诊断也失败，也不能反噬 digest/compose。
         try:
-            mark_extract_error(workspace_root, path, str(exc))
+            from kairo.rules import safe_provider_summary
+
+            mark_extract_error(workspace_root, path, safe_provider_summary(exc))
         except Exception:
             pass
 
@@ -375,6 +377,17 @@ def _clear_transaction(workspace_root: Path) -> None:
     _transaction_path(workspace_root).unlink(missing_ok=True)
 
 
+def _transaction(workspace_root: Path) -> dict:
+    path = _transaction_path(workspace_root)
+    if not path.is_file():
+        return {}
+    try:
+        value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        return value if isinstance(value, dict) else {}
+    except yaml.YAMLError:
+        return {}
+
+
 def _set_candidate(review: KnowledgeReview, index: int, candidate: KnowledgeCandidate, **changes) -> KnowledgeCandidate:
     updated = candidate.model_copy(update={**changes, "updated_at": _now()})
     review.candidates[index] = updated
@@ -387,10 +400,13 @@ def accept_workspace(workspace_root: Path, candidate_id: str) -> KnowledgeEntry:
         raise KnowledgeError(f"候选不可采纳:{candidate.status}")
     document, _ = load_workspace(workspace_root)
     # 重试收敛：权威文件已写而 review 未落盘时，按 merged_into 补齐状态。
-    existing_entry = next((entry for entry in document.entries if entry.id == candidate.merged_into), None)
+    tx = _transaction(workspace_root)
+    replay_id = candidate.merged_into or (str(tx.get("entry_id", "")) if tx.get("kind") == "accept_workspace" and tx.get("candidate_id") == candidate.id else "")
+    existing_entry = next((entry for entry in document.entries if entry.id == replay_id), None)
     if existing_entry:
-        _set_candidate(review, index, candidate, status="accepted")
+        _set_candidate(review, index, candidate, status="accepted", merged_into=existing_entry.id)
         save_review(workspace_root, review)
+        _clear_transaction(workspace_root)
         return existing_entry
     entry = new_entry(
         title=candidate.title,
@@ -518,9 +534,11 @@ def merge_workspace(workspace_root: Path, candidate_id: str, entry_id: str) -> N
     replacement = target.model_copy(update={"aliases": aliases, "sources": sources, "updated_at": _now()})
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="workspace")
+    _write_transaction(workspace_root, {"kind": "merge_workspace", "candidate_id": candidate.id, "entry_id": entry_id})
     save_workspace(workspace_root, document)
     _set_candidate(review, index, candidate, status="merged", merged_into=entry_id)
     save_review(workspace_root, review)
+    _clear_transaction(workspace_root)
 
 
 def merge_global(serve_root: Path, workspace_root: Path, candidate_id: str, entry_id: str) -> None:
@@ -540,6 +558,7 @@ def merge_global(serve_root: Path, workspace_root: Path, candidate_id: str, entr
     replacement = target.model_copy(update={"aliases": aliases, "description": target.description or candidate.description, "tags": sorted(set([*target.tags, *candidate.tags])), "sources": _append_source(target.sources, _source(candidate, workspace_root)), "updated_at": _now()})
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="global")
+    _write_transaction(workspace_root, {"kind": "merge_global", "candidate_id": candidate.id, "entry_id": entry_id})
     save_global(serve_root, document)
     if candidate.entry_id:
         local_doc, _ = load_workspace(workspace_root)
@@ -548,6 +567,7 @@ def merge_global(serve_root: Path, workspace_root: Path, candidate_id: str, entr
             save_workspace(workspace_root, local_doc)
     _set_candidate(review, index, candidate, status="merged", merged_into=entry_id)
     save_review(workspace_root, review)
+    _clear_transaction(workspace_root)
 
 
 def set_obsolete(workspace_root: Path, entry_id: str) -> None:

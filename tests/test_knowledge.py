@@ -290,3 +290,27 @@ def test_pending_candidate_can_be_edited_in_web(tmp_path):
     assert page.status_code == 200 and "新标题" in page.text
     changed = load_review(ws.root).candidates[0]
     assert changed.title == "新标题" and changed.tags == ["tag"]
+
+
+def test_workspace_accept_replays_journal_after_review_failure(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "可恢复", "quote": "证据"}])
+    candidate = load_review(ws.root).candidates[0]
+    import kairo.knowledge_review as review_module
+
+    original = review_module.save_review
+    monkeypatch.setattr(review_module, "save_review", lambda *_: (_ for _ in ()).throw(OSError("review fail")))
+    try:
+        accept_workspace(ws.root, candidate.id)
+    except OSError:
+        pass
+    monkeypatch.setattr(review_module, "save_review", original)
+    entry = accept_workspace(ws.root, candidate.id)
+    assert entry.title == "可恢复"
+    assert load_review(ws.root).candidates[0].status == "accepted"
+    assert not (ws.root / ".kairo/knowledge_transaction.yaml").exists()
