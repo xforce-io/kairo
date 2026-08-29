@@ -11,12 +11,15 @@ import shutil
 from kairo.history import snapshot
 from kairo.models import REASON_PROVIDER_FAILED, TargetState
 from kairo.rules import (
+    REASON_COMPOSE_MIGRATION_REQUIRED,
     REASON_EXPLICIT_RECOMPOSE,
     ComposeRule,
     DigestRule,
     NormalizeRule,
     TransformRule,
     _hash,
+    effective_compose_block_reason,
+    leftover_degraded_requires_migration,
 )
 from kairo.stream_index import write_stream_index
 
@@ -125,13 +128,30 @@ def has_provider_failed(ws) -> bool:
     return False
 
 
+def promote_oversized_degraded(ws, state=None):
+    """#176:写路径把超长 leftover compose-degraded 落到既有迁移 reason。"""
+    state = state or ws.read_state()
+    changed = False
+    live = {t.path for t in ws.constitution.live_targets()}
+    for path, ts in state.targets.items():
+        if path not in live:
+            continue
+        if leftover_degraded_requires_migration(ws, path, ts):
+            ts.reason = REASON_COMPOSE_MIGRATION_REQUIRED
+            ts.status = "blocked"
+            changed = True
+    if changed:
+        ws.write_state(state)
+    return state
+
+
 def step(ws, provider) -> bool:
     """跑调和循环到收敛。返回是否有推进。
 
     #105:每个 WorkItem 执行后立刻 write_state,使 provider-failed 等 blocked
     诊断在后续 item 挂起/进程被杀时仍已落盘。
     """
-    state = ws.read_state()
+    state = promote_oversized_degraded(ws)
     rules = _build_rules(ws, provider)
     any_progress = False
     for _ in range(MAX_ITER):
@@ -298,14 +318,15 @@ def workspace_run_plan(ws) -> dict:
     for path, ts in ws.read_state().targets.items():
         if path in live_paths and ts.status == "blocked":
             diag = ts.diagnostic
+            reason = effective_compose_block_reason(ws, path, ts)
             blocked_targets.append(
                 {
                     "path": path,
-                    "reason": ts.reason,
+                    "reason": reason,
                     "summary": diag.summary if diag else None,
                     "stage": diag.stage if diag else None,
                     "provider": diag.provider if diag else None,
-                    "retryable": ts.reason == REASON_PROVIDER_FAILED,
+                    "retryable": reason == REASON_PROVIDER_FAILED,
                 }
             )
     blocked_ref_n = sum(len(b["blocks"]) for b in blocked_refs)

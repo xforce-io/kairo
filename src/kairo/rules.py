@@ -306,6 +306,23 @@ REASON_COMPOSE_OVER_BUDGET = "compose-over-budget"
 REASON_EXPLICIT_RECOMPOSE = "explicit-recompose"
 
 
+def leftover_degraded_requires_migration(ws, path: str, ts) -> bool:
+    """#176:超长 leftover compose-degraded 走既有 20k 迁移门禁。不新增阈值。"""
+    if path != "understanding.md" or ts is None:
+        return False
+    if ts.status != "blocked" or ts.reason != "compose-degraded":
+        return False
+    doc = ws.root / path
+    return doc.is_file() and len(doc.read_text()) > UNDERSTANDING_MAX_CHARS
+
+
+def effective_compose_block_reason(ws, path: str, ts) -> str | None:
+    """观察面 reason:超长 leftover degraded 显示为既有迁移门禁。"""
+    if leftover_degraded_requires_migration(ws, path, ts):
+        return REASON_COMPOSE_MIGRATION_REQUIRED
+    return ts.reason if ts else None
+
+
 class NormalizeRule:
     """ASR 派生的誊录(机器转写,有噪声)→ 规范化可读全文 prose(用 provider)。
 

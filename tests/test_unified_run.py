@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from kairo.engine import _run_plan_mode, run_workspace, step, workspace_run_plan
 from kairo.models import ProductState, TargetState
 from kairo.provider import StubProvider
-from kairo.rules import REASON_COMPOSE_MIGRATION_REQUIRED
+from kairo.rules import REASON_COMPOSE_MIGRATION_REQUIRED, UNDERSTANDING_MAX_CHARS, _hash
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 
@@ -170,6 +170,31 @@ def test_web_attention_button_disabled_and_regen_warning(tmp_path):
     assert "Blocked: 1" in page.text or "阻塞: 1" in page.text
     assert "compress" in target.text or "压缩历史正文" in target.text
     assert "failures keep" in target.text or "失败保留旧版" in target.text
+
+
+def test_web_leftover_oversized_degraded_uses_migration_copy(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    old = "旧历史" * (UNDERSTANDING_MAX_CHARS // 3 + 1)
+    understanding = ws.root / "understanding.md"
+    understanding.write_text(old)
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        output_hash=_hash(old),
+        status="blocked",
+        reason="compose-degraded",
+    )
+    ws.write_state(state)
+
+    client = TestClient(create_app(tmp_path))
+    page = client.get("/w/ws")
+    target = client.get("/w/ws/target?path=understanding.md")
+
+    assert "Needs re-step" in page.text or "需要 re-step" in page.text
+    assert 'id="run-btn"' in page.text and "disabled" in page.text
+    assert REASON_COMPOSE_MIGRATION_REQUIRED in target.text
+    assert "compose-degraded" not in target.text
+    assert "compress" in target.text or "压缩历史正文" in target.text
+    assert understanding.read_text() == old
 
 
 def test_web_first_over_budget_target_has_recovery_button(tmp_path):

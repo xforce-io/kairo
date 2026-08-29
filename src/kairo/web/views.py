@@ -47,6 +47,7 @@ from kairo.web.pins import read_pins, toggle_pin
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
 from kairo.web.tasks import classify_task, stream_events
+from kairo.rules import effective_compose_block_reason
 from kairo.workspace import (
     AddError,
     Workspace,
@@ -817,7 +818,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
             "slug": slug,
             "path": path,
             "status": status,
-            "reason": ts.reason if ts else None,
+            "reason": effective_compose_block_reason(ws, path, ts),
             "diagnostic_summary": diag.summary if diag else None,
             "diagnostic_stage": diag.stage if diag else None,
             "diagnostic_provider": diag.provider if diag else None,
