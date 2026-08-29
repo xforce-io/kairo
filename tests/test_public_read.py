@@ -1629,10 +1629,11 @@ def test_cli_serve_mode_public_read_wires_app(tmp_path, monkeypatch):
     root, _, _ = _full_public_root(tmp_path)
     seen: dict = {}
 
-    def fake_run(serve_root, port=8787, *, mode="console"):
+    def fake_run(serve_root, port=8787, *, mode="console", host="127.0.0.1"):
         seen["root"] = Path(serve_root)
         seen["port"] = port
         seen["mode"] = mode
+        seen["host"] = host
 
     import kairo.web.server as srv
 
@@ -1652,7 +1653,7 @@ def test_cli_serve_mode_public_read_wires_app(tmp_path, monkeypatch):
 def test_cli_serve_default_remains_console(tmp_path, monkeypatch):
     seen: dict = {}
 
-    def fake_run(serve_root, port=8787, *, mode="console"):
+    def fake_run(serve_root, port=8787, *, mode="console", host="127.0.0.1"):
         seen["mode"] = mode
 
     import kairo.web.server as srv

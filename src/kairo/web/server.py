@@ -47,9 +47,15 @@ def create_app(root: Path, *, mode: str = "console") -> FastAPI:
     return app
 
 
-def run(root: Path, port: int = 8787, *, mode: str = "console") -> None:
+def run(
+    root: Path,
+    port: int = 8787,
+    *,
+    mode: str = "console",
+    host: str = "127.0.0.1",
+) -> None:
     import uvicorn
 
     # Fail closed before binding — unknown mode must not spawn Console.
     app = create_app(Path(root), mode=mode)
-    uvicorn.run(app, host="127.0.0.1", port=port)
+    uvicorn.run(app, host=host, port=port)

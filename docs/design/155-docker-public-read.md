@@ -2,7 +2,7 @@
 
 - Issue: [#155](https://github.com/xforce-io/kairo/issues/155)
 - 分支: `feat/155-docker-public-read`
-- 状态: Draft
+- 状态: Approved
 - 最后更新: 2026-08-28
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/155#issuecomment-5448360334)
 
