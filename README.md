@@ -63,7 +63,8 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 | `prose` | Generate readable archive `prose.md` for one reference |
 | `accept` | Accept manual edits, pin as the new baseline, clear `blocked: manual-edit` |
 | `status` | List references / fold status of each document |
-| `glossary` | Glossary `list` / `add` / `rm` (`--scope workspace\|shared`) |
+| `knowledge` | Knowledge `list` / `add` / `rm` (`--scope workspace\|global`) |
+| `glossary` | Compatibility alias for `knowledge` (`--scope workspace\|shared`) |
 | `index` | Regenerate the `references/MEETINGS.md` navigation index |
 | `history` | List version snapshots |
 | `rollback` | Roll a document back to a version |
@@ -81,20 +82,23 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 - **Binary ingestion** ([#15](https://github.com/xforce-io/kairo/issues/15)): `add file.docx` (docx/pptx/xlsx/pdf) goes through `doc2text` (in-process conversion via [markitdown](https://github.com/microsoft/markitdown)) to produce `source_text`, isomorphic to ASR (`audio→transcript` ↔ `binary→source_text`), with zero downstream changes; xlsx converts to GFM tables, preserving header semantics. No machine configuration needed (markitdown is a project dependency). Stream-type processing only; corpus binaries are not converted (the baseline is read directly, read-only, not derived).
 - **blocked states**: source/conversion reasons (`no-asr`, `asr-failed`, `convert-failed`, `missing-source`), `manual-edit`, `provider-failed`, and Compose protections (`compose-degraded`, `compose-provenance-invalid`, `compose-migration-required`, `compose-over-budget`). `provider-failed` is Run-retryable; the Compose protections are terminal and preserve the old document/folded state. Budget reasons require an explicit `kairo re-step understanding.md` after confirming the compression trade-off. When `understanding.md` already exceeds 20,000 characters, leftover `compose-degraded` is observed and recovered as `compose-migration-required`.
 
-## Domain glossary
+## Domain knowledge
 
-`constitution.yaml` can declare a `glossary` that pins down this domain's canonical proper nouns. It is injected into the agent prompt at every Digest / Compose (and the optional Normalize) (Issue [#20](https://github.com/xforce-io/kairo/issues/20)) as structured read-only data plus a conservative rule: use the canonical name only when the mention is supported by name, alias, or definition; otherwise keep the original wording. Each entry has three keys: `name` (canonical name, the anchor), `note` (grounding for the model, optional), `aka` (known variants/aliases, reference only, optional).
+`constitution.yaml` can declare `knowledge` entries that retain canonical naming while adding status, scope, tags and optional one-way sources. Only confirmed entries that exactly match current material are injected into Digest / Compose / Normalize, under a deterministic budget; they remain reference context and never replace material evidence. `glossary` remains a compatible CLI and file migration path, not a second authority.
 
 ```yaml
-glossary:
-- name: 灵犀系统            # canonical name (example), used consistently everywhere
-  note: 本项目所研究的系统    # grounding, optional
-  aka: [灵西, 凌犀, 灵息]    # known mis-recognitions/homophone variants, optional
-- name: 星图平台
-  note: 平台名（与 corpus 基线一致）
+knowledge:
+  version: 2
+  entries:
+    - id: ke-example
+      title: 灵犀系统
+      description: 本项目所研究的系统
+      aliases: [{value: 灵西, auto_match: true}]
+      status: confirmed
+      scope: workspace
 ```
 
-Note: correction happens in the **normalize / digest / compose stages**; ASR transcription itself is unaffected (whisper still outputs by sound). An empty table (`glossary: []`, the default) means zero behavior change; after editing the glossary for an already-generated reference, run `kairo re-step <id>` to regenerate the digest before it is re-corrected. Shared entries live in `<serve-root>/glossary.yaml` and are maintained from the Root homepage; a workspace may override a name locally. Machine `~/.config/kairo/glossary.yaml` is not part of the effective glossary ([#163](https://github.com/xforce-io/kairo/issues/163)).
+Knowledge context applies in the **normalize / digest / compose stages**; ASR transcription itself is unaffected. After editing knowledge for an already-generated reference, run `kairo re-step <id>` to regenerate the digest. Global entries live in `<serve-root>/glossary.yaml` as a v2 document and are managed at `/knowledge`; a workspace may override a title locally. Machine `~/.config/kairo/glossary.yaml` is not part of the effective knowledge set.
 
 ## Local ASR configuration
 

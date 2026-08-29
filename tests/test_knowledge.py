@@ -45,7 +45,7 @@ def test_matcher_normalizes_boundaries_ambiguity_and_budget():
     global_entry = _entry("公共锚", aliases=["local"])
     # alias 同词但不同条目时不自动注入；ASCII 不可嵌在更长 token 中。
     matcher = KnowledgeMatcher([local, global_entry, _entry("Alpha", description="A"), _entry("Beta", description="B")])
-    result = matcher.match("LOCAL AlphaX alpha beta", budget=MatchBudget(max_entries=1, max_chars=20))
+    result = matcher.match("LOCAL AlphaX alpha beta", budget=MatchBudget(max_entries=1, max_chars=160))
     assert "local" in result.ambiguities
     assert [match.entry.title for match in result.matches] == ["Alpha"]
     assert result.truncated_count == 1
@@ -95,9 +95,12 @@ def test_review_accept_global_and_stale_source(tmp_path):
         drafts=[{"title": "全局锚", "quote": "锚点来自材料"}],
     )
     candidate = load_review(ws.root).candidates[-1]
-    promote(ws.root, candidate.id)
+    promoted_local = accept_workspace(ws.root, candidate.id)
+    promote(ws.root, promoted_local.id)
+    candidate = load_review(ws.root).candidates[-1]
     global_entry = accept_global(root, ws.root, candidate.id)
-    assert global_entry.scope == "global"
+    assert global_entry.scope == "global" and global_entry.id == promoted_local.id
+    assert not any(item.id == promoted_local.id for item in load_workspace(ws.root)[0].entries)
     ingest_candidates(
         ws.root,
         source_kind="digest",
@@ -153,3 +156,86 @@ def test_knowledge_web_add_and_candidate_actions(tmp_path):
     page = client.post(f"/w/ws/knowledge/candidates/{candidate.id}/accept")
     assert page.status_code == 200 and "候选锚" in page.text
     assert 'href="/knowledge"' in client.get("/").text
+
+
+def test_matcher_suggest_keeps_short_and_manual_aliases_out_of_auto_match():
+    entry = _entry("A", aliases=["XY", "manual"])
+    entry = entry.model_copy(update={"aliases": [KnowledgeAlias(value="XY", auto_match=False), KnowledgeAlias(value="manual", auto_match=False)]})
+    matcher = KnowledgeMatcher([entry, _entry("另一个", scope="workspace", aliases=["冲突"])])
+    assert matcher.match("XY manual").matches == ()
+    assert matcher.suggest(["XY", "manual", "A"]) == {"XY": "known", "manual": "known", "A": "known"}
+
+
+def test_legacy_review_migrates_once_and_old_web_routes_use_knowledge(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("旧候选证据")
+    review_dir = ws.root / ".kairo"
+    review_dir.mkdir(exist_ok=True)
+    (review_dir / "glossary_review.yaml").write_text("candidates:\n  - id: gc-old\n    name: 旧候选\n    ref_id: r\n    quote: 旧候选证据\n")
+    review = load_review(ws.root)
+    assert review.candidates[0].source_kind == "digest"
+    assert (review_dir / "knowledge_review.yaml").is_file()
+    assert (review_dir / "glossary_review.yaml.migrated").is_file()
+    client = TestClient(create_app(root))
+    assert client.get("/glossary", follow_redirects=False).headers["location"] == "/knowledge"
+    page = client.post("/w/ws/glossary", data={"name": "兼容写入", "scope": "workspace"})
+    assert page.status_code == 200
+    assert any(item.title == "兼容写入" for item in load_workspace(ws.root)[0].entries)
+
+
+def test_global_accept_retries_to_consistent_authorities(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("可定位证据")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="可定位证据", drafts=[{"title": "待提升", "quote": "可定位证据"}])
+    local = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    promotion = promote(ws.root, local.id)
+    import kairo.knowledge_review as review_module
+
+    original = review_module.save_review
+    calls = {"n": 0}
+
+    def fail_once(path, review):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("injected review write failure")
+        return original(path, review)
+
+    monkeypatch.setattr(review_module, "save_review", fail_once)
+    try:
+        accept_global(root, ws.root, promotion.id)
+    except OSError:
+        pass
+    entry = accept_global(root, ws.root, promotion.id)
+    assert entry.id == local.id
+    assert any(item.id == local.id for item in load_global(root)[0].entries)
+    assert not any(item.id == local.id for item in load_workspace(ws.root)[0].entries)
+    assert next(item for item in load_review(ws.root).candidates if item.id == promotion.id).status == "accepted"
+
+
+def test_extraction_is_side_effect_only_when_review_is_broken(tmp_path):
+    from kairo.knowledge_review import extract_after_success
+
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    (ws.root / ".kairo").mkdir(exist_ok=True)
+    (ws.root / ".kairo/knowledge_review.yaml").write_text("not: [valid")
+    # 不得抛出：Digest/Compose 已写出的主产物不能被审核旁路撤销。
+    extract_after_success(ws.root, root, source_kind="digest", path="references/r/digest.md", text="正文", extractor=lambda *_: [])
+
+
+def test_cross_scope_conflict_is_local_ambiguity_not_global_disable():
+    global_entry = _entry("公共", aliases=["冲突"])
+    local = _entry("本地", scope="workspace", aliases=["冲突"])
+    matcher = KnowledgeMatcher([global_entry, local, _entry("仍可用", scope="workspace")])
+    result = matcher.match("冲突 仍可用")
+    assert result.ambiguities == ("冲突",)
+    assert [hit.entry.title for hit in result.matches] == ["仍可用"]

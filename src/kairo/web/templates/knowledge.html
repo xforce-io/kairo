@@ -36,7 +36,7 @@
       <li><strong>{{ candidate.title }}</strong> ← {{ candidate.slug }} · {{ candidate.source_kind }}
         <div class="gl-note">{{ candidate.quote }}</div>
         <form method="post" action="/knowledge/candidates/{{ candidate.slug }}/{{ candidate.id }}/accept" style="display:inline"><button class="btn btn-ghost btn-regen">接受到 global</button></form>
-        <form method="post" action="/knowledge/candidates/{{ candidate.slug }}/{{ candidate.id }}/merge" style="display:inline"><input name="entry_id" placeholder="公共条目 ID"><button class="btn btn-ghost btn-regen">合并</button></form>
+        <form method="post" action="/knowledge/candidates/{{ candidate.slug }}/{{ candidate.id }}/merge" style="display:inline"><select name="entry_id" aria-label="公共合并目标">{% for entry in global_entries if entry.status == 'confirmed' %}<option value="{{ entry.id }}">{{ entry.title }}</option>{% endfor %}</select><button class="btn btn-ghost btn-regen">合并</button></form>
         <form method="post" action="/knowledge/candidates/{{ candidate.slug }}/{{ candidate.id }}/reject" style="display:inline"><input name="reason" placeholder="拒绝原因"><button class="btn btn-ghost btn-regen">拒绝</button></form>
       </li>{% endfor %}</ul>{% else %}<p class="panel-hint">暂无待全局审核的知识候选。</p>{% endif %}
   </section>
@@ -56,11 +56,12 @@
         {% if entry.description %}<div class="gl-note">{{ entry.description }}</div>{% endif %}
         {% for source in entry.sources %}<a class="gl-aka" href="/w/{{ selected_slug | urlencode }}?ref={{ source.path.split('/')[1] if source.path.startswith('references/') else '' }}">{{ source.path }}{% if not source.available %}（出处已不可用）{% endif %}</a>{% endfor %}
       </td><td class="mf-actions">{% if entry.status != 'obsolete' %}<form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/{{ entry.id }}/obsolete"><button class="btn btn-ghost btn-regen">标为已失效</button></form>{% endif %}
-        <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/{{ entry.id }}"><input name="title" value="{{ entry.title }}" required><input name="description" value="{{ entry.description }}" placeholder="简短说明"><input name="aliases" value="{% for alias in entry.aliases %}{{ alias.value }}{% if not loop.last %}, {% endif %}{% endfor %}" placeholder="别名"><button class="btn btn-ghost btn-regen">保存编辑</button></form>
+        <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/{{ entry.id }}"><input name="title" value="{{ entry.title }}" required><input name="description" value="{{ entry.description }}" placeholder="简短说明"><input name="aliases" value="{% for alias in entry.aliases %}{{ alias.value }}{% if not loop.last %}, {% endif %}{% endfor %}" placeholder="别名"><input name="tags" value="{{ entry.tags | join(', ') }}" placeholder="标签，逗号分隔"><button class="btn btn-ghost btn-regen">保存编辑</button></form>
+        {% if entry.status == 'confirmed' %}<form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/{{ entry.id }}/promote"><button class="btn btn-ghost btn-regen">提交 global 审核</button></form>{% endif %}
       </td></tr>
     {% endfor %}</tbody></table>{% else %}<p class="panel-hint">还没有本地知识条目。</p>{% endif %}
     <form class="dlg-form glossary-add" method="post" action="/w/{{ selected_slug | urlencode }}/knowledge">
-      <label class="dlg-label">添加本地知识</label><input name="title" required placeholder="规范标题"><input name="description" placeholder="简短说明（可选）"><input name="aliases" placeholder="别名，逗号分隔（可选)"><button class="btn btn-step dlg-go">添加</button>
+      <label class="dlg-label">添加本地知识</label><input name="title" required placeholder="规范标题"><input name="description" placeholder="简短说明（可选）"><input name="aliases" placeholder="别名，逗号分隔（可选)"><input name="tags" placeholder="标签，逗号分隔（可选)"><button class="btn btn-step dlg-go">添加</button>
     </form>
 
     <div class="meta-label" style="margin-top:18px">待审核知识候选 · {{ candidates | length }}</div>
@@ -70,8 +71,7 @@
         {% if candidate.status == 'pending' %}
         <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/accept" style="display:inline"><button class="btn btn-ghost btn-regen">采纳到本工作区</button></form>
         <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/ignore" style="display:inline"><button class="btn btn-ghost btn-regen">忽略</button></form>
-        <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/promote" style="display:inline"><button class="btn btn-ghost btn-regen">提交 global</button></form>
-        <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/merge" style="display:inline"><input name="entry_id" placeholder="本地条目 ID"><button class="btn btn-ghost btn-regen">合并</button></form>
+        <form method="post" action="/w/{{ selected_slug | urlencode }}/knowledge/candidates/{{ candidate.id }}/merge" style="display:inline"><select name="entry_id" aria-label="合并目标">{% for entry in local_entries if entry.status == 'confirmed' %}<option value="{{ entry.id }}">{{ entry.title }}</option>{% endfor %}</select><button class="btn btn-ghost btn-regen">合并</button></form>
         {% else %}<span class="gl-aka">等待 global 审核</span>{% endif %}
       </li>{% endfor %}</ul>{% else %}<p class="panel-hint">本次没有待审核知识候选。</p>{% endif %}
     {% if extract_errors %}<div class="ref-blocks" role="alert">Digest/Compose 已完成；知识候选提取失败，可重试：{% for path, message in extract_errors.items() %}<div>{{ path }}：{{ message }}</div>{% endfor %}</div>{% endif %}

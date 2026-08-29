@@ -32,8 +32,8 @@ def normalize_term(value: str) -> str:
     """匹配及冲突检测使用的稳定规范化形式。"""
     normalized = unicodedata.normalize("NFKC", value)
     normalized = re.sub(r"\s+", " ", normalized.strip())
-    # casefold 不会改变 CJK，能让 ASCII 标题和别名无大小写差异。
-    return normalized.casefold()
+    # 契约只承诺 ASCII 大小写无关；Unicode casefold 会意外改变非英语术语。
+    return "".join(ch.lower() if ch.isascii() else ch for ch in normalized)
 
 
 def _stable_legacy_id(scope: str, title: str) -> str:
@@ -59,6 +59,7 @@ class KnowledgeSource(BaseModel):
     path: str
     quote: str = ""
     content_hash: str = ""
+    workspace_slug: str = ""
 
 
 class KnowledgeEntry(BaseModel):
@@ -89,6 +90,10 @@ def _validate_source(source: KnowledgeSource) -> None:
     p = Path(source.path)
     if not source.path or p.is_absolute() or ".." in p.parts:
         raise KnowledgeError(f"出处 path 必须是安全相对路径:{source.path!r}")
+    if source.content_hash and not re.fullmatch(r"[a-f0-9]{64}", source.content_hash):
+        raise KnowledgeError("出处 content_hash 必须是 SHA-256")
+    if source.workspace_slug and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", source.workspace_slug):
+        raise KnowledgeError(f"出处 workspace_slug 非法:{source.workspace_slug!r}")
 
 
 def validate_entries(entries: list[KnowledgeEntry], *, scope: str) -> None:
@@ -280,19 +285,7 @@ def effective_entries(serve_root: Path, workspace_root: Path) -> list[KnowledgeE
             order.append(key)
         by_title[key] = entry
     entries = [by_title[key] for key in order]
-    # Effective aliases may conflict even when each authority layer alone is legal.
-    confirmed = [x for x in entries if x.status == "confirmed"]
-    title_terms = {normalize_term(x.title) for x in confirmed}
-    aliases: dict[str, str] = {}
-    for entry in confirmed:
-        for alias in entry.aliases:
-            term = normalize_term(alias.value)
-            if term in title_terms:
-                raise KnowledgeError(f"生效别名 {alias.value!r} 与规范标题冲突")
-            owner = aliases.get(term)
-            if owner and owner != entry.id:
-                raise KnowledgeError(f"生效别名 {alias.value!r} 指向多个条目")
-            aliases[term] = entry.id
+    # 跨 authority 的同词由 matcher 局部报告 ambiguity；不能因此关闭整个知识上下文。
     return entries
 
 

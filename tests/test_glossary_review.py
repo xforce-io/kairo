@@ -94,11 +94,11 @@ def test_extract_error_does_not_change_digest(tmp_path):
 def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
     class CandidateProvider(StubProvider):
         def run(self, config, signal=None):
-            if config.artifact == "candidates.yaml":
+            if config.artifact == "knowledge-candidates.yaml":
                 config.artifact_dir.mkdir(parents=True, exist_ok=True)
-                path = config.artifact_dir / "candidates.yaml"
+                path = config.artifact_dir / "knowledge-candidates.yaml"
                 path.write_text(
-                    "- name: 天溯\n  note: 系统名称\n  quote: 天溯系统\n"
+                    "- title: 天溯\n  description: 系统名称\n  quote: 天溯系统\n"
                 )
                 return AgentResult(artifacts=[path], result_text=path.read_text())
             return super().run(config, signal)
@@ -112,9 +112,11 @@ def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
 
     step(ws, provider=CandidateProvider())
 
-    candidates = open_candidates(ws.root)
+    from kairo.knowledge_review import open_candidates as knowledge_open_candidates
+
+    candidates = knowledge_open_candidates(ws.root)
     assert len(candidates) == 1
-    assert candidates[0].name == "天溯"
+    assert candidates[0].title == "天溯"
     assert candidates[0].quote == "天溯系统"
 
 

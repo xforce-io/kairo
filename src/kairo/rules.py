@@ -63,20 +63,16 @@ def _hash(text: str) -> str:
 
 
 def _knowledge_context(ws, text: str) -> tuple[str, str | None]:
-    """#182：调用方决定扫描范围；知识损坏时不注入不完整集合。"""
+    """#182：调用方决定扫描范围；局部歧义不会关闭整个知识上下文。"""
     try:
         from kairo.knowledge import current_hash, effective_entries, load_global, load_workspace
         from kairo.knowledge_matcher import KnowledgeMatcher, format_knowledge_context
 
         entries = effective_entries(ws.root.parent, ws.root)
         result = KnowledgeMatcher(entries).match(text)
-        # 旧真名册尚未写入 v2 前保留既有提示契约；首次知识写入后不再全量注入。
-        legacy = load_global(ws.root.parent)[1] or load_workspace(ws.root)[1]
-        try:
-            prefix = ws.glossary_reference() if legacy else ""
-        except Exception:
-            prefix = ""
-        return prefix + format_knowledge_context(result), current_hash(ws.root.parent, ws.root)
+        # legacy 读取也会转为 KnowledgeEntry；绝不再把全量 glossary 注入 Prompt。
+        _ = load_global(ws.root.parent), load_workspace(ws.root)
+        return format_knowledge_context(result), current_hash(ws.root.parent, ws.root)
     except Exception:
         return "", None
 
@@ -401,7 +397,7 @@ class NormalizeRule:
             content = _run_agent(
                 self.provider,
                 self.prompt
-                + self.ws.glossary_reference()
+                + _knowledge_context(self.ws, body)[0]
                 + _OUTPUT_DISCIPLINE,
                 body,
                 "prose.md",
@@ -457,7 +453,8 @@ class DigestRule:
                     text = p.read_text()
                 except UnicodeDecodeError:
                     continue
-                chunks.append(f"# {p.name}\n\n{text}")
+                # 匹配与知识上下文只看正文，文件名不应造成 filename-only 命中。
+                chunks.append(text)
         return "\n\n".join(chunks) if chunks else None
 
     def _catalog_items(self, man) -> list[CatalogItem]:
@@ -586,13 +583,7 @@ class DigestRule:
                     text=content,
                     provider=self.provider,
                 )
-                # 旧审核文件仅在未迁移 workspace 的兼容期继续填充。
-                from kairo.knowledge import load_workspace
-
-                if load_workspace(self.ws.root)[1]:
-                    from kairo.glossary_review import extract_after_digest
-
-                    extract_after_digest(self.ws, ref_id, content, provider=self.provider)
+                # glossary_review 在首次读取时原子迁移，此后只保留 knowledge_review 单一路径。
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试
@@ -783,13 +774,13 @@ class ComposeRule:
                 + format_source_catalog_block(catalog)
                 + f"\n本步必读 Δdigest:{len(use_delta)} 条。\n"
             )
-            # #182：即使显式全量重综合，也只按本轮 delta 取知识上下文。
-            delta_text = "\n\n".join(
+            # 显式 re-step/full compose 必须用本次实际必读 digest；普通运行才是 delta。
+            knowledge_text = "\n\n".join(
                 (self.ws.root / path).read_text()
-                for path in sorted(delta)
+                for path in sorted(use_delta)
                 if (self.ws.root / path).is_file()
             )
-            knowledge_context, knowledge_hash = _knowledge_context(self.ws, delta_text)
+            knowledge_context, knowledge_hash = _knowledge_context(self.ws, knowledge_text)
             layer = getattr(target, "layer", None) or "fact"
             budget_discipline = (
                 "\n- 完整 `understanding.md`（含标题、空白、正文、来源索引）不得超过 "
@@ -894,21 +885,25 @@ class ComposeRule:
             ts.retry_reason = None
             ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
             ts.glossary_hash = _legacy_glossary_hash(self.ws)
-            ts.knowledge_hash = knowledge_hash
+            # 空 delta 不会伪造一次“知识重新校正”。
+            if use_delta:
+                ts.knowledge_hash = knowledge_hash
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts
             from kairo.knowledge_review import extract_after_success
 
-            extract_after_success(
-                self.ws.root,
-                self.ws.root.parent,
-                source_kind="compose",
-                path=key,
-                text=content,
-                provider=self.provider,
-            )
+            # 跨材料候选的证据只取本轮 digest；非 understanding target 不伪装为 understanding。
+            if use_delta:
+                extract_after_success(
+                    self.ws.root,
+                    self.ws.root.parent,
+                    source_kind="compose",
+                    path=sorted(use_delta)[0],
+                    text=knowledge_text,
+                    provider=self.provider,
+                )
 
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)

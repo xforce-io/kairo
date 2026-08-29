@@ -35,7 +35,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | 有哪些调研 / spaces / 工作区列表 | **`kairo list`**（或 `kairo list --json`）；勿手写扫盘 |
 | 某主题现在什么情况 / 状态 | 在目标 cwd 执行 `kairo status`（只读；可对多个 ws 各跑一次） |
 | 新建 / 删除整个 workspace | 确认后 `kairo new "<topic>"` / `kairo rm-ws <slug> --yes`（须讲清不可恢复） |
-| 真名册 / glossary | `kairo glossary list`；写操作用 `add` / `rm`（`--scope workspace|shared`）并先确认 |
+| 知识 / knowledge | `kairo knowledge list`；写操作用 `add` / `rm`（`--scope workspace|global`）并先确认；`glossary` 是兼容别名 |
 | 事实到哪了 / 总结结论 / 结论是什么 | **先** `kairo status`，再读 `understanding.md`（见下节）；必要时下钻 digest，**不**把 raw transcript 当最终结论 |
 | 为什么卡住 / blocked / 怎么推进 | 依据 `status` 的 `⚠ blocked:…` 与下表解释含义与选项；**未确认不写** |
 | 推进一下 / step / 调和 | **默认**说明副作用（烧 LLM token、可能改文档）→ 确认后 `kairo step`（不自动清终态 blocked） |
@@ -50,7 +50,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | 删参考 / rm-ref | 说明会改 state；确认后 `kairo rm-ref <id>`（若带 `--recompose` 会立刻重综合，副作用更大，须单独确认） |
 | 生成 prose / 重建 MEETINGS 索引 | 写磁盘；确认后 `kairo prose <id>` / `kairo index` |
 
-纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`glossary list`、`timeline`，以及直接读 workspace 内 markdown / state。
+纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`knowledge list`、`glossary list`、`timeline`，以及直接读 workspace 内 markdown / state。
 
 ## 怎么读知识产物
 

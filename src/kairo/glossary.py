@@ -275,6 +275,27 @@ def workspace_effective(
     ws_root: Path, *, serve_root: Path | None = None
 ) -> list[EffectiveItem]:
     root = resolve_serve_root(ws_root=ws_root, explicit=serve_root)
+    # v2 的兼容读视图：旧调用方仍拿到 GlossaryEntry，但不再读取第二事实源。
+    try:
+        from kairo.knowledge import effective_entries, load_global, load_workspace
+
+        load_global(root)
+        load_workspace(ws_root)
+        return [
+            EffectiveItem(
+                GlossaryEntry(
+                    name=entry.title,
+                    note=entry.description,
+                    aka=[alias.value for alias in entry.aliases],
+                    tags=entry.tags,
+                ),
+                ORIGIN_LOCAL if entry.scope == "workspace" else ORIGIN_INHERITED,
+            )
+            for entry in effective_entries(root, ws_root)
+        ]
+    except Exception:
+        # 保留 legacy 错误语义，由下方严格 reader 报出具体 path。
+        pass
     return effective_items(
         load_glossary_file(root_glossary_path(root)),
         load_workspace_glossary(ws_root),

@@ -1065,7 +1065,7 @@ def glossary_view(request: Request, slug: str) -> RedirectResponse:
     """旧右栏入口转到统一维护页。"""
     _open(request, slug)
     return RedirectResponse(
-        url=f"/glossary?workspace={quote(slug)}", status_code=303
+        url=f"/knowledge?workspace={quote(slug)}", status_code=303
     )
 
 
@@ -1079,29 +1079,10 @@ def glossary_add(
     tags: str = Form(""),
     scope: str = Form("workspace"),
 ) -> HTMLResponse:
-    """只写 workspace 层;shared 请走 Root /glossary。"""
-    from kairo.glossary import GlossaryError, parse_scope
-
-    ws = _open(request, slug)
-    parts = _parse_aka(aka)
-    tag_parts = _parse_tags(tags)
-    form = {"name": name, "note": note, "aka": aka, "tags": tags}
-    try:
-        chosen = parse_scope(scope)
-        if chosen != "workspace":
-            raise GlossaryError("workspace 真名册只能写本层;公共条目请到 Root 首页")
-        ws.add_glossary_entry(
-            name,
-            note=note,
-            aka=parts,
-            tags=tag_parts,
-            serve_root=Path(request.app.state.root),
-        )
-    except (GlossaryError, ValueError) as e:
-        return _glossary_fragment(
-            request, ws, slug, error=str(e), error_scope=scope.strip() or None, form=form
-        )
-    return _glossary_fragment(request, ws, slug)
+    """兼容 POST：写入唯一 KnowledgeStore。"""
+    if scope.strip() != "workspace":
+        return _knowledge_page(request, selected_slug=slug, error="workspace 知识只能写本层")
+    return knowledge_workspace_add(request, slug, title=name, description=note, aliases=aka, tags=tags)
 
 
 @router.post("/w/{slug}/glossary/{index}/delete", response_class=HTMLResponse)
@@ -1314,19 +1295,9 @@ def _root_glossary_page(
 
 @router.get("/glossary", response_class=HTMLResponse)
 def root_glossary_view(request: Request):
-    """#163:Root 首页公共真名册。"""
-    # #182：一旦已写入 v2，旧书签进入同一知识维护面；尚未迁移的旧册继续可读。
-    from kairo.knowledge import load_global
-
-    serve = Path(request.app.state.root)
-    try:
-        _document, legacy = load_global(serve)
-        if (serve / "glossary.yaml").is_file() and not legacy:
-            query = request.url.query
-            return RedirectResponse(f"/knowledge{('?' + query) if query else ''}", status_code=303)
-    except Exception:
-        pass
-    return _root_glossary_page(request)
+    """旧书签始终进入唯一知识入口；读取时自动迁移 legacy 真名册。"""
+    query = request.url.query
+    return RedirectResponse(f"/knowledge{('?' + query) if query else ''}", status_code=303)
 
 
 @router.post("/glossary", response_class=HTMLResponse)
@@ -1338,37 +1309,8 @@ def root_glossary_add(
     tags: str = Form(""),
     workspace: str = Form(""),
 ) -> HTMLResponse:
-    from kairo.workspace import stamp_serve_workspaces as _stamp_serve_workspaces
-    from kairo.glossary import (
-        GlossaryError,
-        add_entry,
-        load_glossary_file,
-        root_glossary_path,
-        save_glossary_file,
-        validate_entries,
-    )
-
-    serve = Path(request.app.state.root)
-    form = {"name": name, "note": note, "aka": aka, "tags": tags}
-    try:
-        path = root_glossary_path(serve)
-        entries = add_entry(
-            load_glossary_file(path),
-            name,
-            note=note,
-            aka=_parse_aka(aka),
-            tags=_parse_tags(tags),
-        )
-        validate_entries(entries, path=path)
-        save_glossary_file(path, entries)
-        _stamp_serve_workspaces(serve)
-    except (GlossaryError, ValueError) as e:
-        return _root_glossary_page(
-            request, error=str(e), form=form, selected_slug=workspace or None
-        )
-    return _root_glossary_page(
-        request, success=True, selected_slug=workspace or None
-    )
+    """兼容 POST：公共 glossary 写入 global KnowledgeStore。"""
+    return knowledge_global_add(request, title=name, description=note, aliases=aka, tags=tags, workspace=workspace)
 
 
 @router.post("/glossary/{index}/delete", response_class=HTMLResponse)
@@ -1584,6 +1526,18 @@ def knowledge_obsolete(request: Request, slug: str, entry_id: str) -> HTMLRespon
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
+@router.post("/w/{slug}/knowledge/{entry_id}/promote", response_class=HTMLResponse)
+def knowledge_entry_promote(request: Request, slug: str, entry_id: str) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError
+    from kairo.knowledge_review import promote_entry
+
+    try:
+        promote_entry(_open(request, slug).root, entry_id)
+    except KnowledgeError as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
+
+
 @router.post("/w/{slug}/knowledge/{entry_id}", response_class=HTMLResponse)
 def knowledge_update(
     request: Request, slug: str, entry_id: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form("")
@@ -1601,7 +1555,7 @@ def knowledge_update(
 @router.post("/w/{slug}/knowledge/candidates/{candidate_id}/{action}", response_class=HTMLResponse)
 def knowledge_candidate_action(request: Request, slug: str, candidate_id: str, action: str, entry_id: str = Form("")) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError
-    from kairo.knowledge_review import accept_workspace, ignore, merge_workspace, promote
+    from kairo.knowledge_review import accept_workspace, ignore, merge_workspace
 
     try:
         root = _open(request, slug).root
@@ -1609,8 +1563,6 @@ def knowledge_candidate_action(request: Request, slug: str, candidate_id: str, a
             accept_workspace(root, candidate_id)
         elif action == "ignore":
             ignore(root, candidate_id)
-        elif action == "promote":
-            promote(root, candidate_id)
         elif action == "merge":
             merge_workspace(root, candidate_id, entry_id)
         else:

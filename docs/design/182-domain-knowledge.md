@@ -50,7 +50,7 @@ Issue [#182](https://github.com/xforce-io/kairo/issues/182)。Kairo 已保存 re
 
 全局权威文件为 `<serve-root>/glossary.yaml` 的 v2 `entries` 文档；workspace 权威为 `constitution.yaml` 的 `knowledge` 字段。文件名 `glossary.yaml` 是兼容路径，语义已是知识条目库；应用层只经统一知识仓储读写，旧 `glossary` 字段和旧列表格式只用于一次性导入。写入通过现有临时文件加 `os.replace` 的原子策略，先以严格模型和生效集合校验，再替换原文件。
 
-候选单独保存在 `workspace/.kairo/knowledge_review.yaml`，因为它是可丢弃的审核工作状态而不是权威知识。每个候选有稳定 `kc-` id、拟议条目、`source_kind`（`digest` 或 `compose`）、来源 `path`、`quote`、`content_hash`、提取 fingerprint、状态和可选 `merged_into`/拒绝原因。状态为 `pending`、`pending_global`、`accepted`、`merged`、`ignored`、`rejected` 或 `stale`；只有前两者显示为待办。原始来源缺失、hash 不同且短摘录不再出现时转为 `stale`，保留审计记录但不再计入队列。
+候选单独保存在 `workspace/.kairo/knowledge_review.yaml`，因为它是可丢弃的审核工作状态而不是权威知识。每个候选有稳定 `kc-` id、拟议条目、`source_kind`（`digest` 或 `compose`）、来源 `path`、`quote`、`content_hash`、提取 fingerprint、状态和可选 `merged_into`/拒绝原因。状态为 `pending`、`pending_global`、`accepted`、`merged`、`ignored`、`rejected_global` 或 `stale`；只有前两者显示为待办。原始来源缺失、hash 不同且短摘录不再出现时转为 `stale`，保留审计记录但不再计入队列。
 
 ### 4.1 UI/UX
 
@@ -146,7 +146,7 @@ flowchart TD
 
 自动匹配的最小规则是：CJK 词少于 2 个字符、ASCII/数字词少于 3 个字母数字字符时不入自动机；title/alias 被标为 `auto_match=false` 时不入；配置的泛词清单不入。ASCII 或数字命中两侧若仍是 ASCII 字母数字或下划线则无效，避免在更长 token 内误命中；CJK 不使用该边界。候选的 `suggest` 不因短词过滤而放弃精确重复提示，但仍报告歧义。
 
-同一条目多次命中只保留一次。稳定排序为 workspace、global；规范标题命中、别名命中；更长规范化词；标题 Unicode 码点序；`id`。排序后按条数和字符预算取前缀，输出 title、description、scope、命中的展示词和轻量出处概览。超预算只省略额外上下文，不改变候选或条目状态。
+同一条目多次命中只保留一次。稳定排序为 workspace、global；规范标题命中、别名命中；更长规范化词；标题 Unicode 码点序；`id`。排序后按条数和最终序列化片段（含固定上下文头）的字符预算取前缀；第一个放不下即截断，不跳过 workspace 项去选后续 global 项。输出 title、description、scope、命中的展示词和轻量出处概览。超预算只省略额外上下文，不改变候选或条目状态。
 
 未来替换算法只须保留上述 refresh/match/suggest、归一化、歧义、范围、预算和可观察性语义；例如语义检索若未来获批，也不能绕开状态/边界/预算。第一期不设计或启用第二 matcher。
 
@@ -220,7 +220,7 @@ CLI 的 `glossary list/add/rm` 继续可用但输出“知识”语义，并映�
 
 ## 12. 开放问题
 
-- “泛词清单”的初始维护责任和默认内容需在实现评审时由产品确认；在此之前以最小长度和每 alias 的 `auto_match=false` 保守兜底，不能用模型猜测泛词。
+- “泛词清单”由产品在每次设计变更中确认，默认只保留仓库内显式列出的最小中文泛词；新增或删除必须更新本节并补匹配回归测试，不能由模型在运行时猜测。
 - 是否在 Run 摘要展示具体被注入的标题，还是仅展示数量与范围，需要在隐私/噪声取舍上确认；本设计要求至少可观察数量、范围、歧义和截断数。
 
 ## 13. 关联

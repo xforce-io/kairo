@@ -52,10 +52,9 @@ def test_three_stages_share_effective_hash(tmp_path):
     assert digest_ps.glossary_hash == h
     ts = ws.read_state().targets["understanding.md"]
     assert ts.glossary_hash == h
-    digest = (ws.root / f"references/{rid}/digest.md").read_text()
-    assert "覆盖" in digest
-    assert "entries:" in digest
-    assert "禁止猜测" in digest
+    # v2 知识 hash 是新运行时契约；legacy glossary_hash 仅保持 advisory 兼容。
+    assert digest_ps.knowledge_hash
+    assert ts.knowledge_hash
 
 
 def test_normalize_records_same_hash_when_enabled(tmp_path):
@@ -77,4 +76,5 @@ def test_normalize_records_same_hash_when_enabled(tmp_path):
     items[0].run(mem)
     key = f"references/{rid}/prose.md"
     assert mem.products[key].glossary_hash == h
-    assert "甲" in (ws.root / key).read_text()
+    # 单字 CJK 条目默认不自动匹配，不会被全量 glossary 注入。
+    assert "领域知识上下文" not in (ws.root / key).read_text()

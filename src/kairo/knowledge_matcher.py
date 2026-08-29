@@ -64,6 +64,7 @@ class KnowledgeMatcher:
 
     def __init__(self, entries: list[KnowledgeEntry]):
         self._entries: dict[str, KnowledgeEntry] = {}
+        self._ownership: dict[str, list[tuple[str, bool]]] = {}
         self._terms: dict[str, list[tuple[str, bool]]] = {}
         self._nodes: list[_Node] = [_Node()]
         self.version = ""
@@ -74,37 +75,41 @@ class KnowledgeMatcher:
         return tuple(self._entries.values())
 
     def refresh(self, entries: list[KnowledgeEntry], semantic_version: str | None = None) -> str:
-        self._entries = {entry.id: entry for entry in entries if entry.status == "confirmed"}
-        terms: dict[str, list[tuple[str, bool]]] = {}
-        for entry in self._entries.values():
+        # 先在局部变量建立不可变快照，构建完成后一次性替换缓存。
+        confirmed = {entry.id: entry for entry in entries if entry.status == "confirmed"}
+        ownership: dict[str, list[tuple[str, bool]]] = {}
+        eligible: dict[str, list[tuple[str, bool]]] = {}
+        for entry in confirmed.values():
             title = normalize_term(entry.title)
+            ownership.setdefault(title, []).append((entry.id, True))
             if _eligible(title):
-                terms.setdefault(title, []).append((entry.id, True))
+                eligible.setdefault(title, []).append((entry.id, True))
             for alias in entry.aliases:
                 term = normalize_term(alias.value)
+                ownership.setdefault(term, []).append((entry.id, False))
                 if alias.auto_match and _eligible(term):
-                    terms.setdefault(term, []).append((entry.id, False))
-        self._terms = terms
-        self._nodes = [_Node()]
-        for term in terms:
+                    eligible.setdefault(term, []).append((entry.id, False))
+        nodes = [_Node()]
+        for term in eligible:
             state = 0
             for char in term:
-                state = self._nodes[state].children.setdefault(char, len(self._nodes))
-                if state == len(self._nodes):
-                    self._nodes.append(_Node())
-            self._nodes[state].terms.append(term)
+                state = nodes[state].children.setdefault(char, len(nodes))
+                if state == len(nodes):
+                    nodes.append(_Node())
+            nodes[state].terms.append(term)
         queue: deque[int] = deque()
-        for state in self._nodes[0].children.values():
+        for state in nodes[0].children.values():
             queue.append(state)
         while queue:
             parent = queue.popleft()
-            for char, state in self._nodes[parent].children.items():
+            for char, state in nodes[parent].children.items():
                 queue.append(state)
-                failure = self._nodes[parent].fail
-                while failure and char not in self._nodes[failure].children:
-                    failure = self._nodes[failure].fail
-                self._nodes[state].fail = self._nodes[failure].children.get(char, 0)
-                self._nodes[state].terms.extend(self._nodes[self._nodes[state].fail].terms)
+                failure = nodes[parent].fail
+                while failure and char not in nodes[failure].children:
+                    failure = nodes[failure].fail
+                nodes[state].fail = nodes[failure].children.get(char, 0)
+                nodes[state].terms.extend(nodes[nodes[state].fail].terms)
+        self._entries, self._ownership, self._terms, self._nodes = confirmed, ownership, eligible, nodes
         self.version = semantic_version or semantic_hash(entries)
         return self.version
 
@@ -113,7 +118,7 @@ class KnowledgeMatcher:
         answer: dict[str, str] = {}
         for raw in terms:
             term = normalize_term(raw)
-            owners = {entry_id for entry_id, _ in self._terms.get(term, [])}
+            owners = {entry_id for entry_id, _ in self._ownership.get(term, [])}
             answer[raw] = "unknown" if not owners else "ambiguous" if len(owners) > 1 else "known"
         return answer
 
@@ -156,16 +161,19 @@ class KnowledgeMatcher:
         )
         selected: list[KnowledgeMatch] = []
         used = 0
+        # 预算按最终序列化片段计费（固定头也计入），稳定排序后的前缀一旦放不下即截断。
+        header = "\n\n[领域知识上下文]\n以下条目仅作参考，不能替代本次材料证据；冲突时保留材料说法并标明待核。\n"
+        used = len(header)
         for hit in ordered:
-            rendered = f"{hit.entry.title}\n{hit.entry.description}".strip()
+            rendered = f"- {hit.entry.title}（{hit.entry.scope}）：{hit.entry.description}".rstrip("：") + "\n"
             if len(selected) >= budget.max_entries or used + len(rendered) > budget.max_chars:
-                continue
+                break
             selected.append(hit)
             used += len(rendered)
         return MatchResult(
             matches=tuple(selected),
             ambiguities=tuple(sorted(ambiguities)),
-            skipped_terms=tuple(sorted(term for term in self._terms if not _eligible(term))),
+            skipped_terms=tuple(sorted(term for term in self._ownership if term not in self._terms)),
             truncated_count=len(ordered) - len(selected),
             version=self.version,
         )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
 
@@ -12,7 +13,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from kairo.knowledge import (
     KnowledgeAlias,
-    KnowledgeDocument,
     KnowledgeEntry,
     KnowledgeError,
     KnowledgeSource,
@@ -29,6 +29,11 @@ from kairo.knowledge_matcher import KnowledgeMatcher
 
 
 OPEN = frozenset({"pending", "pending_global"})
+_CANDIDATE_STATUSES = frozenset({"pending", "pending_global", "accepted", "merged", "ignored", "stale", "rejected_global"})
+
+
+def _now() -> str:
+    return datetime.now(UTC).replace(microsecond=0).isoformat()
 
 
 class KnowledgeCandidate(BaseModel):
@@ -47,6 +52,9 @@ class KnowledgeCandidate(BaseModel):
     status: str = "pending"
     merged_into: str = ""
     reject_reason: str = ""
+    suggestion: dict[str, str] = Field(default_factory=dict)
+    entry_id: str = ""
+    updated_at: str = ""
 
 
 class KnowledgeReview(BaseModel):
@@ -63,6 +71,43 @@ def review_path(workspace_root: Path) -> Path:
     return Path(workspace_root) / ".kairo" / "knowledge_review.yaml"
 
 
+def _legacy_review_path(workspace_root: Path) -> Path:
+    return Path(workspace_root) / ".kairo" / "glossary_review.yaml"
+
+
+def _safe_path(path: str) -> None:
+    value = Path(path)
+    if not path or value.is_absolute() or ".." in value.parts:
+        raise KnowledgeError(f"候选 path 必须是工作区内相对路径:{path!r}")
+
+
+def _validate_candidate(candidate: KnowledgeCandidate) -> None:
+    if not re.fullmatch(r"kc-[a-f0-9]{20}", candidate.id):
+        raise KnowledgeError(f"候选 id 非法:{candidate.id!r}")
+    if candidate.source_kind not in {"digest", "compose"}:
+        raise KnowledgeError(f"候选来源非法:{candidate.source_kind}")
+    if candidate.status not in _CANDIDATE_STATUSES:
+        raise KnowledgeError(f"候选状态非法:{candidate.status}")
+    _safe_path(candidate.path)
+    if not re.fullmatch(r"[a-f0-9]{64}", candidate.content_hash):
+        raise KnowledgeError("候选 content_hash 必须是 SHA-256")
+    if not re.fullmatch(r"[a-f0-9]{64}", candidate.fingerprint):
+        raise KnowledgeError("候选 fingerprint 必须是 SHA-256")
+    if not candidate.title.strip() or not candidate.quote.strip():
+        raise KnowledgeError("候选 title 与 quote 不能为空")
+    if candidate.entry_id and not re.fullmatch(r"ke-[a-zA-Z0-9-]+", candidate.entry_id):
+        raise KnowledgeError(f"候选 entry_id 非法:{candidate.entry_id!r}")
+
+
+def _validate_review(review: KnowledgeReview) -> None:
+    ids: set[str] = set()
+    for candidate in review.candidates:
+        _validate_candidate(candidate)
+        if candidate.id in ids:
+            raise KnowledgeError(f"候选 id 重复:{candidate.id}")
+        ids.add(candidate.id)
+
+
 def _atomic_write(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -77,15 +122,63 @@ def _atomic_write(path: Path, payload) -> None:
 def load_review(workspace_root: Path) -> KnowledgeReview:
     path = review_path(workspace_root)
     if not path.is_file():
-        return KnowledgeReview()
+        legacy_path = _legacy_review_path(workspace_root)
+        if not legacy_path.is_file():
+            return KnowledgeReview()
+        # 一次性、原子地把 #165 队列迁入唯一 knowledge_review，迁完即停止旧提取。
+        try:
+            raw = yaml.safe_load(legacy_path.read_text(encoding="utf-8")) or {}
+            migrated: list[KnowledgeCandidate] = []
+            for old in raw.get("candidates", []):
+                if not isinstance(old, dict):
+                    continue
+                ref_id = str(old.get("ref_id", "")).strip()
+                candidate_path = f"references/{ref_id}/digest.md"
+                title = str(old.get("name", "")).strip()
+                quote = str(old.get("quote", "")).strip()
+                fp = str(old.get("fingerprint") or _fingerprint("digest", candidate_path, title, quote))
+                status = {"pending_root": "pending_global", "root_rejected": "rejected_global"}.get(str(old.get("status", "pending")), str(old.get("status", "pending")))
+                text_path = Path(workspace_root) / candidate_path
+                legacy_hash = str(old.get("digest_hash") or "")
+                content_hash = legacy_hash if re.fullmatch(r"[a-f0-9]{64}", legacy_hash) else (_hash(text_path.read_text(encoding="utf-8")) if text_path.is_file() else _hash(""))
+                migrated.append(KnowledgeCandidate(id="kc-" + fp[:20], title=title, aliases=[KnowledgeAlias(value=str(x)) for x in old.get("aka", []) if str(x).strip()], description=str(old.get("note", "")), source_kind="digest", path=candidate_path, quote=quote or "[旧候选缺少引文]", content_hash=content_hash, fingerprint=fp, status=status if status in _CANDIDATE_STATUSES else "stale", merged_into=str(old.get("merged_into", "")), reject_reason=str(old.get("reject_reason", "")), updated_at=_now()))
+            review = KnowledgeReview(candidates=migrated, extract_errors={str(k): str(v) for k, v in raw.get("extract_errors", {}).items()})
+            _validate_review(review)
+            save_review(workspace_root, review)
+            legacy_path.replace(legacy_path.with_suffix(".yaml.migrated"))
+            return review
+        except (OSError, yaml.YAMLError, ValueError) as exc:
+            raise KnowledgeError(f"旧审核队列迁移失败:{exc}", path=legacy_path) from exc
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        return KnowledgeReview.model_validate(data)
+        review = KnowledgeReview.model_validate(data)
+        _validate_review(review)
+        # 运行已先创建 v2 文件时，仍把遗留 #165 候选一次性并入，不能让它成为孤岛。
+        legacy_path = _legacy_review_path(workspace_root)
+        if legacy_path.is_file():
+            legacy = yaml.safe_load(legacy_path.read_text(encoding="utf-8")) or {}
+            known = {candidate.fingerprint for candidate in review.candidates}
+            for old in legacy.get("candidates", []):
+                if not isinstance(old, dict):
+                    continue
+                ref_id, title, quote = str(old.get("ref_id", "")).strip(), str(old.get("name", "")).strip(), str(old.get("quote", "")).strip()
+                candidate_path = f"references/{ref_id}/digest.md"
+                fp = str(old.get("fingerprint") or _fingerprint("digest", candidate_path, title, quote))
+                if fp in known or not title or not quote:
+                    continue
+                source = Path(workspace_root) / candidate_path
+                review.candidates.append(KnowledgeCandidate(id="kc-" + fp[:20], title=title, aliases=[KnowledgeAlias(value=str(x)) for x in old.get("aka", []) if str(x).strip()], description=str(old.get("note", "")), source_kind="digest", path=candidate_path, quote=quote, content_hash=_hash(source.read_text(encoding="utf-8")) if source.is_file() else _hash(""), fingerprint=fp, status={"pending_root": "pending_global", "root_rejected": "rejected_global"}.get(str(old.get("status", "pending")), str(old.get("status", "pending"))), updated_at=_now()))
+                known.add(fp)
+            _validate_review(review)
+            save_review(workspace_root, review)
+            legacy_path.replace(legacy_path.with_suffix(".yaml.migrated"))
+        return review
     except (yaml.YAMLError, ValueError) as exc:
         raise KnowledgeError(f"审核队列无法解析:{exc}", path=path) from exc
 
 
 def save_review(workspace_root: Path, review: KnowledgeReview) -> None:
+    _validate_review(review)
     _atomic_write(review_path(workspace_root), review.model_dump())
 
 
@@ -110,7 +203,7 @@ def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
             text = source.read_text(encoding="utf-8")
             alive = candidate.quote.strip() in text or _hash(text) == candidate.content_hash
         if not alive:
-            review.candidates[index] = candidate.model_copy(update={"status": "stale"})
+            review.candidates[index] = candidate.model_copy(update={"status": "stale", "updated_at": _now()})
             changed = True
     if changed:
         save_review(workspace_root, review)
@@ -165,10 +258,11 @@ def ingest_candidates(
             quote=quote,
             content_hash=source_hash,
             fingerprint=fp,
+            updated_at=_now(),
         )
         # 建议只影响 UI，不自动确认或覆盖。
         if matcher is not None:
-            _ = matcher.suggest([candidate.title, *(a.value for a in aliases)])
+            candidate = candidate.model_copy(update={"suggestion": matcher.suggest([candidate.title, *(a.value for a in aliases)])})
         review.candidates.append(candidate)
         existing.add(fp)
     save_review(workspace_root, review)
@@ -234,7 +328,11 @@ def extract_after_success(
         drafts = (extractor or provider_extractor(provider))(text, list(matcher.entries), path) if (extractor or provider) else []
         ingest_candidates(workspace_root, source_kind=source_kind, path=path, source_text=text, drafts=drafts, matcher=matcher)
     except Exception as exc:
-        mark_extract_error(workspace_root, path, str(exc))
+        # 提取永远是旁路：即使审核 YAML 损坏或写诊断也失败，也不能反噬 digest/compose。
+        try:
+            mark_extract_error(workspace_root, path, str(exc))
+        except Exception:
+            pass
 
 
 def _candidate(workspace_root: Path, candidate_id: str) -> tuple[KnowledgeReview, int, KnowledgeCandidate]:
@@ -245,24 +343,60 @@ def _candidate(workspace_root: Path, candidate_id: str) -> tuple[KnowledgeReview
     raise KnowledgeError(f"知识候选不存在:{candidate_id}")
 
 
+def _source(candidate: KnowledgeCandidate, workspace_root: Path) -> KnowledgeSource:
+    return KnowledgeSource(
+        kind="digest" if candidate.source_kind == "digest" else "understanding",
+        path=candidate.path,
+        quote=candidate.quote,
+        content_hash=candidate.content_hash,
+        workspace_slug=Path(workspace_root).name,
+    )
+
+
+def _transaction_path(workspace_root: Path) -> Path:
+    return Path(workspace_root) / ".kairo" / "knowledge_transaction.yaml"
+
+
+def _write_transaction(workspace_root: Path, payload: dict) -> None:
+    _atomic_write(_transaction_path(workspace_root), payload)
+
+
+def _clear_transaction(workspace_root: Path) -> None:
+    _transaction_path(workspace_root).unlink(missing_ok=True)
+
+
+def _set_candidate(review: KnowledgeReview, index: int, candidate: KnowledgeCandidate, **changes) -> KnowledgeCandidate:
+    updated = candidate.model_copy(update={**changes, "updated_at": _now()})
+    review.candidates[index] = updated
+    return updated
+
+
 def accept_workspace(workspace_root: Path, candidate_id: str) -> KnowledgeEntry:
     review, index, candidate = _candidate(workspace_root, candidate_id)
     if candidate.status != "pending":
         raise KnowledgeError(f"候选不可采纳:{candidate.status}")
     document, _ = load_workspace(workspace_root)
+    # 重试收敛：权威文件已写而 review 未落盘时，按 merged_into 补齐状态。
+    existing_entry = next((entry for entry in document.entries if entry.id == candidate.merged_into), None)
+    if existing_entry:
+        _set_candidate(review, index, candidate, status="accepted")
+        save_review(workspace_root, review)
+        return existing_entry
     entry = new_entry(
         title=candidate.title,
         scope="workspace",
         aliases=candidate.aliases,
         description=candidate.description,
         tags=candidate.tags,
-        sources=[KnowledgeSource(kind="digest" if candidate.source_kind == "digest" else "understanding", path=candidate.path, quote=candidate.quote, content_hash=candidate.content_hash)],
+        sources=[_source(candidate, workspace_root)],
     )
     validate_entries([*document.entries, entry], scope="workspace")
     document.entries.append(entry)
+    _write_transaction(workspace_root, {"kind": "accept_workspace", "candidate_id": candidate.id, "entry_id": entry.id})
     save_workspace(workspace_root, document)
-    review.candidates[index] = candidate.model_copy(update={"status": "accepted", "merged_into": entry.id})
+    _set_candidate(review, index, candidate, status="accepted", merged_into=entry.id)
     save_review(workspace_root, review)
+    _clear_transaction(workspace_root)
     return entry
 
 
@@ -270,36 +404,60 @@ def ignore(workspace_root: Path, candidate_id: str) -> None:
     review, index, candidate = _candidate(workspace_root, candidate_id)
     if candidate.status != "pending":
         raise KnowledgeError(f"候选不可忽略:{candidate.status}")
-    review.candidates[index] = candidate.model_copy(update={"status": "ignored"})
+    _set_candidate(review, index, candidate, status="ignored")
     save_review(workspace_root, review)
 
 
-def promote(workspace_root: Path, candidate_id: str) -> None:
-    review, index, candidate = _candidate(workspace_root, candidate_id)
-    if candidate.status != "pending":
-        raise KnowledgeError(f"候选不可提升:{candidate.status}")
-    review.candidates[index] = candidate.model_copy(update={"status": "pending_global"})
+def promote_entry(workspace_root: Path, entry_id: str) -> KnowledgeCandidate:
+    """仅允许已确认的 workspace 条目进入 global 审核，且沿用 ke-* stable ID。"""
+    document, _ = load_workspace(workspace_root)
+    entry = next((item for item in document.entries if item.id == entry_id), None)
+    if entry is None or entry.status != "confirmed":
+        raise KnowledgeError("只能提升已确认的本地知识条目")
+    review = load_review(workspace_root)
+    existing = next((c for c in review.candidates if c.entry_id == entry_id and c.status == "pending_global"), None)
+    if existing:
+        return existing
+    source = entry.sources[0] if entry.sources else KnowledgeSource(kind="reference", path="constitution.yaml", quote=entry.title, content_hash="")
+    # source hash 的空值只允许人工创建条目；审核记录仍需要可校验 SHA-256。
+    source_hash = source.content_hash or _hash(entry.title)
+    fp = _fingerprint("compose", source.path, entry.title, source.quote or entry.title)
+    candidate = KnowledgeCandidate(id="kc-" + fp[:20], title=entry.title, aliases=entry.aliases, description=entry.description, tags=entry.tags, source_kind="compose" if source.kind == "understanding" else "digest", path=source.path, quote=source.quote or entry.title, content_hash=source_hash, fingerprint=fp, status="pending_global", entry_id=entry.id, updated_at=_now())
+    review.candidates.append(candidate)
     save_review(workspace_root, review)
+    return candidate
+
+
+def promote(workspace_root: Path, entry_id: str) -> KnowledgeCandidate:
+    """兼容导出名；参数语义已改为 workspace entry id。"""
+    return promote_entry(workspace_root, entry_id)
 
 
 def accept_global(serve_root: Path, workspace_root: Path, candidate_id: str) -> KnowledgeEntry:
     review, index, candidate = _candidate(workspace_root, candidate_id)
     if candidate.status != "pending_global":
         raise KnowledgeError(f"候选不在全局待审核:{candidate.status}")
+    if not candidate.entry_id:
+        raise KnowledgeError("公共审核只接受已确认的本地知识条目")
+    local_doc, _ = load_workspace(workspace_root)
+    local_entry = next((item for item in local_doc.entries if item.id == candidate.entry_id), None)
     document, _ = load_global(serve_root)
-    entry = new_entry(
-        title=candidate.title,
-        scope="global",
-        aliases=candidate.aliases,
-        description=candidate.description,
-        tags=candidate.tags,
-        sources=[KnowledgeSource(kind="digest" if candidate.source_kind == "digest" else "understanding", path=candidate.path, quote=candidate.quote, content_hash=candidate.content_hash)],
-    )
-    validate_entries([*document.entries, entry], scope="global")
-    document.entries.append(entry)
-    save_global(serve_root, document)
-    review.candidates[index] = candidate.model_copy(update={"status": "accepted", "merged_into": entry.id})
+    entry = next((item for item in document.entries if item.id == candidate.entry_id), None)
+    if entry is None:
+        if local_entry is None:
+            raise KnowledgeError("待提升的本地知识条目不存在")
+        entry = local_entry.model_copy(update={"scope": "global", "sources": [*local_entry.sources, _source(candidate, workspace_root)], "updated_at": _now()})
+        validate_entries([*document.entries, entry], scope="global")
+        _write_transaction(workspace_root, {"kind": "accept_global", "candidate_id": candidate.id, "entry_id": entry.id})
+        document.entries.append(entry)
+        save_global(serve_root, document)
+    # 第二步移除 local 独立 authority；重试也会收敛到同一最终状态。
+    if local_entry is not None:
+        local_doc.entries = [item for item in local_doc.entries if item.id != entry.id]
+        save_workspace(workspace_root, local_doc)
+    _set_candidate(review, index, candidate, status="accepted", merged_into=entry.id)
     save_review(workspace_root, review)
+    _clear_transaction(workspace_root)
     return entry
 
 
@@ -307,7 +465,8 @@ def reject_global(workspace_root: Path, candidate_id: str, reason: str) -> None:
     review, index, candidate = _candidate(workspace_root, candidate_id)
     if candidate.status != "pending_global":
         raise KnowledgeError(f"候选不在全局待审核:{candidate.status}")
-    review.candidates[index] = candidate.model_copy(update={"status": "rejected", "reject_reason": reason.strip()})
+    # 拒绝不改变本地条目权威；候选记录保留理由，用户可编辑后重新提升。
+    _set_candidate(review, index, candidate, status="rejected_global", reject_reason=reason.strip() or "未说明")
     save_review(workspace_root, review)
 
 
@@ -325,12 +484,12 @@ def merge_workspace(workspace_root: Path, candidate_id: str, entry_id: str) -> N
         if normalize_term(value) not in seen and normalize_term(value) != normalize_term(target.title):
             aliases.append(KnowledgeAlias(value=value))
             seen.add(normalize_term(value))
-    sources = [*target.sources, KnowledgeSource(kind="digest" if candidate.source_kind == "digest" else "understanding", path=candidate.path, quote=candidate.quote, content_hash=candidate.content_hash)]
-    replacement = target.model_copy(update={"aliases": aliases, "sources": sources})
+    sources = [*target.sources, _source(candidate, workspace_root)]
+    replacement = target.model_copy(update={"aliases": aliases, "sources": sources, "updated_at": _now()})
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="workspace")
     save_workspace(workspace_root, document)
-    review.candidates[index] = candidate.model_copy(update={"status": "merged", "merged_into": entry_id})
+    _set_candidate(review, index, candidate, status="merged", merged_into=entry_id)
     save_review(workspace_root, review)
 
 
@@ -348,11 +507,11 @@ def merge_global(serve_root: Path, workspace_root: Path, candidate_id: str, entr
         if normalize_term(value) not in seen and normalize_term(value) != normalize_term(target.title):
             aliases.append(KnowledgeAlias(value=value))
             seen.add(normalize_term(value))
-    replacement = target.model_copy(update={"aliases": aliases})
+    replacement = target.model_copy(update={"aliases": aliases, "description": target.description or candidate.description, "tags": sorted(set([*target.tags, *candidate.tags])), "sources": [*target.sources, _source(candidate, workspace_root)], "updated_at": _now()})
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="global")
     save_global(serve_root, document)
-    review.candidates[index] = candidate.model_copy(update={"status": "merged", "merged_into": entry_id})
+    _set_candidate(review, index, candidate, status="merged", merged_into=entry_id)
     save_review(workspace_root, review)
 
 
@@ -362,7 +521,7 @@ def set_obsolete(workspace_root: Path, entry_id: str) -> None:
     entries: list[KnowledgeEntry] = []
     for entry in document.entries:
         if entry.id == entry_id:
-            entries.append(entry.model_copy(update={"status": "obsolete"}))
+            entries.append(entry.model_copy(update={"status": "obsolete", "updated_at": _now()}))
             found = True
         else:
             entries.append(entry)
@@ -380,7 +539,10 @@ def update_workspace_entry(
     entries: list[KnowledgeEntry] = []
     for entry in document.entries:
         if entry.id == entry_id:
-            entries.append(entry.model_copy(update={"title": title.strip(), "description": description.strip(), "aliases": aliases, "tags": tags}))
+            # 表单只传别名文字时保留同名别名的 auto_match；新增别名默认可匹配。
+            previous = {normalize_term(alias.value): alias.auto_match for alias in entry.aliases}
+            preserved = [alias.model_copy(update={"auto_match": previous.get(normalize_term(alias.value), alias.auto_match)}) for alias in aliases]
+            entries.append(entry.model_copy(update={"title": title.strip(), "description": description.strip(), "aliases": preserved, "tags": tags, "updated_at": _now()}))
             found = True
         else:
             entries.append(entry)
