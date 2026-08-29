@@ -638,6 +638,135 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .lang-switch a { color: #888; text-decoration: none; padding: 2px 6px; border-radius: 4px; }
 .lang-switch a.on { color: #fff; background: #444; }
 
+/* 知识页在手机上保持单列：表格只是桌面密度布局，不应决定视口宽度。 */
+@media (max-width: 520px) {
+  header.top {
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 16px;
+  }
+  header.top .console-nav {
+    order: 3;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  header.top .crumb {
+    order: 4;
+    flex: 1 1 100%;
+    white-space: normal;
+  }
+  header.top .top-end {
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    min-width: 0;
+  }
+  .knowledge-responsive {
+    max-width: none;
+    min-width: 0;
+    margin: 16px;
+  }
+  .knowledge-responsive,
+  .knowledge-responsive * { min-width: 0; }
+  .knowledge-responsive input,
+  .knowledge-responsive select,
+  .knowledge-responsive button { max-width: 100%; }
+  .knowledge-responsive a,
+  .knowledge-responsive .gl-note,
+  .knowledge-responsive .gl-aka { overflow-wrap: anywhere; }
+  .knowledge-responsive .glossary-table,
+  .knowledge-responsive .glossary-table tbody {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    table-layout: fixed;
+  }
+  .knowledge-responsive .glossary-table tr {
+    display: block;
+    width: 100%;
+    margin: 8px 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--card);
+  }
+  .knowledge-responsive .glossary-table td {
+    display: block;
+    width: 100% !important;
+    overflow-wrap: anywhere;
+  }
+  .knowledge-responsive .gl-ws-panel .glossary-table td.mf-actions {
+    padding: 8px 10px 10px;
+    white-space: normal;
+    text-align: left;
+  }
+  .knowledge-responsive .gl-ws-panel .glossary-table td.mf-actions form {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    width: 100%;
+    margin: 8px 0;
+  }
+  .knowledge-responsive .gl-ws-panel .glossary-table td.mf-actions input,
+  .knowledge-responsive .gl-ws-panel .glossary-table td.mf-actions button {
+    width: 100%;
+    margin: 0;
+  }
+  .knowledge-responsive .dlg-form,
+  .knowledge-responsive .dlg-bullets li form {
+    width: 100%;
+    max-width: 100%;
+  }
+  .knowledge-responsive .dlg-form input:not([type="hidden"]),
+  .knowledge-responsive .dlg-form select,
+  .knowledge-responsive .dlg-form button {
+    width: 100%;
+    margin: 0;
+  }
+  .knowledge-responsive .dlg-bullets {
+    margin: 8px 0;
+    padding: 0;
+  }
+  .knowledge-responsive .dlg-bullets li {
+    display: block;
+    width: 100%;
+    margin: 8px 0;
+    padding: 10px;
+    overflow-wrap: anywhere;
+    list-style: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--card);
+  }
+  .knowledge-responsive .dlg-bullets li form {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin: 8px 0;
+  }
+  .knowledge-responsive .dlg-bullets li label {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+    overflow-wrap: anywhere;
+  }
+  .knowledge-responsive .dlg-bullets li input,
+  .knowledge-responsive .dlg-bullets li select,
+  .knowledge-responsive .dlg-bullets li button {
+    width: 100%;
+    margin: 0;
+  }
+  .knowledge-responsive .ref-blocks form {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+    margin: 8px 0;
+  }
+  .knowledge-responsive .ref-blocks button { width: 100%; margin: 0; }
+}
+
 /* 导出 PDF:打印时只保留阅读区正文,裁掉外壳与按钮 */
 @media print {
   header.top, .pane-nav, .pane-panel, .doc-export { display: none !important; }

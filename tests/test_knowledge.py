@@ -165,6 +165,29 @@ def test_knowledge_web_add_and_candidate_actions(tmp_path):
     assert 'href="/knowledge"' in client.get("/").text
 
 
+def test_knowledge_narrow_screen_layout_uses_cards_and_wrapping_navigation(tmp_path):
+    """390px 视口：知识页不再让表格和内联审核表单撑宽整个文档。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ui-lab")
+    ws.add_glossary_entry("本地知识", note="可编辑的窄屏条目", aka=["本地别名"])
+
+    page = TestClient(create_app(root)).get("/knowledge?workspace=ui-lab")
+    assert page.status_code == 200
+    assert 'class="gl-console knowledge-console knowledge-responsive"' in page.text
+    assert 'class="gl-ws-panel"' in page.text
+    assert 'class="top-end"' in page.text and 'class="lang-switch"' in page.text
+
+    css = (Path(__file__).parents[1] / "src/kairo/web/static/app.css").read_text(encoding="utf-8")
+    narrow = css[css.index("@media (max-width: 520px)") :]
+    assert "header.top" in narrow and "flex-wrap: wrap" in narrow
+    assert ".knowledge-responsive .glossary-table tr" in narrow
+    assert "display: block" in narrow and "width: 100% !important" in narrow
+    assert ".knowledge-responsive .gl-ws-panel .glossary-table td.mf-actions form" in narrow
+    assert ".knowledge-responsive .dlg-bullets li form" in narrow
+    assert "overflow-wrap: anywhere" in narrow
+
+
 def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     root = tmp_path / "root"
     root.mkdir()

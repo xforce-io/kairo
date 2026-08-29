@@ -4,7 +4,7 @@
 <div class="dash-head"><p class="dlg-hint">{{ t('knowledge.hint') }}</p></div>
 {% if error %}<p class="ref-blocks glossary-error" role="alert">{{ t('knowledge.save_error').format(error=error) }}</p>{% endif %}
 {% if success %}<p class="meta-hint" role="status">{{ t('knowledge.saved') }}</p>{% endif %}
-<div class="gl-console knowledge-console">
+<div class="gl-console knowledge-console knowledge-responsive">
   <section class="gl-shared">
     <div class="meta-label">{{ t('knowledge.global').format(n=global_entries|length) }}</div>
     {% if global_entries %}<table class="meta-forms glossary-table"><tbody>{% for entry in global_entries %}<tr><td class="mf-role">
