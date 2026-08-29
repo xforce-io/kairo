@@ -418,6 +418,16 @@ def ignore(workspace_root: Path, candidate_id: str) -> None:
     save_review(workspace_root, review)
 
 
+def update_candidate(workspace_root: Path, candidate_id: str, *, title: str, description: str, aliases: list[KnowledgeAlias], tags: list[str]) -> KnowledgeCandidate:
+    review, index, candidate = _candidate(workspace_root, candidate_id)
+    if candidate.status != "pending":
+        raise KnowledgeError(f"候选不可编辑:{candidate.status}")
+    updated = _set_candidate(review, index, candidate, title=title.strip(), description=description.strip(), aliases=aliases, tags=tags)
+    _validate_candidate(updated)
+    save_review(workspace_root, review)
+    return updated
+
+
 def promote_entry(workspace_root: Path, entry_id: str) -> KnowledgeCandidate:
     """仅允许已确认的 workspace 条目进入 global 审核，且沿用 ke-* stable ID。"""
     document, _ = load_workspace(workspace_root)

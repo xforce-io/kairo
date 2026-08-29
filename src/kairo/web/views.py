@@ -1560,6 +1560,18 @@ def knowledge_candidate_action(request: Request, slug: str, candidate_id: str, a
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
+@router.post("/w/{slug}/knowledge/candidates/{candidate_id}", response_class=HTMLResponse)
+def knowledge_candidate_update(request: Request, slug: str, candidate_id: str, title: str = Form(...), description: str = Form(""), aliases: str = Form(""), tags: str = Form("")) -> HTMLResponse:
+    from kairo.knowledge import KnowledgeError
+    from kairo.knowledge_review import update_candidate
+
+    try:
+        update_candidate(_open(request, slug).root, candidate_id, title=title, description=description, aliases=_knowledge_aliases(aliases), tags=_parse_tags(tags))
+    except KnowledgeError as exc:
+        return _knowledge_page(request, selected_slug=slug, error=str(exc))
+    return _knowledge_page(request, selected_slug=slug, success=True)
+
+
 @router.post("/knowledge/candidates/{slug}/{candidate_id}/{action}", response_class=HTMLResponse)
 def knowledge_global_action(
     request: Request, slug: str, candidate_id: str, action: str, reason: str = Form(""), entry_id: str = Form("")

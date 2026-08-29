@@ -275,3 +275,18 @@ def test_legacy_list_is_read_only_and_v2_legacy_delete_keeps_v2(tmp_path, monkey
     assert deleted.status_code == 200
     raw = (root / "glossary.yaml").read_text(encoding="utf-8")
     assert "version: 2" in raw and "title:" in raw
+
+
+def test_pending_candidate_can_be_edited_in_web(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("候选证据")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="候选证据", drafts=[{"title": "旧标题", "quote": "候选证据"}])
+    candidate = load_review(ws.root).candidates[0]
+    page = TestClient(create_app(root)).post(f"/w/ws/knowledge/candidates/{candidate.id}", data={"title": "新标题", "description": "已编辑", "aliases": "别名", "tags": "tag"})
+    assert page.status_code == 200 and "新标题" in page.text
+    changed = load_review(ws.root).candidates[0]
+    assert changed.title == "新标题" and changed.tags == ["tag"]
