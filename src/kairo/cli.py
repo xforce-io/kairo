@@ -51,6 +51,8 @@ _EPILOG = (
 app = typer.Typer(help="step 驱动的增量知识构建引擎", epilog=_EPILOG)
 glossary_app = typer.Typer(help="真名册:list / add / rm(workspace 或 shared)")
 app.add_typer(glossary_app, name="glossary")
+backup_app = typer.Typer(help="remote 完整备份:push / verify / restore")
+app.add_typer(backup_app, name="backup")
 
 
 def _open_ws() -> Workspace:
@@ -673,6 +675,70 @@ def _stamp_serve_workspaces(serve: Path) -> None:
     from kairo.workspace import stamp_serve_workspaces
 
     stamp_serve_workspaces(serve)
+
+
+def _backup_fail(exc) -> None:
+    typer.secho(f"{exc.stage}: {exc.message}", fg=typer.colors.RED, err=True)
+    raise typer.Exit(exc.code) from None
+
+
+@backup_app.command("push")
+def backup_push(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+    root: Path = typer.Argument(
+        None, help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
+    ),
+) -> None:
+    """把 serve root 完整备份到 remote 并原子切换 current(#154)。"""
+    from kairo.backup import BackupError, load_remote, publish
+
+    try:
+        spec = load_remote(remote)
+        result = publish(_serve_root(root), Path(spec.path))
+    except BackupError as exc:
+        _backup_fail(exc)
+    typer.echo(
+        f"{result.status} remote={remote} backup_id={result.backup_id} "
+        f"files={result.files} bytes={result.bytes}"
+    )
+
+
+@backup_app.command("verify")
+def backup_verify(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+    backup_id: str = typer.Option(None, "--backup-id", help="默认 current"),
+) -> None:
+    """校验 remote 上 current 或指定 generation(#154)。"""
+    from kairo.backup import BackupError, load_remote, verify_generation
+
+    try:
+        spec = load_remote(remote)
+        result = verify_generation(Path(spec.path), backup_id)
+    except BackupError as exc:
+        _backup_fail(exc)
+    typer.echo(
+        f"ok backup_id={result.backup_id} files={result.files} bytes={result.bytes}"
+    )
+
+
+@backup_app.command("restore")
+def backup_restore(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+    dest: Path = typer.Argument(..., help="空目标目录"),
+    backup_id: str = typer.Option(None, "--backup-id", help="默认 current"),
+) -> None:
+    """把 remote generation 恢复到空目录(#154)。"""
+    from kairo.backup import BackupError, load_remote, restore_generation
+
+    try:
+        spec = load_remote(remote)
+        result = restore_generation(Path(spec.path), dest, backup_id)
+    except BackupError as exc:
+        _backup_fail(exc)
+    typer.echo(
+        f"restored backup_id={result.backup_id} dest={dest} "
+        f"files={result.files} bytes={result.bytes}"
+    )
 
 
 @glossary_app.command("list")
