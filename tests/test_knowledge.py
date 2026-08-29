@@ -15,6 +15,7 @@ from kairo.knowledge import (
     migrate_workspace,
     new_entry,
     save_global,
+    save_workspace,
 )
 from kairo.knowledge_matcher import KnowledgeMatcher, MatchBudget
 from kairo.knowledge_review import (
@@ -28,6 +29,7 @@ from kairo.knowledge_review import (
 from kairo.provider import StubProvider
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
+from kairo.models import ProductState
 
 
 def _entry(title: str, *, scope: str = "global", aliases=(), description=""):
@@ -145,7 +147,7 @@ def test_knowledge_web_add_and_candidate_actions(tmp_path):
     client = TestClient(create_app(root))
     page = client.get("/knowledge?workspace=ws")
     assert page.status_code == 200
-    assert "还没有本地知识条目" in page.text
+    assert "No local knowledge entries yet" in page.text
     page = client.post("/w/ws/knowledge", data={"title": "本地锚", "description": "说明"})
     assert page.status_code == 200 and "本地锚" in page.text
     digest = ws.root / "references" / "r" / "digest.md"
@@ -156,6 +158,36 @@ def test_knowledge_web_add_and_candidate_actions(tmp_path):
     page = client.post(f"/w/ws/knowledge/candidates/{candidate.id}/accept")
     assert page.status_code == 200 and "候选锚" in page.text
     assert 'href="/knowledge"' in client.get("/").text
+
+
+def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    entry = new_entry(title="existing", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("evidence")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="evidence", drafts=[{"title": "candidate", "quote": "evidence"}])
+    page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
+    assert "Merge target" in page.text and "aliases and source" in page.text
+    assert "待审核知识候选" not in page.text and "采纳到本工作区" not in page.text
+
+
+def test_knowledge_drift_is_visible_and_offers_manual_restep(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    entry = new_entry(title="current", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    state = ws.read_state()
+    state.products["references/r/digest.md"] = ProductState(input_hash="x", knowledge_hash="old")
+    ws.write_state(state)
+    page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
+    assert "Knowledge context drift" in page.text
+    assert 'name="target" value="references/r/digest.md"' in page.text
+    assert "Re-step with current knowledge" in page.text
 
 
 def test_matcher_suggest_keeps_short_and_manual_aliases_out_of_auto_match():

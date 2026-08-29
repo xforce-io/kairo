@@ -21,6 +21,7 @@ from kairo.models import (
     REASON_PROVIDER_FAILED,
     FailureDiagnostic,
     Form,
+    KnowledgeDiagnostic,
     Manifest,
     ProductState,
     State,
@@ -62,7 +63,7 @@ def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
 
 
-def _knowledge_context(ws, text: str) -> tuple[str, str | None]:
+def _knowledge_context(ws, text: str) -> tuple[str, str | None, KnowledgeDiagnostic]:
     """#182：调用方决定扫描范围；局部歧义不会关闭整个知识上下文。"""
     try:
         from kairo.knowledge import current_hash, effective_entries, load_global, load_workspace
@@ -72,9 +73,18 @@ def _knowledge_context(ws, text: str) -> tuple[str, str | None]:
         result = matcher_for(entries).match(text)
         # legacy 读取也会转为 KnowledgeEntry；绝不再把全量 glossary 注入 Prompt。
         _ = load_global(ws.root.parent), load_workspace(ws.root)
-        return format_knowledge_context(result), current_hash(ws.root.parent, ws.root)
+        return (
+            format_knowledge_context(result),
+            current_hash(ws.root.parent, ws.root),
+            KnowledgeDiagnostic(
+                matched_entry_ids=[hit.entry.id for hit in result.matches],
+                ambiguities=len(result.ambiguities),
+                truncated=result.truncated_count,
+                skipped=len(result.skipped_terms),
+            ),
+        )
     except Exception:
-        return "", None
+        return "", None, KnowledgeDiagnostic()
 
 
 def _legacy_glossary_hash(ws) -> str | None:
@@ -529,7 +539,7 @@ class DigestRule:
         input_hash = _hash(fingerprint)
 
         def run(state: State) -> None:
-            knowledge_context, knowledge_hash = _knowledge_context(self.ws, body)
+            knowledge_context, knowledge_hash, knowledge_diagnostic = _knowledge_context(self.ws, body)
             persona = (
                 self.prompt
                 + knowledge_context
@@ -572,6 +582,7 @@ class DigestRule:
                 },
                 glossary_hash=_legacy_glossary_hash(self.ws),
                 knowledge_hash=knowledge_hash,
+                knowledge_diagnostic=knowledge_diagnostic,
             )
             ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
             if ref_id:
@@ -780,7 +791,7 @@ class ComposeRule:
                 for path in sorted(use_delta)
                 if (self.ws.root / path).is_file()
             )
-            knowledge_context, knowledge_hash = _knowledge_context(self.ws, knowledge_text)
+            knowledge_context, knowledge_hash, knowledge_diagnostic = _knowledge_context(self.ws, knowledge_text)
             layer = getattr(target, "layer", None) or "fact"
             budget_discipline = (
                 "\n- 完整 `understanding.md`（含标题、空白、正文、来源索引）不得超过 "
@@ -888,6 +899,7 @@ class ComposeRule:
             # 空 delta 不会伪造一次“知识重新校正”。
             if use_delta:
                 ts.knowledge_hash = knowledge_hash
+                ts.knowledge_diagnostic = knowledge_diagnostic
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:
                 ts.last_major_folded = dict(all_digests)

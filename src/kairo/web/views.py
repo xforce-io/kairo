@@ -981,6 +981,26 @@ def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
     return knowledge_todos + todo_count(ws.root, pending=pending)
 
 
+def _capture_knowledge_run_boundary(ws: Workspace, task) -> None:
+    """启动运行前的内存快照，供结果页隔离本 run；失败时宁可为空也不读累计队列。"""
+    try:
+        from kairo.knowledge_review import load_review
+
+        review = load_review(ws.root)
+        task.knowledge_before_candidates = frozenset(candidate.id for candidate in review.candidates)
+        task.knowledge_before_errors = frozenset(review.extract_errors)
+        state = ws.read_state()
+        task.knowledge_before_products = {
+            key: value.knowledge_hash for key, value in state.products.items()
+        }
+        task.knowledge_before_targets = {
+            key: value.knowledge_hash for key, value in state.targets.items()
+        }
+    except Exception:
+        # diagnostics 不能影响 Run 主路径；空边界不会回退为累计 pending。
+        pass
+
+
 def _workspace_glossary_ctx(
     request: Request,
     ws: Workspace,
@@ -1408,6 +1428,7 @@ def _knowledge_page(
     candidates = []
     extract_errors = {}
     promotions = []
+    drift: list[dict[str, str]] = []
     try:
         global_entries = load_global(serve)[0].entries
         for slug in slugs:
@@ -1419,10 +1440,26 @@ def _knowledge_page(
                     promotions.append(row)
         if selected:
             local_entries = load_workspace(serve / selected)[0].entries
+            from kairo.knowledge import current_hash
+
+            current = current_hash(serve, serve / selected)
+            state = _open(request, selected).read_state()
+            for path, product in state.products.items():
+                if product.knowledge_hash and product.knowledge_hash != current:
+                    drift.append({"path": path, "target": path})
+            for path, target_state in state.targets.items():
+                if target_state.knowledge_hash and target_state.knowledge_hash != current:
+                    drift.append({"path": path, "target": path})
             review = invalidate_stale(serve / selected)
             for candidate in review.candidates:
                 row = candidate.model_dump()
                 row["available"] = (serve / selected / candidate.path).is_file()
+                if candidate.suggestion:
+                    targets = {entry.id: entry.title for entry in [*local_entries, *global_entries]}
+                    row["suggestion_text"] = "；".join(
+                        f"{term} → {targets.get(value.removeprefix('merge:'), value)}"
+                        for term, value in candidate.suggestion.items()
+                    )
                 candidates.append(row)
             extract_errors = review.extract_errors
             for entry in local_entries:
@@ -1444,6 +1481,7 @@ def _knowledge_page(
             "candidate_open_count": sum(item["status"] in {"pending", "pending_global"} for item in candidates),
             "promotions": promotions,
             "extract_errors": extract_errors,
+            "knowledge_drift": drift,
             "error": error,
             "success": success,
         },
@@ -1719,7 +1757,25 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
             )
         argv = [sys.executable, "-m", "kairo", "run"]
     try:
+        # 必须在子进程实际工作前建立边界，避免历史候选被说成本次产出。
+        boundary: dict[str, object] = {}
+        try:
+            from kairo.knowledge_review import load_review
+
+            review = load_review(ws.root)
+            boundary = {
+                "candidates": frozenset(candidate.id for candidate in review.candidates),
+                "errors": frozenset(review.extract_errors),
+                "products": {key: value.knowledge_hash for key, value in ws.read_state().products.items()},
+                "targets": {key: value.knowledge_hash for key, value in ws.read_state().targets.items()},
+            }
+        except Exception:
+            pass
         task = reg.start(slug, ws.root, argv, job_kind="reconcile")
+        task.knowledge_before_candidates = boundary.get("candidates", frozenset())  # type: ignore[assignment]
+        task.knowledge_before_errors = boundary.get("errors", frozenset())  # type: ignore[assignment]
+        task.knowledge_before_products = boundary.get("products", {})  # type: ignore[assignment]
+        task.knowledge_before_targets = boundary.get("targets", {})  # type: ignore[assignment]
     except RuntimeError:
         # 竞态:判断 is_running 与 start 之间被抢占 → 附着
         task = reg.current(slug)
@@ -1807,24 +1863,68 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
             lines.append("</ul>")
         else:
             lines.append(f'<p class="muted">{t("run.done_ok")}</p>')
-        try:
-            from kairo.knowledge_review import load_review
-
-            review = load_review(ws.root)
-            pending_knowledge = sum(c.status in {"pending", "pending_global"} for c in review.candidates)
-            if pending_knowledge:
-                lines.append(
-                    f'<p class="run-summary-meta"><a href="/knowledge?workspace={quote(slug)}">{escape(t("knowledge.run_pending").format(n=pending_knowledge))}</a></p>'
-                )
-            elif review.extract_errors:
-                lines.append(f'<p class="run-summary-meta">{escape(t("knowledge.run_extract_failed"))}</p>')
-            else:
-                lines.append(f'<p class="run-summary-meta">{escape(t("knowledge.run_empty"))}</p>')
-        except Exception:
-            pass
+        lines.extend(_knowledge_run_summary_lines(ws, slug, task, t))
     # 任务结束后释放运行锁;OOB 刷新主按钮、活 target 圆点与元信息(#180)
     lines.append(_run_status_oob(request, ws, slug, t))
     return HTMLResponse("".join(lines))
+
+
+def _knowledge_run_summary_lines(ws: Workspace, slug: str, task, t) -> list[str]:
+    """只读取 task 启动边界之后的产物和审核记录，绝不把历史 pending 伪装成本轮。"""
+    if task is None:
+        return [f'<p class="run-summary-meta">{escape(t("knowledge.run_not_available"))}</p>']
+    try:
+        from kairo.knowledge_review import load_review
+
+        review = load_review(ws.root)
+        candidates = [
+            candidate
+            for candidate in review.candidates
+            if candidate.id not in task.knowledge_before_candidates
+        ]
+        errors = [path for path in review.extract_errors if path not in task.knowledge_before_errors]
+        state = ws.read_state()
+        changed_products = [
+            value for key, value in state.products.items()
+            if value.knowledge_hash is not None
+            and value.knowledge_hash != task.knowledge_before_products.get(key)
+        ]
+        changed_targets = [
+            value for key, value in state.targets.items()
+            if value.knowledge_hash is not None
+            and value.knowledge_hash != task.knowledge_before_targets.get(key)
+        ]
+        diagnostics = [
+            value.knowledge_diagnostic
+            for value in [*changed_products, *changed_targets]
+            if value.knowledge_diagnostic is not None
+        ]
+        matched = sum(len(item.matched_entry_ids) for item in diagnostics)
+        ambiguity = sum(item.ambiguities for item in diagnostics)
+        truncated = sum(item.truncated for item in diagnostics)
+        skipped = sum(item.skipped for item in diagnostics)
+        digest_candidates = sum(item.source_kind == "digest" for item in candidates)
+        compose_candidates = sum(item.source_kind == "compose" for item in candidates)
+        lines: list[str] = []
+        if candidates:
+            lines.append(
+                f'<p class="run-summary-meta"><a href="/knowledge?workspace={quote(slug)}">'
+                f'{escape(t("knowledge.run_candidates").format(digest=digest_candidates, compose=compose_candidates))}</a></p>'
+            )
+        if diagnostics:
+            lines.append(
+                f'<p class="run-summary-meta">{escape(t("knowledge.run_match_stats").format(matched=matched, ambiguity=ambiguity, truncated=truncated, skipped=skipped))}</p>'
+            )
+        if errors:
+            # error 内容可能来自 provider；结果区只泄露数量和安全入口。
+            lines.append(
+                f'<p class="run-summary-meta"><a href="/knowledge?workspace={quote(slug)}">{escape(t("knowledge.run_extract_errors").format(n=len(errors)))}</a></p>'
+            )
+        if not candidates and not diagnostics and not errors:
+            lines.append(f'<p class="run-summary-meta">{escape(t("knowledge.run_empty"))}</p>')
+        return lines
+    except Exception:
+        return [f'<p class="run-summary-meta">{escape(t("knowledge.run_not_available"))}</p>']
 
 
 def _run_status_oob(request: Request, ws: Workspace, slug: str, t) -> str:

@@ -213,6 +213,6 @@ def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws")
 
     assert page.status_code == 200
-    assert "等待 global 审核" in page.text
+    assert "Awaiting shared review" in page.text
     assert f"/candidates/{candidate.id}/accept" not in page.text
     assert f"/candidates/{candidate.id}/ignore" not in page.text

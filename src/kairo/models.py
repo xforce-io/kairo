@@ -261,6 +261,15 @@ class FailureDiagnostic(BaseModel):
     summary: str = ""
 
 
+class KnowledgeDiagnostic(BaseModel):
+    """一次产物实际采用的知识匹配诊断；只保存计数与稳定 id，绝不保存 prompt。"""
+
+    matched_entry_ids: list[str] = Field(default_factory=list)
+    ambiguities: int = 0
+    truncated: int = 0
+    skipped: int = 0
+
+
 class ProductState(BaseModel):
     input_hash: str
     produced_by: dict[str, str] | None = None
@@ -269,6 +278,7 @@ class ProductState(BaseModel):
     diagnostic: FailureDiagnostic | None = None  # #98;旧 state 无此键
     glossary_hash: str | None = None  # #163;缺省=旧产物
     knowledge_hash: str | None = None  # #182;仅 advisory，不进入 input_hash
+    knowledge_diagnostic: KnowledgeDiagnostic | None = None
 
 
 class TargetState(BaseModel):
@@ -286,6 +296,7 @@ class TargetState(BaseModel):
     retry_reason: str | None = None  # provider-failed 前的触发语义;Run 重试后清空
     glossary_hash: str | None = None  # #163;缺省=旧产物
     knowledge_hash: str | None = None  # #182;仅 advisory，不进入 input_hash
+    knowledge_diagnostic: KnowledgeDiagnostic | None = None
 
 
 class State(BaseModel):

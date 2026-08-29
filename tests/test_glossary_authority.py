@@ -187,7 +187,8 @@ def test_glossary_change_marks_pending_without_autostep(tmp_path):
     assert items == [] or not items[0].is_stale(ws.read_state())
     page = TestClient(create_app(tmp_path / "root")).get("/glossary?workspace=ws")
     assert page.status_code == 200
-    assert "知识" in page.text
+    # 知识页已统一走 catalog；默认英文不能依赖旧硬编码中文。
+    assert "Knowledge" in page.text
     ws_page = TestClient(create_app(tmp_path / "root")).get("/w/ws")
     assert 'hx-post="/w/ws/step"' not in ws_page.text or 'name="target"' not in ws_page.text
     assert f'name="target" value="{rid}"' not in ws_page.text

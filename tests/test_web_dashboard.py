@@ -233,4 +233,4 @@ def test_knowledge_page_marks_utility_on(tmp_path):
     assert re.search(r'href="/knowledge"[^>]*\bon\b', _header(html))
     crumb = re.search(r'<span class="crumb">(.*?)</span>', html, re.S)
     assert crumb is not None
-    assert "知识" in crumb.group(1)
+    assert "Knowledge" in crumb.group(1)

@@ -75,6 +75,11 @@ class StepTask:
     transport_seen: bool = False
     saw_pending: bool = False
     last_phrase: str | None = None
+    # Web 在启动子进程前记录的只读边界；run-summary 只能据此呈现本次变化。
+    knowledge_before_candidates: frozenset[str] = field(default_factory=frozenset)
+    knowledge_before_errors: frozenset[str] = field(default_factory=frozenset)
+    knowledge_before_products: dict[str, str | None] = field(default_factory=dict)
+    knowledge_before_targets: dict[str, str | None] = field(default_factory=dict)
 
 
 def redact_sensitive(text: str) -> str:

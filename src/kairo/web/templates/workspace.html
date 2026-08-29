@@ -138,7 +138,7 @@
     </div>
     <div id="step-area">{% if run_task_id %}{% with task_id=run_task_id %}{% include "_step.html" %}{% endwith %}{% endif %}</div>
     {% if glossary_todo_n %}
-    <a class="gl-todo-hint" href="/knowledge?workspace={{ slug | urlencode }}">知识有 {{ glossary_todo_n }} 项待处理</a>
+    <a class="gl-todo-hint" href="/knowledge?workspace={{ slug | urlencode }}">{{ t('knowledge.todo_hint').format(n=glossary_todo_n) }}</a>
     {% endif %}
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
     <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}><p class="panel-hint">{{ t('panel.hint') }}</p></div>
