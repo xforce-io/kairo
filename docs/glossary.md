@@ -31,3 +31,4 @@
 | 备份清单 | `backup.json` 中完整描述一份备份 generation 的目录、文件、物化对象及其完整性信息。 | 文件清单 |
 | 最近结果 | 源环境为某个 remote 保留的最近一次备份尝试记录，含尝试时间、成功时间、backup_id 与成败。 | 同步日志 |
 | 重叠跳过 | 同一 remote 上一轮仍在运行时，本轮不启动第二次备份并留下可判定记录。 | 取消 |
+| 数据根 | 容器内 public-read 进程打开的 serve root，必须经 current 跟随到该 generation 的 `data/`。 | 挂载点、备份根 |

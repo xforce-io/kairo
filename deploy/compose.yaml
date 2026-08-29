@@ -1,0 +1,31 @@
+# 最小匿名只读交付(#155)。把 #154 remote 根只读挂到 /data。
+services:
+  kairo-public:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    read_only: true
+    user: "65532:65532"
+    ports:
+      - "8787:8787"
+    tmpfs:
+      - /tmp
+    volumes:
+      - type: bind
+        source: ${KAIRO_BACKUP_ROOT:?set KAIRO_BACKUP_ROOT to the remote backup root}
+        target: /data
+        read_only: true
+    command:
+      - serve
+      - /data/current/data
+      - --mode
+      - public-read
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8787"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

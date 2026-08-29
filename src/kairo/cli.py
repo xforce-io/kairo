@@ -68,14 +68,17 @@ def _open_ws() -> Workspace:
         raise typer.Exit(1) from None
 
 
-def _serve_root(root: Path | None = None) -> Path:
-    """解析 serve root:显式参数 → KAIRO_SERVE_ROOT → cwd。"""
+def _serve_root(root: Path | None = None, *, follow: bool = True) -> Path:
+    """解析 serve root:显式参数 → KAIRO_SERVE_ROOT → cwd。
+
+    public-read 经 current 跟随数据根时 follow=False,避免启动时 resolve 钉死 generation。
+    """
     if root is not None:
-        return Path(root).expanduser().resolve()
-    env = os.environ.get("KAIRO_SERVE_ROOT")
-    if env:
-        return Path(env).expanduser().resolve()
-    return Path.cwd().resolve()
+        path = Path(root).expanduser()
+    else:
+        env = os.environ.get("KAIRO_SERVE_ROOT")
+        path = Path(env).expanduser() if env else Path.cwd()
+    return path.resolve() if follow else path
 
 
 def _validate_topic_name(topic: str) -> str:
@@ -629,15 +632,27 @@ def serve(
         "--mode",
         help="console=本地 Console(默认); public-read=匿名公开只读面(#118)",
     ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="监听地址;console 仅回环;public-read 可 0.0.0.0(#155)",
+    ),
 ) -> None:
     """启动 Web 服务。默认本地 Console;``--mode public-read`` 仅挂匿名公开只读面。"""
-    serve_root = _serve_root(root)
     if mode not in {"console", "public-read"}:
         typer.secho(
             f"未知 mode: {mode}(期望 console 或 public-read)",
             fg=typer.colors.RED,
             err=True,
         )
+        raise typer.Exit(2)
+    loopback = {"127.0.0.1", "::1", "localhost"}
+    if mode == "console" and host not in loopback:
+        typer.secho("console 只能绑定回环地址", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    serve_root = _serve_root(root, follow=(mode != "public-read"))
+    if mode == "public-read" and not Path(serve_root).is_dir():
+        typer.secho(f"数据根不是目录:{serve_root}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
     try:
         from kairo.web.server import run as web_run
@@ -649,8 +664,8 @@ def serve(
         )
         raise typer.Exit(1) from None
     label = "public-read" if mode == "public-read" else "console"
-    typer.echo(f"kairo {label}: http://127.0.0.1:{port}  (root={serve_root})")
-    web_run(serve_root, port=port, mode=mode)  # type: ignore[arg-type]
+    typer.echo(f"kairo {label}: http://{host}:{port}  (root={serve_root})")
+    web_run(serve_root, port=port, mode=mode, host=host)  # type: ignore[arg-type]
 
 
 @app.command()
