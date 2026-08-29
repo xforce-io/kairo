@@ -1,6 +1,7 @@
 """#182 知识条目、匹配器、审核与 Web 主路径。"""
 
 import re
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -179,6 +180,7 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     assert not re.search(r"[\u4e00-\u9fff]", knowledge_region)
     chinese = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "zh"})
     assert "待审核知识候选" in chinese.text and "采纳到本工作区" in chinese.text
+    assert "confirmed ·" not in chinese.text and "digest · pending" not in chinese.text
 
 
 def test_knowledge_drift_is_visible_and_offers_manual_restep(tmp_path):
@@ -474,7 +476,8 @@ def test_candidate_provider_only_receives_current_product_and_redacts_error(tmp_
     provider_extractor(object())("本次产物", [_entry("不应泄露的已知知识")], "references/r/digest.md")
     assert "不应泄露" not in seen["context"] and "本次产物" in seen["context"]
     extract_after_success(ws.root, root, source_kind="digest", path="references/r/digest.md", text="正文", extractor=lambda *_: (_ for _ in ()).throw(RuntimeError("Authorization: Bearer super-secret-token api_key=hidden")))
-    error = load_review(ws.root).extract_errors["references/r/digest.md"]
+    from kairo.knowledge_review import extract_error_key
+    error = load_review(ws.root).extract_errors[extract_error_key("digest", "references/r/digest.md")]
     assert "super-secret-token" not in error and "hidden" not in error and "[redacted]" in error
 
 
@@ -493,3 +496,170 @@ def test_matcher_cache_uses_semantic_snapshot_and_time_is_strict():
     else:
         raise AssertionError("缺少时区的时间必须被拒绝")
     assert KnowledgeDocument(entries=[entry]).entries[0].created_at.endswith("+00:00")
+
+
+def test_transaction_replay_covers_workspace_and_global_merge_after_source_removed(tmp_path, monkeypatch):
+    """P1-1：三类跨文件动作在 stale 前按 journal 的已落盘权威收敛。"""
+    from kairo.knowledge_review import merge_global, merge_workspace
+    import pytest
+
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    base = new_entry(title="目标", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [base]}))
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "合并", "quote": "证据"}])
+    candidate = load_review(ws.root).candidates[0]
+    import kairo.knowledge_review as module
+    original = module.save_review
+    monkeypatch.setattr(module, "save_review", lambda *_: (_ for _ in ()).throw(OSError("review")))
+    with pytest.raises(OSError):
+        merge_workspace(ws.root, candidate.id, base.id)
+    digest.unlink()
+    monkeypatch.setattr(module, "save_review", original)
+    merge_workspace(ws.root, candidate.id, base.id)
+    assert load_review(ws.root).candidates[0].status == "merged"
+    assert not (ws.root / ".kairo/knowledge_transaction.yaml").exists()
+
+    # global merge 同样通过 source_entry_id 移除本地 authority，再补终态。
+    local = new_entry(title="待合并公共", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [local]}))
+    promotion = promote(ws.root, local.id)
+    global_target = new_entry(title="公共目标", scope="global")
+    from kairo.knowledge import KnowledgeDocument
+    save_global(root, KnowledgeDocument(entries=[global_target]))
+    monkeypatch.setattr(module, "save_review", lambda *_: (_ for _ in ()).throw(OSError("review")))
+    with pytest.raises(OSError):
+        merge_global(root, ws.root, promotion.id, global_target.id)
+    monkeypatch.setattr(module, "save_review", original)
+    merge_global(root, ws.root, promotion.id, global_target.id)
+    assert not any(item.id == local.id for item in load_workspace(ws.root)[0].entries)
+    assert next(item for item in load_review(ws.root).candidates if item.id == promotion.id).status == "merged"
+
+
+def test_extract_errors_are_keyed_by_kind_and_path_and_clear_independently(tmp_path):
+    """P1-4：Digest 与 Compose 相同路径可各自重试、各自清除。"""
+    from kairo.knowledge_review import extract_error_key, mark_extract_error
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    path = "references/r/digest.md"
+    mark_extract_error(ws.root, path, "digest-error", source_kind="digest")
+    mark_extract_error(ws.root, path, "compose-error", source_kind="compose")
+    review = load_review(ws.root)
+    assert set(review.extract_errors) == {extract_error_key("digest", path), extract_error_key("compose", path)}
+    ingest_candidates(ws.root, source_kind="digest", path=path, source_text="证据", drafts=[])
+    assert set(load_review(ws.root).extract_errors) == {extract_error_key("compose", path)}
+
+
+def test_legacy_root_candidate_keeps_gc_route_and_stable_local_entry(tmp_path):
+    """P1-2：gc-* 旧链接可继续审核，pending_root/root_rejected 均锚定本地 ke-*。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("旧证据")
+    (ws.root / ".kairo").mkdir(exist_ok=True)
+    (ws.root / ".kairo/glossary_review.yaml").write_text(
+        "candidates:\n"
+        "  - id: gc-pending\n    name: 待提升\n    ref_id: r\n    quote: 旧证据\n    status: pending_root\n"
+        "  - id: gc-rejected\n    name: 退回条目\n    ref_id: r\n    quote: 旧证据\n    status: root_rejected\n    reject_reason: 需编辑\n",
+        encoding="utf-8",
+    )
+    review = load_review(ws.root)
+    pending = next(candidate for candidate in review.candidates if candidate.legacy_id == "gc-pending")
+    rejected = next(candidate for candidate in review.candidates if candidate.legacy_id == "gc-rejected")
+    assert pending.entry_id.startswith("ke-") and rejected.entry_id.startswith("ke-")
+    accepted = accept_global(root, ws.root, "gc-pending")
+    assert accepted.id == pending.entry_id
+    from kairo.knowledge_review import update_workspace_entry
+    update_workspace_entry(ws.root, rejected.entry_id, title="退回条目已编辑", description="可再次提升", aliases=[], tags=[])
+    refreshed = promote(ws.root, rejected.entry_id)
+    assert refreshed.id == rejected.id and refreshed.status == "pending_global" and not refreshed.reject_reason
+
+
+def test_promotion_preserves_all_sources_when_one_source_disappears(tmp_path):
+    """P1-3：提升候选保留全部出处；首出处消失而另一个有效时不可 stale。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = ws.root / "references/a/digest.md"
+    b = ws.root / "references/b/digest.md"
+    a.parent.mkdir(parents=True)
+    b.parent.mkdir(parents=True)
+    a.write_text("甲证据")
+    b.write_text("乙证据")
+    entry = new_entry(title="多出处", scope="workspace", sources=[
+        KnowledgeSource(kind="digest", path="references/a/digest.md", quote="甲证据", content_hash="a" * 64, workspace_slug="ws"),
+        KnowledgeSource(kind="digest", path="references/b/digest.md", quote="乙证据", content_hash="b" * 64, workspace_slug="ws"),
+    ])
+    # 使用真实 digest hash，保证第二出处可定位。
+    entry.sources[0].content_hash = __import__("hashlib").sha256(a.read_text().encode()).hexdigest()
+    entry.sources[1].content_hash = __import__("hashlib").sha256(b.read_text().encode()).hexdigest()
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    candidate = promote(ws.root, entry.id)
+    a.unlink()
+    assert next(item for item in invalidate_stale(ws.root).candidates if item.id == candidate.id).status == "pending_global"
+    global_entry = accept_global(root, ws.root, candidate.id)
+    assert len(global_entry.sources) == 2
+
+
+def test_matcher_display_scope_renderer_budget_and_semantic_projection():
+    """P2-5/P2-8：展示词、scope、版本和预算与实际 renderer/hash 同步。"""
+    from kairo.knowledge import semantic_hash
+    from kairo.knowledge_matcher import format_knowledge_context
+    entry = new_entry(title="Canonical", scope="global", aliases=[KnowledgeAlias(value="Alias")], description="说明")
+    local = new_entry(title="本地条目", scope="workspace", description="本地")
+    matcher = KnowledgeMatcher([entry, local], semantic_version="v1")
+    hit = matcher.match("Alias 本地条目", scope="global", budget=MatchBudget(max_chars=10_000)).matches[0]
+    assert hit.term == "Alias" and matcher.version == "v1"
+    result = matcher.match("Alias 本地条目", budget=MatchBudget(max_entries=1, max_chars=10_000))
+    assert len(format_knowledge_context(result)) <= 10_000 and result.matches[0].entry.scope == "workspace"
+    changed_tags = entry.model_copy(update={"tags": ["不会注入"]})
+    changed_quote = entry.model_copy(update={"sources": [KnowledgeSource(kind="digest", path="references/r/digest.md", quote="不同", content_hash="a" * 64, workspace_slug="ws")]})
+    same_path = changed_quote.model_copy(update={"sources": [KnowledgeSource(kind="digest", path="references/r/digest.md", quote="再变", content_hash="b" * 64, workspace_slug="other")]})
+    assert semantic_hash([entry]) == semantic_hash([changed_tags])
+    assert semantic_hash([changed_quote]) == semantic_hash([same_path])
+
+
+def test_knowledge_filter_and_global_source_link_include_availability(tmp_path):
+    """P2-6：同一筛选覆盖 global/local/candidate，global 出处回链到实际 workspace。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    source = KnowledgeSource(kind="digest", path="references/r/digest.md", quote="证据", content_hash=__import__("hashlib").sha256("证据".encode()).hexdigest(), workspace_slug="ws")
+    from kairo.knowledge import KnowledgeDocument
+    save_global(root, KnowledgeDocument(entries=[new_entry(title="只查我", scope="global", sources=[source])]))
+    page = TestClient(create_app(root)).get("/knowledge?workspace=ws&filter=%E5%8F%AA%E6%9F%A5%E6%88%91")
+    assert page.status_code == 200 and "只查我" in page.text and '/w/ws?ref=r' in page.text
+
+
+def test_legacy_workspace_write_rejects_unrelated_serve_root(tmp_path):
+    """P2-9：兼容 add/remove 在读写前校验显式 root 归属。"""
+    import pytest
+    root = tmp_path / "root"
+    other = tmp_path / "other"
+    root.mkdir()
+    other.mkdir()
+    ws = Workspace.init(root / "ws")
+    with pytest.raises(ValueError):
+        ws.add_glossary_entry("不能写", serve_root=other)
+    with pytest.raises(ValueError):
+        ws.remove_glossary_entry(0, serve_root=other)
+
+
+def test_readme_v2_example_has_strict_audit_fields(tmp_path):
+    """P2-10：README 的 v2 片段可被严格知识仓储加载。"""
+    import yaml
+    from kairo.knowledge import KnowledgeDocument, validate_entries
+    text = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    block = text.split("```yaml\nknowledge:\n", 1)[1].split("```", 1)[0]
+    document = KnowledgeDocument.model_validate(yaml.safe_load("knowledge:\n" + block)["knowledge"])
+    validate_entries(document.entries, scope="workspace")

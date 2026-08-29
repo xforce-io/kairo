@@ -445,6 +445,7 @@ class Workspace:
     ) -> GlossaryEntry:
         """兼容旧 API，但唯一写入 v2 KnowledgeStore，绝不回落 glossary 字段。"""
         from kairo.glossary import GlossaryEntry
+        from kairo.glossary import resolve_serve_root
         from kairo.knowledge import (
             KnowledgeAlias,
             effective_entries,
@@ -454,6 +455,7 @@ class Workspace:
             validate_entries,
         )
 
+        root = resolve_serve_root(ws_root=self.root, explicit=serve_root)
         document, _ = load_workspace(self.root)
         entry = new_entry(
             title=name,
@@ -464,7 +466,7 @@ class Workspace:
         )
         validate_entries([*document.entries, entry], scope="workspace")
         # effective_entries 同时验证 root/workspace 可读；跨 scope alias 冲突由 matcher 局部处理。
-        _ = effective_entries(serve_root or self.root.parent, self.root)
+        _ = effective_entries(root, self.root)
         document.entries.append(entry)
         save_workspace(self.root, document)
         self.stamp_knowledge_pending()
@@ -472,8 +474,11 @@ class Workspace:
 
     def remove_glossary_entry(self, index: int, *, serve_root: Path | None = None) -> None:
         """兼容旧索引删除，但只改 constitution.knowledge。"""
+        from kairo.glossary import resolve_serve_root
         from kairo.knowledge import load_workspace, save_workspace
 
+        # 旧 API 也必须先验证它确实属于传入的 serve root，才允许读写。
+        resolve_serve_root(ws_root=self.root, explicit=serve_root)
         document, _ = load_workspace(self.root)
         document.entries.pop(index)
         save_workspace(self.root, document)

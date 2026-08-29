@@ -1430,20 +1430,28 @@ def _knowledge_page(
     global_entries = []
     local_entries = []
     candidates = []
-    extract_errors = {}
+    extract_errors: list[dict[str, str]] = []
     promotions = []
     drift: list[dict[str, str]] = []
     try:
         global_entries = load_global(serve)[0].entries
+        for entry in global_entries:
+            for source in entry.sources:
+                source.__dict__["available"] = bool(source.workspace_slug) and (serve / source.workspace_slug / source.path).is_file()
+        if filter_text:
+            global_entries = [entry for entry in global_entries if filter_text in " ".join([entry.title, entry.description, entry.status, *entry.tags, *(source.path for source in entry.sources)]).lower()]
         for slug in slugs:
             review = invalidate_stale(serve / slug)
             for candidate in review.candidates:
                 if candidate.status == "pending_global":
                     row = candidate.model_dump()
                     row["slug"] = slug
-                    promotions.append(row)
+                    if not filter_text or filter_text in " ".join([candidate.title, candidate.description, candidate.status, *candidate.tags, candidate.path]).lower():
+                        promotions.append(row)
         if selected:
             local_entries = load_workspace(serve / selected)[0].entries
+            if filter_text:
+                local_entries = [entry for entry in local_entries if filter_text in " ".join([entry.title, entry.description, entry.status, *entry.tags, *(source.path for source in entry.sources)]).lower()]
             from kairo.knowledge import current_hash
 
             current = current_hash(serve, serve / selected)
@@ -1470,7 +1478,16 @@ def _knowledge_page(
                 ]).lower()
                 if not filter_text or filter_text in haystack:
                     candidates.append(row)
-            extract_errors = review.extract_errors
+            extract_errors = [
+                {
+                    "key": key,
+                    "message": message,
+                    "source_kind": review.extract_error_meta.get(key, {}).get("source_kind", key.split(":", 1)[0]),
+                    "path": review.extract_error_meta.get(key, {}).get("path", key.split(":", 1)[1] if ":" in key else key),
+                    "version": review.extract_error_meta.get(key, {}).get("version", str(review.extract_error_versions.get(key, 0))),
+                }
+                for key, message in review.extract_errors.items()
+            ]
             for entry in local_entries:
                 for source in entry.sources:
                     # 模型允许额外显示字段；不写回存储。
@@ -1575,9 +1592,9 @@ def knowledge_entry_promote(request: Request, slug: str, entry_id: str) -> HTMLR
 
 
 @router.post("/w/{slug}/knowledge/extract", response_class=HTMLResponse)
-def knowledge_extract_retry_early(request: Request, slug: str, path: str = Form(...)) -> HTMLResponse:
+def knowledge_extract_retry_early(request: Request, slug: str, path: str = Form(...), source_kind: str = Form("")) -> HTMLResponse:
     """静态路由必须先于 `{entry_id}`，否则 FastAPI 会把 extract 当条目 id。"""
-    return _knowledge_extract_retry_impl(request, slug, path)
+    return _knowledge_extract_retry_impl(request, slug, path, source_kind=source_kind)
 
 
 @router.post("/w/{slug}/knowledge/{entry_id}", response_class=HTMLResponse)
@@ -1626,7 +1643,7 @@ def knowledge_candidate_update(request: Request, slug: str, candidate_id: str, t
     return _knowledge_page(request, selected_slug=slug, success=True)
 
 
-def _knowledge_extract_retry_impl(request: Request, slug: str, path: str) -> HTMLResponse:
+def _knowledge_extract_retry_impl(request: Request, slug: str, path: str, *, source_kind: str = "") -> HTMLResponse:
     """仅重试已完成产物的候选提取，不重跑 Digest/Compose。"""
     from kairo.knowledge import KnowledgeError
     from kairo.knowledge_review import extract_after_success
@@ -1644,7 +1661,13 @@ def _knowledge_extract_retry_impl(request: Request, slug: str, path: str) -> HTM
         from kairo.knowledge_review import load_review
 
         review = load_review(ws.root)
-        source_kind = review.extract_error_meta.get(path, {}).get("source_kind", "compose" if path == "understanding.md" else "digest")
+        from kairo.knowledge_review import extract_error_meta
+        if not source_kind:
+            candidates = [meta.get("source_kind", key.split(":", 1)[0]) for key, meta in review.extract_error_meta.items() if meta.get("path", key.split(":", 1)[1] if ":" in key else key) == path]
+            source_kind = candidates[0] if len(set(candidates)) == 1 else ("compose" if path == "understanding.md" else "digest")
+        meta = extract_error_meta(review, source_kind, path)
+        if not meta:
+            raise KnowledgeError("候选提取错误不存在或来源类型不匹配")
         extract_after_success(ws.root, Path(request.app.state.root), source_kind=source_kind, path=path, text=source.read_text(encoding="utf-8"), provider=select_provider())
     except (KnowledgeError, OSError) as exc:
         return _knowledge_page(request, selected_slug=slug, error=str(exc))

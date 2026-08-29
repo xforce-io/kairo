@@ -96,9 +96,13 @@ knowledge:
       aliases: [{value: 灵西, auto_match: true}]
       status: confirmed
       scope: workspace
+      created_at: "2026-08-29T00:00:00+00:00"
+      updated_at: "2026-08-29T00:00:00+00:00"
 ```
 
 Knowledge context applies in the **normalize / digest / compose stages**; ASR transcription itself is unaffected. After editing knowledge for an already-generated reference, run `kairo re-step <id>` to regenerate the digest. Global entries live in `<serve-root>/glossary.yaml` as a v2 document and are managed at `/knowledge`; a workspace may override a title locally. Machine `~/.config/kairo/glossary.yaml` is not part of the effective knowledge set.
+
+`glossary` remains a v1-compatible CLI/file projection; `knowledge` is its equivalent v2-facing command. Reads never migrate files. A write or explicit migration converts legacy entries atomically into the single v2 authority, and a confirmed workspace entry can be submitted for global review while preserving its stable `ke-*` id and all optional one-way sources.
 
 ## Local ASR configuration
 

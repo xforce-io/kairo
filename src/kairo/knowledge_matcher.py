@@ -63,13 +63,13 @@ def _ascii_boundary(text: str, start: int, end: int, term: str) -> bool:
 class KnowledgeMatcher:
     """业务层依赖的稳定匹配语义，不泄露 AC 节点。"""
 
-    def __init__(self, entries: list[KnowledgeEntry]):
+    def __init__(self, entries: list[KnowledgeEntry], *, semantic_version: str | None = None):
         self._entries: dict[str, KnowledgeEntry] = {}
         self._ownership: dict[str, list[tuple[str, bool]]] = {}
         self._terms: dict[str, list[tuple[str, bool]]] = {}
         self._nodes: list[_Node] = [_Node()]
         self.version = ""
-        self._replace(entries)
+        self._replace(entries, semantic_version)
 
     @property
     def entries(self) -> tuple[KnowledgeEntry, ...]:
@@ -78,18 +78,18 @@ class KnowledgeMatcher:
     def _replace(self, entries: list[KnowledgeEntry], semantic_version: str | None = None) -> str:
         # 先在局部变量建立不可变快照，构建完成后一次性替换缓存。
         confirmed = {entry.id: entry.model_copy(deep=True) for entry in entries if entry.status == "confirmed"}
-        ownership: dict[str, list[tuple[str, bool]]] = {}
-        eligible: dict[str, list[tuple[str, bool]]] = {}
+        ownership: dict[str, list[tuple[str, bool, str]]] = {}
+        eligible: dict[str, list[tuple[str, bool, str]]] = {}
         for entry in confirmed.values():
             title = normalize_term(entry.title)
-            ownership.setdefault(title, []).append((entry.id, True))
+            ownership.setdefault(title, []).append((entry.id, True, entry.title))
             if _eligible(title):
-                eligible.setdefault(title, []).append((entry.id, True))
+                eligible.setdefault(title, []).append((entry.id, True, entry.title))
             for alias in entry.aliases:
                 term = normalize_term(alias.value)
-                ownership.setdefault(term, []).append((entry.id, False))
+                ownership.setdefault(term, []).append((entry.id, False, alias.value))
                 if alias.auto_match and _eligible(term):
-                    eligible.setdefault(term, []).append((entry.id, False))
+                    eligible.setdefault(term, []).append((entry.id, False, alias.value))
         nodes = [_Node()]
         for term in eligible:
             state = 0
@@ -116,18 +116,18 @@ class KnowledgeMatcher:
 
     def refresh(self, entries: list[KnowledgeEntry], semantic_version: str | None = None) -> "KnowledgeMatcher":
         """发布新快照，而非修改已被正在运行任务持有的 matcher。"""
-        return KnowledgeMatcher(entries)
+        return KnowledgeMatcher(entries, semantic_version=semantic_version)
 
     def suggest(self, terms: list[str]) -> dict[str, str]:
         """候选去重/合并建议复用同一归一化与歧义视图。"""
         answer: dict[str, str] = {}
         for raw in terms:
             term = normalize_term(raw)
-            owners = {entry_id for entry_id, _ in self._ownership.get(term, [])}
+            owners = {entry_id for entry_id, _, _ in self._ownership.get(term, [])}
             answer[raw] = "unknown" if not owners else "ambiguous" if len(owners) > 1 else f"merge:{next(iter(owners))}"
         return answer
 
-    def match(self, text: str, *, budget: MatchBudget = MatchBudget()) -> MatchResult:
+    def match(self, text: str, *, scope: str | None = None, budget: MatchBudget = MatchBudget()) -> MatchResult:
         normalized = normalize_term(text)
         state = 0
         raw: list[KnowledgeMatch] = []
@@ -142,12 +142,15 @@ class KnowledgeMatcher:
                 if not _ascii_boundary(normalized, start, end, term):
                     continue
                 owners = self._terms[term]
-                unique = {entry_id for entry_id, _ in owners}
+                unique = {entry_id for entry_id, _, _ in owners}
                 if len(unique) != 1:
                     ambiguities.add(term)
                     continue
-                entry_id, is_title = owners[0]
-                raw.append(KnowledgeMatch(self._entries[entry_id].model_copy(deep=True), term, is_title, start, end))
+                entry_id, is_title, display = owners[0]
+                entry = self._entries[entry_id]
+                if scope is not None and entry.scope != scope:
+                    continue
+                raw.append(KnowledgeMatch(entry.model_copy(deep=True), display, is_title, start, end))
         # Keep an entry once, choosing its best deterministic match.
         best: dict[str, KnowledgeMatch] = {}
         for hit in raw:
@@ -167,10 +170,9 @@ class KnowledgeMatcher:
         selected: list[KnowledgeMatch] = []
         used = 0
         # 预算按最终序列化片段计费（固定头也计入），稳定排序后的前缀一旦放不下即截断。
-        header = _context_header()
-        used = len(header)
+        used = len(_render_context(()))
         for hit in ordered:
-            rendered = _context_line(hit)
+            rendered = _render_context((hit,))[len(_render_context(())):]
             if len(selected) >= budget.max_entries or used + len(rendered) > budget.max_chars:
                 break
             selected.append(hit)
@@ -185,12 +187,12 @@ class KnowledgeMatcher:
 
 
 def format_knowledge_context(result: MatchResult) -> str:
-    if not result.matches:
-        return ""
-    lines = _context_header().strip().splitlines()
-    for hit in result.matches:
-        lines.append(_context_line(hit).rstrip())
-    return "\n".join(lines) + "\n"
+    return _render_context(result.matches) if result.matches else ""
+
+
+def _render_context(matches: tuple[KnowledgeMatch, ...]) -> str:
+    """唯一的上下文 renderer；预算与最终输出必须逐字符相同。"""
+    return _context_header() + "".join(_context_line(hit) for hit in matches)
 
 
 def _context_header() -> str:
@@ -199,7 +201,7 @@ def _context_header() -> str:
 
 def _context_line(hit: KnowledgeMatch) -> str:
     entry = hit.entry
-    source = entry.sources[0].path if entry.sources else "无出处"
+    source = "、".join(item.path for item in entry.sources) if entry.sources else "无出处"
     return f"- {entry.title}（{entry.scope}；命中：{hit.term}；出处：{source}）：{entry.description}".rstrip("：") + "\n"
 
 
@@ -208,7 +210,7 @@ def matcher_for(entries: list[KnowledgeEntry]) -> KnowledgeMatcher:
     version = semantic_hash(entries)
     matcher = _CACHE.get(version)
     if matcher is None:
-        matcher = KnowledgeMatcher(entries)
+        matcher = KnowledgeMatcher(entries, semantic_version=version)
         _CACHE.clear()
         _CACHE[version] = matcher
     return matcher

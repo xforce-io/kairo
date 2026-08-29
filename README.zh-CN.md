@@ -81,7 +81,27 @@ kairo status                  # 看各 reference / 文档的融入状态
 - **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
 - **blocked 状态**：源/转换原因（`no-asr`、`asr-failed`、`convert-failed`、`missing-source`）、`manual-edit`、`provider-failed`，以及 Compose 保护（`compose-degraded`、`compose-provenance-invalid`、`compose-migration-required`、`compose-over-budget`）。`provider-failed` 可由 Run 重试；Compose 保护是终态，旧文档与 folded 保持不变。预算原因需在确认压缩取舍后显式执行 `kairo re-step understanding.md`。`understanding.md` 已超过 20,000 字符时，leftover `compose-degraded` 按 `compose-migration-required` 观察与恢复。
 
-## 领域真名册（glossary）
+## 领域知识（knowledge）与兼容真名册（glossary）
+
+`constitution.yaml: knowledge` 是工作区唯一的 v2 知识权威，根目录 `glossary.yaml` 保留为 global 知识的兼容文件路径。知识条目保存稳定 `ke-*` id、规范标题、别名（含 `auto_match`）、简短说明、状态、范围、标签、可选单向出处与带时区的审计时间。只有已确认条目按当前材料精确命中后，才会以受预算限制的参考上下文进入 Normalize、Digest 或 Compose；它不会替代材料证据。
+
+`glossary` CLI/旧路由仍是兼容投影，`knowledge` 是等价入口。纯读不会迁移或写盘；显式写入/迁移会原子转换旧 v1 数据并移除第二权威。候选先审核为本地条目；已确认的本地条目可提交 global 审核，接受或合并后保留同一 `ke-*` id 与全部出处，并移除本地独立权威。
+
+```yaml
+knowledge:
+  version: 2
+  entries:
+    - id: ke-example
+      title: 灵犀系统
+      description: 本项目所研究的系统
+      aliases: [{value: 灵西, auto_match: true}]
+      status: confirmed
+      scope: workspace
+      created_at: "2026-08-29T00:00:00+00:00"
+      updated_at: "2026-08-29T00:00:00+00:00"
+```
+
+## 旧领域真名册（glossary）
 
 `constitution.yaml` 可声明一张 `glossary`，把本领域的规范专名钉死。它在每次 Digest / Compose（及开启的 Normalize）时作为结构化只读数据注入（Issue [#20](https://github.com/xforce-io/kairo/issues/20)）：仅当提及能由规范名、alias 或定义充分对应时才用规范名，否则保留原文。每条三个键：`name`（规范名，作锚点）、`note`（给模型的 grounding，可选）、`aka`（已知变体 / 别名，纯参考，可选）。
 

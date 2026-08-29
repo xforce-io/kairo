@@ -299,16 +299,16 @@ def effective_entries(serve_root: Path, workspace_root: Path) -> list[KnowledgeE
 
 
 def semantic_hash(entries: list[KnowledgeEntry]) -> str:
+    """仅哈希实际可注入/匹配语义，避免 tags 与未渲染出处细节制造假漂移。"""
     payload = [
         {
             "id": entry.id,
             "title": entry.title,
-            "aliases": [a.model_dump() for a in entry.aliases],
+            "aliases": [{"value": a.value, "auto_match": a.auto_match} for a in entry.aliases],
             "description": entry.description,
-            "status": entry.status,
             "scope": entry.scope,
-            "tags": sorted(entry.tags),
-            "sources": [source.model_dump() for source in entry.sources],
+            # renderer 仅展示路径概览；quote/hash/workspace_slug 不进入 Prompt。
+            "source_paths": [source.path for source in entry.sources],
         }
         for entry in entries
         if entry.status == "confirmed"
