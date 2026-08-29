@@ -333,6 +333,23 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .glossary-add .dlg-go { width: 100%; margin-top: 4px; }
 .gl-note, .gl-aka { font-size: 12px; color: var(--muted); margin-top: 3px; font-weight: 400; }
 .glossary-table .btn-regen { margin: 0; padding: 4px 8px; font-size: 11px; }
+/* 本地知识编辑表单不能让全宽 Save 按钮接在内联输入项之后。 */
+.knowledge-console .gl-ws-panel .glossary-table td.mf-actions form:has(input[name="title"]) {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  width: 100%;
+  max-width: 100%;
+}
+.knowledge-console .gl-ws-panel .glossary-table td.mf-actions form:has(input[name="title"]) input {
+  width: 100%;
+  min-width: 0;
+}
+.knowledge-console .gl-ws-panel .glossary-table td.mf-actions form:has(input[name="title"]) button {
+  grid-column: 1 / -1;
+  width: 100%;
+  margin: 0;
+}
 .gl-section { padding-top: 4px; border-top: 1px solid var(--line); margin-top: 8px; }
 .gl-section:first-of-type { border-top: none; margin-top: 0; }
 .ref-blocks { margin: 10px 0 12px; padding: 10px 12px; border-radius: 8px; background: #f7ecec; border: 1px solid #e2b6b6; }

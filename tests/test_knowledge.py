@@ -188,6 +188,29 @@ def test_knowledge_narrow_screen_layout_uses_cards_and_wrapping_navigation(tmp_p
     assert "overflow-wrap: anywhere" in narrow
 
 
+def test_knowledge_desktop_edit_form_uses_bounded_grid_for_full_width_save(tmp_path):
+    """桌面编辑表单的 Save 不得在内联字段末尾重新取一遍父宽。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "desktop-lab")
+    ws.add_glossary_entry("本地知识", note="桌面编辑", aka=["别名"])
+
+    page = TestClient(create_app(root)).get("/knowledge?workspace=desktop-lab")
+    assert page.status_code == 200
+    assert re.search(
+        r'<form method="post" action="/w/desktop-lab/knowledge/ke-[^"]+">'
+        r'<input name="title"',
+        page.text,
+    )
+    css = (Path(__file__).parents[1] / "src/kairo/web/static/app.css").read_text(encoding="utf-8")
+    selector = '.knowledge-console .gl-ws-panel .glossary-table td.mf-actions form:has(input[name="title"])'
+    start = css.index(selector)
+    rule = css[start : start + 500]
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr))" in rule
+    assert "max-width: 100%" in rule
+    assert "grid-column: 1 / -1" in css[start : start + 1000]
+
+
 def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
