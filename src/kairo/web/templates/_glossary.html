@@ -9,7 +9,7 @@
       {% for item in pending %}
       <li>
         {{ item.key }}
-        <form hx-post="/w/{{ slug | urlencode }}/step" hx-target="#gl-step" hx-swap="innerHTML"
+        <form hx-post="/w/{{ slug | urlencode }}/step" hx-target="#step-area" hx-swap="innerHTML"
               hx-confirm="{{ t('target.regen_confirm') }}" style="display:inline">
           <input type="hidden" name="target" value="{{ item.target }}">
           <button type="submit" class="btn btn-ghost btn-regen">{{ t('target.regen') }}</button>
@@ -17,7 +17,7 @@
       </li>
       {% endfor %}
     </ul>
-    <div id="gl-step"></div>
+    <div id="step-area"></div>
   </div>
   {% endif %}
 
@@ -41,7 +41,7 @@
       <li>
         <strong>{{ c.name }}</strong> ({{ c.status_label }})
         <div class="gl-note">{{ c.quote }}</div>
-        <a href="/w/{{ slug | urlencode }}/ref/{{ c.ref_id }}">{{ c.ref_id }}</a>
+        <a href="/w/{{ slug | urlencode }}?ref={{ c.ref_id }}">{{ c.ref_id }}</a>
         {% if c.reject_reason %}<div class="gl-aka">{{ c.reject_reason }}</div>{% endif %}
         {% if c.status == 'pending_root' %}
         <div class="dlg-hint">{{ t('glossary.awaiting_root_hint') }}</div>

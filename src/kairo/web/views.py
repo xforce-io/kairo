@@ -1034,13 +1034,17 @@ def _glossary_fragment(
     error_scope: str | None = None,
     form: dict | None = None,
 ) -> HTMLResponse:
-    """写完后回到统一维护页，并选中刚写入的 workspace。"""
-    return _root_glossary_page(
-        request,
-        selected_slug=slug,
-        ws_error=error,
-        ws_error_scope=error_scope,
-        ws_form=form,
+    """写失败留在统一页表单；成功 303 到可刷新的 GET。"""
+    if error:
+        return _root_glossary_page(
+            request,
+            selected_slug=slug,
+            ws_error=error,
+            ws_error_scope=error_scope,
+            ws_form=form,
+        )
+    return RedirectResponse(
+        url=f"/glossary?workspace={quote(slug)}", status_code=303
     )
 
 
@@ -1309,6 +1313,7 @@ def root_glossary_add(
     note: str = Form(""),
     aka: str = Form(""),
     tags: str = Form(""),
+    workspace: str = Form(""),
 ) -> HTMLResponse:
     from kairo.workspace import stamp_serve_workspaces as _stamp_serve_workspaces
     from kairo.glossary import (
@@ -1335,12 +1340,18 @@ def root_glossary_add(
         save_glossary_file(path, entries)
         _stamp_serve_workspaces(serve)
     except (GlossaryError, ValueError) as e:
-        return _root_glossary_page(request, error=str(e), form=form)
-    return _root_glossary_page(request, success=True)
+        return _root_glossary_page(
+            request, error=str(e), form=form, selected_slug=workspace or None
+        )
+    return _root_glossary_page(
+        request, success=True, selected_slug=workspace or None
+    )
 
 
 @router.post("/glossary/{index}/delete", response_class=HTMLResponse)
-def root_glossary_delete(request: Request, index: int) -> HTMLResponse:
+def root_glossary_delete(
+    request: Request, index: int, workspace: str = Form("")
+) -> HTMLResponse:
     from kairo.workspace import stamp_serve_workspaces as _stamp_serve_workspaces
     from kairo.glossary import (
         GlossaryError,
@@ -1359,25 +1370,39 @@ def root_glossary_delete(request: Request, index: int) -> HTMLResponse:
         save_glossary_file(path, nxt)
         _stamp_serve_workspaces(serve)
     except (GlossaryError, ValueError, IndexError) as e:
-        return _root_glossary_page(request, error=str(e))
-    return _root_glossary_page(request, success=True)
+        return _root_glossary_page(
+            request, error=str(e), selected_slug=workspace or None
+        )
+    return _root_glossary_page(
+        request, success=True, selected_slug=workspace or None
+    )
 
 
 @router.post("/glossary/candidates/{slug}/{cid}/accept", response_class=HTMLResponse)
-def root_candidate_accept(request: Request, slug: str, cid: str) -> HTMLResponse:
+def root_candidate_accept(
+    request: Request, slug: str, cid: str, workspace: str = Form("")
+) -> HTMLResponse:
     from kairo.glossary import GlossaryError
     from kairo.glossary_review import accept_root
 
     try:
         accept_root(Path(request.app.state.root), slug, cid)
     except (GlossaryError, ValueError) as e:
-        return _root_glossary_page(request, error=str(e))
-    return _root_glossary_page(request, success=True)
+        return _root_glossary_page(
+            request, error=str(e), selected_slug=workspace or None
+        )
+    return _root_glossary_page(
+        request, success=True, selected_slug=workspace or None
+    )
 
 
 @router.post("/glossary/candidates/{slug}/{cid}/merge", response_class=HTMLResponse)
 def root_candidate_merge(
-    request: Request, slug: str, cid: str, existing_name: str = Form(...)
+    request: Request,
+    slug: str,
+    cid: str,
+    existing_name: str = Form(...),
+    workspace: str = Form(""),
 ) -> HTMLResponse:
     from kairo.glossary import GlossaryError
     from kairo.glossary_review import merge_root
@@ -1385,13 +1410,21 @@ def root_candidate_merge(
     try:
         merge_root(Path(request.app.state.root), slug, cid, existing_name)
     except (GlossaryError, ValueError) as e:
-        return _root_glossary_page(request, error=str(e))
-    return _root_glossary_page(request, success=True)
+        return _root_glossary_page(
+            request, error=str(e), selected_slug=workspace or None
+        )
+    return _root_glossary_page(
+        request, success=True, selected_slug=workspace or None
+    )
 
 
 @router.post("/glossary/candidates/{slug}/{cid}/reject", response_class=HTMLResponse)
 def root_candidate_reject(
-    request: Request, slug: str, cid: str, reason: str = Form("")
+    request: Request,
+    slug: str,
+    cid: str,
+    reason: str = Form(""),
+    workspace: str = Form(""),
 ) -> HTMLResponse:
     from kairo.glossary import GlossaryError
     from kairo.glossary_review import reject_root
@@ -1399,8 +1432,12 @@ def root_candidate_reject(
     try:
         reject_root(Path(request.app.state.root) / slug, cid, reason)
     except GlossaryError as e:
-        return _root_glossary_page(request, error=str(e))
-    return _root_glossary_page(request, success=True)
+        return _root_glossary_page(
+            request, error=str(e), selected_slug=workspace or None
+        )
+    return _root_glossary_page(
+        request, success=True, selected_slug=workspace or None
+    )
 
 
 @router.post("/w/{slug}/corpus", response_class=HTMLResponse)

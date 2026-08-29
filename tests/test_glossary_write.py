@@ -142,6 +142,22 @@ def test_glossary_invalid_workspace_query_not_selected(tmp_path):
     assert _ws_panel(html) is None
 
 
+def test_workspace_write_redirects_to_console_get(tmp_path):
+    """写成功 303 到 GET /glossary?workspace=，刷新不会重放 POST。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    c = _client(tmp_path)
+    r = c.post(
+        "/w/ws/glossary",
+        data={"name": "甲", "scope": "workspace"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/glossary?workspace=ws"
+    followed = c.get(r.headers["location"])
+    panel = _ws_panel(followed.text)
+    assert panel and "甲" in panel
+
+
 def test_web_glossary_add_and_delete(tmp_path):
     Workspace.init(tmp_path / "ws", topic="t")
     c = _client(tmp_path)

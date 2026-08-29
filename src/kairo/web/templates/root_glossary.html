@@ -29,6 +29,7 @@
         <td class="mf-actions">
           <form method="post" action="/glossary/{{ loop.index0 }}/delete"
                 onsubmit="return confirm({{ t('glossary.delete_confirm') | tojson }})">
+            {% if selected_slug %}<input type="hidden" name="workspace" value="{{ selected_slug }}">{% endif %}
             <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.delete') }}</button>
           </form>
         </td>
@@ -40,6 +41,7 @@
     <p class="panel-hint">{{ t('glossary.shared_empty') }}</p>
     {% endif %}
     <form class="dlg-form glossary-add" method="post" action="/glossary">
+      {% if selected_slug %}<input type="hidden" name="workspace" value="{{ selected_slug }}">{% endif %}
       <label class="dlg-label">{{ t('glossary.add_shared') }}</label>
       <input type="text" name="name" placeholder="{{ t('glossary.name_ph') }}" value="{{ shared_form_name }}" required>
       <input type="text" name="note" placeholder="{{ t('glossary.note_ph') }}" value="{{ shared_form_note }}">
@@ -57,13 +59,16 @@
       <strong>{{ c.name }}</strong> ← {{ c.slug }} / {{ c.ref_id }}
       <div class="gl-note">{{ c.quote }}</div>
       <form method="post" action="/glossary/candidates/{{ c.slug }}/{{ c.id }}/accept" style="display:inline">
+        {% if selected_slug %}<input type="hidden" name="workspace" value="{{ selected_slug }}">{% endif %}
         <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.accept') }}</button>
       </form>
       <form method="post" action="/glossary/candidates/{{ c.slug }}/{{ c.id }}/reject" style="display:inline">
+        {% if selected_slug %}<input type="hidden" name="workspace" value="{{ selected_slug }}">{% endif %}
         <input type="text" name="reason" placeholder="{{ t('glossary.reject_ph') }}">
         <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.reject') }}</button>
       </form>
       <form method="post" action="/glossary/candidates/{{ c.slug }}/{{ c.id }}/merge" style="display:inline">
+        {% if selected_slug %}<input type="hidden" name="workspace" value="{{ selected_slug }}">{% endif %}
         <input type="text" name="existing_name" placeholder="{{ t('glossary.merge_ph') }}">
         <button type="submit" class="btn btn-ghost btn-regen">{{ t('glossary.merge') }}</button>
       </form>

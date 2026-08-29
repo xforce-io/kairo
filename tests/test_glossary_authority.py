@@ -188,6 +188,8 @@ def test_glossary_change_marks_pending_without_autostep(tmp_path):
     assert page.status_code == 200
     assert f'name="target" value="{rid}"' in page.text
     assert f'value="{key}"' not in page.text
+    assert 'hx-target="#step-area"' in page.text
+    assert 'id="step-area"' in page.text
     ws_page = TestClient(create_app(tmp_path / "root")).get("/w/ws")
     assert 'hx-post="/w/ws/step"' not in ws_page.text or 'name="target"' not in ws_page.text
     assert f'name="target" value="{rid}"' not in ws_page.text

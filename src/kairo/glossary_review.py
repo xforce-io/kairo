@@ -129,9 +129,10 @@ def open_candidates(ws_root: Path) -> list[GlossaryCandidate]:
 
 
 def todo_count(ws_root: Path, pending: list[str] | None = None) -> int:
-    """待审核 + 提取失败 + 尚未重新校正。全无则为 0。"""
-    n = len(open_candidates(ws_root))
-    n += len(load_review(ws_root).extract_errors)
+    """待审核 + 提取失败 + 尚未重新校正。只读，不 invalidate、不写盘。"""
+    store = load_review(ws_root)
+    n = sum(1 for c in store.candidates if c.status in OPEN_STATUSES)
+    n += len(store.extract_errors)
     n += len(pending or [])
     return n
 
