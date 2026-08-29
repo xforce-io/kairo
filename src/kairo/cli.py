@@ -685,7 +685,7 @@ def glossary_list(
 ) -> None:
     """列出 global + workspace 知识；glossary 是兼容命令名。"""
     from kairo.glossary import machine_migration_hint, resolve_serve_root
-    from kairo.knowledge import KnowledgeError, effective_entries, migrate_global, migrate_workspace
+    from kairo.knowledge import KnowledgeError, effective_entries
 
     try:
         hint = machine_migration_hint()
@@ -701,11 +701,15 @@ def glossary_list(
         layers: list[tuple[str, list]] = []
         if in_ws:
             serve = resolve_serve_root(ws_root=ws.root, explicit=root)
-            layers.append(("global", migrate_global(serve).entries))
-            layers.append(("workspace", migrate_workspace(ws.root).entries))
+            from kairo.knowledge import load_global, load_workspace
+
+            layers.append(("global", load_global(serve)[0].entries))
+            layers.append(("workspace", load_workspace(ws.root)[0].entries))
         else:
             serve = resolve_serve_root(explicit=root)
-            layers.append(("global", migrate_global(serve).entries))
+            from kairo.knowledge import load_global
+
+            layers.append(("global", load_global(serve)[0].entries))
 
         for label, entries in layers:
             typer.echo(f"[{label}] ({len(entries)})")

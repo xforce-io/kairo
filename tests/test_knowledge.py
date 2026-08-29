@@ -1,8 +1,10 @@
 """#182 知识条目、匹配器、审核与 Web 主路径。"""
 
 from fastapi.testclient import TestClient
+from typer.testing import CliRunner
 
 from kairo.engine import step
+from kairo.cli import app
 from kairo.knowledge import (
     KnowledgeAlias,
     KnowledgeEntry,
@@ -237,3 +239,21 @@ def test_cross_scope_conflict_is_local_ambiguity_not_global_disable():
     result = matcher.match("冲突 仍可用")
     assert result.ambiguities == ("冲突",)
     assert [hit.entry.title for hit in result.matches] == ["仍可用"]
+
+
+def test_legacy_list_is_read_only_and_v2_legacy_delete_keeps_v2(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    (root / "glossary.yaml").write_text("- name: 旧公共\n", encoding="utf-8")
+    before = (root / "glossary.yaml").read_bytes()
+    monkeypatch.chdir(ws.root)
+    result = CliRunner().invoke(app, ["glossary", "list"])
+    assert result.exit_code == 0
+    assert (root / "glossary.yaml").read_bytes() == before
+    client = TestClient(create_app(root))
+    client.post("/glossary", data={"name": "新公共"})
+    deleted = client.post("/glossary/0/delete")
+    assert deleted.status_code == 200
+    raw = (root / "glossary.yaml").read_text(encoding="utf-8")
+    assert "version: 2" in raw and "title:" in raw

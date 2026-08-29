@@ -297,15 +297,10 @@ def provider_extractor(provider) -> Extractor:
     def extract(text: str, entries: list[KnowledgeEntry], path: str) -> list[dict]:
         from kairo.rules import _run_agent
 
-        known = yaml.safe_dump(
-            [{"title": e.title, "aliases": [a.value for a in e.aliases]} for e in entries],
-            allow_unicode=True,
-            sort_keys=False,
-        )
         response = _run_agent(
             provider,
             _PERSONA,
-            f"来源:{path}\n\n已确认知识（只读，不重复提出）：\n{known or '[]'}\n\n正文：\n{text}",
+            f"来源:{path}\n\n正文：\n{text}",
             "knowledge-candidates.yaml",
         )
         return parse_extract_yaml(response)

@@ -189,7 +189,7 @@ CLI 的 `glossary list/add/rm` 继续可用但输出“知识”语义，并映�
 
 ## 10. 迁移/兼容/回滚
 
-首次启用时，根 `glossary.yaml` 的 list/`entries` 和 workspace `constitution.glossary` 严格读入，逐项变为保持原 `name`/`aka`/`note`/`tags` 的 `confirmed` 知识条目，并生成稳定 id；根文件升级为 v2，workspace 在**同一次原子 constitution 写入**中写入 `knowledge` 并移除 `glossary`。迁移后的旧字段不再参与读取，因而不存在两个权威来源；遇到非法旧 YAML 或归一化冲突时停止迁移、原文件不变并要求用户修正。
+首次启用时，根 `glossary.yaml` 的 list/`entries` 和 workspace `constitution.glossary` 严格读入，逐项变为保持原 `name`/`aka`/`note`/`tags` 的 `confirmed` 知识条目，并生成稳定 id；根文件升级为 v2，workspace 在**同一次原子 constitution 写入**中写入 `knowledge` 并移除 `glossary`。纯读 CLI/API/投影视图绝不迁移或写盘；仅显式写操作或明确迁移入口可触发上述转换。迁移后的旧字段不再参与读取，因而不存在两个权威来源；遇到非法旧 YAML 或归一化冲突时停止迁移、原文件不变并要求用户修正。
 
 现有 `.kairo/glossary_review.yaml` 候选迁入新审核文件，标为 `source_kind=digest`，保留 ref、quote、digest hash、fingerprint 和原终态。候选无法定位来源时迁为 `stale`，不自动丢弃。已有 `glossary_hash` 读取为 legacy advisory；新 `knowledge_hash` 缺失即显示尚未重新校正，但不触发 stale。`/glossary`、旧 CLI 和书签保持兼容重定向/别名。
 

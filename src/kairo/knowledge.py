@@ -92,7 +92,7 @@ def _validate_source(source: KnowledgeSource) -> None:
         raise KnowledgeError(f"出处 path 必须是安全相对路径:{source.path!r}")
     if source.content_hash and not re.fullmatch(r"[a-f0-9]{64}", source.content_hash):
         raise KnowledgeError("出处 content_hash 必须是 SHA-256")
-    if source.workspace_slug and not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,79}", source.workspace_slug):
+    if source.workspace_slug and (source.workspace_slug in {".", ".."} or "/" in source.workspace_slug or "\\" in source.workspace_slug or "\x00" in source.workspace_slug):
         raise KnowledgeError(f"出处 workspace_slug 非法:{source.workspace_slug!r}")
 
 

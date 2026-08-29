@@ -1318,30 +1318,16 @@ def root_glossary_add(
 def root_glossary_delete(
     request: Request, index: int, workspace: str = Form("")
 ) -> HTMLResponse:
-    from kairo.workspace import stamp_serve_workspaces as _stamp_serve_workspaces
-    from kairo.glossary import (
-        GlossaryError,
-        load_glossary_file,
-        remove_entry,
-        root_glossary_path,
-        save_glossary_file,
-        validate_entries,
-    )
+    from kairo.knowledge import KnowledgeError, migrate_global, save_global
 
     serve = Path(request.app.state.root)
     try:
-        path = root_glossary_path(serve)
-        nxt = remove_entry(load_glossary_file(path), index)
-        validate_entries(nxt, path=path)
-        save_glossary_file(path, nxt)
-        _stamp_serve_workspaces(serve)
-    except (GlossaryError, ValueError, IndexError) as e:
-        return _root_glossary_page(
-            request, error=str(e), selected_slug=workspace or None
-        )
-    return _root_glossary_page(
-        request, success=True, selected_slug=workspace or None
-    )
+        document = migrate_global(serve)
+        document.entries.pop(index)
+        save_global(serve, document)
+    except (KnowledgeError, IndexError) as e:
+        return _knowledge_page(request, selected_slug=workspace or None, error=str(e))
+    return _knowledge_page(request, selected_slug=workspace or None, success=True)
 
 
 @router.post("/glossary/candidates/{slug}/{cid}/accept", response_class=HTMLResponse)
