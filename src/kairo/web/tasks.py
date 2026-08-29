@@ -78,6 +78,7 @@ class StepTask:
     # Web 在启动子进程前记录的只读边界；run-summary 只能据此呈现本次变化。
     knowledge_before_candidates: frozenset[str] = field(default_factory=frozenset)
     knowledge_before_errors: frozenset[str] = field(default_factory=frozenset)
+    knowledge_before_error_versions: dict[str, int] = field(default_factory=dict)
     knowledge_before_products: dict[str, str | None] = field(default_factory=dict)
     knowledge_before_targets: dict[str, str | None] = field(default_factory=dict)
 

@@ -10,6 +10,7 @@ import hashlib
 import os
 import re
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -83,8 +84,13 @@ def _knowledge_context(ws, text: str) -> tuple[str, str | None, KnowledgeDiagnos
                 skipped=len(result.skipped_terms),
             ),
         )
-    except Exception:
-        return "", None, KnowledgeDiagnostic()
+    except Exception as exc:
+        # 权威仓储/索引错误不是“零命中”；仅保存已脱敏短摘要，主规则仍可完成。
+        return "", None, KnowledgeDiagnostic(
+            available=False,
+            error_code="knowledge-unavailable",
+            safe_summary=safe_provider_summary(exc),
+        )
 
 
 def _legacy_glossary_hash(ws) -> str | None:
@@ -404,10 +410,11 @@ class NormalizeRule:
         input_hash = _hash(f"{self.prompt}\n\n---誊录---\n{body}")
 
         def run(state: State) -> None:
+            knowledge_context, knowledge_hash, knowledge_diagnostic = _knowledge_context(self.ws, body)
             content = _run_agent(
                 self.provider,
                 self.prompt
-                + _knowledge_context(self.ws, body)[0]
+                + knowledge_context
                 + _OUTPUT_DISCIPLINE,
                 body,
                 "prose.md",
@@ -430,6 +437,9 @@ class NormalizeRule:
                     "model": self.provider.model,
                 },
                 glossary_hash=_legacy_glossary_hash(self.ws),
+                knowledge_hash=knowledge_hash,
+                knowledge_diagnostic=knowledge_diagnostic,
+                knowledge_generation=uuid.uuid4().hex,
             )
 
         def is_stale(state: State) -> bool:
@@ -583,6 +593,7 @@ class DigestRule:
                 glossary_hash=_legacy_glossary_hash(self.ws),
                 knowledge_hash=knowledge_hash,
                 knowledge_diagnostic=knowledge_diagnostic,
+                knowledge_generation=uuid.uuid4().hex,
             )
             ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
             if ref_id:
@@ -900,6 +911,7 @@ class ComposeRule:
             if use_delta:
                 ts.knowledge_hash = knowledge_hash
                 ts.knowledge_diagnostic = knowledge_diagnostic
+                ts.knowledge_generation = uuid.uuid4().hex
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:
                 ts.last_major_folded = dict(all_digests)

@@ -62,6 +62,7 @@ class KnowledgeReview(BaseModel):
 
     candidates: list[KnowledgeCandidate] = Field(default_factory=list)
     extract_errors: dict[str, str] = Field(default_factory=dict)
+    extract_error_versions: dict[str, int] = Field(default_factory=dict)
 
 
 Extractor = Callable[[str, list[KnowledgeEntry], str], list[dict]]
@@ -241,6 +242,7 @@ def ingest_candidates(
         raise KnowledgeError(f"未知候选来源:{source_kind}")
     review = invalidate_stale(workspace_root)
     review.extract_errors.pop(path, None)
+    review.extract_error_versions.pop(path, None)
     existing = {c.fingerprint for c in review.candidates}
     source_hash = _hash(source_text)
     for draft in drafts:
@@ -281,6 +283,7 @@ def ingest_candidates(
 def mark_extract_error(workspace_root: Path, path: str, message: str) -> None:
     review = load_review(workspace_root)
     review.extract_errors[path] = message
+    review.extract_error_versions[path] = review.extract_error_versions.get(path, 0) + 1
     save_review(workspace_root, review)
 
 
@@ -363,6 +366,22 @@ def _append_source(sources: list[KnowledgeSource], source: KnowledgeSource) -> l
     """同一可定位出处只保留一次，避免幂等重试不断堆积。"""
     key = (source.kind, source.workspace_slug, source.path, source.content_hash, source.quote)
     return list(sources) if any((item.kind, item.workspace_slug, item.path, item.content_hash, item.quote) == key for item in sources) else [*sources, source]
+
+
+def _append_sources(sources: list[KnowledgeSource], additions: list[KnowledgeSource]) -> list[KnowledgeSource]:
+    merged = list(sources)
+    for source in additions:
+        merged = _append_source(merged, source)
+    return merged
+
+
+def _merged_description(existing: str, incoming: str) -> str:
+    """短说明保留双方人工已审内容，避免 merge 静默覆盖。"""
+    if not incoming or incoming == existing:
+        return existing
+    if not existing:
+        return incoming
+    return f"{existing}\n{incoming}"
 
 
 def _transaction_path(workspace_root: Path) -> Path:
@@ -451,11 +470,24 @@ def promote_entry(workspace_root: Path, entry_id: str) -> KnowledgeCandidate:
     if entry is None or entry.status != "confirmed":
         raise KnowledgeError("只能提升已确认的本地知识条目")
     review = load_review(workspace_root)
-    existing = next((c for c in review.candidates if c.entry_id == entry_id and c.status in {"pending_global", "rejected_global"}), None)
+    existing = next((c for c in review.candidates if c.entry_id == entry_id and c.status in {"pending_global", "rejected_global", "stale"}), None)
     if existing:
         if existing.status == "pending_global":
             return existing
-        refreshed = existing.model_copy(update={"title": entry.title, "aliases": entry.aliases, "description": entry.description, "tags": entry.tags, "status": "pending_global", "reject_reason": "", "updated_at": _now()})
+        source = entry.sources[0] if entry.sources else None
+        refreshed = existing.model_copy(update={
+            "title": entry.title,
+            "aliases": entry.aliases,
+            "description": entry.description,
+            "tags": entry.tags,
+            "source_kind": "compose" if source and source.kind == "understanding" else "digest",
+            "path": source.path if source else "review/manual",
+            "quote": source.quote if source else entry.title,
+            "content_hash": source.content_hash if source else _hash(entry.title),
+            "status": "pending_global",
+            "reject_reason": "",
+            "updated_at": _now(),
+        })
         review.candidates[review.candidates.index(existing)] = refreshed
         save_review(workspace_root, review)
         return refreshed
@@ -526,12 +558,18 @@ def merge_workspace(workspace_root: Path, candidate_id: str, entry_id: str) -> N
         raise KnowledgeError(f"本地知识条目不存在:{entry_id}")
     aliases = list(target.aliases)
     seen = {normalize_term(alias.value) for alias in aliases}
-    for value in [candidate.title, *(alias.value for alias in candidate.aliases)]:
-        if normalize_term(value) not in seen and normalize_term(value) != normalize_term(target.title):
-            aliases.append(KnowledgeAlias(value=value))
-            seen.add(normalize_term(value))
+    for alias in [KnowledgeAlias(value=candidate.title), *candidate.aliases]:
+        if normalize_term(alias.value) not in seen and normalize_term(alias.value) != normalize_term(target.title):
+            aliases.append(alias)
+            seen.add(normalize_term(alias.value))
     sources = _append_source(target.sources, _source(candidate, workspace_root))
-    replacement = target.model_copy(update={"aliases": aliases, "sources": sources, "updated_at": _now()})
+    replacement = target.model_copy(update={
+        "aliases": aliases,
+        "description": _merged_description(target.description, candidate.description),
+        "tags": sorted(set([*target.tags, *candidate.tags])),
+        "sources": sources,
+        "updated_at": _now(),
+    })
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="workspace")
     _write_transaction(workspace_root, {"kind": "merge_workspace", "candidate_id": candidate.id, "entry_id": entry_id})
@@ -551,11 +589,23 @@ def merge_global(serve_root: Path, workspace_root: Path, candidate_id: str, entr
         raise KnowledgeError(f"公共知识条目不存在:{entry_id}")
     aliases = list(target.aliases)
     seen = {normalize_term(alias.value) for alias in aliases}
-    for value in [candidate.title, *(alias.value for alias in candidate.aliases)]:
-        if normalize_term(value) not in seen and normalize_term(value) != normalize_term(target.title):
-            aliases.append(KnowledgeAlias(value=value))
-            seen.add(normalize_term(value))
-    replacement = target.model_copy(update={"aliases": aliases, "description": target.description or candidate.description, "tags": sorted(set([*target.tags, *candidate.tags])), "sources": _append_source(target.sources, _source(candidate, workspace_root)), "updated_at": _now()})
+    for alias in [KnowledgeAlias(value=candidate.title), *candidate.aliases]:
+        if normalize_term(alias.value) not in seen and normalize_term(alias.value) != normalize_term(target.title):
+            aliases.append(alias)
+            seen.add(normalize_term(alias.value))
+    local_sources: list[KnowledgeSource] = []
+    if candidate.entry_id:
+        local_doc, _ = load_workspace(workspace_root)
+        local = next((item for item in local_doc.entries if item.id == candidate.entry_id), None)
+        if local is not None:
+            local_sources = local.sources
+    replacement = target.model_copy(update={
+        "aliases": aliases,
+        "description": _merged_description(target.description, candidate.description),
+        "tags": sorted(set([*target.tags, *candidate.tags])),
+        "sources": _append_sources(_append_source(target.sources, _source(candidate, workspace_root)), local_sources),
+        "updated_at": _now(),
+    })
     document.entries = [replacement if entry.id == entry_id else entry for entry in document.entries]
     validate_entries(document.entries, scope="global")
     _write_transaction(workspace_root, {"kind": "merge_global", "candidate_id": candidate.id, "entry_id": entry_id})

@@ -150,12 +150,12 @@ def test_workspace_add_preserves_unknown_constitution_fields(tmp_path):
     assert raw["custom_flag"] is True
     assert raw["extra_note"] == "keep-me"
     assert raw["topic"] == "主课题"
-    assert raw["glossary"][0]["name"] == "消福中心"
+    assert raw["knowledge"]["entries"][0]["title"] == "消福中心"
     ws.remove_glossary_entry(0)
     raw2 = yaml.safe_load(con.read_text())
     assert raw2["custom_flag"] is True
     assert raw2["extra_note"] == "keep-me"
-    assert raw2["glossary"] == []
+    assert raw2["knowledge"]["entries"] == []
 
 
 def test_workspace_save_failure_keeps_constitution(tmp_path, monkeypatch):
@@ -166,8 +166,8 @@ def test_workspace_save_failure_keeps_constitution(tmp_path, monkeypatch):
     def boom(src, dst, *args, **kwargs):
         raise OSError("simulated replace failure")
 
-    monkeypatch.setattr("kairo.glossary.os.replace", boom)
-    with pytest.raises(GlossaryError, match="保存失败"):
+    monkeypatch.setattr("kairo.knowledge.os.replace", boom)
+    with pytest.raises(ValueError, match="保存失败"):
         ws.add_glossary_entry("天溯")
     assert con.read_bytes() == before
     assert yaml.safe_load(con.read_text())["topic"] == "t"
@@ -177,12 +177,12 @@ def test_empty_constitution_not_rewritten(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path / "ws", topic="t")
     con = tmp_path / "ws" / "constitution.yaml"
     con.write_bytes(b"")
-    with pytest.raises(GlossaryError, match="mapping"):
+    with pytest.raises(ValueError, match="constitution"):
         ws.add_glossary_entry("新词")
     assert con.read_bytes() == b""
     con.write_text("null\n")
     before = con.read_bytes()
-    with pytest.raises(GlossaryError, match="mapping"):
+    with pytest.raises(ValueError, match="constitution"):
         ws.remove_glossary_entry(0)
     assert con.read_bytes() == before
     monkeypatch.chdir(tmp_path / "ws")

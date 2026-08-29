@@ -126,7 +126,7 @@ def test_digest_and_compose_only_use_confirmed_matching_knowledge(tmp_path):
         title="电网锚",
         scope="global",
         description="仅作参考",
-        sources=[KnowledgeSource(kind="reference", path="references/x/manifest.yaml")],
+        sources=[KnowledgeSource(kind="reference", path="references/x/manifest.yaml", content_hash="a" * 64)],
     )
     from kairo.knowledge import KnowledgeDocument
 
@@ -194,6 +194,45 @@ def test_knowledge_drift_is_visible_and_offers_manual_restep(tmp_path):
     assert "Knowledge context drift" in page.text
     assert 'name="target" value="references/r/digest.md"' in page.text
     assert "Re-step with current knowledge" in page.text
+
+
+def test_legacy_workspace_api_and_old_candidate_route_keep_v2_authority(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    ws.add_glossary_entry("兼容条目", note="说明", aka=["别名"])
+    raw = (ws.root / "constitution.yaml").read_text()
+    assert "knowledge:" in raw and "glossary:" not in raw
+    entry = load_workspace(ws.root)[0].entries[0]
+    assert entry.id.startswith("ke-") and entry.created_at and entry.aliases[0].auto_match
+    ws.remove_glossary_entry(0)
+    assert load_workspace(ws.root)[0].entries == []
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "候选", "quote": "证据"}])
+    candidate = load_review(ws.root).candidates[0]
+    response = TestClient(create_app(root)).post(f"/w/ws/glossary/candidates/{candidate.id}/accept")
+    assert response.status_code == 200
+    accepted = load_workspace(ws.root)[0].entries[0]
+    assert accepted.sources and accepted.sources[0].content_hash and "glossary:" not in (ws.root / "constitution.yaml").read_text()
+
+
+def test_v2_rejects_missing_audit_or_source_hash_and_matcher_snapshot_isolated(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    from kairo.knowledge import KnowledgeError, validate_entries
+    import pytest
+
+    bad = KnowledgeEntry(id="ke-bad", title="bad", scope="global")
+    with pytest.raises(KnowledgeError):
+        validate_entries([bad], scope="global")
+    entry = new_entry(title="锚点", scope="global", sources=[KnowledgeSource(kind="digest", path="references/r/digest.md", content_hash="b" * 64)])
+    matcher = KnowledgeMatcher([entry])
+    entry.title = "被外部改写"
+    assert [hit.entry.title for hit in matcher.match("锚点").matches] == ["锚点"]
+    refreshed = matcher.refresh([entry])
+    assert refreshed is not matcher and matcher.version != refreshed.version
 
 
 def test_matcher_suggest_keeps_short_and_manual_aliases_out_of_auto_match():

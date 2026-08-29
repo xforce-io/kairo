@@ -124,6 +124,13 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 
 def save_glossary_file(path: Path, entries: list[GlossaryEntry]) -> None:
+    if path.is_file():
+        try:
+            current = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if isinstance(current, dict) and current.get("version") == 2:
+                raise GlossaryError("v2 知识文件只能经 KnowledgeStore 保存", path=path)
+        except yaml.YAMLError as exc:
+            raise GlossaryError(f"YAML 无法解析:{exc}", path=path) from exc
     payload = [e.model_dump() for e in entries]
     _atomic_write_text(
         path, yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
@@ -140,6 +147,23 @@ def load_workspace_glossary(ws_root: Path) -> list[GlossaryEntry]:
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
     if data is None or not isinstance(data, dict):
         raise GlossaryError("constitution 顶层必须是 mapping", path=path)
+    # 旧 reader 仅投影 v2，不能把它当作旧 glossary 的第二权威或触发写盘。
+    if "knowledge" in data:
+        try:
+            from kairo.knowledge import _parse_document
+
+            document, _legacy = _parse_document(data["knowledge"], scope="workspace", path=path)
+            return [
+                GlossaryEntry(
+                    name=item.title,
+                    note=item.description,
+                    aka=[alias.value for alias in item.aliases],
+                    tags=item.tags,
+                )
+                for item in document.entries
+            ]
+        except Exception as exc:
+            raise GlossaryError(f"v2 知识文档非法:{exc}", path=path) from exc
     if "glossary" not in data:
         return []
     items = data["glossary"]
@@ -160,6 +184,8 @@ def write_workspace_glossary(ws_root: Path, entries: list[GlossaryEntry]) -> Non
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
     if data is None or not isinstance(data, dict):
         raise GlossaryError("constitution 顶层必须是 mapping", path=path)
+    if "knowledge" in data:
+        raise GlossaryError("v2 知识文件只能经 KnowledgeStore 保存", path=path)
     data["glossary"] = [e.model_dump() for e in entries]
     _atomic_write_text(
         path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False)

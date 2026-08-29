@@ -138,7 +138,7 @@ flowchart TD
 
 ### 6.2 KnowledgeMatcher 契约与首版实现
 
-业务依赖以下稳定语义，而不依赖 Aho-Corasick：`refresh(effective_entries, semantic_hash)` 在生效已确认条目变化时发布一个 immutable matcher version；`match(text, scope, budget)` 返回去重后的 `matches`、`ambiguities`、`skipped_terms`、`truncated_count` 和该 version；`suggest(terms)` 对候选的标题/别名做同一规范化和歧义规则，返回“已知/可合并/歧义/未知”。`budget` 至少包含最大条数和最大字符数；调用方记录 version、命中数、歧义数与截断数，但不记录完整 Prompt 正文。
+业务依赖以下稳定语义，而不依赖 Aho-Corasick：`refresh(effective_entries, semantic_hash)` 在生效已确认条目变化时发布一个 immutable matcher version；`match(text, scope, budget)` 返回去重后的 `matches`、`ambiguities`、`skipped_terms`、`truncated_count` 和该 version；`suggest(terms)` 对候选的标题/别名做同一规范化和歧义规则，返回“已知/可合并/歧义/未知”。`budget` 至少包含最大条数和最大字符数；调用方记录 version、命中数、歧义数与截断数，但不记录完整 Prompt 正文。每个实际消费知识的产物另记录一次性 generation；Web 以 task 启动前后的 generation 和候选/错误版本边界呈现本 run，不能以 `knowledge_hash` 推断本轮执行。
 
 首版 Aho-Corasick 从 `confirmed` 有效集合的 title 与 `auto_match=true` aliases 构建自动机。条目保存后重建/替换缓存索引，读取中的 matcher 继续使用旧 immutable version，下一次运行使用新版本；不会在一次匹配中混用两代。每次 `match` 对归一化后的输入单次扫描，再映射到原条目。
 
@@ -154,7 +154,7 @@ flowchart TD
 
 主路径是“可用正文/本轮 delta → matcher 命中 → 小型上下文 → 成功产物 → 旁路候选 → 人工审核 → 权威条目”。知识 hash 覆盖已确认的生效条目及其可注入字段；它记录在 `ProductState`/`TargetState` 的新 `knowledge_hash` 中，但**不**并入 `input_hash`。变更后旧产物显示“知识已更新，尚未重新校正”，不自动重跑；显式 re-step 成功才刷新 hash。
 
-失败路径中，知识仓储解析/生效冲突使 matcher 不可用：本次不注入知识并在 UI 显示可行动错误，不能以不完整集合继续匹配。Matcher 构建失败同样不注入、记录诊断并保留最近一次可用持久化权威文件，不写产物。候选抽取/provider 失败发生在 Digest/Compose 成功之后，只写审核错误；主产物与 folded/state 不回滚。候选来源失效只转候选为 `stale`；已确认条目的出处失效只告警，由人决定标为 `obsolete`，不级联删除。
+失败路径中，知识仓储解析/生效冲突使 matcher 不可用：本次不注入知识并在 UI 显示可行动错误，不能以不完整集合继续匹配。Matcher 构建失败同样不注入、记录带 `available=false`、稳定错误码和安全摘要的诊断并保留最近一次可用持久化权威文件，不写产物。候选抽取/provider 失败发生在 Digest/Compose 成功之后，只写审核错误；主产物与 folded/state 不回滚。候选来源失效只转候选为 `stale`；已确认条目的出处失效只告警，由人决定标为 `obsolete`，不级联删除。
 
 ## 7. 模块
 

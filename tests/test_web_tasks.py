@@ -653,11 +653,11 @@ def test_run_summary_isolates_this_task_knowledge_diagnostics(tmp_path):
     # 当前 state 是 new 后写入；old 的边界已包含同一 hash，new 的没有。
     st = ws.read_state()
     st.products["references/r/digest.md"] = ProductState(
-        input_hash="x", knowledge_hash="new-hash",
+        input_hash="x", knowledge_hash="new-hash", knowledge_generation="run-new",
         knowledge_diagnostic=KnowledgeDiagnostic(matched_entry_ids=["ke-a"], ambiguities=1, truncated=2, skipped=3),
     )
     ws.write_state(st)
-    old.knowledge_before_products = {"references/r/digest.md": "new-hash"}
+    old.knowledge_before_products = {"references/r/digest.md": "run-new"}
     new.knowledge_before_products = {}
     app.state.registry._tasks.update({"old": old, "new": new})
     assert "Knowledge context: 0 matched" not in c.get("/w/ws/run-summary?task_id=old").text

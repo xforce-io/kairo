@@ -15,11 +15,12 @@ def test_add_glossary_entry_roundtrip(tmp_path):
     ws = Workspace.init(tmp_path)
     e = ws.add_glossary_entry("消福中心", note="管理约束方", aka=["消福体系"])
     assert e.name == "消福中心"
-    con = ws.constitution
-    assert len(con.glossary) == 1
-    assert con.glossary[0].aka == ["消福体系"]
+    from kairo.knowledge import load_workspace
+    entries = load_workspace(ws.root)[0].entries
+    assert len(entries) == 1
+    assert [alias.value for alias in entries[0].aliases] == ["消福体系"]
     raw = yaml.safe_load((tmp_path / "constitution.yaml").read_text())
-    assert raw["glossary"][0]["name"] == "消福中心"
+    assert raw["knowledge"]["entries"][0]["title"] == "消福中心"
     # 其它 constitution 字段仍在
     assert raw["topic"] == "main"
     assert "targets" in raw
@@ -37,7 +38,7 @@ def test_add_glossary_rejects_empty_and_duplicate(tmp_path):
         ws.add_glossary_entry("蒋总")
         raise AssertionError("expected ValueError")
     except ValueError as e:
-        assert "同名" in str(e)
+        assert "重复" in str(e)
 
 
 def test_remove_glossary_entry(tmp_path):
@@ -45,7 +46,8 @@ def test_remove_glossary_entry(tmp_path):
     ws.add_glossary_entry("A")
     ws.add_glossary_entry("B")
     ws.remove_glossary_entry(0)
-    assert [e.name for e in ws.constitution.glossary] == ["B"]
+    from kairo.knowledge import load_workspace
+    assert [e.title for e in load_workspace(ws.root)[0].entries] == ["B"]
     try:
         ws.remove_glossary_entry(9)
         raise AssertionError("expected IndexError")

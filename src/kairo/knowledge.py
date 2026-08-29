@@ -90,7 +90,7 @@ def _validate_source(source: KnowledgeSource) -> None:
     p = Path(source.path)
     if not source.path or p.is_absolute() or ".." in p.parts:
         raise KnowledgeError(f"出处 path 必须是安全相对路径:{source.path!r}")
-    if source.content_hash and not re.fullmatch(r"[a-f0-9]{64}", source.content_hash):
+    if not source.content_hash or not re.fullmatch(r"[a-f0-9]{64}", source.content_hash):
         raise KnowledgeError("出处 content_hash 必须是 SHA-256")
     if source.workspace_slug and (source.workspace_slug in {".", ".."} or "/" in source.workspace_slug or "\\" in source.workspace_slug or "\x00" in source.workspace_slug):
         raise KnowledgeError(f"出处 workspace_slug 非法:{source.workspace_slug!r}")
@@ -119,12 +119,11 @@ def validate_entries(entries: list[KnowledgeEntry], *, scope: str) -> None:
         if entry.status not in {"pending", "confirmed", "obsolete"}:
             raise KnowledgeError(f"条目状态非法:{entry.status}")
         for label, value in (("created_at", entry.created_at), ("updated_at", entry.updated_at)):
-            if value:
-                try:
-                    if datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is None:
-                        raise ValueError
-                except ValueError as exc:
-                    raise KnowledgeError(f"条目 {label} 必须是带时区 ISO-8601") from exc
+            try:
+                if not value or datetime.fromisoformat(value.replace("Z", "+00:00")).tzinfo is None:
+                    raise ValueError
+            except ValueError as exc:
+                raise KnowledgeError(f"条目 {label} 必须是非空、带时区 ISO-8601") from exc
         seen_aliases: set[str] = set()
         for alias in entry.aliases:
             term = normalize_term(alias.value)
@@ -149,6 +148,7 @@ def validate_entries(entries: list[KnowledgeEntry], *, scope: str) -> None:
 
 def _legacy_entries(items: list[dict], *, scope: str) -> list[KnowledgeEntry]:
     out: list[KnowledgeEntry] = []
+    migrated_at = _now()
     for item in items:
         if not isinstance(item, dict):
             raise KnowledgeError("旧真名册条目必须是 mapping")
@@ -170,6 +170,8 @@ def _legacy_entries(items: list[dict], *, scope: str) -> list[KnowledgeEntry]:
                 status="confirmed",
                 scope=scope,
                 tags=[x.strip() for x in tags if x.strip()],
+                created_at=migrated_at,
+                updated_at=migrated_at,
             )
         )
     validate_entries(out, scope=scope)
@@ -306,6 +308,7 @@ def semantic_hash(entries: list[KnowledgeEntry]) -> str:
             "status": entry.status,
             "scope": entry.scope,
             "tags": sorted(entry.tags),
+            "sources": [source.model_dump() for source in entry.sources],
         }
         for entry in entries
         if entry.status == "confirmed"

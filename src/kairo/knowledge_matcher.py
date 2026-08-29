@@ -69,15 +69,15 @@ class KnowledgeMatcher:
         self._terms: dict[str, list[tuple[str, bool]]] = {}
         self._nodes: list[_Node] = [_Node()]
         self.version = ""
-        self.refresh(entries)
+        self._replace(entries)
 
     @property
     def entries(self) -> tuple[KnowledgeEntry, ...]:
-        return tuple(self._entries.values())
+        return tuple(entry.model_copy(deep=True) for entry in self._entries.values())
 
-    def refresh(self, entries: list[KnowledgeEntry], semantic_version: str | None = None) -> str:
+    def _replace(self, entries: list[KnowledgeEntry], semantic_version: str | None = None) -> str:
         # 先在局部变量建立不可变快照，构建完成后一次性替换缓存。
-        confirmed = {entry.id: entry for entry in entries if entry.status == "confirmed"}
+        confirmed = {entry.id: entry.model_copy(deep=True) for entry in entries if entry.status == "confirmed"}
         ownership: dict[str, list[tuple[str, bool]]] = {}
         eligible: dict[str, list[tuple[str, bool]]] = {}
         for entry in confirmed.values():
@@ -114,6 +114,10 @@ class KnowledgeMatcher:
         self.version = semantic_version or semantic_hash(entries)
         return self.version
 
+    def refresh(self, entries: list[KnowledgeEntry], semantic_version: str | None = None) -> "KnowledgeMatcher":
+        """发布新快照，而非修改已被正在运行任务持有的 matcher。"""
+        return KnowledgeMatcher(entries)
+
     def suggest(self, terms: list[str]) -> dict[str, str]:
         """候选去重/合并建议复用同一归一化与歧义视图。"""
         answer: dict[str, str] = {}
@@ -143,7 +147,7 @@ class KnowledgeMatcher:
                     ambiguities.add(term)
                     continue
                 entry_id, is_title = owners[0]
-                raw.append(KnowledgeMatch(self._entries[entry_id], term, is_title, start, end))
+                raw.append(KnowledgeMatch(self._entries[entry_id].model_copy(deep=True), term, is_title, start, end))
         # Keep an entry once, choosing its best deterministic match.
         best: dict[str, KnowledgeMatch] = {}
         for hit in raw:
@@ -163,10 +167,10 @@ class KnowledgeMatcher:
         selected: list[KnowledgeMatch] = []
         used = 0
         # 预算按最终序列化片段计费（固定头也计入），稳定排序后的前缀一旦放不下即截断。
-        header = "\n\n[领域知识上下文]\n以下条目仅作参考，不能替代本次材料证据；冲突时保留材料说法并标明待核。\n"
+        header = _context_header()
         used = len(header)
         for hit in ordered:
-            rendered = f"- {hit.entry.title}（{hit.entry.scope}）：{hit.entry.description}".rstrip("：") + "\n"
+            rendered = _context_line(hit)
             if len(selected) >= budget.max_entries or used + len(rendered) > budget.max_chars:
                 break
             selected.append(hit)
@@ -183,14 +187,20 @@ class KnowledgeMatcher:
 def format_knowledge_context(result: MatchResult) -> str:
     if not result.matches:
         return ""
-    lines = [
-        "\n\n[领域知识上下文]",
-        "以下条目仅作参考，不能替代本次材料证据；冲突时保留材料说法并标明待核。",
-    ]
+    lines = _context_header().strip().splitlines()
     for hit in result.matches:
-        entry = hit.entry
-        lines.append(f"- {entry.title}（{entry.scope}）：{entry.description}".rstrip("："))
+        lines.append(_context_line(hit).rstrip())
     return "\n".join(lines) + "\n"
+
+
+def _context_header() -> str:
+    return "\n\n[领域知识上下文]\n以下条目仅作参考，不能替代本次材料证据；冲突时保留材料说法并标明待核。\n"
+
+
+def _context_line(hit: KnowledgeMatch) -> str:
+    entry = hit.entry
+    source = entry.sources[0].path if entry.sources else "无出处"
+    return f"- {entry.title}（{entry.scope}；命中：{hit.term}；出处：{source}）：{entry.description}".rstrip("：") + "\n"
 
 
 def matcher_for(entries: list[KnowledgeEntry]) -> KnowledgeMatcher:
