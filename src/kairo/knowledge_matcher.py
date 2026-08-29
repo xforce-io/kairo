@@ -9,6 +9,7 @@ from kairo.knowledge import KnowledgeEntry, normalize_term, semantic_hash
 
 
 GENERIC_TERMS = frozenset({"系统", "平台", "服务", "数据", "项目"})
+_CACHE: dict[str, "KnowledgeMatcher"] = {}
 
 
 @dataclass(frozen=True)
@@ -119,7 +120,7 @@ class KnowledgeMatcher:
         for raw in terms:
             term = normalize_term(raw)
             owners = {entry_id for entry_id, _ in self._ownership.get(term, [])}
-            answer[raw] = "unknown" if not owners else "ambiguous" if len(owners) > 1 else "known"
+            answer[raw] = "unknown" if not owners else "ambiguous" if len(owners) > 1 else f"merge:{next(iter(owners))}"
         return answer
 
     def match(self, text: str, *, budget: MatchBudget = MatchBudget()) -> MatchResult:
@@ -190,3 +191,14 @@ def format_knowledge_context(result: MatchResult) -> str:
         entry = hit.entry
         lines.append(f"- {entry.title}（{entry.scope}）：{entry.description}".rstrip("："))
     return "\n".join(lines) + "\n"
+
+
+def matcher_for(entries: list[KnowledgeEntry]) -> KnowledgeMatcher:
+    """按语义版本复用不可变索引；调用方只持有返回 snapshot。"""
+    version = semantic_hash(entries)
+    matcher = _CACHE.get(version)
+    if matcher is None:
+        matcher = KnowledgeMatcher(entries)
+        _CACHE.clear()
+        _CACHE[version] = matcher
+    return matcher

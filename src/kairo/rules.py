@@ -66,10 +66,10 @@ def _knowledge_context(ws, text: str) -> tuple[str, str | None]:
     """#182：调用方决定扫描范围；局部歧义不会关闭整个知识上下文。"""
     try:
         from kairo.knowledge import current_hash, effective_entries, load_global, load_workspace
-        from kairo.knowledge_matcher import KnowledgeMatcher, format_knowledge_context
+        from kairo.knowledge_matcher import format_knowledge_context, matcher_for
 
         entries = effective_entries(ws.root.parent, ws.root)
-        result = KnowledgeMatcher(entries).match(text)
+        result = matcher_for(entries).match(text)
         # legacy 读取也会转为 KnowledgeEntry；绝不再把全量 glossary 注入 Prompt。
         _ = load_global(ws.root.parent), load_workspace(ws.root)
         return format_knowledge_context(result), current_hash(ws.root.parent, ws.root)

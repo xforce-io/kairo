@@ -1397,7 +1397,7 @@ def _knowledge_page(
     request: Request, *, selected_slug: str | None = None, error: str | None = None, success: bool = False
 ) -> HTMLResponse:
     from kairo.knowledge import KnowledgeError, load_global, load_workspace
-    from kairo.knowledge_review import load_review
+    from kairo.knowledge_review import invalidate_stale
 
     serve = Path(request.app.state.root)
     slugs = [item.slug for item in scan_workspaces(serve)]
@@ -1411,7 +1411,7 @@ def _knowledge_page(
     try:
         global_entries = load_global(serve)[0].entries
         for slug in slugs:
-            review = load_review(serve / slug)
+            review = invalidate_stale(serve / slug)
             for candidate in review.candidates:
                 if candidate.status == "pending_global":
                     row = candidate.model_dump()
@@ -1419,7 +1419,7 @@ def _knowledge_page(
                     promotions.append(row)
         if selected:
             local_entries = load_workspace(serve / selected)[0].entries
-            review = load_review(serve / selected)
+            review = invalidate_stale(serve / selected)
             for candidate in review.candidates:
                 row = candidate.model_dump()
                 row["available"] = (serve / selected / candidate.path).is_file()

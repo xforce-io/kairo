@@ -137,7 +137,7 @@ def load_review(workspace_root: Path) -> KnowledgeReview:
             migrated: list[KnowledgeCandidate] = []
             for old in raw.get("candidates", []):
                 if not isinstance(old, dict):
-                    continue
+                    raise KnowledgeError("旧审核候选必须是 mapping", path=legacy_path)
                 ref_id = str(old.get("ref_id", "")).strip()
                 candidate_path = f"references/{ref_id}/digest.md"
                 title = str(old.get("name", "")).strip()
@@ -166,14 +166,14 @@ def load_review(workspace_root: Path) -> KnowledgeReview:
             known = {candidate.fingerprint for candidate in review.candidates}
             for old in legacy.get("candidates", []):
                 if not isinstance(old, dict):
-                    continue
+                    raise KnowledgeError("旧审核候选必须是 mapping", path=legacy_path)
                 ref_id, title, quote = str(old.get("ref_id", "")).strip(), str(old.get("name", "")).strip(), str(old.get("quote", "")).strip()
                 candidate_path = f"references/{ref_id}/digest.md"
                 fp = str(old.get("fingerprint") or _fingerprint("digest", candidate_path, title, quote))
                 if fp in known or not title or not quote:
                     continue
                 source = Path(workspace_root) / candidate_path
-                review.candidates.append(KnowledgeCandidate(id="kc-" + fp[:20], title=title, aliases=[KnowledgeAlias(value=str(x)) for x in old.get("aka", []) if str(x).strip()], description=str(old.get("note", "")), source_kind="digest", path=candidate_path, quote=quote, content_hash=_hash(source.read_text(encoding="utf-8")) if source.is_file() else _hash(""), fingerprint=fp, status={"pending_root": "pending_global", "root_rejected": "rejected_global"}.get(str(old.get("status", "pending")), str(old.get("status", "pending"))), updated_at=_now()))
+                review.candidates.append(KnowledgeCandidate(id="kc-" + fp[:20], title=title, aliases=[KnowledgeAlias(value=str(x)) for x in old.get("aka", []) if str(x).strip()], description=str(old.get("note", "")), source_kind="digest", path=candidate_path, quote=quote, content_hash=_hash(source.read_text(encoding="utf-8")) if source.is_file() else _hash(""), fingerprint=fp, status={"pending_root": "pending_global", "root_rejected": "rejected_global"}.get(str(old.get("status", "pending")), str(old.get("status", "pending"))), merged_into=str(old.get("merged_into", "")), reject_reason=str(old.get("reject_reason", "")), updated_at=_now()))
                 known.add(fp)
             _validate_review(review)
             save_review(workspace_root, review)

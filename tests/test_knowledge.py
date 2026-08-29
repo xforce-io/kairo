@@ -49,7 +49,7 @@ def test_matcher_normalizes_boundaries_ambiguity_and_budget():
     assert "local" in result.ambiguities
     assert [match.entry.title for match in result.matches] == ["Alpha"]
     assert result.truncated_count == 1
-    assert matcher.suggest(["ＡＬＰＨＡ", "未知"]) == {"ＡＬＰＨＡ": "known", "未知": "unknown"}
+    assert matcher.suggest(["ＡＬＰＨＡ", "未知"]) == {"ＡＬＰＨＡ": "merge:ke-Alpha", "未知": "unknown"}
 
 
 def test_migration_uses_one_authority_file(tmp_path):
@@ -163,7 +163,7 @@ def test_matcher_suggest_keeps_short_and_manual_aliases_out_of_auto_match():
     entry = entry.model_copy(update={"aliases": [KnowledgeAlias(value="XY", auto_match=False), KnowledgeAlias(value="manual", auto_match=False)]})
     matcher = KnowledgeMatcher([entry, _entry("另一个", scope="workspace", aliases=["冲突"])])
     assert matcher.match("XY manual").matches == ()
-    assert matcher.suggest(["XY", "manual", "A"]) == {"XY": "known", "manual": "known", "A": "known"}
+    assert matcher.suggest(["XY", "manual", "A"]) == {"XY": "merge:ke-A", "manual": "merge:ke-A", "A": "merge:ke-A"}
 
 
 def test_legacy_review_migrates_once_and_old_web_routes_use_knowledge(tmp_path):
@@ -346,3 +346,20 @@ def test_candidate_provider_only_receives_current_product_and_redacts_error(tmp_
     extract_after_success(ws.root, root, source_kind="digest", path="references/r/digest.md", text="正文", extractor=lambda *_: (_ for _ in ()).throw(RuntimeError("Authorization: Bearer super-secret-token api_key=hidden")))
     error = load_review(ws.root).extract_errors["references/r/digest.md"]
     assert "super-secret-token" not in error and "hidden" not in error and "[redacted]" in error
+
+
+def test_matcher_cache_uses_semantic_snapshot_and_time_is_strict():
+    from kairo.knowledge import KnowledgeDocument, KnowledgeError, validate_entries
+    from kairo.knowledge_matcher import matcher_for
+
+    entry = new_entry(title="缓存条目", scope="global", description="说明")
+    assert matcher_for([entry]) is matcher_for([entry])
+    assert matcher_for([entry]).match("缓存条目").version
+    bad = entry.model_copy(update={"created_at": "2026-01-01"})
+    try:
+        validate_entries([bad], scope="global")
+    except KnowledgeError:
+        pass
+    else:
+        raise AssertionError("缺少时区的时间必须被拒绝")
+    assert KnowledgeDocument(entries=[entry]).entries[0].created_at.endswith("+00:00")
