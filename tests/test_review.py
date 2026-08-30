@@ -3,15 +3,17 @@ import datetime as dt
 import pytest
 
 from kairo.review import (
+    JOURNAL_NAME,
     ReviewError,
     collect_digests,
     generate_review_body,
     prepare_range,
+    resolve_review_workspace,
     review_title,
     write_review_reference,
 )
 from kairo.timeline import scan_timeline
-from kairo.workspace import Workspace
+from kairo.workspace import Workspace, WorkspaceNotFound
 
 
 def _range_ws(tmp_path, monkeypatch):
@@ -70,3 +72,19 @@ def test_write_review_reference_sets_title_and_occurred(tmp_path, monkeypatch):
     assert (dest.references_dir() / rid).is_dir()
     assert any(f.role == "source_text" for f in man.forms)
     assert (root / "alpha" / "references" / "2026-08-21-weekly" / "digest.md").read_text() == orig_digest
+
+
+def test_resolve_review_workspace_creates_and_reuses(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    Workspace.init(root / "alpha", topic="能源梳理")
+    first = resolve_review_workspace(root)
+    assert first.root.name == JOURNAL_NAME
+    assert first.constitution.topic == JOURNAL_NAME
+    second = resolve_review_workspace(root)
+    assert second.root.resolve() == first.root.resolve()
+    named = Workspace.init(root / "回顾", topic="回顾")
+    escaped = resolve_review_workspace(root, "回顾")
+    assert escaped.root.resolve() == named.root.resolve()
+    with pytest.raises(WorkspaceNotFound):
+        resolve_review_workspace(root, "missing")

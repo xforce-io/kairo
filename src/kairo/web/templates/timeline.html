@@ -82,7 +82,12 @@
           <p class="rev-hint">{{ t('tl.review_no_digest') }}</p>
           {% else %}
           <p class="rev-hint">{{ t('tl.review_hint').format(d=digest_n, n=no_digest_n) }}</p>
-          <button type="button" class="btn" onclick="document.getElementById('rev-dlg').showModal()">{{ t('tl.review_btn') }}</button>
+          <form method="post" action="/timeline/review"
+                onsubmit="var b=this.querySelector('[type=submit]');b.disabled=true;b.textContent='{{ t('run.running') }}';">
+            <input type="hidden" name="from" value="{{ range_from }}">
+            <input type="hidden" name="to" value="{{ range_to }}">
+            <button type="submit" class="btn">{{ t('tl.review_btn') }}</button>
+          </form>
           {% endif %}
         </div>
         {% endif %}
@@ -93,7 +98,6 @@
           <a class="tl-row" href="/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}">
             <span class="tl-title">{{ it.title }}</span>
             <span class="tl-ws">{{ it.topic }}</span>
-            <span class="tl-meta">{{ it.id }}</span>
           </a>
           {% endfor %}
           {% else %}
@@ -111,29 +115,6 @@
           {% endfor %}
         {% endif %}
       </section>
-      {% if range_on and day_items and not too_long and digest_n %}
-      <dialog id="rev-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
-        <div class="dlg-head">
-          <h3 class="dlg-title">{{ t('tl.review_btn') }}</h3>
-          <button type="button" class="dlg-x" aria-label="close" onclick="this.closest('dialog').close()">×</button>
-        </div>
-        <form class="dlg-form" method="post" action="/timeline/review"
-              onsubmit="var b=this.querySelector('[type=submit]');b.disabled=true;b.textContent='{{ t('run.running') }}';">
-          <input type="hidden" name="from" value="{{ range_from }}">
-          <input type="hidden" name="to" value="{{ range_to }}">
-          {% if workspaces %}
-          <label class="dlg-label" for="rev-ws">{{ t('tl.review_ws') }}</label>
-          <select id="rev-ws" name="workspace">
-            {% for w in workspaces %}
-            <option value="{{ w.slug }}"{% if w.topic == '回顾' or w.slug == '回顾' %} selected{% endif %}>{{ w.topic }}</option>
-            {% endfor %}
-          </select>
-          {% endif %}
-          <input id="rev-topic" type="text" name="topic" placeholder="{{ t('tl.review_new_ws') }}">
-          <button type="submit" class="btn btn-step dlg-go">{{ t('tl.review_confirm') }}</button>
-        </form>
-      </dialog>
-      {% endif %}
       {% endif %}
     </aside>
   </div>
