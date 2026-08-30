@@ -34,7 +34,7 @@ from kairo.knowledge_review import (
 from kairo.provider import StubProvider
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
-from kairo.models import ProductState
+from kairo.models import ProductState, TargetState
 
 
 def _entry(title: str, *, scope: str = "global", aliases=(), description=""):
@@ -185,7 +185,7 @@ def test_knowledge_narrow_screen_layout_uses_cards_and_wrapping_navigation(tmp_p
     assert "display: block" in narrow and "width: 100% !important" in narrow
     assert ".knowledge-responsive .gl-ws-panel .glossary-table td.mf-actions form" in narrow
     assert ".knowledge-responsive .dlg-bullets li form" in narrow
-    assert "overflow-wrap: anywhere" in narrow
+    assert ".knowledge-responsive .ref-blocks { overflow-wrap: anywhere; }" in narrow
 
 
 def test_knowledge_desktop_edit_form_uses_bounded_grid_for_full_width_save(tmp_path):
@@ -242,8 +242,112 @@ def test_knowledge_drift_is_visible_and_offers_manual_restep(tmp_path):
     ws.write_state(state)
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
     assert "Knowledge context drift" in page.text
-    assert 'name="target" value="references/r/digest.md"' in page.text
+    assert 'name="target" value="r"' in page.text
     assert "Re-step with current knowledge" in page.text
+
+
+def test_knowledge_drift_only_lists_products_that_consume_knowledge(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    entry = new_entry(title="current", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    state = ws.read_state()
+    for path in (
+        "references/r/transcript.md",
+        "references/r/source_text.md",
+        "references/r/evidence.md",
+    ):
+        state.products[path] = ProductState(input_hash="source")
+    state.products["references/r/digest.md"] = ProductState(input_hash="digest")
+    state.products["references/r/prose.md"] = ProductState(input_hash="prose")
+    state.targets["understanding.md"] = TargetState()
+    state.targets["assessment.md"] = TargetState()
+    ws.write_state(state)
+    # legacy 兼容写会把旧产物的 None 标为 ""；这仍不能把原料误判成知识消费者。
+    ws.add_glossary_entry("兼容写入")
+
+    page = TestClient(create_app(root)).get(
+        "/knowledge?workspace=ws", headers={"accept-language": "en"}
+    )
+
+    assert "Knowledge context drift · 3" in page.text
+    assert page.text.count('name="target" value="r"') == 2
+    assert 'value="understanding.md"' in page.text
+    assert 'value="assessment.md"' not in page.text
+    assert "transcript.md: knowledge changed" not in page.text
+    assert "source_text.md: knowledge changed" not in page.text
+    assert "evidence.md: knowledge changed" not in page.text
+
+
+def test_knowledge_drift_restep_retries_the_reference(tmp_path, monkeypatch):
+    """产物漂移按钮必须提交 ref_id，并保留按需 prose。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    source = tmp_path / "source.wav"
+    source.write_bytes(b"stub audio")
+    ws.add([source], ref_id="r", role="audio")
+    step(ws, StubProvider())
+    from kairo.engine import generate_prose
+
+    generate_prose(ws, StubProvider(), "r")
+    ws.add_glossary_entry("Alpha")
+
+    client = TestClient(create_app(root))
+    page = client.get("/knowledge?workspace=ws", headers={"accept-language": "en"})
+    assert 'name="target" value="r"' in page.text
+    assert "references/r/prose.md: knowledge changed" in page.text
+    assert 'name="target" value="references/r/digest.md"' not in page.text
+
+    response = client.post("/w/ws/step", data={"target": "r"})
+    task_id = re.search(r"/w/ws/step/([0-9a-f]+)/stream", response.text)
+    assert response.status_code == 200 and task_id
+    stream = client.get(f"/w/ws/step/{task_id.group(1)}/stream")
+    assert "reference 不存在" not in stream.text
+    from kairo.knowledge import current_hash
+
+    state = ws.read_state()
+    assert state.products["references/r/digest.md"].knowledge_hash == current_hash(
+        root, ws.root
+    )
+    assert (ws.root / "references/r/prose.md").is_file()
+    assert state.products["references/r/prose.md"].knowledge_hash == current_hash(
+        root, ws.root
+    )
+
+
+@pytest.mark.parametrize("ref_id", ["no-such", "../outside"])
+def test_retry_reference_rejects_unknown_id_before_reading_manifest(tmp_path, ref_id):
+    ws = Workspace.init(tmp_path / "ws")
+    from kairo.engine import retry_reference
+
+    with pytest.raises(ValueError, match="reference 不存在"):
+        retry_reference(ws, StubProvider(), ref_id)
+
+
+def test_workspace_knowledge_todo_count_does_not_double_count_legacy_advisory(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    entry = new_entry(title="current", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    state = ws.read_state()
+    state.products["references/r/transcript.md"] = ProductState(
+        input_hash="raw", knowledge_hash="", glossary_hash=""
+    )
+    state.products["references/r/digest.md"] = ProductState(
+        input_hash="digest", knowledge_hash="", glossary_hash=""
+    )
+    state.targets["understanding.md"] = TargetState(
+        knowledge_hash="", glossary_hash=""
+    )
+    ws.write_state(state)
+
+    page = TestClient(create_app(root)).get("/w/ws", headers={"accept-language": "en"})
+    assert "Knowledge: 2 item(s) need attention" in page.text
+    assert "Knowledge: 4 item(s) need attention" not in page.text
 
 
 def test_legacy_workspace_api_and_old_candidate_route_keep_v2_authority(tmp_path):

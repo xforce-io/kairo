@@ -47,6 +47,7 @@ from kairo.web.pins import read_pins, toggle_pin
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.render import render_markdown
 from kairo.web.tasks import classify_task, stream_events
+from kairo.models import State
 from kairo.rules import effective_compose_block_reason
 from kairo.workspace import (
     AddError,
@@ -986,11 +987,31 @@ def _parse_tags(tags: str) -> list[str]:
     return [p.strip() for p in tags.replace("，", ",").split(",") if p.strip()]
 
 
-def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
-    from kairo.glossary import GlossaryError
-    from kairo.glossary_review import todo_count
+def _knowledge_drift_rows(
+    state: State,
+    current_hash: str,
+    *,
+    live_targets: set[str],
+) -> list[dict[str, str]]:
+    """仅报告实际消费知识上下文的产物，避免把原料/证据误报为待重算。"""
+    rows: list[dict[str, str]] = []
+    for path, product in state.products.items():
+        parts = path.split("/")
+        consumes_knowledge = (
+            len(parts) == 3
+            and parts[0] == "references"
+            and parts[2] in {"digest.md", "prose.md"}
+        )
+        if consumes_knowledge and product.knowledge_hash != current_hash:
+            # re-step 的 reference 契约接收 ref_id，而不是产物路径。
+            rows.append({"path": path, "target": parts[1]})
+    for path, target_state in state.targets.items():
+        if path in live_targets and target_state.knowledge_hash != current_hash:
+            rows.append({"path": path, "target": path})
+    return rows
 
-    knowledge_todos = 0
+
+def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
     try:
         from kairo.knowledge_review import todo_count as knowledge_todo_count
         from kairo.knowledge import current_hash
@@ -998,14 +1019,13 @@ def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
         knowledge_todos = knowledge_todo_count(ws.root)
         current = current_hash(serve_root, ws.root)
         state = ws.read_state()
-        knowledge_todos += sum(
-            value.knowledge_hash != current
-            for value in [*state.products.values(), *state.targets.values()]
+        live_targets = {target.path for target in ws.constitution.live_targets()}
+        knowledge_todos += len(
+            _knowledge_drift_rows(state, current, live_targets=live_targets)
         )
-        pending = ws.glossary_pending(serve_root=serve_root)
-    except (GlossaryError, ValueError):
-        pending = ["unreadable"]
-    return knowledge_todos + todo_count(ws.root, pending=pending)
+        return knowledge_todos
+    except ValueError:
+        return 1
 
 
 def _knowledge_run_boundary(ws: Workspace) -> dict:
@@ -1509,13 +1529,14 @@ def _knowledge_page(
             from kairo.knowledge import current_hash
 
             current = current_hash(serve, serve / selected)
-            state = _open(request, selected).read_state()
-            for path, product in state.products.items():
-                if product.knowledge_hash != current:
-                    drift.append({"path": path, "target": path})
-            for path, target_state in state.targets.items():
-                if target_state.knowledge_hash != current:
-                    drift.append({"path": path, "target": path})
+            workspace = _open(request, selected)
+            state = workspace.read_state()
+            live_targets = {
+                target.path for target in workspace.constitution.live_targets()
+            }
+            drift.extend(
+                _knowledge_drift_rows(state, current, live_targets=live_targets)
+            )
             review = invalidate_stale(serve / selected)
             for candidate in review.candidates:
                 row = candidate.model_dump()
