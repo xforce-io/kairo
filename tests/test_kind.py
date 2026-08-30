@@ -46,6 +46,24 @@ def test_open_existing_总结_is_journal_without_kind_field(tmp_path, monkeypatc
     assert pending(opened) == []
 
 
+def test_open_leftover_总结_yaml_without_kind_key_has_empty_live_targets(tmp_path):
+    import yaml
+
+    ws = Workspace.init(tmp_path / "总结", topic="能源梳理")
+    data = yaml.safe_load((ws.root / "constitution.yaml").read_text())
+    data.pop("kind", None)
+    data["topic"] = "总结"
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    opened = Workspace.open(ws.root)
+    raw = yaml.safe_load((opened.root / "constitution.yaml").read_text())
+    assert "kind" not in raw
+    assert [t.path for t in opened.constitution.targets] == ["understanding.md"]
+    assert opened.constitution.live_targets() == []
+    assert effective_kind(opened) == KIND_JOURNAL
+
+
 def test_journal_pending_skips_digest_and_compose(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     journal = Workspace.init(tmp_path / "总结", topic="总结")
