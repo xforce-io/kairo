@@ -29,6 +29,7 @@ from kairo.knowledge_review import (
     ingest_candidates,
     invalidate_stale,
     load_review,
+    parse_extract_yaml,
     promote,
 )
 from kairo.provider import StubProvider
@@ -598,6 +599,67 @@ def test_workspace_accept_replays_journal_after_review_failure(tmp_path, monkeyp
     assert entry.title == "可恢复"
     assert load_review(ws.root).candidates[0].status == "accepted"
     assert not (ws.root / ".kairo/knowledge_transaction.yaml").exists()
+
+
+def test_parse_extract_yaml_keeps_block_list_with_flow_tags():
+    """#195:tags/aliases 的 [] 不得被当成整份文档截断。"""
+    text = (
+        "- title: 节能算法\n"
+        "  description: 回路加时间\n"
+        "  aliases: [节能]\n"
+        "  tags: [算法, 能源]\n"
+        "  quote: 只能测精确率\n"
+        "- title: 一张网\n"
+        "  tags: [能源]\n"
+        "  quote: 11月1日要上\n"
+    )
+    items = parse_extract_yaml(text)
+    assert [i["title"] for i in items] == ["节能算法", "一张网"]
+    assert items[0]["tags"] == ["算法", "能源"]
+
+
+def test_parse_extract_yaml_survives_preamble_and_fence():
+    fenced = (
+        "```yaml\n"
+        "- title: 电网锚\n"
+        "  tags: [算法, 能源]\n"
+        "  quote: 今天讨论电网锚\n"
+        "```\n"
+    )
+    assert parse_extract_yaml(fenced)[0]["title"] == "电网锚"
+    with_preamble = "先读取材料\n\n- title: 电网锚\n  tags: [算法]\n  quote: 讨论电网\n"
+    assert parse_extract_yaml(with_preamble)[0]["title"] == "电网锚"
+
+
+def test_extract_after_success_ingests_flow_tags(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "总结", topic="总结")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    body = "只能测精确率。11月1日要上。"
+    digest.write_text(body)
+    yaml_text = (
+        "- title: 节能算法\n"
+        "  tags: [算法, 能源]\n"
+        "  quote: 只能测精确率\n"
+        "- title: 一张网\n"
+        "  tags: [能源]\n"
+        "  quote: 11月1日要上\n"
+    )
+    from kairo.knowledge_review import extract_after_success
+
+    extract_after_success(
+        ws.root,
+        root,
+        source_kind="digest",
+        path="references/r/digest.md",
+        text=body,
+        extractor=lambda *_: parse_extract_yaml(yaml_text),
+    )
+    review = load_review(ws.root)
+    assert review.extract_errors == {}
+    assert {c.title for c in review.candidates} == {"节能算法", "一张网"}
 
 
 def test_unicode_workspace_slug_is_retained_in_source(tmp_path):
