@@ -3,6 +3,7 @@
 {% block body %}
 {% macro ws_card(s, pinned) %}
   <div class="card{% if pinned %} pinned{% endif %}">
+    {% if not s.journal %}
     <form class="card-pin-form" method="post" action="/workspaces/{{ s.slug | urlencode }}/pin">
       <input type="hidden" name="q" value="{{ q }}">
       <input type="hidden" name="filter" value="{{ filter }}">
@@ -18,14 +19,19 @@
         </svg>
       </button>
     </form>
+    {% endif %}
     <a class="card-main" href="/w/{{ s.slug | urlencode }}">
-      <h3>{{ s.topic }}</h3>
+      <h3>{{ s.topic }}{% if s.journal %} <span class="kind-chip">{{ t('dash.kind_review') }}</span>{% endif %}</h3>
       <div class="meta"><span class="when">{{ s.when }}</span><span class="slug">{{ s.slug }}</span></div>
       <div class="badges">
+        {% if s.journal %}
+        <span class="badge journal">{{ s.stream_count }} {{ t('dash.badge_journal') }}</span>
+        {% else %}
         <span class="badge stream">{{ s.stream_count }} {{ t('dash.badge_stream') }}</span>
         <span class="badge corpus">{{ s.corpus_count }} {{ t('dash.badge_corpus') }}</span>
         {% if s.stale_count %}<span class="badge stale">{{ s.stale_count }} {{ t('dash.badge_stale') }}</span>{% endif %}
         {% if s.blocked_count %}<span class="badge blocked">⚠ {{ s.blocked_count }}</span>{% endif %}
+        {% endif %}
       </div>
     </a>
     <button type="button" class="card-trash" title="{{ t('dash.delete_btn') }}"
@@ -71,7 +77,7 @@
     <div class="dash-label">{{ t('dash.section_pinned') }}</div>
   {% endif %}
   {% for s in pinned %}
-    {{ ws_card(s, true) }}
+    {{ ws_card(s, s.slug in pin_slugs) }}
   {% endfor %}
   {% if show_sections %}
     <div class="dash-label rest">{{ t('dash.section_recent') }}</div>

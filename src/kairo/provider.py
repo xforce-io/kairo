@@ -592,9 +592,10 @@ class CodexProvider:
 
 
 class GrokProvider:
-    """驱动 `grok -p` CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
+    """驱动 grok CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
 
     #153:Grok 无授读;read_dirs 非空则失败,不回退倾倒全文。
+    #145:prompt 走 --prompt-file,不把正文塞进 argv。
     JSON 成功字段为 text;错误为 {"type":"error","message":...},写产物前拦截(#8)。
     """
 
@@ -609,17 +610,18 @@ class GrokProvider:
         _reject_unsupported_read(config, self.name)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
-        (config.artifact_dir / "_prompt.md").write_text(prompt)
+        prompt_file = config.artifact_dir / "_prompt.md"
+        prompt_file.write_text(prompt)
         stdout_file = config.artifact_dir / "_grok_stdout.json"
-        # -p 要求 <PROMPT>;read_dirs 无 CLI 等价物,MVP 忽略(见设计 #61)
-        args = ["-p", prompt, "--output-format", "json"]
+        # #145/#126:prompt 走 --prompt-file,不把正文塞进 argv。
+        args = ["--prompt-file", "_prompt.md", "--output-format", "json"]
         if self.model.strip():
             args += ["-m", self.model]
         self._runner(
             "grok",
             args,
             cwd=config.artifact_dir,
-            input=prompt,
+            input=None,
             stdout_file=stdout_file,
             timeout=config.timeout_s,
         )

@@ -212,6 +212,13 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   padding-right: 28px; /* 给右下角垃圾桶留空 */
 }
 .card h3 { margin: 0 0 4px; font-family: var(--serif); font-size: 20px; font-weight: 600; letter-spacing: .01em; }
+.card h3 .kind-chip {
+  font-family: var(--sans); font-size: 11.5px; font-weight: 500; letter-spacing: .04em;
+  color: var(--pine-deep); background: var(--pine-soft);
+  border: 1px solid #cfe0d6; border-radius: 999px; padding: 1px 8px;
+  vertical-align: middle;
+}
+.badge.journal { background: var(--pine-soft); color: var(--pine-deep); border-color: #cfe0d6; }
 .card .slug { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .card .badges { margin-top: 13px; display: flex; flex-wrap: wrap; gap: 6px; }
 /* #78 弱样式垃圾桶:卡片右下角,默认很淡,hover 卡片时显现 */

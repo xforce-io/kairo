@@ -36,6 +36,7 @@ from kairo.review import (
     ReviewError,
     collect_digests,
     generate_review_body,
+    occupied_span,
     prepare_range,
     resolve_review_workspace,
     write_review_reference,
@@ -453,13 +454,14 @@ def review(
         start, end = end, start
     serve = _serve_root(root)
     try:
-        found = prepare_range(scan_timeline(serve), start, end)
+        found = prepare_range(scan_timeline(serve), start, end, root=serve)
         with_d, without = collect_digests(serve, found)
         body = generate_review_body(
             with_d, without, artifact_dir=serve / ".kairo" / "review-work"
         )
         ws = resolve_review_workspace(serve, workspace or "")
-        rid = write_review_reference(ws, start, end, body)
+        occ = occupied_span([it for it, _ in with_d]) or (start, end)
+        rid = write_review_reference(ws, occ[0], occ[1], body, occurred=end)
     except WorkspaceNotFound:
         typer.secho(f"workspace 不存在:{workspace}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)

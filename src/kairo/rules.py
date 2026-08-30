@@ -523,6 +523,10 @@ class DigestRule:
         return items
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
+        from kairo.kind import stage_enabled
+
+        if not stage_enabled(self.ws, "digest"):
+            return []
         items: list[WorkItem] = []
         for ref_id in self.ws.list_reference_ids():
             man = self.ws.read_manifest(ref_id)
@@ -669,6 +673,10 @@ class ComposeRule:
         )
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
+        from kairo.kind import stage_enabled
+
+        if not stage_enabled(self.ws, "compose"):
+            return []
         all_digests = self._all_digests()
         items: list[WorkItem] = []
         for target in self.ws.constitution.live_targets():

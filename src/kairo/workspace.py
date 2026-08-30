@@ -149,10 +149,13 @@ class Workspace:
         return ws
 
     @classmethod
-    def init(cls, root: Path | str, topic: str = "main") -> "Workspace":
+    def init(cls, root: Path | str, topic: str = "main", *, kind: str | None = None) -> "Workspace":
+        from kairo.kind import KIND_TOPIC, fill_at_create
+
         root = Path(root)
         (root / ".kairo").mkdir(parents=True, exist_ok=True)
-        con = Constitution(topic=topic)
+        con = Constitution(topic=topic, kind=kind or KIND_TOPIC)
+        fill_at_create(con)
         (root / "constitution.yaml").write_text(
             yaml.safe_dump(con.model_dump(), allow_unicode=True, sort_keys=False)
         )
