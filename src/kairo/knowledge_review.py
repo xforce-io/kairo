@@ -356,9 +356,38 @@ def mark_extract_error(workspace_root: Path, path: str, message: str, *, source_
     save_review(workspace_root, review)
 
 
+_EXTRACT_FENCE = re.compile(r"^```(?:ya?ml)?\s*\n(.*)\n```\s*$", re.S | re.I)
+
+
+def _load_candidate_doc(raw: str):
+    """整篇 YAML 优先。禁止用第一个 `[` 截到最后一个 `]`（会吃掉 tags/aliases）。"""
+    try:
+        return yaml.safe_load(raw)
+    except yaml.YAMLError:
+        pass
+    start = re.search(r"(?m)^-\s+\S", raw)
+    if start:
+        try:
+            return yaml.safe_load(raw[start.start() :])
+        except yaml.YAMLError:
+            pass
+    entries = re.search(r"(?ms)^entries:\s*\n", raw)
+    if entries:
+        try:
+            return yaml.safe_load(raw[entries.start() :])
+        except yaml.YAMLError:
+            pass
+    return None
+
+
 def parse_extract_yaml(text: str) -> list[dict]:
-    match = re.search(r"(\[[\s\S]*\]|entries:\s*[\s\S]*)", text)
-    data = yaml.safe_load(match.group(1) if match else text)
+    raw = (text or "").strip().lstrip("\ufeff")
+    if not raw:
+        return []
+    fenced = _EXTRACT_FENCE.match(raw)
+    if fenced:
+        raw = fenced.group(1).strip()
+    data = _load_candidate_doc(raw)
     if data is None:
         return []
     if isinstance(data, dict):

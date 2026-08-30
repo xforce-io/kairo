@@ -31,9 +31,10 @@ def test_init_default_constitution_has_digest_prompt_and_fact_target(tmp_path):
     assert "未定时" in prompt
     assert " · " in prompt
     assert "禁止表格" in prompt
-    assert "虚构优先级或截止日期" in prompt
     assert "不要输出花括号" in prompt
     assert "- P0 · 下周 ·" in prompt
+    assert "不得把所有待办都标成 P?" in prompt
+    assert "先做/最重要/卡住别人" in prompt
     assert [t.path for t in con.targets] == ["understanding.md"]
     assert con.targets[0].layer == "fact"
 
