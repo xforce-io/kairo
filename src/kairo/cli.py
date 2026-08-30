@@ -37,6 +37,7 @@ from kairo.review import (
     collect_digests,
     generate_review_body,
     prepare_range,
+    resolve_review_workspace,
     write_review_reference,
 )
 from kairo.timeline import (
@@ -434,7 +435,7 @@ def timeline(
 def review(
     from_day: str = typer.Option(..., "--from", help="区间起"),
     to_day: str = typer.Option(..., "--to", help="区间止"),
-    workspace: str = typer.Option(None, "--workspace", "-w", help="保存到该 workspace slug"),
+    workspace: str = typer.Option(None, "--workspace", "-w", help="可选落点 slug;缺省写入「总结」"),
     root: Path = typer.Option(
         None,
         "--root",
@@ -442,7 +443,7 @@ def review(
         help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd",
     ),
 ) -> None:
-    """按发生日闭区间生成回顾,写入指定 workspace 的一条 stream reference。"""
+    """按发生日闭区间生成回顾,默认写入「总结」workspace 的一条 stream reference。"""
     start = parse_calendar_date(from_day)
     end = parse_calendar_date(to_day)
     if start is None or end is None:
@@ -451,29 +452,17 @@ def review(
     if start > end:
         start, end = end, start
     serve = _serve_root(root)
-    from kairo.web.discovery import scan_workspaces
-
-    if not workspace:
-        items_ws = scan_workspaces(serve)
-        typer.echo(
-            json.dumps(
-                {"reason": "need-workspace", "workspaces": [s.slug for s in items_ws]},
-                ensure_ascii=False,
-            )
-        )
-        raise typer.Exit(2)
-    try:
-        ws = Workspace.open(serve / workspace)
-    except WorkspaceNotFound:
-        typer.secho(f"workspace 不存在:{workspace}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(1)
     try:
         found = prepare_range(scan_timeline(serve), start, end)
         with_d, without = collect_digests(serve, found)
         body = generate_review_body(
-            with_d, without, artifact_dir=ws.root / ".kairo" / "review-work"
+            with_d, without, artifact_dir=serve / ".kairo" / "review-work"
         )
+        ws = resolve_review_workspace(serve, workspace or "")
         rid = write_review_reference(ws, start, end, body)
+    except WorkspaceNotFound:
+        typer.secho(f"workspace 不存在:{workspace}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
     except ReviewError as e:
         msg = {
             "range-too-long": f"一次最多 {MAX_RANGE_DAYS} 天",
@@ -483,7 +472,7 @@ def review(
         }.get(str(e), str(e))
         typer.secho(msg, fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from e
-    typer.echo(f"review {rid} → {workspace}")
+    typer.echo(f"review {rid} → {ws.root.name}")
 
 
 def _exit_if_run_failed(ws: Workspace) -> None:

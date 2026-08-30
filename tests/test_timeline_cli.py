@@ -59,10 +59,20 @@ def test_cli_review_writes_reference(tmp_path, monkeypatch):
     wa = Workspace.open(wsdir)
     rid = wa.add([src], ref_id="meet", occurred_at="2026-08-20")
     (wa.references_dir() / rid / "digest.md").write_text("结论")
+    before = len(wa.list_reference_ids())
     missing = runner.invoke(
         app, ["review", "--from", "2026-08-20", "--to", "2026-08-20", "--root", str(root)]
     )
-    assert missing.exit_code == 2
+    assert missing.exit_code == 0, missing.output
+    assert "总结" in missing.output
+    journal = Workspace.open(root / "总结")
+    ids = journal.list_reference_ids()
+    assert ids
+    assert "review " in missing.output and ids[-1] in missing.output
+    man = journal.read_manifest(ids[-1])
+    assert man.occurred_at == "2026-08-20"
+    assert "2026-08-20" in (man.title or "")
+    assert len(wa.list_reference_ids()) == before
     ok = runner.invoke(
         app,
         [

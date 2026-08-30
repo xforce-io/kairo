@@ -36,6 +36,7 @@ from kairo.review import (
     collect_digests,
     generate_review_body,
     prepare_range,
+    resolve_review_workspace,
     write_review_reference,
 )
 from kairo.timeline import (
@@ -531,7 +532,6 @@ def timeline_view(
             "no_digest_n": len(day_items) - digest_n,
             "too_long": too_long,
             "max_range_days": MAX_RANGE_DAYS,
-            "workspaces": scan_workspaces(request.app.state.root),
         },
     )
 
@@ -542,7 +542,6 @@ def timeline_review(
     start: str = Form("", alias="from"),
     end: str = Form("", alias="to"),
     workspace: str = Form(""),
-    topic: str = Form(""),
 ):
     t = _t(request)
     a = parse_calendar_date(start)
@@ -552,32 +551,7 @@ def timeline_review(
     if a > b:
         a, b = b, a
     root = Path(request.app.state.root)
-    topic = topic.strip()
     slug = workspace.strip()
-    if topic:
-        if len(topic) > 64:
-            raise HTTPException(status_code=400, detail=t("err.topic_too_long"))
-        if any(ord(c) < 0x20 or ord(c) == 0x7F for c in topic):
-            raise HTTPException(status_code=400, detail=t("err.topic_control"))
-        if "/" in topic or "\\" in topic or topic.startswith(".") or topic in (".", ".."):
-            raise HTTPException(status_code=400, detail=t("err.topic_illegal"))
-        dest = (root / topic).resolve()
-        if dest.parent != root.resolve():
-            raise HTTPException(status_code=400, detail=t("err.topic_invalid"))
-        if dest.exists():
-            try:
-                ws = Workspace.open(dest)
-            except WorkspaceNotFound:
-                raise HTTPException(status_code=400, detail=t("err.topic_exists").format(topic=topic))
-        else:
-            ws = Workspace.init(dest, topic=topic)
-    else:
-        if not slug:
-            raise HTTPException(status_code=400, detail=t("tl.review_need_ws"))
-        try:
-            ws = Workspace.open(root / slug)
-        except WorkspaceNotFound:
-            raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
     items = scan_timeline(root)
     try:
         found = prepare_range(items, a, b)
@@ -585,9 +559,12 @@ def timeline_review(
         body = generate_review_body(
             with_d,
             without,
-            artifact_dir=ws.root / ".kairo" / "review-work",
+            artifact_dir=root / ".kairo" / "review-work",
         )
+        ws = resolve_review_workspace(root, slug)
         rid = write_review_reference(ws, a, b, body)
+    except WorkspaceNotFound:
+        raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
     except ReviewError as e:
         key = {
             "range-too-long": "tl.review_too_long",

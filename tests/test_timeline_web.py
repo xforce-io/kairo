@@ -1,7 +1,14 @@
+import re
+
 from fastapi.testclient import TestClient
 
+from kairo.web.discovery import scan_workspaces
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
+
+
+def _meta_cells(html: str) -> list[str]:
+    return re.findall(r'<span class="tl-meta">([^<]*)</span>', html)
 
 
 def _client(root):
@@ -19,7 +26,12 @@ def _two_ws(tmp_path):
     (tmp_path / "m.txt").write_text("会议")
     (tmp_path / "n.txt").write_text("笔记")
     (tmp_path / "c.txt").write_text("基线")
-    wa.add([tmp_path / "m.txt"], ref_id="2026-08-25-weekly", occurred_at="2026-08-24")
+    wa.add(
+        [tmp_path / "m.txt"],
+        ref_id="2026-08-25-weekly",
+        title="候选人沟通",
+        occurred_at="2026-08-24",
+    )
     wb.add([tmp_path / "n.txt"], ref_id="notes-candidate")
     wa.add([tmp_path / "c.txt"], ref_id="whitepaper", source_class="corpus")
     return root, wa, wb
@@ -81,10 +93,21 @@ def test_timeline_range_lists_inclusive_and_hides_unknown(tmp_path):
     c = _client(root)
     r = c.get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
     assert r.status_code == 200
-    assert "2026-08-25-weekly" in r.text
+    assert "候选人沟通" in r.text
+    assert "能源梳理" in r.text
+    assert "2026-08-24" in r.text
+    assert 'href="/w/alpha?ref=2026-08-25-weekly"' in r.text
+    assert "2026-08-25-weekly" not in _meta_cells(r.text)
     assert "notes-candidate" not in r.text
     assert "from=2026-08-24" in r.text
     assert "写这段回顾" in r.text or "Write this review" in r.text
+    assert "<select" not in r.text
+    assert 'name="workspace"' not in r.text
+    assert 'name="topic"' not in r.text
+    assert 'id="rev-topic"' not in r.text
+    day = c.get("/timeline", params={"day": "2026-08-24"})
+    assert day.status_code == 200
+    assert "08-24" in _meta_cells(day.text)
 
 
 def test_timeline_empty_range_has_no_write_button(tmp_path):
@@ -117,15 +140,18 @@ def test_timeline_review_writes_stream(tmp_path, monkeypatch):
     root, wa, _ = _two_ws(tmp_path)
     rid = "2026-08-25-weekly"
     (wa.references_dir() / rid / "digest.md").write_text("周会结论")
-    dest = Workspace.init(root / "回顾", topic="回顾")
+    before = len(wa.list_reference_ids())
     c = _client(root)
     r = c.post(
         "/timeline/review",
-        data={"from": "2026-08-24", "to": "2026-08-24", "workspace": "回顾"},
+        data={"from": "2026-08-24", "to": "2026-08-24"},
         follow_redirects=False,
     )
     assert r.status_code == 303
-    assert r.headers["location"].startswith("/w/")
+    assert r.headers["location"].startswith("/w/%E6%80%BB%E7%BB%93") or r.headers[
+        "location"
+    ].startswith("/w/总结")
+    dest = Workspace.open(root / "总结")
     ids = dest.list_reference_ids()
     assert ids
     man = dest.read_manifest(ids[-1])
@@ -134,6 +160,34 @@ def test_timeline_review_writes_stream(tmp_path, monkeypatch):
     assert any(f.role == "source_text" for f in man.forms)
     orig = (wa.references_dir() / rid / "digest.md").read_text()
     assert orig == "周会结论"
+    assert len(wa.list_reference_ids()) == before
+    r2 = c.post(
+        "/timeline/review",
+        data={"from": "2026-08-24", "to": "2026-08-24"},
+        follow_redirects=False,
+    )
+    assert r2.status_code == 303
+    journals = [s for s in scan_workspaces(root) if s.slug == "总结" or s.topic == "总结"]
+    assert len(journals) == 1
+    assert len(Workspace.open(root / journals[0].slug).list_reference_ids()) == 2
+
+
+def test_timeline_review_workspace_escape(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, wa, _ = _two_ws(tmp_path)
+    (wa.references_dir() / "2026-08-25-weekly" / "digest.md").write_text("周会结论")
+    dest = Workspace.init(root / "回顾", topic="回顾")
+    r = _client(root).post(
+        "/timeline/review",
+        data={"from": "2026-08-24", "to": "2026-08-24", "workspace": "回顾"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"].startswith("/w/")
+    ids = dest.list_reference_ids()
+    assert ids
+    assert dest.read_manifest(ids[-1]).occurred_at == "2026-08-24"
+    assert not (root / "总结").exists()
 
 
 def test_timeline_review_too_long_skips_provider(tmp_path, monkeypatch):
@@ -147,14 +201,14 @@ def test_timeline_review_too_long_skips_provider(tmp_path, monkeypatch):
     monkeypatch.setattr("kairo.web.views.generate_review_body", boom)
     root, wa, _ = _two_ws(tmp_path)
     (wa.references_dir() / "2026-08-25-weekly" / "digest.md").write_text("周会")
-    Workspace.init(root / "回顾", topic="回顾")
     r = _client(root).post(
         "/timeline/review",
-        data={"from": "2026-08-01", "to": "2026-09-01", "workspace": "回顾"},
+        data={"from": "2026-08-01", "to": "2026-09-01"},
         follow_redirects=False,
     )
     assert r.status_code == 400
     assert called == []
+    assert not (root / "总结").exists()
 
 
 def test_workspace_ref_query_selects(tmp_path):

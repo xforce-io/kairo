@@ -7,6 +7,9 @@ from pathlib import Path
 
 from kairo.provider import AgentConfig, select_provider
 from kairo.timeline import MAX_RANGE_DAYS, TimelineItem, filter_range, range_day_count
+from kairo.workspace import Workspace, WorkspaceNotFound
+
+JOURNAL_NAME = "总结"
 
 
 class ReviewError(ValueError):
@@ -89,6 +92,33 @@ def generate_review_body(
     if not body.strip():
         raise ReviewError("empty")
     return body
+
+
+def resolve_review_workspace(root: Path, workspace: str = "") -> Workspace:
+    """缺省落入 topic/slug「总结」;有 slug 则打开该仓(不存在则 WorkspaceNotFound)。"""
+    root = Path(root)
+    slug = (workspace or "").strip()
+    if slug:
+        return Workspace.open(root / slug)
+    by_slug: Workspace | None = None
+    by_topic: Workspace | None = None
+    if root.is_dir():
+        for child in sorted(p for p in root.iterdir() if p.is_dir()):
+            if not (child / "constitution.yaml").is_file():
+                continue
+            try:
+                ws = Workspace.open(child)
+            except WorkspaceNotFound:
+                continue
+            if child.name == JOURNAL_NAME:
+                by_slug = ws
+                break
+            if ws.constitution.topic == JOURNAL_NAME and by_topic is None:
+                by_topic = ws
+    found = by_slug or by_topic
+    if found is not None:
+        return found
+    return Workspace.init(root / JOURNAL_NAME, topic=JOURNAL_NAME)
 
 
 def write_review_reference(ws, start: dt.date, end: dt.date, body: str) -> str:
