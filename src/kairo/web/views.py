@@ -35,6 +35,7 @@ from kairo.review import (
     ReviewError,
     collect_digests,
     generate_review_body,
+    is_journal_item,
     prepare_range,
     resolve_review_workspace,
     write_review_reference,
@@ -464,7 +465,9 @@ def timeline_view(
             )
         weeks[-1]["days"].append(cell)
     if range_on:
-        day_items = filter_range(items, q.start, q.end)
+        day_items = [
+            it for it in filter_range(items, q.start, q.end) if not is_journal_item(it)
+        ]
     else:
         day_items = [it for it in items if it.occurred_at == q.day]
     range_groups: list[dict] = []

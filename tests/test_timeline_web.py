@@ -169,7 +169,26 @@ def test_timeline_review_writes_stream(tmp_path, monkeypatch):
     assert r2.status_code == 303
     journals = [s for s in scan_workspaces(root) if s.slug == "总结" or s.topic == "总结"]
     assert len(journals) == 1
-    assert len(Workspace.open(root / journals[0].slug).list_reference_ids()) == 2
+    dest = Workspace.open(root / journals[0].slug)
+    assert dest.list_reference_ids() == ids
+    assert r2.headers["location"].endswith("ref=" + ids[-1]) or ids[-1] in r2.headers["location"]
+
+
+def test_timeline_range_omits_journal_reviews(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, wa, _ = _two_ws(tmp_path)
+    (wa.references_dir() / "2026-08-25-weekly" / "digest.md").write_text("周会")
+    c = _client(root)
+    c.post(
+        "/timeline/review",
+        data={"from": "2026-08-24", "to": "2026-08-25"},
+        follow_redirects=False,
+    )
+    r = c.get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
+    assert r.status_code == 200
+    assert "候选人沟通" in r.text
+    assert "2026-08-24～2026-08-25 回顾" not in r.text
+    assert ">总结<" not in r.text
 
 
 def test_timeline_review_workspace_escape(tmp_path, monkeypatch):

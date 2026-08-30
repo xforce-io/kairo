@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hashlib
 from pathlib import Path
 
 from kairo.provider import AgentConfig, select_provider
@@ -94,6 +95,27 @@ def generate_review_body(
     return body
 
 
+def is_journal_item(it: TimelineItem) -> bool:
+    return it.workspace == JOURNAL_NAME or it.topic == JOURNAL_NAME
+
+
+def existing_review_id(ws: Workspace, start: dt.date, end: dt.date) -> str | None:
+    want = review_title(start, end)
+    hits = [
+        rid for rid in ws.list_reference_ids() if ws.read_manifest(rid).title == want
+    ]
+    return hits[-1] if hits else None
+
+
+def _source_text_path(ws: Workspace, rid: str) -> Path:
+    man = ws.read_manifest(rid)
+    form = next((f for f in man.forms if f.role == "source_text"), None)
+    if form is None:
+        raise ReviewError("empty")
+    loc = Path(form.location)
+    return loc if loc.is_absolute() else ws.root / loc
+
+
 def resolve_review_workspace(root: Path, workspace: str = "") -> Workspace:
     """缺省落入 topic/slug「总结」;有 slug 则打开该仓(不存在则 WorkspaceNotFound)。"""
     root = Path(root)
@@ -122,6 +144,19 @@ def resolve_review_workspace(root: Path, workspace: str = "") -> Workspace:
 
 
 def write_review_reference(ws, start: dt.date, end: dt.date, body: str) -> str:
+    existing = existing_review_id(ws, start, end)
+    if existing:
+        path = _source_text_path(ws, existing)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+        man = ws.read_manifest(existing)
+        digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+        man.forms = [
+            f.model_copy(update={"hash": digest}) if f.role == "source_text" else f
+            for f in man.forms
+        ]
+        ws.write_manifest(existing, man)
+        return existing
     uploads = ws.root / ".kairo" / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     src = uploads / f"review-{start.isoformat()}-{end.isoformat()}.md"
@@ -141,7 +176,7 @@ def prepare_range(
 ) -> list[TimelineItem]:
     if range_day_count(start, end) > MAX_RANGE_DAYS:
         raise ReviewError("range-too-long")
-    found = filter_range(items, start, end)
+    found = [it for it in filter_range(items, start, end) if not is_journal_item(it)]
     if not found:
         raise ReviewError("empty-range")
     return found

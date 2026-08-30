@@ -73,6 +73,11 @@ def test_cli_review_writes_reference(tmp_path, monkeypatch):
     assert man.occurred_at == "2026-08-20"
     assert "2026-08-20" in (man.title or "")
     assert len(wa.list_reference_ids()) == before
+    again = runner.invoke(
+        app, ["review", "--from", "2026-08-20", "--to", "2026-08-20", "--root", str(root)]
+    )
+    assert again.exit_code == 0, again.output
+    assert journal.list_reference_ids() == ids
     ok = runner.invoke(
         app,
         [

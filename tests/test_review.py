@@ -72,6 +72,25 @@ def test_write_review_reference_sets_title_and_occurred(tmp_path, monkeypatch):
     assert (dest.references_dir() / rid).is_dir()
     assert any(f.role == "source_text" for f in man.forms)
     assert (root / "alpha" / "references" / "2026-08-21-weekly" / "digest.md").read_text() == orig_digest
+    rid2 = write_review_reference(dest, start, end, body + "\n第二稿")
+    assert rid2 == rid
+    assert dest.list_reference_ids() == [rid]
+    text = (dest.root / dest.read_manifest(rid).forms[0].location).read_text(encoding="utf-8")
+    assert "第二稿" in text
+
+
+def test_prepare_range_skips_journal_items(tmp_path, monkeypatch):
+    root, dest = _range_ws(tmp_path, monkeypatch)
+    journal = resolve_review_workspace(root)
+    write_review_reference(journal, dt.date(2026, 8, 18), dt.date(2026, 8, 24), "旧回顾")
+    items = scan_timeline(root)
+    found = prepare_range(items, dt.date(2026, 8, 18), dt.date(2026, 8, 24))
+    assert all(it.workspace != JOURNAL_NAME and it.topic != JOURNAL_NAME for it in found)
+    assert {it.id for it in found} == {
+        "2026-08-21-weekly",
+        "2026-08-18-call",
+        "2026-08-24-empty",
+    }
 
 
 def test_resolve_review_workspace_creates_and_reuses(tmp_path):
