@@ -21,6 +21,7 @@ class WorkspaceSummary:
     blocked_count: int
     stale_count: int
     last_activity: datetime.datetime
+    journal: bool = False
 
 
 def last_activity(ws: Workspace) -> datetime.datetime:
@@ -84,6 +85,9 @@ def summarize(ws: Workspace) -> WorkspaceSummary:
         for path, target in state.targets.items()
         if path in live_paths and target.status == "blocked"
     )
+    from kairo.kind import is_journal_workspace
+
+    journal = is_journal_workspace(ws)
     return WorkspaceSummary(
         slug=ws.root.name,
         topic=con.topic,
@@ -91,9 +95,10 @@ def summarize(ws: Workspace) -> WorkspaceSummary:
         ref_count=stream + corpus,
         stream_count=stream,
         corpus_count=corpus,
-        blocked_count=blocked,
-        stale_count=len(pending(ws)),
+        blocked_count=0 if journal else blocked,
+        stale_count=0 if journal else len(pending(ws)),
         last_activity=last_activity(ws),
+        journal=journal,
     )
 
 

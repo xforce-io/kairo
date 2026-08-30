@@ -57,6 +57,7 @@ class NormalizeConfig(BaseModel):
 
 
 class DigestConfig(BaseModel):
+    enabled: bool = True  # journal 预设关掉;引擎读此字段
     prompt: str = DEFAULT_DIGEST_PROMPT
 
 
@@ -165,6 +166,7 @@ class GlossaryEntry(BaseModel):
 
 class Constitution(BaseModel):
     topic: str = "main"
+    kind: str = "topic"  # 建仓填法名;运行时读 digest.enabled / targets / review_input
     pipeline: Pipeline = Field(default_factory=Pipeline)
     roles_by_ext: dict[str, str] = Field(default_factory=_default_roles_by_ext)
     default_role: str = "transcript"  # 无匹配扩展名时兜底
@@ -178,6 +180,7 @@ class Constitution(BaseModel):
     )
     default_class: str = "stream"  # add 不指定时的兜底归类
     targets: list[Target] = Field(default_factory=_default_targets)
+    review_input: bool = True  # 材料是否进时段回顾原料
     glossary: list[GlossaryEntry] = Field(default_factory=list)  # 领域真名册(#20)
 
     def live_targets(self) -> list[Target]:

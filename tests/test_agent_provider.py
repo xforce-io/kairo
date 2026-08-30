@@ -247,13 +247,16 @@ def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
     )
     cmd, args, sent, timeout = calls[0]
     assert cmd == "grok"
-    assert "-p" in args
+    assert "--prompt-file" in args
+    assert "_prompt.md" in args
+    assert "-p" not in args
     assert "--output-format" in args and "json" in args
     assert "-m" in args and "grok-4.5" in args
     assert timeout == 30
-    # prompt 进 -p 参数或 input（与 runner 签名对齐）
-    prompt_blob = " ".join(args) + "\n" + (sent or "")
-    assert "你是X" in prompt_blob and "材料Y" in prompt_blob
+    prompt_blob = " ".join(str(a) for a in args) + "\n" + (sent or "")
+    assert "材料Y" not in prompt_blob
+    written = (tmp_path / "_prompt.md").read_text()
+    assert "你是X" in written and "材料Y" in written
     out = tmp_path / "digest.md"
     assert out in res.artifacts
     assert out.read_text() == "GROK 纪要"

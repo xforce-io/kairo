@@ -36,6 +36,7 @@ from kairo.review import (
     collect_digests,
     generate_review_body,
     is_journal_item,
+    occupied_span,
     prepare_range,
     resolve_review_workspace,
     write_review_reference,
@@ -328,10 +329,18 @@ def _dash_groups(items, pins: list[str], q: str, filt: str):
 
     matched = [s for s in items if ok(s)]
     by_slug = {s.slug: s for s in matched}
+    journals = [s for s in matched if getattr(s, "journal", False)]
     pinned = [by_slug[p] for p in pins if p in by_slug]
     pinned_set = {s.slug for s in pinned}
-    rest = [s for s in matched if s.slug not in pinned_set]
-    rest.sort(key=lambda s: (-s.last_activity.timestamp(), s.slug))
+    if pinned:
+        pinned = pinned + [j for j in journals if j.slug not in pinned_set]
+        pinned_set = {s.slug for s in pinned}
+        rest = [s for s in matched if s.slug not in pinned_set]
+        rest.sort(key=lambda s: (-s.last_activity.timestamp(), s.slug))
+    else:
+        rest = [s for s in matched if not getattr(s, "journal", False)]
+        rest.sort(key=lambda s: (-s.last_activity.timestamp(), s.slug))
+        rest = journals + rest
     return pinned, rest, qn
 
 
@@ -466,7 +475,9 @@ def timeline_view(
         weeks[-1]["days"].append(cell)
     if range_on:
         day_items = [
-            it for it in filter_range(items, q.start, q.end) if not is_journal_item(it)
+            it
+            for it in filter_range(items, q.start, q.end)
+            if not is_journal_item(it, request.app.state.root)
         ]
     else:
         day_items = [it for it in items if it.occurred_at == q.day]
@@ -557,7 +568,7 @@ def timeline_review(
     slug = workspace.strip()
     items = scan_timeline(root)
     try:
-        found = prepare_range(items, a, b)
+        found = prepare_range(items, a, b, root=root)
         with_d, without = collect_digests(root, found)
         body = generate_review_body(
             with_d,
@@ -565,7 +576,8 @@ def timeline_review(
             artifact_dir=root / ".kairo" / "review-work",
         )
         ws = resolve_review_workspace(root, slug)
-        rid = write_review_reference(ws, a, b, body)
+        occ = occupied_span([it for it, _ in with_d]) or (a, b)
+        rid = write_review_reference(ws, occ[0], occ[1], body, occurred=b)
     except WorkspaceNotFound:
         raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
     except ReviewError as e:
