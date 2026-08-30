@@ -12,7 +12,7 @@ PRESETS: dict[str, dict] = {
         "review_input": True,
     },
     KIND_JOURNAL: {
-        "digest_enabled": False,
+        "digest_enabled": True,
         "empty_targets": True,
         "review_input": False,
     },
@@ -67,11 +67,14 @@ def is_journal_workspace(ws) -> bool:
 
 
 def stage_enabled(ws, stage: str) -> bool:
-    if is_journal_workspace(ws):
-        return False
-    con = ws.constitution
+    """journal:digest 开(含 leftover yaml 关)、compose 关。课题仓读 yaml / 活 target。"""
+    journal = is_journal_workspace(ws)
     if stage == "digest":
-        return bool(getattr(con.pipeline.digest, "enabled", True))
+        if journal:
+            return True
+        return bool(getattr(ws.constitution.pipeline.digest, "enabled", True))
     if stage == "compose":
-        return bool(con.live_targets())
+        if journal:
+            return False
+        return bool(ws.constitution.live_targets())
     raise ValueError(f"unknown agent stage:{stage}")

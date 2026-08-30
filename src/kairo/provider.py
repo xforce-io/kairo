@@ -136,6 +136,13 @@ def _stub_compose_document(
             .split("[阅读纪律]", 1)[0]
             .strip()
         )
+    knowledge_bit = ""
+    if "[领域知识上下文]" in persona:
+        knowledge_bit = (
+            persona[persona.find("[领域知识上下文]") :]
+            .split("[阅读纪律]", 1)[0]
+            .strip()
+        )
     bodies = _stub_required_bodies(context, artifact_dir)
     if not bodies:
         bodies = _digest_bodies_from_context(context)
@@ -149,6 +156,8 @@ def _stub_compose_document(
     ]
     if glossary_bit:
         body_bits += [glossary_bit, ""]
+    if knowledge_bit:
+        body_bits += [knowledge_bit, ""]
     for i, (sid, title, path) in enumerate(catalog):
         core = sid[2:]
         fid = f"F-{core}-01"
