@@ -10,6 +10,7 @@ import hashlib
 import os
 import re
 import tempfile
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -21,6 +22,7 @@ from kairo.models import (
     REASON_PROVIDER_FAILED,
     FailureDiagnostic,
     Form,
+    KnowledgeDiagnostic,
     Manifest,
     ProductState,
     State,
@@ -60,6 +62,45 @@ _REDACT_PATTERNS: tuple[re.Pattern[str], ...] = (
 
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def _knowledge_context(ws, text: str) -> tuple[str, str | None, KnowledgeDiagnostic]:
+    """#182：调用方决定扫描范围；局部歧义不会关闭整个知识上下文。"""
+    try:
+        from kairo.knowledge import current_hash, effective_entries, load_global, load_workspace
+        from kairo.knowledge_matcher import format_knowledge_context, matcher_for
+
+        entries = effective_entries(ws.root.parent, ws.root)
+        result = matcher_for(entries).match(text)
+        # legacy 读取也会转为 KnowledgeEntry；绝不再把全量 glossary 注入 Prompt。
+        _ = load_global(ws.root.parent), load_workspace(ws.root)
+        return (
+            format_knowledge_context(result),
+            current_hash(ws.root.parent, ws.root),
+            KnowledgeDiagnostic(
+                matched_entry_ids=[hit.entry.id for hit in result.matches],
+                ambiguities=len(result.ambiguities),
+                truncated=result.truncated_count,
+                skipped=len(result.skipped_terms),
+            ),
+        )
+    except Exception as exc:
+        # 权威仓储/索引错误不是“零命中”；仅保存已脱敏短摘要，主规则仍可完成。
+        return "", None, KnowledgeDiagnostic(
+            available=False,
+            error_code="knowledge-unavailable",
+            safe_summary=safe_provider_summary(exc),
+        )
+
+
+def _legacy_glossary_hash(ws) -> str | None:
+    """迁移后 v2 文件不再可由旧真名册读取；保留旧 advisory 的兼容空值。"""
+    try:
+        from kairo.glossary import current_effective_hash
+
+        return current_effective_hash(ws.root)
+    except Exception:
+        return None
 
 
 def safe_provider_summary(
@@ -369,10 +410,11 @@ class NormalizeRule:
         input_hash = _hash(f"{self.prompt}\n\n---誊录---\n{body}")
 
         def run(state: State) -> None:
+            knowledge_context, knowledge_hash, knowledge_diagnostic = _knowledge_context(self.ws, body)
             content = _run_agent(
                 self.provider,
                 self.prompt
-                + self.ws.glossary_reference()
+                + knowledge_context
                 + _OUTPUT_DISCIPLINE,
                 body,
                 "prose.md",
@@ -388,15 +430,16 @@ class NormalizeRule:
                 )
             )
             self.ws.write_manifest(ref_id, m)
-            from kairo.glossary import current_effective_hash
-
             state.products[key] = ProductState(
                 input_hash=input_hash,
                 produced_by={
                     "provider": self.provider.name,
                     "model": self.provider.model,
                 },
-                glossary_hash=current_effective_hash(self.ws.root),
+                glossary_hash=_legacy_glossary_hash(self.ws),
+                knowledge_hash=knowledge_hash,
+                knowledge_diagnostic=knowledge_diagnostic,
+                knowledge_generation=uuid.uuid4().hex,
             )
 
         def is_stale(state: State) -> bool:
@@ -430,7 +473,8 @@ class DigestRule:
                     text = p.read_text()
                 except UnicodeDecodeError:
                     continue
-                chunks.append(f"# {p.name}\n\n{text}")
+                # 匹配与知识上下文只看正文，文件名不应造成 filename-only 命中。
+                chunks.append(text)
         return "\n\n".join(chunks) if chunks else None
 
     def _catalog_items(self, man) -> list[CatalogItem]:
@@ -505,9 +549,10 @@ class DigestRule:
         input_hash = _hash(fingerprint)
 
         def run(state: State) -> None:
+            knowledge_context, knowledge_hash, knowledge_diagnostic = _knowledge_context(self.ws, body)
             persona = (
                 self.prompt
-                + self.ws.glossary_reference()
+                + knowledge_context
                 + _CATALOG_DISCIPLINE
                 + _OUTPUT_DISCIPLINE
             )
@@ -537,8 +582,7 @@ class DigestRule:
                 )
                 return
             (self.ws.root / key).write_text(content)
-            from kairo.glossary import current_effective_hash
-            from kairo.glossary_review import extract_after_digest
+            from kairo.knowledge_review import extract_after_success
 
             state.products[key] = ProductState(
                 input_hash=input_hash,
@@ -546,11 +590,22 @@ class DigestRule:
                     "provider": self.provider.name,
                     "model": self.provider.model,
                 },
-                glossary_hash=current_effective_hash(self.ws.root),
+                glossary_hash=_legacy_glossary_hash(self.ws),
+                knowledge_hash=knowledge_hash,
+                knowledge_diagnostic=knowledge_diagnostic,
+                knowledge_generation=uuid.uuid4().hex,
             )
             ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
             if ref_id:
-                extract_after_digest(self.ws, ref_id, content, provider=self.provider)
+                extract_after_success(
+                    self.ws.root,
+                    self.ws.root.parent,
+                    source_kind="digest",
+                    path=key,
+                    text=content,
+                    provider=self.provider,
+                )
+                # glossary_review 在首次读取时原子迁移，此后只保留 knowledge_review 单一路径。
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试
@@ -741,6 +796,13 @@ class ComposeRule:
                 + format_source_catalog_block(catalog)
                 + f"\n本步必读 Δdigest:{len(use_delta)} 条。\n"
             )
+            # 显式 re-step/full compose 必须用本次实际必读 digest；普通运行才是 delta。
+            knowledge_text = "\n\n".join(
+                (self.ws.root / path).read_text()
+                for path in sorted(use_delta)
+                if (self.ws.root / path).is_file()
+            )
+            knowledge_context, knowledge_hash, knowledge_diagnostic = _knowledge_context(self.ws, knowledge_text)
             layer = getattr(target, "layer", None) or "fact"
             budget_discipline = (
                 "\n- 完整 `understanding.md`（含标题、空白、正文、来源索引）不得超过 "
@@ -753,7 +815,7 @@ class ComposeRule:
                     self.provider,
                     target.fold_protocol
                     + provenance_protocol_for(layer)
-                    + self.ws.glossary_reference()
+                    + knowledge_context
                     + reference_section
                     + _CATALOG_DISCIPLINE
                     + _OUTPUT_DISCIPLINE
@@ -844,13 +906,39 @@ class ComposeRule:
             ts.diagnostic = None  # 成功清除 #98 诊断
             ts.retry_reason = None
             ts.corpus_stamp = corpus.stamp(corpus_refs)  # 记 corpus 参考层版本戳(advisory)
-            from kairo.glossary import current_effective_hash
-
-            ts.glossary_hash = current_effective_hash(self.ws.root)
+            ts.glossary_hash = _legacy_glossary_hash(self.ws)
+            # 空 delta 不会伪造一次“知识重新校正”。
+            if use_delta:
+                ts.knowledge_hash = knowledge_hash
+                ts.knowledge_diagnostic = knowledge_diagnostic
+                ts.knowledge_generation = uuid.uuid4().hex
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts
+            from kairo.knowledge_review import extract_after_success
+
+            # 每个 delta digest 独立保留可定位出处；成功 target 也可提出跨材料变化。
+            for digest_path in sorted(use_delta):
+                digest_file = self.ws.root / digest_path
+                if digest_file.is_file():
+                    extract_after_success(
+                        self.ws.root,
+                        self.ws.root.parent,
+                        source_kind="compose",
+                        path=digest_path,
+                        text=digest_file.read_text(),
+                        provider=self.provider,
+                    )
+            if key == "understanding.md":
+                extract_after_success(
+                    self.ws.root,
+                    self.ws.root.parent,
+                    source_kind="compose",
+                    path=key,
+                    text=content,
+                    provider=self.provider,
+                )
 
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)

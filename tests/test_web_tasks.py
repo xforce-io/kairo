@@ -19,7 +19,7 @@ from kairo.web.tasks import (
     stream_events,
     wrap_log_line,
 )
-from kairo.models import TargetState
+from kairo.models import KnowledgeDiagnostic, ProductState, TargetState
 from kairo.rules import (
     REASON_COMPOSE_MIGRATION_REQUIRED,
     UNDERSTANDING_MAX_CHARS,
@@ -59,7 +59,8 @@ def test_different_slugs_run_concurrently(tmp_path):
     reg = TaskRegistry()
     a = reg.start("a", tmp_path, [sys.executable, "-c", "print('x')"])
     b = reg.start("b", tmp_path, [sys.executable, "-c", "print('y')"])
-    _wait(a); _wait(b)
+    _wait(a)
+    _wait(b)
     assert a.lines == ["x"] and b.lines == ["y"]
 
 
@@ -640,3 +641,36 @@ def test_step_with_target_triggers_restep(tmp_path, monkeypatch):
     c.get(f"/w/ws/step/{m.group(1)}/stream")  # 阻塞到 done
     # re-step 删旧产物 + 重综合 → 覆盖手改内容
     assert (tmp_path / "ws" / "understanding.md").read_text() != "STALE-手改"
+
+
+def test_run_summary_isolates_this_task_knowledge_diagnostics(tmp_path):
+    """历史 pending 不能出现在另一次 Run 的结果；两个 task 用各自启动边界。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    c = TestClient(app)
+    old = StepTask(task_id="old", slug="ws", done=True, exit_code=0)
+    new = StepTask(task_id="new", slug="ws", done=True, exit_code=0)
+    # 当前 state 是 new 后写入；old 的边界已包含同一 hash，new 的没有。
+    st = ws.read_state()
+    st.products["references/r/digest.md"] = ProductState(
+        input_hash="x", knowledge_hash="new-hash", knowledge_generation="run-new",
+        knowledge_diagnostic=KnowledgeDiagnostic(matched_entry_ids=["ke-a"], ambiguities=1, truncated=2, skipped=3),
+    )
+    ws.write_state(st)
+    old.knowledge_before_products = {"references/r/digest.md": "run-new"}
+    new.knowledge_before_products = {}
+    app.state.registry._tasks.update({"old": old, "new": new})
+    assert "Knowledge context: 0 matched" not in c.get("/w/ws/run-summary?task_id=old").text
+    page = c.get("/w/ws/run-summary?task_id=new")
+    assert "Knowledge context: 1 matched, 1 ambiguous, 2 truncated, 3 skipped" in page.text
+
+
+def test_task_stream_and_cancel_reject_cross_workspace_task_id(tmp_path):
+    Workspace.init(tmp_path / "a", topic="a")
+    Workspace.init(tmp_path / "b", topic="b")
+    app = create_app(tmp_path)
+    task = StepTask(task_id="only-a", slug="a", done=False)
+    app.state.registry._tasks[task.task_id] = task
+    client = TestClient(app)
+    assert client.get("/w/b/step/only-a/stream").status_code == 404
+    assert client.post("/w/b/step/only-a/cancel").status_code == 404

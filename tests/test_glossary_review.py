@@ -94,11 +94,11 @@ def test_extract_error_does_not_change_digest(tmp_path):
 def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
     class CandidateProvider(StubProvider):
         def run(self, config, signal=None):
-            if config.artifact == "candidates.yaml":
+            if config.artifact == "knowledge-candidates.yaml":
                 config.artifact_dir.mkdir(parents=True, exist_ok=True)
-                path = config.artifact_dir / "candidates.yaml"
+                path = config.artifact_dir / "knowledge-candidates.yaml"
                 path.write_text(
-                    "- name: 天溯\n  note: 系统名称\n  quote: 天溯系统\n"
+                    "- title: 天溯\n  description: 系统名称\n  quote: 天溯系统\n"
                 )
                 return AgentResult(artifacts=[path], result_text=path.read_text())
             return super().run(config, signal)
@@ -112,9 +112,11 @@ def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
 
     step(ws, provider=CandidateProvider())
 
-    candidates = open_candidates(ws.root)
+    from kairo.knowledge_review import open_candidates as knowledge_open_candidates
+
+    candidates = knowledge_open_candidates(ws.root)
     assert len(candidates) == 1
-    assert candidates[0].name == "天溯"
+    assert candidates[0].title == "天溯"
     assert candidates[0].quote == "天溯系统"
 
 
@@ -179,33 +181,38 @@ def test_web_review_actions(tmp_path):
 
 
 def test_web_promote_then_root_reject_on_console(tmp_path):
-    """#174 S4: 提交公共出现在上半待提升；拒绝退回该区待审核。"""
+    """#182 S3：提升的是已确认 workspace entry，拒绝保留本地可编辑权威。"""
     ws, rid, root = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
-    cid = open_candidates(ws.root)[0].id
+    from kairo.knowledge_review import accept_workspace as accept_knowledge_workspace, ingest_candidates as ingest_knowledge, load_review as load_knowledge_review
+
+    digest = ws.root / "references" / rid / "digest.md"
+    ingest_knowledge(ws.root, source_kind="digest", path=f"references/{rid}/digest.md", source_text=digest.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
+    entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
     c = TestClient(create_app(root))
-    r = c.post(f"/w/ws/glossary/candidates/{cid}/promote")
+    r = c.post(f"/w/ws/knowledge/{entry.id}/promote")
     assert r.status_code == 200
-    bare = c.get("/glossary")
-    assert f"/glossary/candidates/ws/{cid}/reject" in bare.text
+    candidate = load_knowledge_review(ws.root).candidates[-1]
+    bare = c.get("/knowledge")
+    assert f"/knowledge/candidates/ws/{candidate.id}/reject" in bare.text
     assert "天溯" in bare.text
-    c.post(f"/glossary/candidates/ws/{cid}/reject", data={"reason": "本课题专用"})
-    selected = c.get("/glossary?workspace=ws")
-    assert "returned from root review" in selected.text
+    c.post(f"/knowledge/candidates/ws/{candidate.id}/reject", data={"reason": "本课题专用"})
+    selected = c.get("/knowledge?workspace=ws")
     assert "本课题专用" in selected.text
-    assert load_review(ws.root).candidates[0].status == STATUS_ROOT_REJECTED
+    assert load_knowledge_review(ws.root).candidates[-1].status == "rejected_global"
 
 
 def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
-    cid = open_candidates(ws.root)[0].id
-    promote_candidate(ws.root, cid)
+    from kairo.knowledge_review import accept_workspace as accept_knowledge_workspace, ingest_candidates as ingest_knowledge, load_review as load_knowledge_review, promote_entry
 
-    page = TestClient(create_app(root)).get("/glossary?workspace=ws")
+    digest = ws.root / "references" / rid / "digest.md"
+    ingest_knowledge(ws.root, source_kind="digest", path=f"references/{rid}/digest.md", source_text=digest.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
+    entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
+    candidate = promote_entry(ws.root, entry.id)
+
+    page = TestClient(create_app(root)).get("/knowledge?workspace=ws")
 
     assert page.status_code == 200
-    assert "awaiting root review" in page.text
-    assert f"/candidates/{cid}/accept" not in page.text
-    assert f"/candidates/{cid}/ignore" not in page.text
-    assert f"/candidates/{cid}/promote" not in page.text
+    assert "Awaiting shared review" in page.text
+    assert f"/candidates/{candidate.id}/accept" not in page.text
+    assert f"/candidates/{candidate.id}/ignore" not in page.text

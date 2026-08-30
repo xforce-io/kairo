@@ -244,9 +244,24 @@ def clear_reference_products(ws, ref_id: str) -> None:
 
 
 def retry_reference(ws, provider, ref_id: str) -> bool:
-    """清除 ref 派生产物(含终态 blocked)后 step 到收敛。"""
+    """清除 ref 派生产物(含终态 blocked)后 step 到收敛。
+
+    按需 prose 不受默认 normalize 开关控制；重试前若已存在，收敛后须恢复。
+    """
+    if ref_id not in ws.list_reference_ids():
+        raise ValueError(f"reference 不存在:{ref_id}")
+    state = ws.read_state()
+    prose_key = f"references/{ref_id}/prose.md"
+    manifest = ws.read_manifest(ref_id)
+    had_generated_prose = prose_key in state.products or any(
+        form.role == "prose" and form.origin != "added" for form in manifest.forms
+    )
     clear_reference_products(ws, ref_id)
-    return step(ws, provider)
+    progressed = step(ws, provider)
+    if had_generated_prose and not (ws.root / prose_key).is_file():
+        generate_prose(ws, provider, ref_id)
+        progressed = True
+    return progressed
 
 
 def delete_reference(ws, ref_id: str, *, recompose: bool = False, provider=None) -> None:

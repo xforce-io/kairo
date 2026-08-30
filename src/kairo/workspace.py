@@ -443,43 +443,61 @@ class Workspace:
         *,
         serve_root: Path | None = None,
     ) -> GlossaryEntry:
-        """追加一条 **workspace** 真名册;name 必填;重名拒绝;生效歧义拒绝。"""
-        from kairo.glossary import (
-            add_entry,
-            effective_items,
-            load_glossary_file,
-            load_workspace_glossary,
-            resolve_serve_root,
-            root_glossary_path,
-            write_workspace_glossary,
+        """兼容旧 API，但唯一写入 v2 KnowledgeStore，绝不回落 glossary 字段。"""
+        from kairo.glossary import GlossaryEntry
+        from kairo.glossary import resolve_serve_root
+        from kairo.knowledge import (
+            KnowledgeAlias,
+            effective_entries,
+            load_workspace,
+            new_entry,
+            save_workspace,
+            validate_entries,
         )
 
-        entries = add_entry(
-            load_workspace_glossary(self.root), name, note=note, aka=aka, tags=tags
-        )
         root = resolve_serve_root(ws_root=self.root, explicit=serve_root)
-        effective_items(load_glossary_file(root_glossary_path(root)), entries)
-        write_workspace_glossary(self.root, entries)
-        self.stamp_glossary_pending()
-        return entries[-1]
+        document, _ = load_workspace(self.root)
+        entry = new_entry(
+            title=name,
+            scope="workspace",
+            aliases=[KnowledgeAlias(value=value) for value in aka or []],
+            description=note,
+            tags=tags or [],
+        )
+        validate_entries([*document.entries, entry], scope="workspace")
+        # effective_entries 同时验证 root/workspace 可读；跨 scope alias 冲突由 matcher 局部处理。
+        _ = effective_entries(root, self.root)
+        document.entries.append(entry)
+        save_workspace(self.root, document)
+        self.stamp_knowledge_pending()
+        return GlossaryEntry(name=entry.title, note=entry.description, aka=[a.value for a in entry.aliases], tags=entry.tags)
 
     def remove_glossary_entry(self, index: int, *, serve_root: Path | None = None) -> None:
-        """按索引删除一条 **workspace** 真名册。"""
-        from kairo.glossary import (
-            effective_items,
-            load_glossary_file,
-            load_workspace_glossary,
-            remove_entry,
-            resolve_serve_root,
-            root_glossary_path,
-            write_workspace_glossary,
-        )
+        """兼容旧索引删除，但只改 constitution.knowledge。"""
+        from kairo.glossary import resolve_serve_root
+        from kairo.knowledge import load_workspace, save_workspace
 
-        entries = remove_entry(load_workspace_glossary(self.root), index)
-        root = resolve_serve_root(ws_root=self.root, explicit=serve_root)
-        effective_items(load_glossary_file(root_glossary_path(root)), entries)
-        write_workspace_glossary(self.root, entries)
-        self.stamp_glossary_pending()
+        # 旧 API 也必须先验证它确实属于传入的 serve root，才允许读写。
+        resolve_serve_root(ws_root=self.root, explicit=serve_root)
+        document, _ = load_workspace(self.root)
+        document.entries.pop(index)
+        save_workspace(self.root, document)
+        self.stamp_knowledge_pending()
+
+    def stamp_knowledge_pending(self) -> None:
+        """旧产物没有 knowledge_hash 时标出待人工重新校正；不触发运行。"""
+        state = self.read_state()
+        dirty = False
+        for ps in state.products.values():
+            if ps.knowledge_hash is None:
+                ps.knowledge_hash = ""
+                dirty = True
+        for ts in state.targets.values():
+            if ts.knowledge_hash is None:
+                ts.knowledge_hash = ""
+                dirty = True
+        if dirty:
+            self.write_state(state)
 
     def stamp_glossary_pending(self) -> None:
         """#163:已有产物缺 glossary_hash 时标脏,使尚未重新校正可见。不触发 step。"""

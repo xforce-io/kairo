@@ -49,8 +49,10 @@ _EPILOG = (
 )
 
 app = typer.Typer(help="step 驱动的增量知识构建引擎", epilog=_EPILOG)
-glossary_app = typer.Typer(help="真名册:list / add / rm(workspace 或 shared)")
+glossary_app = typer.Typer(help="兼容别名：知识条目 list / add / rm(workspace 或 shared)")
+knowledge_app = typer.Typer(help="知识条目：list / add / rm(workspace 或 global)")
 app.add_typer(glossary_app, name="glossary")
+app.add_typer(knowledge_app, name="knowledge")
 backup_app = typer.Typer(help="remote 完整备份:push / verify / restore")
 app.add_typer(backup_app, name="backup")
 
@@ -782,23 +784,14 @@ def glossary_list(
         None, "--root", "-r", help="shared 所在 serve root;默认 ws 父目录 / 环境变量"
     ),
 ) -> None:
-    """列出 shared + workspace 真名册;machine 仅提示。"""
-    from kairo.glossary import (
-        GlossaryError,
-        current_effective_hash,
-        load_glossary_file,
-        load_workspace_glossary,
-        machine_migration_hint,
-        resolve_serve_root,
-        root_glossary_path,
-        workspace_effective,
-    )
+    """列出 global + workspace 知识；glossary 是兼容命令名。"""
+    from kairo.glossary import machine_migration_hint, resolve_serve_root
+    from kairo.knowledge import KnowledgeError, effective_entries
 
     try:
         hint = machine_migration_hint()
         if hint:
             typer.secho(hint, fg=typer.colors.YELLOW, err=True)
-
         try:
             ws = Workspace.open(Path.cwd())
             in_ws = True
@@ -809,35 +802,41 @@ def glossary_list(
         layers: list[tuple[str, list]] = []
         if in_ws:
             serve = resolve_serve_root(ws_root=ws.root, explicit=root)
-            shared = load_glossary_file(root_glossary_path(serve))
-            layers.append(("shared", shared))
-            layers.append(("workspace", load_workspace_glossary(ws.root)))
+            from kairo.knowledge import load_global, load_workspace
+
+            layers.append(("global", load_global(serve)[0].entries))
+            layers.append(("workspace", load_workspace(ws.root)[0].entries))
         else:
             serve = resolve_serve_root(explicit=root)
-            shared = load_glossary_file(root_glossary_path(serve))
-            layers.append(("shared", shared))
+            from kairo.knowledge import load_global
+
+            layers.append(("global", load_global(serve)[0].entries))
 
         for label, entries in layers:
             typer.echo(f"[{label}] ({len(entries)})")
+            if label == "global":
+                typer.echo("[shared] compatibility name for global")
             if not entries:
                 typer.echo("  (empty)")
                 continue
             for i, e in enumerate(entries):
                 extra = []
-                if e.note:
-                    extra.append(e.note)
-                if e.aka:
-                    extra.append("aka:" + "/".join(e.aka))
+                if e.description:
+                    extra.append(e.description)
+                if e.aliases:
+                    extra.append("aka:" + "/".join(a.value for a in e.aliases))
                 if e.tags:
                     extra.append("tags:" + ",".join(e.tags))
                 suffix = f"  — {' | '.join(extra)}" if extra else ""
-                typer.echo(f"  {i}: {e.name}{suffix}")
+                typer.echo(f"  {i}: {e.title} [{e.id}]{suffix}")
         if in_ws:
-            items = workspace_effective(ws.root, serve_root=root)
-            typer.echo(f"[effective] ({len(items)}) {current_effective_hash(ws.root, serve_root=root)}")
+            items = effective_entries(serve, ws.root)
+            from kairo.glossary import current_effective_hash
+
+            typer.echo(f"[effective] ({len(items)}) {current_effective_hash(ws.root, serve_root=serve)}")
             for it in items:
-                typer.echo(f"  {it.origin}: {it.entry.name}")
-    except GlossaryError as e:
+                typer.echo(f"  {it.scope}: {it.title} [{it.id}]")
+    except KnowledgeError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
 
@@ -855,42 +854,36 @@ def glossary_add(
         None, "--root", "-r", help="scope=shared 时的 serve root"
     ),
 ) -> None:
-    """追加一条真名册;scope=workspace 写 constitution,shared 写 root/glossary.yaml。"""
-    from kairo.glossary import (
-        add_entry,
-        load_glossary_file,
-        parse_scope,
-        resolve_serve_root,
-        root_glossary_path,
-        save_glossary_file,
-        validate_entries,
-    )
+    """追加一条知识条目；旧 glossary 命令写入同一 KnowledgeStore。"""
+    from kairo.glossary import parse_scope, resolve_serve_root
+    from kairo.knowledge import KnowledgeAlias, KnowledgeError, migrate_global, migrate_workspace, new_entry, save_global, save_workspace, validate_entries
 
     aka_parts = [a.strip() for a in aka.split(",") if a.strip()] if aka else []
     tag_parts = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
     try:
-        chosen = parse_scope(scope)
+        chosen = "shared" if scope.strip() == "global" else parse_scope(scope)
         if chosen == "workspace":
             ws = _open_ws()
-            ws.add_glossary_entry(
-                name, note=note, aka=aka_parts, tags=tag_parts, serve_root=root
-            )
-            typer.echo(f"added workspace glossary: {name}")
+            document = migrate_workspace(ws.root)
+            entry = new_entry(title=name, scope="workspace", description=note, aliases=[KnowledgeAlias(value=value) for value in aka_parts], tags=tag_parts)
+            validate_entries([*document.entries, entry], scope="workspace")
+            document.entries.append(entry)
+            save_workspace(ws.root, document)
+            typer.echo(f"added workspace knowledge: {name}")
             return
         try:
             ws = Workspace.open(Path.cwd())
             serve = resolve_serve_root(ws_root=ws.root, explicit=root)
         except WorkspaceNotFound:
             serve = resolve_serve_root(explicit=root)
-        path = root_glossary_path(serve)
-        entries = add_entry(
-            load_glossary_file(path), name, note=note, aka=aka_parts, tags=tag_parts
-        )
-        validate_entries(entries, path=path)
-        save_glossary_file(path, entries)
+        document = migrate_global(serve)
+        entry = new_entry(title=name, scope="global", description=note, aliases=[KnowledgeAlias(value=value) for value in aka_parts], tags=tag_parts)
+        validate_entries([*document.entries, entry], scope="global")
+        document.entries.append(entry)
+        save_global(serve, document)
         _stamp_serve_workspaces(serve)
-        typer.echo(f"added shared glossary: {name} → {path}")
-    except ValueError as e:
+        typer.echo(f"added global knowledge: {name}")
+    except (KnowledgeError, ValueError) as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
 
@@ -905,39 +898,60 @@ def glossary_rm(
         None, "--root", "-r", help="scope=shared 时的 serve root"
     ),
 ) -> None:
-    """按索引删除一条真名册。"""
-    from kairo.glossary import (
-        load_glossary_file,
-        load_workspace_glossary,
-        parse_scope,
-        remove_entry,
-        resolve_serve_root,
-        root_glossary_path,
-        save_glossary_file,
-        validate_entries,
-    )
+    """按索引删除一条知识；旧 glossary 命令是兼容别名。"""
+    from kairo.glossary import parse_scope, resolve_serve_root
+    from kairo.knowledge import KnowledgeError, migrate_global, migrate_workspace, save_global, save_workspace
 
     try:
-        chosen = parse_scope(scope)
+        chosen = "shared" if scope.strip() == "global" else parse_scope(scope)
         if chosen == "workspace":
             ws = _open_ws()
-            name = load_workspace_glossary(ws.root)[index].name
-            ws.remove_glossary_entry(index, serve_root=root)
-            typer.echo(f"removed workspace glossary[{index}]: {name}")
+            document = migrate_workspace(ws.root)
+            name = document.entries[index].title
+            document.entries.pop(index)
+            save_workspace(ws.root, document)
+            typer.echo(f"removed workspace knowledge[{index}]: {name}")
             return
         try:
             ws = Workspace.open(Path.cwd())
             serve = resolve_serve_root(ws_root=ws.root, explicit=root)
         except WorkspaceNotFound:
             serve = resolve_serve_root(explicit=root)
-        path = root_glossary_path(serve)
-        entries = load_glossary_file(path)
-        name = entries[index].name
-        nxt = remove_entry(entries, index)
-        validate_entries(nxt, path=path)
-        save_glossary_file(path, nxt)
+        document = migrate_global(serve)
+        name = document.entries[index].title
+        document.entries.pop(index)
+        save_global(serve, document)
         _stamp_serve_workspaces(serve)
-        typer.echo(f"removed shared glossary[{index}]: {name}")
-    except (ValueError, IndexError) as e:
+        typer.echo(f"removed global knowledge[{index}]: {name}")
+    except (KnowledgeError, ValueError, IndexError) as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
+
+
+@knowledge_app.command("list")
+def knowledge_list(root: Path = typer.Option(None, "--root", "-r", help="global 所在 serve root")) -> None:
+    """列出知识（等价于兼容命令 `glossary list`）。"""
+    glossary_list(root=root)
+
+
+@knowledge_app.command("add")
+def knowledge_add(
+    title: str = typer.Argument(..., help="规范标题"),
+    description: str = typer.Option("", "--description", "--note", help="简短说明"),
+    aliases: str = typer.Option("", "--aliases", "--aka", help="别名，逗号分隔"),
+    tags: str = typer.Option("", "--tags", help="标签，逗号分隔"),
+    scope: str = typer.Option("workspace", "--scope", help="workspace 或 global（shared 兼容）"),
+    root: Path = typer.Option(None, "--root", "-r", help="scope=global 时的 serve root"),
+) -> None:
+    """创建知识条目。"""
+    glossary_add(name=title, note=description, aka=aliases, tags=tags, scope=scope, root=root)
+
+
+@knowledge_app.command("rm")
+def knowledge_rm(
+    index: int = typer.Argument(..., help="条目索引（见 knowledge list）"),
+    scope: str = typer.Option("workspace", "--scope", help="workspace 或 global（shared 兼容）"),
+    root: Path = typer.Option(None, "--root", "-r", help="scope=global 时的 serve root"),
+) -> None:
+    """删除知识条目。"""
+    glossary_rm(index=index, scope=scope, root=root)

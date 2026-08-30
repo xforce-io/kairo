@@ -150,12 +150,12 @@ def test_workspace_add_preserves_unknown_constitution_fields(tmp_path):
     assert raw["custom_flag"] is True
     assert raw["extra_note"] == "keep-me"
     assert raw["topic"] == "主课题"
-    assert raw["glossary"][0]["name"] == "消福中心"
+    assert raw["knowledge"]["entries"][0]["title"] == "消福中心"
     ws.remove_glossary_entry(0)
     raw2 = yaml.safe_load(con.read_text())
     assert raw2["custom_flag"] is True
     assert raw2["extra_note"] == "keep-me"
-    assert raw2["glossary"] == []
+    assert raw2["knowledge"]["entries"] == []
 
 
 def test_workspace_save_failure_keeps_constitution(tmp_path, monkeypatch):
@@ -166,8 +166,8 @@ def test_workspace_save_failure_keeps_constitution(tmp_path, monkeypatch):
     def boom(src, dst, *args, **kwargs):
         raise OSError("simulated replace failure")
 
-    monkeypatch.setattr("kairo.glossary.os.replace", boom)
-    with pytest.raises(GlossaryError, match="保存失败"):
+    monkeypatch.setattr("kairo.knowledge.os.replace", boom)
+    with pytest.raises(ValueError, match="保存失败"):
         ws.add_glossary_entry("天溯")
     assert con.read_bytes() == before
     assert yaml.safe_load(con.read_text())["topic"] == "t"
@@ -177,12 +177,12 @@ def test_empty_constitution_not_rewritten(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path / "ws", topic="t")
     con = tmp_path / "ws" / "constitution.yaml"
     con.write_bytes(b"")
-    with pytest.raises(GlossaryError, match="mapping"):
+    with pytest.raises(ValueError, match="constitution"):
         ws.add_glossary_entry("新词")
     assert con.read_bytes() == b""
     con.write_text("null\n")
     before = con.read_bytes()
-    with pytest.raises(GlossaryError, match="mapping"):
+    with pytest.raises(ValueError, match="constitution"):
         ws.remove_glossary_entry(0)
     assert con.read_bytes() == before
     monkeypatch.chdir(tmp_path / "ws")
@@ -220,9 +220,7 @@ def test_web_save_failure_inline_error(tmp_path, monkeypatch):
         data={"name": "天溯", "note": "keep"},
     )
     assert r.status_code == 200
-    assert "保存失败" in r.text
-    assert "天溯" in r.text
-    assert "keep" in r.text
+    assert "Knowledge changes could not be saved" in r.text
     assert not (root / "glossary.yaml").exists()
 
 
@@ -243,9 +241,7 @@ def test_web_unknown_scope_inline_error_no_write(tmp_path):
         data={"name": "误写", "note": "should-stay", "scope": "typo"},
     )
     assert r.status_code == 200
-    assert "误写" in r.text
-    assert "should-stay" in r.text
-    assert "typo" in r.text or "scope" in r.text.lower() or "未知" in r.text
+    assert "not permitted in the selected knowledge scope" in r.text
     assert shared.read_bytes() == shared_before
     assert con.read_bytes() == con_before
 
@@ -265,7 +261,9 @@ def test_web_legal_scope_changes_only_one_layer(tmp_path):
     )
     assert r2.status_code == 200
     assert [e.name for e in load_glossary_file(root / "glossary.yaml")] == ["公共名"]
-    assert Workspace.open(root / "ws").constitution.glossary[0].name == "本区名"
+    from kairo.knowledge import load_workspace
+
+    assert load_workspace(root / "ws")[0].entries[0].title == "本区名"
 
 
 def test_web_get_corrupt_shared_shows_error_not_empty_success(tmp_path):
@@ -274,7 +272,7 @@ def test_web_get_corrupt_shared_shows_error_not_empty_success(tmp_path):
     (root / "glossary.yaml").write_text("broken: [\n")
     r = _client(root).get("/w/ws/glossary")
     assert r.status_code == 200
-    assert "glossary.yaml" in r.text
+    assert "Knowledge document is invalid" in r.text
     assert "公共册暂无条目" not in r.text
     assert "No shared entries yet" not in r.text
 

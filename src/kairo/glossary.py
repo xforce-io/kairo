@@ -97,6 +97,15 @@ def load_glossary_file(path: Path) -> list[GlossaryEntry]:
         data = yaml.safe_load(path.read_text())
     except yaml.YAMLError as e:
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
+    # 旧公开 reader 的兼容投影：v2 仍只有 KnowledgeStore 是权威。
+    if isinstance(data, dict) and data.get("version") == 2:
+        try:
+            from kairo.knowledge import _parse_document
+
+            document, _legacy = _parse_document(data, scope="global", path=path)
+            return [GlossaryEntry(name=item.title, note=item.description, aka=[alias.value for alias in item.aliases], tags=item.tags) for item in document.entries]
+        except Exception as exc:
+            raise GlossaryError(f"v2 知识文档非法:{exc}", path=path) from exc
     return _parse_glossary_doc(data, path=path)
 
 
@@ -115,6 +124,13 @@ def _atomic_write_text(path: Path, text: str) -> None:
 
 
 def save_glossary_file(path: Path, entries: list[GlossaryEntry]) -> None:
+    if path.is_file():
+        try:
+            current = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if isinstance(current, dict) and current.get("version") == 2:
+                raise GlossaryError("v2 知识文件只能经 KnowledgeStore 保存", path=path)
+        except yaml.YAMLError as exc:
+            raise GlossaryError(f"YAML 无法解析:{exc}", path=path) from exc
     payload = [e.model_dump() for e in entries]
     _atomic_write_text(
         path, yaml.safe_dump(payload, allow_unicode=True, sort_keys=False)
@@ -131,6 +147,23 @@ def load_workspace_glossary(ws_root: Path) -> list[GlossaryEntry]:
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
     if data is None or not isinstance(data, dict):
         raise GlossaryError("constitution 顶层必须是 mapping", path=path)
+    # 旧 reader 仅投影 v2，不能把它当作旧 glossary 的第二权威或触发写盘。
+    if "knowledge" in data:
+        try:
+            from kairo.knowledge import _parse_document
+
+            document, _legacy = _parse_document(data["knowledge"], scope="workspace", path=path)
+            return [
+                GlossaryEntry(
+                    name=item.title,
+                    note=item.description,
+                    aka=[alias.value for alias in item.aliases],
+                    tags=item.tags,
+                )
+                for item in document.entries
+            ]
+        except Exception as exc:
+            raise GlossaryError(f"v2 知识文档非法:{exc}", path=path) from exc
     if "glossary" not in data:
         return []
     items = data["glossary"]
@@ -151,6 +184,8 @@ def write_workspace_glossary(ws_root: Path, entries: list[GlossaryEntry]) -> Non
         raise GlossaryError(f"YAML 无法解析:{e}", path=path) from e
     if data is None or not isinstance(data, dict):
         raise GlossaryError("constitution 顶层必须是 mapping", path=path)
+    if "knowledge" in data:
+        raise GlossaryError("v2 知识文件只能经 KnowledgeStore 保存", path=path)
     data["glossary"] = [e.model_dump() for e in entries]
     _atomic_write_text(
         path, yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
@@ -275,6 +310,27 @@ def workspace_effective(
     ws_root: Path, *, serve_root: Path | None = None
 ) -> list[EffectiveItem]:
     root = resolve_serve_root(ws_root=ws_root, explicit=serve_root)
+    # v2 的兼容读视图：旧调用方仍拿到 GlossaryEntry，但不再读取第二事实源。
+    try:
+        from kairo.knowledge import effective_entries, load_global, load_workspace
+
+        load_global(root)
+        load_workspace(ws_root)
+        return [
+            EffectiveItem(
+                GlossaryEntry(
+                    name=entry.title,
+                    note=entry.description,
+                    aka=[alias.value for alias in entry.aliases],
+                    tags=entry.tags,
+                ),
+                ORIGIN_LOCAL if entry.scope == "workspace" else ORIGIN_INHERITED,
+            )
+            for entry in effective_entries(root, ws_root)
+        ]
+    except Exception:
+        # 保留 legacy 错误语义，由下方严格 reader 报出具体 path。
+        pass
     return effective_items(
         load_glossary_file(root_glossary_path(root)),
         load_workspace_glossary(ws_root),

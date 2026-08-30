@@ -86,9 +86,10 @@ def test_glossary_injected_into_digest_and_compose(tmp_path):
     rid = ws.list_reference_ids()[0]
     digest = (ws.root / f"references/{rid}/digest.md").read_text()
     understanding = (ws.root / "understanding.md").read_text()
-    # 真名册随 persona 进了 digest 与 compose
-    assert "灵犀系统" in digest and "规范名" in digest
-    assert "灵犀系统" in understanding
+    # 旧真名册迁为按需知识上下文，而非整表注入。
+    assert "灵犀系统" in digest and "领域知识上下文" in digest
+    # Compose 仅扫描本轮 digest；Stub 输出不保证复述 persona，主产物仍正常完成。
+    assert "STUB UNDERSTANDING" in understanding
 
 
 def test_no_glossary_keeps_behavior(tmp_path):

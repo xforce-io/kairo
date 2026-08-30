@@ -2,20 +2,15 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import yaml
 from fastapi.testclient import TestClient
 
 from kairo.glossary import (
-    format_glossary_reference,
     load_glossary_file,
     merge_glossary,
-    merged_glossary_entries,
     save_glossary_file,
 )
 from kairo.models import GlossaryEntry
-from kairo.provider import StubProvider
 from kairo.rules import DigestRule, State
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -72,11 +67,10 @@ def test_digest_persona_gets_merged_glossary(tmp_path, monkeypatch):
     root.mkdir()
     ws = Workspace.init(ws_dir)
     save_glossary_file(root / "glossary.yaml", [GlossaryEntry(name="公共锚")])
-    t = tmp_path / "m.txt"  # outside
     # put transcript inside ref via add of file in tmp outside
     src = root / "note.txt"
     src.write_text("讨论公共锚")
-    rid = ws.add([src])
+    ws.add([src])
     # capture persona via custom provider
     calls = []
 
@@ -99,7 +93,7 @@ def test_digest_persona_gets_merged_glossary(tmp_path, monkeypatch):
 
 def test_web_shared_and_local_glossary(tmp_path):
     root = tmp_path
-    ws = Workspace.init(root / "ws", topic="t")
+    Workspace.init(root / "ws", topic="t")
     c = TestClient(create_app(root))
     r = c.post(
         "/glossary",
@@ -109,7 +103,7 @@ def test_web_shared_and_local_glossary(tmp_path):
     assert "公共名" in r.text
     assert (root / "glossary.yaml").is_file()
     raw = yaml.safe_load((root / "glossary.yaml").read_text())
-    assert raw[0]["tags"] == ["org"]
+    assert raw["entries"][0]["tags"] == ["org"]
 
     r2 = c.post(
         "/w/ws/glossary",
@@ -117,9 +111,11 @@ def test_web_shared_and_local_glossary(tmp_path):
     )
     assert r2.status_code == 200
     assert "本区名" in r2.text
-    assert any(e.name == "本区名" for e in Workspace.open(root / "ws").constitution.glossary)
+    from kairo.knowledge import load_workspace
+
+    assert any(e.title == "本区名" for e in load_workspace(root / "ws")[0].entries)
 
     r3 = c.post("/glossary/0/delete")
     assert r3.status_code == 200
     assert load_glossary_file(root / "glossary.yaml") == []
-    assert any(e.name == "本区名" for e in Workspace.open(root / "ws").constitution.glossary)
+    assert any(e.title == "本区名" for e in load_workspace(root / "ws")[0].entries)

@@ -15,11 +15,12 @@ def test_add_glossary_entry_roundtrip(tmp_path):
     ws = Workspace.init(tmp_path)
     e = ws.add_glossary_entry("消福中心", note="管理约束方", aka=["消福体系"])
     assert e.name == "消福中心"
-    con = ws.constitution
-    assert len(con.glossary) == 1
-    assert con.glossary[0].aka == ["消福体系"]
+    from kairo.knowledge import load_workspace
+    entries = load_workspace(ws.root)[0].entries
+    assert len(entries) == 1
+    assert [alias.value for alias in entries[0].aliases] == ["消福体系"]
     raw = yaml.safe_load((tmp_path / "constitution.yaml").read_text())
-    assert raw["glossary"][0]["name"] == "消福中心"
+    assert raw["knowledge"]["entries"][0]["title"] == "消福中心"
     # 其它 constitution 字段仍在
     assert raw["topic"] == "main"
     assert "targets" in raw
@@ -37,7 +38,7 @@ def test_add_glossary_rejects_empty_and_duplicate(tmp_path):
         ws.add_glossary_entry("蒋总")
         raise AssertionError("expected ValueError")
     except ValueError as e:
-        assert "同名" in str(e)
+        assert "重复" in str(e)
 
 
 def test_remove_glossary_entry(tmp_path):
@@ -45,7 +46,8 @@ def test_remove_glossary_entry(tmp_path):
     ws.add_glossary_entry("A")
     ws.add_glossary_entry("B")
     ws.remove_glossary_entry(0)
-    assert [e.name for e in ws.constitution.glossary] == ["B"]
+    from kairo.knowledge import load_workspace
+    assert [e.title for e in load_workspace(ws.root)[0].entries] == ["B"]
     try:
         ws.remove_glossary_entry(9)
         raise AssertionError("expected IndexError")
@@ -74,18 +76,18 @@ def _ws_panel(html: str) -> str | None:
     return m.group(0) if m else None
 
 
-def test_web_glossary_button_on_workspace(tmp_path):
-    """#174 S2: 课题页无维护按钮；顶栏弱链去 /glossary，不进主导航。"""
+def test_web_knowledge_button_on_workspace(tmp_path):
+    """#182: 课题页无维护按钮；顶栏弱链去 /knowledge，不进主导航。"""
     Workspace.init(tmp_path / "ws", topic="t")
     r = _client(tmp_path).get("/w/ws")
     assert r.status_code == 200
     assert 'hx-get="/w/ws/glossary"' not in r.text
     assert 'class="gl-todo-hint"' not in r.text
     nav = _console_nav(r.text)
-    assert 'href="/glossary"' not in nav
+    assert 'href="/knowledge"' not in nav
     header = _header(r.text)
-    assert re.search(r'href="/glossary"', header)
-    assert "Glossary" in header or "真名册" in header
+    assert re.search(r'href="/knowledge"', header)
+    assert "Knowledge" in header or "知识" in header
 
 
 def test_workspace_todo_hint_is_one_line(tmp_path):
@@ -106,7 +108,7 @@ def test_workspace_todo_hint_is_one_line(tmp_path):
         r'<a class="gl-todo-hint"[^>]*href="([^"]+)"', html
     )
     assert len(hints) == 1
-    assert hints[0] == "/glossary?workspace=ws"
+    assert hints[0] == "/knowledge?workspace=ws"
     assert 'hx-get="/w/ws/glossary"' not in html
     assert 'name="scope" value="workspace"' not in html
 
@@ -119,21 +121,21 @@ def test_glossary_page_hides_local_until_workspace_selected(tmp_path):
     c = _client(tmp_path)
     bare = c.get("/glossary")
     assert bare.status_code == 200
-    assert 'action="/glossary"' in bare.text
+    assert 'action="/knowledge/global"' in bare.text
     assert _ws_panel(bare.text) is None
     assert "本区乙" not in bare.text
-    assert 'href="/glossary?workspace=a"' in bare.text
-    assert 'href="/glossary?workspace=b"' in bare.text
+    assert 'href="/knowledge?workspace=a"' in bare.text
+    assert 'href="/knowledge?workspace=b"' in bare.text
     selected = c.get("/glossary?workspace=b")
     panel = _ws_panel(selected.text)
     assert panel is not None
     assert "本区乙" in panel
-    assert 'action="/w/b/glossary"' in panel
+    assert 'action="/w/b/knowledge"' in panel
     a_page = c.get("/glossary?workspace=a")
     a_panel = _ws_panel(a_page.text)
     assert a_panel is not None
     assert "本区乙" not in a_panel
-    assert 'action="/w/a/glossary"' in a_panel
+    assert 'action="/w/a/knowledge"' in a_panel
 
 
 def test_glossary_invalid_workspace_query_not_selected(tmp_path):
@@ -151,10 +153,10 @@ def test_workspace_write_redirects_to_console_get(tmp_path):
         data={"name": "甲", "scope": "workspace"},
         follow_redirects=False,
     )
-    assert r.status_code == 303
-    assert r.headers["location"] == "/glossary?workspace=ws"
-    followed = c.get(r.headers["location"])
-    panel = _ws_panel(followed.text)
+    # 兼容 POST 返回统一知识页，旧路由不再形成第二个维护面。
+    assert r.status_code == 200
+    assert "甲" in r.text
+    panel = _ws_panel(r.text)
     assert panel and "甲" in panel
 
 
@@ -168,8 +170,9 @@ def test_web_glossary_add_and_delete(tmp_path):
     assert r.status_code == 200
     assert "中山医院" in r.text
     assert "中山一" in r.text
-    ws = Workspace.open(tmp_path / "ws")
-    assert ws.constitution.glossary[0].aka == ["中山一", "中山医院联会"]
+    from kairo.knowledge import load_workspace
+
+    assert [a.value for a in load_workspace(tmp_path / "ws")[0].entries[0].aliases] == ["中山一", "中山医院联会"]
 
     r2 = c.post("/w/ws/glossary/0/delete")
     assert r2.status_code == 200
@@ -180,5 +183,5 @@ def test_web_glossary_empty_name_stays_inline(tmp_path):
     Workspace.init(tmp_path / "ws", topic="t")
     r = _client(tmp_path).post("/w/ws/glossary", data={"name": "  "})
     assert r.status_code == 200
-    assert "name 不能为空" in r.text
+    assert "A canonical title is required" in r.text
     assert Workspace.open(tmp_path / "ws").constitution.glossary == []
