@@ -36,6 +36,8 @@ def test_open_existing_总结_is_journal_without_kind_field(tmp_path, monkeypatc
     ws.write_constitution(con)
     opened = Workspace.open(ws.root)
     assert effective_kind(opened) == KIND_JOURNAL
+    assert [t.path for t in opened.constitution.targets] == ["understanding.md"]
+    assert opened.constitution.live_targets() == []
     assert not stage_enabled(opened, "digest")
     assert not stage_enabled(opened, "compose")
     src = tmp_path / "a.txt"

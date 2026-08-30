@@ -333,6 +333,7 @@ def _dash_groups(items, pins: list[str], q: str, filt: str):
     pinned = [by_slug[p] for p in pins if p in by_slug]
     pinned_set = {s.slug for s in pinned}
     if pinned:
+        # 总结跟置顶同一行,但不写入 pinned.yaml,针脚仍按用户置顶集合。
         pinned = pinned + [j for j in journals if j.slug not in pinned_set]
         pinned_set = {s.slug for s in pinned}
         rest = [s for s in matched if s.slug not in pinned_set]
@@ -354,7 +355,8 @@ def dashboard(
     root = request.app.state.root
     items = scan_workspaces(root)
     filt = _dash_filter(filter)
-    pinned, rest, qn = _dash_groups(items, read_pins(root), q or "", filt)
+    pin_list = read_pins(root)
+    pinned, rest, qn = _dash_groups(items, pin_list, q or "", filt)
     now = datetime.datetime.now().astimezone()
     for s in (*pinned, *rest):
         s.when = activity_label(
@@ -371,6 +373,7 @@ def dashboard(
             "root": str(root),
             "nav_active": "workspaces",
             "pinned": pinned,
+            "pin_slugs": set(pin_list),
             "rest": rest,
             "q": qn,
             "filter": filt,

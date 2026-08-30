@@ -251,6 +251,14 @@ def test_dashboard_journal_sits_with_pins(tmp_path):
     assert pin_at < j_at < recent_at
     assert pin_at < e_at < recent_at
     assert recent_at < o_at
+    start = html.rfind('<div class="card', 0, j_at)
+    nxt = html.find('<div class="card', j_at + 1)
+    block = html[start : nxt if nxt != -1 else start + 2500]
+    assert "card-pin" not in block
+    assert "Unpin" not in block and "取消置顶" not in block
+    assert "pinned.yaml" not in (tmp_path / "pinned.yaml").read_text() or "总结" not in (
+        tmp_path / "pinned.yaml"
+    ).read_text()
 
 
 def test_dashboard_journal_in_unpinned_grid_without_pins(tmp_path):

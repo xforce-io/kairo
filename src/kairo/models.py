@@ -184,7 +184,11 @@ class Constitution(BaseModel):
     glossary: list[GlossaryEntry] = Field(default_factory=list)  # 领域真名册(#20)
 
     def live_targets(self) -> list[Target]:
-        """活 target:跳过判断层(#153)。旧 constitution 仍可声明 assessment,但不 fold。"""
+        """活 target:跳过判断层(#153)。journal（含现网「总结」）不 fold。"""
+        from kairo.kind import KIND_JOURNAL, resolve_kind
+
+        if resolve_kind(self.kind, self.topic) == KIND_JOURNAL:
+            return []
         return [t for t in self.targets if t.layer != "judgment"]
 
     def glossary_reference(self) -> str:
