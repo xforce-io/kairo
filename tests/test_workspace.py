@@ -25,6 +25,15 @@ def test_init_default_constitution_has_digest_prompt_and_fact_target(tmp_path):
     # #58:默认 digest 是高密度记忆纪要,不是一页纸周报
     assert "高密度" in con.pipeline.digest.prompt
     assert "宁详勿略" in con.pipeline.digest.prompt
+    prompt = con.pipeline.digest.prompt
+    assert "节名固定为「待办」" in prompt
+    assert "P0" in prompt and "P1" in prompt and "P2" in prompt and "P?" in prompt
+    assert "未定时" in prompt
+    assert " · " in prompt
+    assert "禁止表格" in prompt
+    assert "虚构优先级或截止日期" in prompt
+    assert "不要输出花括号" in prompt
+    assert "- P0 · 下周 ·" in prompt
     assert [t.path for t in con.targets] == ["understanding.md"]
     assert con.targets[0].layer == "fact"
 
