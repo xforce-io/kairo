@@ -213,8 +213,8 @@ def test_dashboard_journal_card_chip_and_count(tmp_path, monkeypatch):
     journal = Workspace.init(tmp_path / "总结", topic="总结")
     src = tmp_path / "a.txt"
     src.write_text("a")
-    journal.add([src], ref_id="r1", occurred_at="2026-08-24")
-    journal.add([src], ref_id="r2", occurred_at="2026-08-25")
+    journal.add([src], ref_id="r1", occurred_at="2026-08-24", role="source_text")
+    journal.add([src], ref_id="r2", occurred_at="2026-08-25", role="source_text")
     html = _client(tmp_path).get("/").text
     assert "系统" not in html
     m = re.search(r'href="/w/%E6%80%BB%E7%BB%93".*?</a>', html, re.S) or re.search(
@@ -230,6 +230,23 @@ def test_dashboard_journal_card_chip_and_count(tmp_path, monkeypatch):
     energy = re.search(r'href="/w/energy".*?</a>', html, re.S)
     assert energy
     assert "观测" in energy.group(0) or "obs" in energy.group(0)
+
+
+def test_dashboard_journal_shows_stale_when_attachment_pending(tmp_path):
+    journal = Workspace.init(tmp_path / "总结", topic="总结")
+    src = tmp_path / "a.txt"
+    src.write_text("回顾正文")
+    rid = journal.add([src], ref_id="r1", occurred_at="2026-08-24", role="source_text")
+    spoken = tmp_path / "t.md"
+    spoken.write_text("口述要点")
+    journal.add([spoken], ref_id=rid, role="transcript")
+    html = _client(tmp_path).get("/").text
+    m = re.search(r'href="/w/%E6%80%BB%E7%BB%93".*?</a>', html, re.S) or re.search(
+        r'href="/w/总结".*?</a>', html, re.S
+    )
+    assert m, html[:500]
+    card = m.group(0)
+    assert "待 step" in card or "to step" in card
 
 
 def test_dashboard_journal_sits_with_pins(tmp_path):

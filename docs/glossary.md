@@ -17,8 +17,9 @@
 | corpus | 基线型参考，只读参考层，不 digest、不 fold。 | 语料库 |
 | digest | 一条 reference 的高密度记忆纪要，compose / 时段回顾的输入。 | 摘要、纪要原文 |
 | kind | constitution 建仓时选用的填法名；运行时读 digest.enabled / targets / review_input。 | 工作区类型枚举 |
-| journal | kind 预设：空 targets、关 digest、材料不进时段回顾原料。现网「总结」仓。 | 回顾仓、总结仓 |
+| journal | kind 预设：空 targets、开 digest（不计回顾自身 source_text）、关 compose、材料不进时段回顾原料。现网「总结」仓。 | 回顾仓、总结仓 |
 | fold | 把 stream digest 调和进 constitution 声明的活 target（默认 `understanding.md`）。 | 融合、合并文档 |
+| 回顾折入 | 把一条回顾上后附材料的 digest 写进该条回顾正文。 | — |
 | 活 target | constitution 中运行时参与 fold 的 target；当前排除判断层 target。 | 活文档、活动目标 |
 | 材料目录 | Digest/Compose 写入 prompt 的表：标记（必读/按需）、角色、来源、路径、体量；不含正文。 | 文件清单、prompt 目录 |
 | 听读 | Web 上音频与带时间轴誊录联动播放、高亮、跳转的界面。 | 听写、播放器页 |

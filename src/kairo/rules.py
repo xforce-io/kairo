@@ -450,17 +450,28 @@ class NormalizeRule:
 
 
 class DigestRule:
-    """有正文(transcript/source_text)且无 digest → 产高密度记忆纪要(用 provider)。"""
+    """有正文(transcript/source_text)且无 digest → 产高密度记忆纪要(用 provider)。
+
+    #193:journal 不计该条回顾 source_text,避免折入后指纹循环。
+    """
 
     def __init__(self, ws, provider) -> None:
         self.ws = ws
         self.provider = provider
         self.prompt = ws.constitution.pipeline.digest.prompt
 
+    def _digest_roles(self) -> list[str]:
+        roles = list(self.ws.constitution.body_roles)
+        from kairo.kind import is_journal_workspace
+
+        if is_journal_workspace(self.ws):
+            return [r for r in roles if r != "source_text"]
+        return roles
+
     def _read_body(self, man) -> str | None:
         """拼接正文供指纹与测试;不进入 provider prompt(#153)。"""
         chunks: list[str] = []
-        for role in self.ws.constitution.body_roles:
+        for role in self._digest_roles():
             forms = sorted(
                 (f for f in man.forms if f.role == role),
                 key=lambda f: f.location,
@@ -479,7 +490,7 @@ class DigestRule:
 
     def _catalog_items(self, man) -> list[CatalogItem]:
         items: list[CatalogItem] = []
-        for role in self.ws.constitution.body_roles:
+        for role in self._digest_roles():
             forms = sorted(
                 (f for f in man.forms if f.role == role),
                 key=lambda f: f.location,
@@ -613,6 +624,136 @@ class DigestRule:
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试
+            ps = state.products.get(key)
+            return ps is None or ps.input_hash != input_hash
+
+        return WorkItem(key, input_hash, run, is_stale)
+
+
+_REVIEW_FOLD_PERSONA = (
+    "把新纪要并入这篇时段回顾。"
+    "保留原结构（发生了什么 / 待跟进事项 / 明显冲突与未调和点）；没有的节按材料需要可补。"
+    "纪要中的新事实必须写入；与原回顾冲突时以纪要为准并点明。"
+    "不要编造纪要和原文都没有的事实。不要把誊录当正文。只输出回顾全文。"
+)
+
+
+class ReviewFoldRule:
+    """#193:journal 回顾在 digest 成功后把纪要写进该条 source_text。"""
+
+    def __init__(self, ws, provider) -> None:
+        self.ws = ws
+        self.provider = provider
+
+    def discover(self, state: State | None = None) -> list[WorkItem]:
+        from kairo.kind import is_journal_workspace
+
+        if not is_journal_workspace(self.ws):
+            return []
+        items: list[WorkItem] = []
+        for ref_id in self.ws.list_reference_ids():
+            man = self.ws.read_manifest(ref_id)
+            src = next((f for f in man.forms if f.role == "source_text"), None)
+            if src is None:
+                continue
+            digest_key = f"references/{ref_id}/digest.md"
+            digest_path = self.ws.root / digest_key
+            if not digest_path.is_file():
+                continue
+            ps = None if state is None else state.products.get(digest_key)
+            if ps is None or ps.status == "blocked" or not ps.input_hash:
+                continue
+            items.append(self._make(ref_id, src, digest_path, ps.input_hash))
+        return items
+
+    def _make(self, ref_id: str, src: Form, digest_path: Path, input_hash: str) -> WorkItem:
+        key = f"references/{ref_id}/review_fold"
+        src_path = _form_abs(self.ws, src)
+
+        def run(state: State) -> None:
+            if not src_path.is_file() or not digest_path.is_file():
+                state.products[key] = ProductState(
+                    input_hash=input_hash, status="blocked", reason="missing-source"
+                )
+                return
+            materials = [
+                CatalogItem(
+                    rel_path=_form_rel(self.ws, src, src_path),
+                    abs_path=src_path,
+                    role="source_text",
+                    origin=src.origin,
+                    required=True,
+                    size=item_size(src_path),
+                ),
+                CatalogItem(
+                    rel_path=f"references/{ref_id}/digest.md",
+                    abs_path=digest_path,
+                    role="digest",
+                    origin="digest",
+                    required=True,
+                    size=item_size(digest_path),
+                ),
+            ]
+            try:
+                content = _run_agent(
+                    self.provider,
+                    _REVIEW_FOLD_PERSONA + _CATALOG_DISCIPLINE + _OUTPUT_DISCIPLINE,
+                    format_catalog(materials),
+                    "review.md",
+                    catalog_items=materials,
+                )
+            except Exception as exc:
+                import sys
+
+                print(
+                    f"Error: provider-failed stage=review-fold: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_PROVIDER_FAILED,
+                    diagnostic=make_provider_diagnostic(
+                        "review-fold", self.provider, exc
+                    ),
+                )
+                return
+            from kairo.review import strip_process_preamble
+
+            body = strip_process_preamble(content)
+            if not body.strip():
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_PROVIDER_FAILED,
+                    diagnostic=make_provider_diagnostic(
+                        "review-fold",
+                        self.provider,
+                        RuntimeError("empty review fold"),
+                    ),
+                )
+                return
+            src_path.parent.mkdir(parents=True, exist_ok=True)
+            src_path.write_text(body, encoding="utf-8")
+            new_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()[:12]
+            man = self.ws.read_manifest(ref_id)
+            man.forms = [
+                f.model_copy(update={"hash": new_hash})
+                if f.role == "source_text"
+                else f
+                for f in man.forms
+            ]
+            self.ws.write_manifest(ref_id, man)
+            state.products[key] = ProductState(
+                input_hash=input_hash,
+                produced_by={
+                    "provider": self.provider.name,
+                    "model": self.provider.model,
+                },
+            )
+
+        def is_stale(state: State) -> bool:
             ps = state.products.get(key)
             return ps is None or ps.input_hash != input_hash
 

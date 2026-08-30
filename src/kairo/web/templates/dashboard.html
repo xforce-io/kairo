@@ -29,9 +29,9 @@
         {% else %}
         <span class="badge stream">{{ s.stream_count }} {{ t('dash.badge_stream') }}</span>
         <span class="badge corpus">{{ s.corpus_count }} {{ t('dash.badge_corpus') }}</span>
+        {% endif %}
         {% if s.stale_count %}<span class="badge stale">{{ s.stale_count }} {{ t('dash.badge_stale') }}</span>{% endif %}
         {% if s.blocked_count %}<span class="badge blocked">⚠ {{ s.blocked_count }}</span>{% endif %}
-        {% endif %}
       </div>
     </a>
     <button type="button" class="card-trash" title="{{ t('dash.delete_btn') }}"

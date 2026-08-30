@@ -95,8 +95,8 @@ def summarize(ws: Workspace) -> WorkspaceSummary:
         ref_count=stream + corpus,
         stream_count=stream,
         corpus_count=corpus,
-        blocked_count=0 if journal else blocked,
-        stale_count=0 if journal else len(pending(ws)),
+        blocked_count=blocked,
+        stale_count=len(pending(ws)),
         last_activity=last_activity(ws),
         journal=journal,
     )
