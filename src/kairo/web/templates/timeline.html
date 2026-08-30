@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block subtitle %}{{ month_label }}{% endblock %}
+{% block subtitle %}{% if range_on %}{{ range_label }}{% else %}{{ month_label }}{% endif %}{% endblock %}
 {% block body %}
 <div class="timeline cal-page">
   <div class="tl-toolbar">
@@ -39,15 +39,19 @@
         <a class="tl-nav" href="/timeline?day={{ next_day }}">›</a>
       </div>
       <div class="cal-weekdays">
+        <span></span>
         {% for w in weekdays %}<span>{{ w }}</span>{% endfor %}
       </div>
       <div class="cal-grid">
-        {% for c in cells %}
-        <a class="cal-cell{% if c.mute %} mute{% endif %}{% if c.today %} today{% endif %}{% if c.on %} on{% endif %}"
-           href="/timeline?day={{ c.iso }}">
+        {% for w in weeks %}
+        <a class="cal-wn" href="{{ w.href }}" title="{{ t('tl.week_hint') }}">·</a>
+        {% for c in w.days %}
+        <a class="cal-cell{% if c.mute %} mute{% endif %}{% if c.today %} today{% endif %}{% if c.on %} on{% endif %}{% if c.in %} in{% endif %}{% if c.edge %} edge{% endif %}"
+           href="{{ c.href }}">
           <span class="cal-num">{{ c.num }}</span>
           <span class="cal-dots">{% for _ in range(c.dots) %}<span class="cal-dot"></span>{% endfor %}</span>
         </a>
+        {% endfor %}
         {% endfor %}
       </div>
     </section>
@@ -65,17 +69,71 @@
       </section>
       {% else %}
       <section class="tl-day">
-        <div class="tl-day-head"><h2>{{ day_iso }}</h2><span class="count">{{ day_items|length }}</span></div>
-        {% for it in day_items %}
-        <a class="tl-row" href="/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}">
-          <span class="tl-title">{{ it.title }}</span>
-          <span class="tl-ws">{{ it.topic }}</span>
-          <span class="tl-meta">{{ it.id }}</span>
-        </a>
+        <div class="tl-day-head">
+          <h2>{% if range_on %}{{ range_label }}{% else %}{{ day_iso }}{% endif %}</h2>
+          <span class="count">{{ day_items|length }}</span>
+        </div>
+        {% if range_on and (too_long or day_items) %}
+        <div class="rev-actions">
+          {% if too_long %}
+          <p class="rev-hint">{{ t('tl.review_too_long').format(n=max_range_days) }}</p>
+          <button type="button" class="btn" disabled>{{ t('tl.review_btn') }}</button>
+          {% elif digest_n == 0 %}
+          <p class="rev-hint">{{ t('tl.review_no_digest') }}</p>
+          {% else %}
+          <p class="rev-hint">{{ t('tl.review_hint').format(d=digest_n, n=no_digest_n) }}</p>
+          <button type="button" class="btn" onclick="document.getElementById('rev-dlg').showModal()">{{ t('tl.review_btn') }}</button>
+          {% endif %}
+        </div>
+        {% endif %}
+        {% if range_on %}
+          {% for g in range_groups %}
+          <div class="tl-range-day">{{ g.key }}</div>
+          {% for it in g.entries %}
+          <a class="tl-row" href="/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}">
+            <span class="tl-title">{{ it.title }}</span>
+            <span class="tl-ws">{{ it.topic }}</span>
+            <span class="tl-meta">{{ it.id }}</span>
+          </a>
+          {% endfor %}
+          {% else %}
+          <p class="tl-empty">{{ t('tl.empty_range') }}</p>
+          {% endfor %}
         {% else %}
-        <p class="tl-empty">{{ t('tl.empty_day') }}</p>
-        {% endfor %}
+          {% for it in day_items %}
+          <a class="tl-row" href="/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}">
+            <span class="tl-title">{{ it.title }}</span>
+            <span class="tl-ws">{{ it.topic }}</span>
+            <span class="tl-meta">{% if it.occurred_at %}{{ it.occurred_at.strftime('%m-%d') }}{% else %}{{ it.id }}{% endif %}</span>
+          </a>
+          {% else %}
+          <p class="tl-empty">{{ t('tl.empty_day') }}</p>
+          {% endfor %}
+        {% endif %}
       </section>
+      {% if range_on and day_items and not too_long and digest_n %}
+      <dialog id="rev-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
+        <div class="dlg-head">
+          <h3 class="dlg-title">{{ t('tl.review_btn') }}</h3>
+          <button type="button" class="dlg-x" aria-label="close" onclick="this.closest('dialog').close()">×</button>
+        </div>
+        <form class="dlg-form" method="post" action="/timeline/review"
+              onsubmit="var b=this.querySelector('[type=submit]');b.disabled=true;b.textContent='{{ t('run.running') }}';">
+          <input type="hidden" name="from" value="{{ range_from }}">
+          <input type="hidden" name="to" value="{{ range_to }}">
+          {% if workspaces %}
+          <label class="dlg-label" for="rev-ws">{{ t('tl.review_ws') }}</label>
+          <select id="rev-ws" name="workspace">
+            {% for w in workspaces %}
+            <option value="{{ w.slug }}"{% if w.topic == '回顾' or w.slug == '回顾' %} selected{% endif %}>{{ w.topic }}</option>
+            {% endfor %}
+          </select>
+          {% endif %}
+          <input id="rev-topic" type="text" name="topic" placeholder="{{ t('tl.review_new_ws') }}">
+          <button type="submit" class="btn btn-step dlg-go">{{ t('tl.review_confirm') }}</button>
+        </form>
+      </dialog>
+      {% endif %}
       {% endif %}
     </aside>
   </div>

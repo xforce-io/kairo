@@ -133,11 +133,56 @@ def item_as_json(it: TimelineItem) -> dict:
     }
 
 
+MAX_RANGE_DAYS = 31
+
+
 @dataclass(frozen=True)
 class TimelineQuery:
     view: str  # calendar | recent | unknown
     month: dt.date  # 该月 1 号
-    day: dt.date  # 日历选中日
+    day: dt.date  # 日历选中日 / 区间止日
+    start: dt.date | None = None  # 闭区间起;与 end 同时有值则为区间
+    end: dt.date | None = None
+
+
+def range_day_count(start: dt.date, end: dt.date) -> int:
+    return (end - start).days + 1
+
+
+def format_range_label(start: dt.date, end: dt.date, *, zh: bool) -> str:
+    if zh:
+        return f"{start.month}月{start.day}日 – {end.month}月{end.day}日"
+    return f"{start.strftime('%b')} {start.day} – {end.strftime('%b')} {end.day}"
+
+
+def filter_range(
+    items: list[TimelineItem], start: dt.date, end: dt.date
+) -> list[TimelineItem]:
+    """发生日落在闭区间内;未知发生日排除。"""
+    out = [
+        it
+        for it in items
+        if it.occurred_at is not None and start <= it.occurred_at <= end
+    ]
+    out.sort(key=lambda it: (it.occurred_at or dt.date.min, it.workspace, it.id))
+    return out
+
+
+def cell_href(q: TimelineQuery, d: dt.date) -> str:
+    """两下点:已有单日再点另一天 → 区间;已是区间再点 → 新单日。"""
+    if q.start is not None and q.end is not None and q.start != q.end:
+        return f"/timeline?day={d.isoformat()}"
+    cur = q.day
+    if d == cur:
+        return f"/timeline?day={d.isoformat()}"
+    a, b = (cur, d) if cur <= d else (d, cur)
+    return f"/timeline?from={a.isoformat()}&to={b.isoformat()}"
+
+
+def week_bounds(d: dt.date) -> tuple[dt.date, dt.date]:
+    """含 d 的周一..周日(与 month_cells 周首一致)。"""
+    mon = d - dt.timedelta(days=d.weekday())
+    return mon, mon + dt.timedelta(days=6)
 
 
 def resolve_timeline_query(
@@ -146,12 +191,34 @@ def resolve_timeline_query(
     day: str | None = None,
     mode: str | None = None,
     unknown: str | None = None,
+    start: str | None = None,
+    end: str | None = None,
     today: dt.date | None = None,
 ) -> TimelineQuery:
     """Web GET /timeline 查询契约。非法或互斥 → TimelineQueryError。"""
     today = today or dt.date.today()
     unknown_on = unknown in ("1", "true", "yes")
     mode = (mode or "").strip() or None
+    start_s = (start or "").strip() or None
+    end_s = (end or "").strip() or None
+    if start_s or end_s:
+        if mode == "recent" or unknown_on:
+            raise TimelineQueryError("range is exclusive")
+        if not start_s or not end_s:
+            raise TimelineQueryError("range needs from and to")
+        a = parse_calendar_date(start_s)
+        b = parse_calendar_date(end_s)
+        if a is None or b is None:
+            raise TimelineQueryError("illegal day")
+        if a > b:
+            a, b = b, a
+        return TimelineQuery(
+            view="calendar",
+            month=dt.date(b.year, b.month, 1),
+            day=b,
+            start=a,
+            end=b,
+        )
     if mode == "day":
         mode = None
     if mode not in (None, "recent"):
