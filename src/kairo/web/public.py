@@ -1284,6 +1284,17 @@ def build_public_router() -> APIRouter:
     def healthz() -> JSONResponse:
         return JSONResponse({"ok": True}, headers=_NO_STORE)
 
+    @router.get("/readyz")
+    def readyz(request: Request) -> JSONResponse:
+        """数据根可用且 public-read.json 合法(含零根)才 200;缺失/损坏 503(#155)。"""
+        root = Path(request.app.state.root)
+        if not root.is_dir():
+            return JSONResponse({"ok": False}, status_code=503, headers=_NO_STORE)
+        snap = load_public_read_state(root)
+        if not snap.valid:
+            return JSONResponse({"ok": False}, status_code=503, headers=_NO_STORE)
+        return JSONResponse({"ok": True}, headers=_NO_STORE)
+
     @router.get("/", response_class=HTMLResponse)
     def public_home() -> HTMLResponse:
         body = (

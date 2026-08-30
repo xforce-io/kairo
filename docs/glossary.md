@@ -27,3 +27,12 @@
 | 人话进度 | 运行中默认可见的一行状态：当前步骤或对象（能判则判）加上已运行时长；不是 agent 原文，也不是任务终态。 | 进度条、ETA、控制台状态、Running… |
 | 运行健康 | 本次 Web 任务会话内的传输稳定性提示；出现指定传输类事件且进程未退出时，明示不稳但仍在跑。 | 失败、Run failed、provider-failed、任务终态 |
 | 原始运行日志 | 子进程合并 stdout/stderr 的按行原文，默认折叠，展开后才可见。 | 进度面、状态区、运行摘要 |
+| remote | 在本机配置、通过 SSH 到达且受信任的 Kairo 备份目标。 | 远端环境、备份服务器 |
+| 路径指针 | manifest form 中指向 workspace 外部源文件或目录、尚未物化进 workspace 的 location。 | 外链、外部引用 |
+| 恢复闭包 | 恢复 serve root 所需的全部目录内数据及 manifest 登记的路径指针材料。 | 备份范围、恢复集 |
+| 备份 generation | remote 上一份不可变、完整且校验通过的恢复版本。 | 备份批次、快照 |
+| current | remote 上唯一指向当前可消费备份 generation 的原子指针。 | 当前版本、线上版本 |
+| 备份清单 | `backup.json` 中完整描述一份备份 generation 的目录、文件、物化对象及其完整性信息。 | 文件清单 |
+| 最近结果 | 源环境为某个 remote 保留的最近一次备份尝试记录，含尝试时间、成功时间、backup_id 与成败。 | 同步日志 |
+| 重叠跳过 | 同一 remote 上一轮仍在运行时，本轮不启动第二次备份并留下可判定记录。 | 取消 |
+| 数据根 | 容器内 public-read 进程打开的 serve root，必须经 current 跟随到该 generation 的 `data/`。 | 挂载点、备份根 |

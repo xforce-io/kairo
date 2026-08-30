@@ -53,6 +53,8 @@ glossary_app = typer.Typer(help="兼容别名：知识条目 list / add / rm(wor
 knowledge_app = typer.Typer(help="知识条目：list / add / rm(workspace 或 global)")
 app.add_typer(glossary_app, name="glossary")
 app.add_typer(knowledge_app, name="knowledge")
+backup_app = typer.Typer(help="remote 完整备份:push / verify / restore")
+app.add_typer(backup_app, name="backup")
 
 
 def _open_ws() -> Workspace:
@@ -68,14 +70,17 @@ def _open_ws() -> Workspace:
         raise typer.Exit(1) from None
 
 
-def _serve_root(root: Path | None = None) -> Path:
-    """解析 serve root:显式参数 → KAIRO_SERVE_ROOT → cwd。"""
+def _serve_root(root: Path | None = None, *, follow: bool = True) -> Path:
+    """解析 serve root:显式参数 → KAIRO_SERVE_ROOT → cwd。
+
+    public-read 经 current 跟随数据根时 follow=False,避免启动时 resolve 钉死 generation。
+    """
     if root is not None:
-        return Path(root).expanduser().resolve()
-    env = os.environ.get("KAIRO_SERVE_ROOT")
-    if env:
-        return Path(env).expanduser().resolve()
-    return Path.cwd().resolve()
+        path = Path(root).expanduser()
+    else:
+        env = os.environ.get("KAIRO_SERVE_ROOT")
+        path = Path(env).expanduser() if env else Path.cwd()
+    return path.resolve() if follow else path
 
 
 def _validate_topic_name(topic: str) -> str:
@@ -629,15 +634,27 @@ def serve(
         "--mode",
         help="console=本地 Console(默认); public-read=匿名公开只读面(#118)",
     ),
+    host: str = typer.Option(
+        "127.0.0.1",
+        "--host",
+        help="监听地址;console 仅回环;public-read 可 0.0.0.0(#155)",
+    ),
 ) -> None:
     """启动 Web 服务。默认本地 Console;``--mode public-read`` 仅挂匿名公开只读面。"""
-    serve_root = _serve_root(root)
     if mode not in {"console", "public-read"}:
         typer.secho(
             f"未知 mode: {mode}(期望 console 或 public-read)",
             fg=typer.colors.RED,
             err=True,
         )
+        raise typer.Exit(2)
+    loopback = {"127.0.0.1", "::1", "localhost"}
+    if mode == "console" and host not in loopback:
+        typer.secho("console 只能绑定回环地址", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    serve_root = _serve_root(root, follow=(mode != "public-read"))
+    if mode == "public-read" and not Path(serve_root).is_dir():
+        typer.secho(f"数据根不是目录:{serve_root}", fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
     try:
         from kairo.web.server import run as web_run
@@ -649,8 +666,8 @@ def serve(
         )
         raise typer.Exit(1) from None
     label = "public-read" if mode == "public-read" else "console"
-    typer.echo(f"kairo {label}: http://127.0.0.1:{port}  (root={serve_root})")
-    web_run(serve_root, port=port, mode=mode)  # type: ignore[arg-type]
+    typer.echo(f"kairo {label}: http://{host}:{port}  (root={serve_root})")
+    web_run(serve_root, port=port, mode=mode, host=host)  # type: ignore[arg-type]
 
 
 @app.command()
@@ -675,6 +692,90 @@ def _stamp_serve_workspaces(serve: Path) -> None:
     from kairo.workspace import stamp_serve_workspaces
 
     stamp_serve_workspaces(serve)
+
+
+def _backup_fail(exc) -> None:
+    typer.secho(f"{exc.stage}: {exc.message}", fg=typer.colors.RED, err=True)
+    raise typer.Exit(exc.code) from None
+
+
+@backup_app.command("push")
+def backup_push(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+    root: Path = typer.Argument(
+        None, help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
+    ),
+) -> None:
+    """把 serve root 完整备份到 remote 并原子切换 current(#154/#156)。"""
+    from kairo.backup import BackupError, push_named
+
+    try:
+        result = push_named(remote, _serve_root(root))
+    except BackupError as exc:
+        _backup_fail(exc)
+    typer.echo(
+        f"{result.status} remote={remote} backup_id={result.backup_id} "
+        f"files={result.files} bytes={result.bytes}"
+    )
+
+
+@backup_app.command("status")
+def backup_status(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+) -> None:
+    """显示该 remote 最近结果(#156)。"""
+    from kairo.backup import BackupError, read_result
+
+    try:
+        data = read_result(remote)
+    except BackupError as exc:
+        _backup_fail(exc)
+    if data is None:
+        typer.echo(f"empty remote={remote}")
+        return
+    typer.echo(
+        f"status={data.get('status')} last_attempt_at={data.get('last_attempt_at')} "
+        f"last_success_at={data.get('last_success_at') or '-'} "
+        f"backup_id={data.get('backup_id') or '-'}"
+    )
+
+
+@backup_app.command("verify")
+def backup_verify(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+    backup_id: str = typer.Option(None, "--backup-id", help="默认 current"),
+) -> None:
+    """校验 remote 上 current 或指定 generation(#154)。"""
+    from kairo.backup import BackupError, load_remote, verify_generation
+
+    try:
+        spec = load_remote(remote)
+        result = verify_generation(Path(spec.path), backup_id)
+    except BackupError as exc:
+        _backup_fail(exc)
+    typer.echo(
+        f"ok backup_id={result.backup_id} files={result.files} bytes={result.bytes}"
+    )
+
+
+@backup_app.command("restore")
+def backup_restore(
+    remote: str = typer.Argument(..., help="config.toml [remote.<name>]"),
+    dest: Path = typer.Argument(..., help="空目标目录"),
+    backup_id: str = typer.Option(None, "--backup-id", help="默认 current"),
+) -> None:
+    """把 remote generation 恢复到空目录(#154)。"""
+    from kairo.backup import BackupError, load_remote, restore_generation
+
+    try:
+        spec = load_remote(remote)
+        result = restore_generation(Path(spec.path), dest, backup_id)
+    except BackupError as exc:
+        _backup_fail(exc)
+    typer.echo(
+        f"restored backup_id={result.backup_id} dest={dest} "
+        f"files={result.files} bytes={result.bytes}"
+    )
 
 
 @glossary_app.command("list")
