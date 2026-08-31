@@ -30,6 +30,7 @@ from kairo.knowledge_matcher import KnowledgeMatcher
 
 OPEN = frozenset({"pending", "pending_global"})
 _CANDIDATE_STATUSES = frozenset({"pending", "pending_global", "accepted", "merged", "ignored", "stale", "rejected_global"})
+MAX_DRAFTS_PER_SOURCE = 12
 
 
 def _now() -> str:
@@ -303,8 +304,19 @@ def ingest_candidates(
     review.extract_errors.pop(error_key, None)
     review.extract_error_versions.pop(error_key, None)
     review.extract_error_meta.pop(error_key, None)
+    # 同材料重抽：丢掉该 path 上未审 pending，不叠历史。已终态保留。
+    review.candidates = [
+        c
+        for c in review.candidates
+        if not (
+            c.path == path
+            and c.source_kind == source_kind
+            and c.status == "pending"
+        )
+    ]
     existing = {c.fingerprint for c in review.candidates}
     source_hash = _hash(source_text)
+    added = 0
     for draft in drafts:
         title = str(draft.get("title", draft.get("name", ""))).strip()
         quote = str(draft.get("quote", "")).strip()
@@ -313,6 +325,8 @@ def ingest_candidates(
         fp = _fingerprint(source_kind, path, title, quote)
         if fp in existing:
             continue
+        if added >= MAX_DRAFTS_PER_SOURCE:
+            break
         aliases = [
             KnowledgeAlias(value=str(value).strip())
             for value in draft.get("aliases", draft.get("aka", [])) or []
@@ -343,6 +357,7 @@ def ingest_candidates(
             candidate = candidate.model_copy(update={"suggestion": matcher.suggest([candidate.title, *(a.value for a in aliases)])})
         review.candidates.append(candidate)
         existing.add(fp)
+        added += 1
     save_review(workspace_root, review)
     return review
 
@@ -399,6 +414,8 @@ def parse_extract_yaml(text: str) -> list[dict]:
 
 _PERSONA = """从已完成产物中提取值得人工审核的领域知识候选。
 只能提出原文有直接证据的标题、简短说明和别名；quote 必须逐字出现在原文。
+最多 12 条：只提跨材料仍有用的领域专名、系统名或稳定口径。
+不要把一次性口号、待办事项、会议流程拆成词条。
 输出 YAML 列表，每项仅含 title、description、aliases、tags、quote；无候选时输出 []。
 不要自动确认、不要猜测、不要输出 Markdown 围栏。"""
 

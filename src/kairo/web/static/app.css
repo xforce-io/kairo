@@ -659,6 +659,14 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .gl-ws-chip .n { margin-left: 4px; color: var(--amber); }
 .gl-console { max-width: 640px; margin: 16px 24px; }
 .gl-ws-panel { margin-top: 22px; }
+.knowledge-candidate-edit { margin-top: 8px; }
+.knowledge-candidate-edit summary { cursor: pointer; color: var(--muted, #666); }
+.knowledge-candidate-edit form {
+  display: grid;
+  gap: 6px;
+  max-width: 36rem;
+  margin-top: 8px;
+}
 .lang-switch a { color: #888; text-decoration: none; padding: 2px 6px; border-radius: 4px; }
 .lang-switch a.on { color: #fff; background: #444; }
 

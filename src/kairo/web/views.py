@@ -1675,10 +1675,14 @@ def _knowledge_page(
                 row["available"] = (serve / selected / candidate.path).is_file()
                 if candidate.suggestion:
                     targets = {entry.id: entry.title for entry in [*local_entries, *global_entries]}
-                    row["suggestion_text"] = "；".join(
-                        f"{term} → {targets.get(value.removeprefix('merge:'), value)}"
-                        for term, value in candidate.suggestion.items()
-                    )
+                    parts = []
+                    for term, value in candidate.suggestion.items():
+                        if not str(value).startswith("merge:"):
+                            continue
+                        title = targets.get(str(value).removeprefix("merge:"), "")
+                        if title:
+                            parts.append(f"{term} → {title}")
+                    row["suggestion_text"] = "；".join(parts)
                 haystack = " ".join([
                     candidate.title, candidate.description, candidate.status,
                     candidate.path, *candidate.tags,
