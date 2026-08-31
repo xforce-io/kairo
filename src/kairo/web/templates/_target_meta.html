@@ -2,7 +2,7 @@
   <p class="meta-kicker">{{ t('target.kicker_prefix') }} · <span class="meta-st {{ status }}">{{ status }}</span></p>
   <h3 class="meta-title">{{ path }}</h3>
   {% if reason %}<p class="meta-hint">{{ t('target.reason_prefix') }}:{{ reason }}{% if diagnostic_stage %} (stage={{ diagnostic_stage }}){% endif %}{% if diagnostic_provider %} (provider={{ diagnostic_provider }}){% endif %}{% if diagnostic_summary %} — {{ diagnostic_summary }}{% endif %}</p>{% endif %}
-  {% if can_regen %}
+  {% if can_regen and not public_read %}
   <button type="button" class="btn btn-ghost btn-regen"
           hx-post="/w/{{ slug | urlencode }}/step"
           hx-vals='{"target": "{{ path }}"}'
