@@ -70,6 +70,41 @@ def test_s2_ref_meta_hides_write_actions_in_public_read(tmp_path):
     assert retry.status_code == 404
 
 
+def _assert_shareable_ref_page(client: TestClient, slug: str, rid: str) -> str:
+    page = client.get(f"/w/{slug}", params={"ref": rid})
+    assert page.status_code == 200
+    share = f"/w/{slug}?ref={rid}"
+    meta = f"/w/{slug}/ref/{rid}"
+    assert f'href="{share}"' in page.text
+    assert 'href="#"' not in page.text.split('id="refs-list"', 1)[-1].split("id=", 1)[0]
+    assert f"is-active" in page.text
+    assert share in page.text
+    assert f'hx-get="{meta}"' in page.text
+    assert 'hx-trigger="load"' in page.text
+    assert f'hx-get="{meta}"' in page.text.split('id="meta"', 1)[-1][:400]
+    return page.text
+
+
+def test_share_url_selects_ref_in_public_read_and_hides_write_chrome(tmp_path):
+    root, rid, slug = _full_public_root(tmp_path)
+    pub = _public_client(root)
+    _assert_shareable_ref_page(pub, slug, rid)
+    meta = pub.get(f"/w/{slug}/ref/{rid}")
+    assert meta.status_code == 200
+    assert "+ Attach material" not in meta.text
+    assert "↻ Reprocess" not in meta.text
+
+
+def test_share_url_selects_ref_in_console_and_keeps_write_chrome(tmp_path):
+    root, rid, slug = _full_public_root(tmp_path)
+    c = TestClient(create_app(root, mode="console"))
+    _assert_shareable_ref_page(c, slug, rid)
+    meta = c.get(f"/w/{slug}/ref/{rid}")
+    assert meta.status_code == 200
+    assert "+ Attach material" in meta.text
+    assert "↻ Reprocess" in meta.text
+
+
 def test_console_mode_still_lists_all_and_allows_write_chrome(tmp_path):
     root, rid, slug = _full_public_root(tmp_path)
     Workspace.init(root / "secret", topic="secret-private")
