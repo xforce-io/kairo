@@ -12,6 +12,10 @@
     <button type="submit" class="meta-rename-save" title="{{ t('ref.rename_save') }}">{{ t('ref.rename_save') }}</button>
   </form>
   {% endif %}
+  <button type="button" class="btn btn-ghost" data-share-ref
+          data-share-path="/w/{{ slug | urlencode }}?ref={{ ref_id | urlencode }}"
+          data-share-copied="{{ t('ref.share_copied') }}"
+          data-share-prompt="{{ t('ref.share_prompt') }}">{{ t('ref.share_btn') }}</button>
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
   {% if can_edit_time %}
   <div class="meta-label">{{ t('tl.time') }}</div>

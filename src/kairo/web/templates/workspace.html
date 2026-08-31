@@ -199,6 +199,32 @@
       setTimeout(function () { btn.classList.remove('copied'); }, 1200);
     });
   }, true);
+  // 一键分享参考 URL:优先 clipboard,HTTP/失败则 prompt 同一绝对地址
+  function kairoCopyShareUrl(url, promptLabel) {
+    function fallback() { window.prompt(promptLabel || url, url); }
+    if (!(navigator.clipboard && window.isSecureContext && navigator.clipboard.writeText)) {
+      fallback();
+      return Promise.resolve(false);
+    }
+    return navigator.clipboard.writeText(url).then(function () { return true; }).catch(function () {
+      fallback();
+      return false;
+    });
+  }
+  document.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-share-ref]');
+    if (!btn || !btn.dataset.sharePath) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var url = window.location.origin + btn.dataset.sharePath;
+    kairoCopyShareUrl(url, btn.dataset.sharePrompt).then(function (ok) {
+      if (!ok) return;
+      var prev = btn.textContent;
+      btn.textContent = btn.dataset.shareCopied || prev;
+      btn.classList.add('copied');
+      setTimeout(function () { btn.textContent = prev; btn.classList.remove('copied'); }, 1200);
+    });
+  }, true);
   // 点整行(可预览/可系统打开)→ 高亮;预览或 open 由该行 hx-* 触发
   document.addEventListener('click', function (e) {
     var tr = e.target.closest('.meta-forms tr.is-prev, .meta-forms tr.is-open');
