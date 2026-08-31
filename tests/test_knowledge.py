@@ -24,6 +24,7 @@ from kairo.knowledge import (
 )
 from kairo.knowledge_matcher import KnowledgeMatcher, MatchBudget
 from kairo.knowledge_review import (
+    MAX_DRAFTS_PER_SOURCE,
     accept_global,
     accept_workspace,
     ingest_candidates,
@@ -660,6 +661,57 @@ def test_extract_after_success_ingests_flow_tags(tmp_path):
     review = load_review(ws.root)
     assert review.extract_errors == {}
     assert {c.title for c in review.candidates} == {"节能算法", "一张网"}
+
+
+def test_ingest_replaces_pending_for_same_path_and_caps_drafts(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    path = "references/r/digest.md"
+    body = "证据甲 证据乙 证据丙"
+    digest = ws.root / path
+    digest.parent.mkdir(parents=True)
+    digest.write_text(body)
+    ingest_candidates(
+        ws.root,
+        source_kind="digest",
+        path=path,
+        source_text=body,
+        drafts=[{"title": "旧甲", "quote": "证据甲"}, {"title": "旧乙", "quote": "证据乙"}],
+    )
+    kept = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    drafts = [{"title": f"新{i}", "quote": "证据丙"} for i in range(MAX_DRAFTS_PER_SOURCE + 5)]
+    ingest_candidates(ws.root, source_kind="digest", path=path, source_text=body, drafts=drafts)
+    review = load_review(ws.root)
+    pending = [c for c in review.candidates if c.status == "pending"]
+    assert all(c.title.startswith("新") for c in pending)
+    assert len(pending) == MAX_DRAFTS_PER_SOURCE
+    assert any(c.status == "accepted" and c.title == "旧甲" for c in review.candidates)
+    assert kept.id in {c.merged_into for c in review.candidates if c.status == "accepted"}
+
+
+def test_knowledge_queue_is_compact_without_merge_when_empty(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    ingest_candidates(
+        ws.root,
+        source_kind="digest",
+        path="references/r/digest.md",
+        source_text="证据",
+        drafts=[{"title": "数据质量智能体", "quote": "证据"}],
+    )
+    html = TestClient(create_app(root)).get("/knowledge?workspace=ws").text
+    assert "数据质量智能体" in html
+    assert "Merge target" not in html and "合并目标" not in html
+    assert "→ unknown" not in html
+    assert "<details" in html and "knowledge-candidate-edit" in html
+    assert "Edit proposed entry" in html or "编辑拟议条目" in html
+    queue, _, _ = html.partition("<details")
+    assert "Save candidate edit" not in queue and "保存候选编辑" not in queue
 
 
 def test_unicode_workspace_slug_is_retained_in_source(tmp_path):
