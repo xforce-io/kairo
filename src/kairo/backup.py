@@ -7,8 +7,10 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import shutil
 import stat
+import subprocess
 import tempfile
 import tomllib
 from dataclasses import dataclass
@@ -27,6 +29,165 @@ BACKUP_ID_RE = re.compile(r"^b-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SSH_RE = re.compile(r"^[A-Za-z0-9._@:/-]+$")
 EXT_PREFIX = ".kairo/backup-external"
+SSH_OPTS = (
+    "-T",
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=5",
+    "-o",
+    "LogLevel=ERROR",
+)
+
+_REMOTE_MKDIR = """
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+root.mkdir(parents=True, exist_ok=True)
+(root / "generations").mkdir(exist_ok=True)
+(root / ".incoming").mkdir(exist_ok=True)
+"""
+
+_REMOTE_READLINK = """
+import os
+import sys
+from pathlib import Path
+link = Path(sys.argv[1]) / "current"
+if not link.exists() and not link.is_symlink():
+    sys.stdout.write("KAIRO:")
+    sys.exit(0)
+if not link.is_symlink():
+    sys.exit(12)
+sys.stdout.write("KAIRO:" + os.readlink(link))
+"""
+
+_REMOTE_READ_TEXT = """
+import sys
+from pathlib import Path
+path = Path(sys.argv[1])
+try:
+    sys.stdout.write(path.read_text(encoding="utf-8"))
+except OSError:
+    sys.exit(15)
+"""
+
+_REMOTE_VALIDATE = """
+import hashlib
+import json
+import os
+import stat
+import sys
+from pathlib import Path
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(str(path), "rb") as fh:
+        while True:
+            chunk = fh.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+def walk_ordinary(root):
+    dirs = []
+    files = []
+    for dirpath, dirnames, filenames in os.walk(str(root), followlinks=False):
+        dp = Path(dirpath)
+        rel = dp.relative_to(root)
+        if rel != Path("."):
+            dirs.append(rel.as_posix())
+        for name in dirnames:
+            st = (dp / name).lstat()
+            if not stat.S_ISDIR(st.st_mode):
+                sys.exit(15)
+        for name in filenames:
+            child = dp / name
+            st = child.lstat()
+            if not stat.S_ISREG(st.st_mode):
+                sys.exit(15)
+            files.append(child.relative_to(root).as_posix())
+    dirs.sort()
+    files.sort()
+    return dirs, files
+
+gen = Path(sys.argv[1])
+man_path = gen / "backup.json"
+data = gen / "data"
+if not man_path.is_file() or not data.is_dir():
+    sys.exit(15)
+try:
+    listing = json.loads(man_path.read_text())
+except Exception:
+    sys.exit(15)
+if listing.get("backup_id") != gen.name:
+    sys.exit(15)
+dirs, files = walk_ordinary(data)
+if dirs != sorted(listing.get("directories") or []):
+    sys.exit(15)
+rec_paths = []
+for rec in listing.get("files") or []:
+    p = rec.get("path")
+    rec_paths.append(p)
+    live = data / p
+    if not live.is_file():
+        sys.exit(15)
+    if sha256_file(live) != rec.get("sha256"):
+        sys.exit(15)
+    if live.stat().st_size != rec.get("size"):
+        sys.exit(15)
+if files != sorted(rec_paths):
+    sys.exit(15)
+sys.stdout.write("KAIRO:ok")
+"""
+
+_REMOTE_COMMIT = """
+import fcntl
+import os
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+backup_id = sys.argv[2]
+observed = sys.argv[3] or None
+(root / "generations").mkdir(parents=True, exist_ok=True)
+(root / ".incoming").mkdir(exist_ok=True)
+lock_fd = os.open(root / ".commit.lock", os.O_CREAT | os.O_RDWR, 0o644)
+fcntl.flock(lock_fd, fcntl.LOCK_EX)
+try:
+    link = root / "current"
+    current = None
+    if link.exists() or link.is_symlink():
+        if not link.is_symlink():
+            sys.exit(12)
+        current = os.readlink(link)
+    expected = f"generations/{observed}" if observed else None
+    if current != expected:
+        sys.exit(11)
+    incoming = root / ".incoming" / backup_id
+    final = root / "generations" / backup_id
+    if not incoming.is_dir():
+        sys.exit(13)
+    if final.exists():
+        sys.exit(14)
+    os.rename(incoming, final)
+    tmp = root / ".current.tmp"
+    if tmp.exists() or tmp.is_symlink():
+        tmp.unlink()
+    tmp.symlink_to(f"generations/{backup_id}")
+    os.replace(tmp, root / "current")
+finally:
+    fcntl.flock(lock_fd, fcntl.LOCK_UN)
+    os.close(lock_fd)
+"""
+
+_REMOTE_EXIT = {
+    11: ("submit", "current 已变化"),
+    12: ("verify", "current 不是符号链接"),
+    13: ("transfer", "incoming 缺失"),
+    14: ("submit", "backup_id 冲突"),
+    15: ("verify", "备份清单损坏"),
+}
 
 
 class BackupError(Exception):
@@ -76,6 +237,250 @@ def load_remote(name: str) -> RemoteSpec:
     ):
         raise BackupError("config", "非法 path", code=2)
     return RemoteSpec(name=name, ssh=ssh, path=dest)
+
+
+def _ssh_python(
+    host: str,
+    script: str,
+    args: list[str],
+    *,
+    stage: str = "connect",
+    timeout: int = 120,
+) -> str:
+    remote = "python3 -u - " + " ".join(shlex.quote(a) for a in args)
+    try:
+        proc = subprocess.run(
+            ["ssh", *SSH_OPTS, host, remote],
+            input=script,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise BackupError(stage, "SSH 连接失败") from exc
+    if proc.returncode != 0:
+        mapped = _REMOTE_EXIT.get(proc.returncode)
+        if mapped:
+            raise BackupError(mapped[0], mapped[1])
+        raise BackupError(stage, "SSH 连接失败")
+    return proc.stdout
+
+
+def _ssh_payload(raw: str) -> str:
+    marker = "KAIRO:"
+    idx = raw.rfind(marker)
+    if idx >= 0:
+        return raw[idx + len(marker) :]
+    return raw
+
+
+def _rsync_bin() -> str | None:
+    seen: list[str] = []
+    which = shutil.which("rsync")
+    if which:
+        seen.append(which)
+    for extra in ("/opt/homebrew/bin/rsync", "/usr/local/bin/rsync"):
+        if extra not in seen:
+            seen.append(extra)
+    for cand in seen:
+        if not os.path.isfile(cand) or not os.access(cand, os.X_OK):
+            continue
+        try:
+            proc = subprocess.run(
+                [cand, "--version"], capture_output=True, text=True, timeout=5
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        text = (proc.stdout or "") + (proc.stderr or "")
+        if "openrsync" in text.lower():
+            continue
+        return cand
+    return None
+
+
+def _tar_ssh(local: Path, host: str, remote_path: str, *, reverse: bool = False) -> None:
+    local.mkdir(parents=True, exist_ok=True)
+    dest = shlex.quote(remote_path)
+    env = os.environ.copy()
+    env["COPYFILE_DISABLE"] = "1"
+    if reverse:
+        remote = f"tar -C {dest} -cf - ."
+        ssh = subprocess.Popen(
+            ["ssh", *SSH_OPTS, host, remote],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        tar = subprocess.run(
+            ["tar", "-C", str(local), "-xf", "-"],
+            stdin=ssh.stdout,
+            capture_output=True,
+            env=env,
+            timeout=3600,
+        )
+        ssh.communicate(timeout=30)
+        if tar.returncode != 0 or ssh.returncode not in (0, None):
+            raise BackupError("transfer", "传输失败")
+        return
+    remote = f"mkdir -p {dest} && tar -C {dest} -xf -"
+    tar = subprocess.Popen(
+        ["tar", "-C", str(local), "-cf", "-", "."],
+        stdout=subprocess.PIPE,
+        env=env,
+    )
+    assert tar.stdout is not None
+    try:
+        ssh = subprocess.run(
+            ["ssh", *SSH_OPTS, host, remote],
+            stdin=tar.stdout,
+            capture_output=True,
+            timeout=3600,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        tar.kill()
+        raise BackupError("transfer", "传输失败") from exc
+    tar.stdout.close()
+    tar.wait(timeout=30)
+    if ssh.returncode != 0 or tar.returncode not in (0, None):
+        raise BackupError("transfer", "传输失败")
+
+
+def _rsync(local: Path, host: str, remote_path: str, *, reverse: bool = False) -> None:
+    """OpenSSH 上优先 rsync;JumpServer/协议不兼容时改 tar 管道。"""
+    local.mkdir(parents=True, exist_ok=True)
+    rsync = _rsync_bin()
+    if rsync:
+        spec = f"{host}:{remote_path}/"
+        src, dst = (spec, f"{local}/") if reverse else (f"{local}/", spec)
+        rsh = " ".join([shutil.which("ssh") or "ssh", *SSH_OPTS])
+        try:
+            proc = subprocess.run(
+                [
+                    rsync,
+                    "--protocol=29",
+                    "--old-args",
+                    "-a",
+                    "--delete",
+                    "-e",
+                    rsh,
+                    src,
+                    dst,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=8,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            proc = None
+        if proc is not None and proc.returncode == 0:
+            return
+    _tar_ssh(local, host, remote_path, reverse=reverse)
+
+
+def _ensure_remote_layout(spec: RemoteSpec) -> None:
+    _ssh_python(spec.ssh, _REMOTE_MKDIR, [spec.path])
+
+
+def _ssh_read_current(spec: RemoteSpec) -> str | None:
+    raw = _ssh_python(spec.ssh, _REMOTE_READLINK, [spec.path], stage="verify")
+    target = _ssh_payload(raw).strip()
+    if not target:
+        return None
+    if not target.startswith("generations/") or "/" in target[len("generations/") :]:
+        raise BackupError("verify", "current 目标非法")
+    backup_id = target.split("/", 1)[1]
+    validate_backup_id(backup_id)
+    if target != f"generations/{backup_id}":
+        raise BackupError("verify", "current 目标非法")
+    return backup_id
+
+
+def _ssh_read_text(spec: RemoteSpec, rel: str) -> str:
+    path = spec.path.rstrip("/") + "/" + rel.lstrip("/")
+    return _ssh_python(spec.ssh, _REMOTE_READ_TEXT, [path], stage="verify")
+
+
+def _hydrate_remote(
+    spec: RemoteSpec, dest_root: Path, backup_id: str | None
+) -> str:
+    if backup_id is None:
+        backup_id = _ssh_read_current(spec)
+        if backup_id is None:
+            raise BackupError("verify", "没有 current", code=2)
+    else:
+        validate_backup_id(backup_id)
+    local_gen = dest_root / "generations" / backup_id
+    remote_gen = spec.path.rstrip("/") + f"/generations/{backup_id}"
+    _rsync(local_gen, spec.ssh, remote_gen, reverse=True)
+    _atomic_current(dest_root, backup_id)
+    return backup_id
+
+
+def publish_remote(spec: RemoteSpec, serve_root: Path) -> PublishResult:
+    """经 OpenSSH/rsync 把 generation 传到 remote,校验后原子切 current。"""
+    serve_root = Path(serve_root).resolve()
+    with tempfile.TemporaryDirectory() as raw:
+        cand = Path(raw) / "cand"
+        cand.mkdir()
+        payload = build_candidate(serve_root, cand)
+        _ensure_remote_layout(spec)
+        observed = _ssh_read_current(spec)
+        if observed:
+            try:
+                cur_list = json.loads(
+                    _ssh_read_text(spec, f"generations/{observed}/backup.json")
+                )
+            except (json.JSONDecodeError, TypeError) as exc:
+                raise BackupError("verify", "备份清单损坏") from exc
+            if cur_list.get("content_sha256") == payload["content_sha256"]:
+                files = cur_list.get("files") or []
+                return PublishResult(
+                    "unchanged",
+                    observed,
+                    len(files),
+                    sum(f.get("size") or 0 for f in files),
+                )
+        incoming = spec.path.rstrip("/") + f"/.incoming/{payload['backup_id']}"
+        _ssh_python(
+            spec.ssh,
+            "import shutil,sys\nfrom pathlib import Path\n"
+            "p=Path(sys.argv[1])\n"
+            "shutil.rmtree(p, ignore_errors=True)\n"
+            "p.mkdir(parents=True)\n",
+            [incoming],
+            stage="transfer",
+        )
+        _rsync(cand, spec.ssh, incoming)
+        _ssh_python(
+            spec.ssh,
+            _REMOTE_VALIDATE,
+            [incoming],
+            stage="verify",
+            timeout=3600,
+        )
+        _ssh_python(
+            spec.ssh,
+            _REMOTE_COMMIT,
+            [spec.path, payload["backup_id"], observed or ""],
+            stage="submit",
+        )
+        nbytes = sum(f["size"] for f in payload["files"])
+        return PublishResult("pushed", payload["backup_id"], len(payload["files"]), nbytes)
+
+
+def verify_remote(spec: RemoteSpec, backup_id: str | None = None) -> PublishResult:
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        bid = _hydrate_remote(spec, root, backup_id)
+        return verify_generation(root, bid)
+
+
+def restore_remote(
+    spec: RemoteSpec, dest: Path, backup_id: str | None = None
+) -> PublishResult:
+    with tempfile.TemporaryDirectory() as raw:
+        root = Path(raw)
+        bid = _hydrate_remote(spec, root, backup_id)
+        return restore_generation(root, dest, bid)
 
 
 def validate_backup_id(backup_id: str) -> str:
@@ -620,7 +1025,12 @@ def _publish_locked(serve_root: Path, remote_root: Path) -> PublishResult:
         if observed:
             cur_gen = remote_root / "generations" / observed
             if cur_gen.is_dir():
-                cur_list = json.loads((cur_gen / "backup.json").read_text())
+                try:
+                    cur_list = json.loads(
+                        (cur_gen / "backup.json").read_text(encoding="utf-8")
+                    )
+                except (OSError, json.JSONDecodeError) as exc:
+                    raise BackupError("verify", "备份清单损坏") from exc
                 if cur_list.get("content_sha256") == payload["content_sha256"]:
                     return PublishResult(
                         "unchanged",
@@ -658,19 +1068,19 @@ def restore_generation(
     if dest.exists() and any(dest.iterdir()):
         raise BackupError("restore", "目标不是空目录", code=2)
     result = verify_generation(remote_root, backup_id)
-    gen_data = Path(remote_root) / "generations" / result.backup_id / "data"
+    gen = Path(remote_root) / "generations" / result.backup_id
     parent = dest.parent
     parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(dir=parent) as raw:
-        tmp = Path(raw) / "data"
-        shutil.copytree(gen_data, tmp, symlinks=False)
-        listing = validate_generation(
-            Path(remote_root) / "generations" / result.backup_id
-        )
-        validate_semantics(tmp, listing)
+        staged = Path(raw) / result.backup_id
+        staged.mkdir()
+        shutil.copyfile(gen / "backup.json", staged / "backup.json")
+        shutil.copytree(gen / "data", staged / "data", symlinks=False)
+        validate_generation(staged)
+        data = staged / "data"
         if dest.exists():
             dest.rmdir()
-        tmp.replace(dest)
+        data.replace(dest)
     return PublishResult("restored", result.backup_id, result.files, result.bytes)
 
 
@@ -791,7 +1201,7 @@ def push_named(name: str, serve_root: Path) -> PublishResult:
             raise BackupError("lock", "重叠跳过", code=3) from exc
     attempt = _now()
     try:
-        result = publish(serve_root, Path(spec.path))
+        result = publish_remote(spec, serve_root)
         _write_result(
             {
                 "schema_version": RESULT_SCHEMA,

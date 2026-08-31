@@ -821,11 +821,11 @@ def backup_verify(
     backup_id: str = typer.Option(None, "--backup-id", help="默认 current"),
 ) -> None:
     """校验 remote 上 current 或指定 generation(#154)。"""
-    from kairo.backup import BackupError, load_remote, verify_generation
+    from kairo.backup import BackupError, load_remote, verify_remote
 
     try:
         spec = load_remote(remote)
-        result = verify_generation(Path(spec.path), backup_id)
+        result = verify_remote(spec, backup_id)
     except BackupError as exc:
         _backup_fail(exc)
     typer.echo(
@@ -840,11 +840,11 @@ def backup_restore(
     backup_id: str = typer.Option(None, "--backup-id", help="默认 current"),
 ) -> None:
     """把 remote generation 恢复到空目录(#154)。"""
-    from kairo.backup import BackupError, load_remote, restore_generation
+    from kairo.backup import BackupError, load_remote, restore_remote
 
     try:
         spec = load_remote(remote)
-        result = restore_generation(Path(spec.path), dest, backup_id)
+        result = restore_remote(spec, dest, backup_id)
     except BackupError as exc:
         _backup_fail(exc)
     typer.echo(
