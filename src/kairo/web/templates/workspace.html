@@ -19,6 +19,7 @@
         <p class="nav-empty">{{ t('nav.empty_streams') }}</p>
         {% endfor %}
       </div>
+      {% if not public_read %}
       <button type="button" class="btn btn-step btn-add-ref"
               onclick="document.getElementById('add-ref-dlg').showModal()">{{ t('ref.add_btn') }}</button>
 
@@ -72,6 +73,7 @@
           })();
         </script>
       </dialog>
+      {% endif %}
     </div>
     <div class="nav-group nav-group-corpus">
       <div class="nav-section">{{ t('nav.corpus') }}</div>
@@ -82,6 +84,7 @@
       </a>
       {% endfor %}
       {% endif %}
+      {% if not public_read %}
       <button type="button" class="btn btn-step btn-add-ref"
               onclick="document.getElementById('add-corpus-dlg').showModal()">{{ t('corpus.add_btn') }}</button>
 
@@ -120,12 +123,14 @@
           })();
         </script>
       </dialog>
+      {% endif %}
     </div>
   </aside>
 
   <main id="reader" class="pane-read"><p class="reader-empty">{{ t('reader.empty') }}</p></main>
 
   <aside class="pane-panel">
+    {% if not public_read %}
     <div class="panel-title">{{ t('panel.actions') }}</div>
     <div id="run-btn-wrap">
       {% if run_disabled %}
@@ -139,6 +144,7 @@
     <div id="step-area">{% if run_task_id %}{% with task_id=run_task_id %}{% include "_step.html" %}{% endwith %}{% endif %}</div>
     {% if glossary_todo_n %}
     <a class="gl-todo-hint" href="/knowledge?workspace={{ slug | urlencode }}">{{ t('knowledge.todo_hint').format(n=glossary_todo_n) }}</a>
+    {% endif %}
     {% endif %}
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
     <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}><p class="panel-hint">{{ t('panel.hint') }}</p></div>

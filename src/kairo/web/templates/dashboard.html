@@ -3,7 +3,7 @@
 {% block body %}
 {% macro ws_card(s, pinned) %}
   <div class="card{% if pinned %} pinned{% endif %}">
-    {% if not s.journal %}
+    {% if not public_read and not s.journal %}
     <form class="card-pin-form" method="post" action="/workspaces/{{ s.slug | urlencode }}/pin">
       <input type="hidden" name="q" value="{{ q }}">
       <input type="hidden" name="filter" value="{{ filter }}">
@@ -34,6 +34,7 @@
         {% if s.blocked_count %}<span class="badge blocked">⚠ {{ s.blocked_count }}</span>{% endif %}
       </div>
     </a>
+    {% if not public_read %}
     <button type="button" class="card-trash" title="{{ t('dash.delete_btn') }}"
             aria-label="{{ t('dash.delete_btn') }}"
             data-slug="{{ s.slug }}" data-topic="{{ s.topic }}"
@@ -46,6 +47,7 @@
         <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
       </svg>
     </button>
+    {% endif %}
   </div>
 {% endmacro %}
 
@@ -65,11 +67,13 @@
          href="{% if filter == 'blocked' %}/{% if q %}?q={{ q | urlencode }}{% endif %}{% else %}/?filter=blocked{% if q %}&q={{ q | urlencode }}{% endif %}{% endif %}">{{ t('dash.filter_blocked') }}<span class="n">{{ blocked_n }}</span></a>
     </nav>
   </div>
+  {% if not public_read %}
   <form class="new-ws" hx-post="/workspaces" hx-swap="none">
     <input name="topic" placeholder="{{ t('dash.topic_placeholder') }}" required>
     <button type="submit">{{ t('dash.new_ws_btn') }}</button>
     <span id="ws-error" class="ws-error"></span>
   </form>
+  {% endif %}
 </div>
 
 <div class="grid">
@@ -94,6 +98,7 @@
   {% endif %}
 </div>
 
+{% if not public_read %}
 <dialog id="del-ws-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
   <div class="dlg-head">
     <h3 class="dlg-title">{{ t('dash.delete_title') }}</h3>
@@ -191,4 +196,5 @@
     });
   })();
 </script>
+{% endif %}
 {% endblock %}
