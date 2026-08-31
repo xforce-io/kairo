@@ -12,7 +12,7 @@
       <div class="nav-section">{{ t('nav.references') }}</div>
       <div id="refs-list">
         {% for r in streams %}
-        <a class="nav-doc is-ref {% if select_ref == r.id %}is-active{% endif %}" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
+        <a class="nav-doc is-ref {% if select_ref == r.id %}is-active{% endif %}" href="/w/{{ slug | urlencode }}?ref={{ r.id | urlencode }}" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta" hx-push-url="/w/{{ slug | urlencode }}?ref={{ r.id | urlencode }}">
           <span class="name">{{ r.title }}</span>
         </a>
         {% else %}
@@ -79,7 +79,7 @@
       <div class="nav-section">{{ t('nav.corpus') }}</div>
       {% if corpus %}
       {% for r in corpus %}
-      <a class="nav-doc is-ref" href="#" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta">
+      <a class="nav-doc is-ref {% if select_ref == r.id %}is-active{% endif %}" href="/w/{{ slug | urlencode }}?ref={{ r.id | urlencode }}" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta" hx-push-url="/w/{{ slug | urlencode }}?ref={{ r.id | urlencode }}">
         <span class="name">{{ r.title }}</span>
       </a>
       {% endfor %}
