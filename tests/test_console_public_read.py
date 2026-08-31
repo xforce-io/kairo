@@ -105,6 +105,44 @@ def test_share_url_selects_ref_in_console_and_keeps_write_chrome(tmp_path):
     assert "↻ Reprocess" in meta.text
 
 
+def _assert_one_click_share_control(html: str, slug: str, rid: str) -> None:
+    share = f"/w/{slug}?ref={rid}"
+    pane, _, reader = html.partition('<main id="reader"')
+    assert f'data-share-path="{share}"' in pane
+    assert "data-share-ref" in pane
+    assert f'data-share-path="{share}"' not in reader
+    assert "doc-export" not in pane
+    assert "kairoPrintDoc" not in pane
+
+
+def test_one_click_share_control_on_public_read_ref_meta(tmp_path):
+    root, rid, slug = _full_public_root(tmp_path)
+    pub = _public_client(root)
+    meta = pub.get(f"/w/{slug}/ref/{rid}")
+    assert meta.status_code == 200
+    _assert_one_click_share_control(meta.text, slug, rid)
+    assert "+ Attach material" not in meta.text
+    assert "↻ Reprocess" not in meta.text
+    page = pub.get(f"/w/{slug}", params={"ref": rid})
+    assert page.status_code == 200
+    assert "kairoCopyShareUrl" in page.text
+    assert "prompt(" in page.text
+
+
+def test_one_click_share_control_on_console_ref_meta(tmp_path):
+    root, rid, slug = _full_public_root(tmp_path)
+    c = TestClient(create_app(root, mode="console"))
+    meta = c.get(f"/w/{slug}/ref/{rid}")
+    assert meta.status_code == 200
+    _assert_one_click_share_control(meta.text, slug, rid)
+    assert "+ Attach material" in meta.text
+    assert "↻ Reprocess" in meta.text
+    page = c.get(f"/w/{slug}", params={"ref": rid})
+    assert page.status_code == 200
+    assert "kairoCopyShareUrl" in page.text
+    assert "prompt(" in page.text
+
+
 def test_console_mode_still_lists_all_and_allows_write_chrome(tmp_path):
     root, rid, slug = _full_public_root(tmp_path)
     Workspace.init(root / "secret", topic="secret-private")
