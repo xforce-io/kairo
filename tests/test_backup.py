@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+import shutil
+import stat
 from pathlib import Path
 
 import pytest
@@ -20,12 +23,56 @@ from kairo.workspace import Workspace
 
 runner = CliRunner()
 
+_FAKE_SSH = r"""#!/usr/bin/env python3
+import subprocess
+import sys
 
-def _write_remote_config(tmp_path: Path, name: str, dest: Path) -> None:
+args = sys.argv[1:]
+i = 0
+while i < len(args):
+    a = args[i]
+    if a in ("-o", "-p", "-l", "-F", "-i") and i + 1 < len(args):
+        i += 2
+        continue
+    if a == "--":
+        i += 1
+        break
+    if a.startswith("-"):
+        i += 1
+        continue
+    break
+if i >= len(args):
+    sys.exit(1)
+cmd = args[i + 1 :]
+if cmd[:1] == ["--"]:
+    cmd = cmd[1:]
+if not cmd:
+    sys.exit(1)
+if len(cmd) == 1:
+    raise SystemExit(
+        subprocess.call(["bash", "--noprofile", "--norc", "-c", cmd[0]])
+    )
+raise SystemExit(subprocess.call(cmd))
+"""
+
+
+def _install_local_ssh(tmp_path: Path, monkeypatch) -> None:
+    """PATH 上的 ssh 在本机执行远端命令,供 rsync -e ssh 与 ssh 脚本共用。"""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    ssh = bindir / "ssh"
+    ssh.write_text(_FAKE_SSH, encoding="utf-8")
+    ssh.chmod(ssh.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    monkeypatch.setenv("PATH", str(bindir) + os.pathsep + os.environ["PATH"])
+
+
+def _write_remote_config(
+    tmp_path: Path, name: str, dest: Path, *, ssh: str = "localhost"
+) -> None:
     cfg = tmp_path / "cfg" / "kairo"
-    cfg.mkdir(parents=True)
+    cfg.mkdir(parents=True, exist_ok=True)
     (cfg / "config.toml").write_text(
-        f'[remote.{name}]\nssh = "localhost"\npath = "{dest}"\n',
+        f'[remote.{name}]\nssh = "{ssh}"\npath = "{dest}"\n',
         encoding="utf-8",
     )
 
@@ -127,7 +174,8 @@ def test_symlink_in_serve_root_fails(tmp_path):
 def test_cli_backup_push_verify_restore(tmp_path, monkeypatch):
     serve = _serve_with_pointers(tmp_path)
     remote = tmp_path / "remote"
-    _write_remote_config(tmp_path, "reader", remote)
+    _install_local_ssh(tmp_path, monkeypatch)
+    _write_remote_config(tmp_path, "reader", remote, ssh="kairo-test-remote")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     result = runner.invoke(app, ["backup", "push", "reader", str(serve)])
@@ -166,3 +214,72 @@ def test_load_remote_rejects_bad_name(tmp_path, monkeypatch):
     with pytest.raises(BackupError) as exc:
         load_remote("../x")
     assert exc.value.code == 2
+
+
+def test_push_named_ssh_other_host_does_not_write_local_path(tmp_path, monkeypatch):
+    serve = _serve_with_pointers(tmp_path)
+    canary = tmp_path / "srv" / "kairo" / "backups"
+    canary.mkdir(parents=True)
+    marker = canary / "keep-me"
+    marker.write_text("untouched\n", encoding="utf-8")
+    _write_remote_config(
+        tmp_path, "reader", canary, ssh="kairo-missing-backup-host.invalid"
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    result = runner.invoke(app, ["backup", "push", "reader", str(serve)])
+    assert result.exit_code != 0
+    combined = (result.output or "") + (getattr(result, "stderr", None) or "")
+    assert "pushed" not in combined
+    assert "Traceback" not in combined
+    assert ":" in combined
+    assert not (canary / "generations").exists()
+    assert not (canary / "current").exists()
+    assert marker.read_text(encoding="utf-8") == "untouched\n"
+    assert list(canary.iterdir()) == [marker]
+
+
+def test_restore_rejects_mutated_copy_before_commit(tmp_path, monkeypatch):
+    serve = _serve_with_pointers(tmp_path)
+    remote = tmp_path / "remote"
+    publish(serve, remote)
+    dest = tmp_path / "restored"
+    real = shutil.copytree
+
+    def mutate(src, dst, *args, **kwargs):
+        out = real(src, dst, *args, **kwargs)
+        target = Path(dst) / "alpha" / "understanding.md"
+        if target.is_file():
+            target.write_text("mutated-bytes\n", encoding="utf-8")
+        return out
+
+    monkeypatch.setattr("kairo.backup.shutil.copytree", mutate)
+    with pytest.raises(BackupError):
+        restore_generation(remote, dest)
+    assert not dest.exists() or (dest.is_dir() and not any(dest.iterdir()))
+
+
+def test_cli_push_corrupt_current_backup_json_is_contract_error(tmp_path, monkeypatch):
+    serve = _serve_with_pointers(tmp_path)
+    remote = tmp_path / "remote"
+    _install_local_ssh(tmp_path, monkeypatch)
+    _write_remote_config(tmp_path, "reader", remote, ssh="kairo-test-remote")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    first = runner.invoke(app, ["backup", "push", "reader", str(serve)])
+    assert first.exit_code == 0, first.output
+    assert "pushed" in first.output
+    current = (remote / "current").readlink()
+    gen = remote / current
+    (gen / "backup.json").write_text("{nope", encoding="utf-8")
+    second = runner.invoke(app, ["backup", "push", "reader", str(serve)])
+    combined = (second.output or "") + (getattr(second, "stderr", None) or "")
+    assert second.exit_code != 0
+    assert "Traceback" not in combined
+    assert ":" in combined
+    assert (remote / "current").readlink() == current
+    from kairo.backup import read_result
+
+    rec = read_result("reader")
+    assert rec is not None
+    assert rec["status"] == "failed"

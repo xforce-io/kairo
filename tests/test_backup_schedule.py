@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 
 from kairo.backup import push_named, read_result, result_path, verify_generation
 from kairo.cli import app
-from test_backup import _serve_with_pointers, _write_remote_config
+from test_backup import _install_local_ssh, _serve_with_pointers, _write_remote_config
 
 runner = CliRunner()
 
@@ -19,7 +19,8 @@ runner = CliRunner()
 def test_push_named_writes_status_and_keeps_current_on_failure(tmp_path, monkeypatch):
     serve = _serve_with_pointers(tmp_path)
     remote = tmp_path / "remote"
-    _write_remote_config(tmp_path, "reader", remote)
+    _install_local_ssh(tmp_path, monkeypatch)
+    _write_remote_config(tmp_path, "reader", remote, ssh="kairo-test-remote")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     first = push_named("reader", serve)
@@ -43,7 +44,8 @@ def test_push_named_writes_status_and_keeps_current_on_failure(tmp_path, monkeyp
 def test_overlap_skip_exit_3(tmp_path, monkeypatch):
     serve = _serve_with_pointers(tmp_path)
     remote = tmp_path / "remote"
-    _write_remote_config(tmp_path, "reader", remote)
+    _install_local_ssh(tmp_path, monkeypatch)
+    _write_remote_config(tmp_path, "reader", remote, ssh="kairo-test-remote")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     push_named("reader", serve)
@@ -76,7 +78,8 @@ def test_corrupt_result_status_fails(tmp_path, monkeypatch):
 def test_backup_status_empty_and_ok(tmp_path, monkeypatch):
     serve = _serve_with_pointers(tmp_path)
     remote = tmp_path / "remote"
-    _write_remote_config(tmp_path, "reader", remote)
+    _install_local_ssh(tmp_path, monkeypatch)
+    _write_remote_config(tmp_path, "reader", remote, ssh="kairo-test-remote")
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     empty = runner.invoke(app, ["backup", "status", "reader"])
