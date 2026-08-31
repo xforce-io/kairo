@@ -117,6 +117,31 @@ def test_ignored_same_title_does_not_return_to_pending(tmp_path):
     assert todo_count(ws.root) == 0
 
 
+def test_accepted_and_merged_same_title_do_not_return_to_pending(tmp_path):
+    from kairo.knowledge_review import merge_workspace
+
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    accepted = _ingest_pending(ws, "已采纳", "证据甲")
+    accept_workspace(ws.root, accepted.id)
+    _ingest(ws, "已采纳", "证据甲", "references/c/digest.md")
+    row = next(c for c in load_review(ws.root).candidates if c.title == "已采纳")
+    assert row.status == "accepted"
+    assert "references/c/digest.md" in {item.path for item in row.sources}
+    assert todo_count(ws.root) == 0
+
+    target = new_entry(title="目标条目", scope="workspace")
+    document, _ = load_workspace(ws.root)
+    save_workspace(ws.root, document.model_copy(update={"entries": [target, *document.entries]}))
+    merged = _ingest_pending(ws, "已合并", "证据乙")
+    merge_workspace(ws.root, merged.id, target.id)
+    _ingest(ws, "已合并", "证据乙", "references/d/digest.md")
+    row = next(c for c in load_review(ws.root).candidates if c.title == "已合并")
+    assert row.status == "merged"
+    assert todo_count(ws.root) == 0
+
+
 def test_load_old_yaml_coalesces_same_title_into_one_pending(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
