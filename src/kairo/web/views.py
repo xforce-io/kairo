@@ -84,36 +84,6 @@ def _is_public_read(request: Request) -> bool:
     return bool(getattr(request.app.state, "public_read", False))
 
 
-def _public_bounds(request: Request) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str]]]:
-    from kairo.web.public import load_public_read_state
-
-    snap = load_public_read_state(Path(request.app.state.root))
-    slugs: set[str] = set()
-    targets: set[tuple[str, str]] = set()
-    refs: set[tuple[str, str]] = set()
-    if not snap.valid:
-        return slugs, targets, refs
-    for bound in snap.locator_to_root.values():
-        slugs.add(bound.workspace)
-        if bound.kind == "target" and bound.target_path:
-            targets.add((bound.workspace, bound.target_path))
-        if bound.kind == "reference" and bound.ref_id:
-            refs.add((bound.workspace, bound.ref_id))
-    return slugs, targets, refs
-
-
-def _deny_if_public_extra(request: Request) -> None:
-    if _is_public_read(request):
-        raise HTTPException(status_code=404)
-
-
-def _require_public_ref(request: Request, slug: str, ref_id: str) -> None:
-    if _is_public_read(request):
-        _, _, pub_refs = _public_bounds(request)
-        if (slug, ref_id) not in pub_refs:
-            raise HTTPException(status_code=404)
-
-
 def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
     """统一渲染:注入 lang + t。所有 TemplateResponse 走这里。"""
     lang = resolve_lang(request)
@@ -151,10 +121,6 @@ def _knowledge_error_text(request: Request, raw: str) -> str:
 
 
 def _open(request: Request, slug: str) -> Workspace:
-    if _is_public_read(request):
-        slugs, _, _ = _public_bounds(request)
-        if slug not in slugs:
-            raise HTTPException(status_code=404)
     try:
         return Workspace.open(Path(request.app.state.root) / slug)
     except WorkspaceNotFound:
@@ -404,9 +370,6 @@ def dashboard(
     t = _t(request)
     root = request.app.state.root
     items = scan_workspaces(root)
-    if _is_public_read(request):
-        slugs, _, _ = _public_bounds(request)
-        items = [s for s in items if s.slug in slugs]
     filt = _dash_filter(filter)
     pin_list = read_pins(root)
     pinned, rest, qn = _dash_groups(items, pin_list, q or "", filt)
@@ -477,7 +440,6 @@ def timeline_view(
     start: str | None = Query(None, alias="from"),
     end: str | None = Query(None, alias="to"),
 ) -> HTMLResponse:
-    _deny_if_public_extra(request)
     t = _t(request)
     try:
         q = resolve_timeline_query(
@@ -748,11 +710,6 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
     ws = _open(request, slug)
     streams, corpus = _split_refs(ws)
     targets = _target_states(ws)
-    if _is_public_read(request):
-        _, pub_targets, pub_refs = _public_bounds(request)
-        streams = [r for r in streams if (slug, r["id"]) in pub_refs]
-        corpus = [r for r in corpus if (slug, r["id"]) in pub_refs]
-        targets = [t for t in targets if (slug, t["path"]) in pub_targets]
     running = request.app.state.registry.current(slug)
     ids = {r["id"] for r in streams} | {r["id"] for r in corpus}
     select_ref = ref if ref in ids else None
@@ -782,10 +739,6 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
 @router.get("/w/{slug}/doc", response_class=HTMLResponse)
 def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ws = _open(request, slug)
-    if _is_public_read(request):
-        _, pub_targets, _ = _public_bounds(request)
-        if (slug, path) not in pub_targets:
-            raise HTTPException(status_code=404)
     target = _safe_doc(ws, path)
     exportable = path in {t.path for t in ws.constitution.targets}
     return _render(
@@ -853,7 +806,6 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
-    _require_public_ref(request, slug, ref_id)
     t = _t(request)
     man = ws.read_manifest(ref_id)
     forms = _ref_forms(ws, ref_id, man, t)
@@ -947,7 +899,6 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
-    _require_public_ref(request, slug, ref_id)
     man = ws.read_manifest(ref_id)
     if key == "digest":
         path, role = ws.references_dir() / ref_id / "digest.md", "digest"
@@ -996,7 +947,6 @@ def ref_form_file(request: Request, slug: str, ref_id: str, key: str) -> FileRes
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
-    _require_public_ref(request, slug, ref_id)
     man = ws.read_manifest(ref_id)
     try:
         idx = int(key)
@@ -1055,10 +1005,6 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ws = _open(request, slug)
     if path not in {t.path for t in ws.constitution.targets}:
         raise HTTPException(status_code=404, detail="target not found")
-    if _is_public_read(request):
-        _, pub_targets, _ = _public_bounds(request)
-        if (slug, path) not in pub_targets:
-            raise HTTPException(status_code=404)
     return _render(
         request,
         "_target_meta.html",
@@ -1590,7 +1536,6 @@ def _root_glossary_page(
 @router.get("/glossary", response_class=HTMLResponse)
 def root_glossary_view(request: Request):
     """旧书签始终进入唯一知识入口；读取时自动迁移 legacy 真名册。"""
-    _deny_if_public_extra(request)
     query = request.url.query
     return RedirectResponse(f"/knowledge{('?' + query) if query else ''}", status_code=303)
 
@@ -1802,7 +1747,6 @@ def _knowledge_page(
 
 @router.get("/knowledge", response_class=HTMLResponse)
 def knowledge_view(request: Request) -> HTMLResponse:
-    _deny_if_public_extra(request)
     return _knowledge_page(request)
 
 

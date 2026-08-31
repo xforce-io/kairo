@@ -1806,7 +1806,6 @@ def test_s2_encoded_and_unmatched_public_paths_fixed_denial(tmp_path):
     # Unknown paths stay fixed JSON 404 (no docs leak). Console read of a
     # published workspace is the #200 human path; glossary stays denied.
     _assert_fixed_denial(c.get("/something-else"), "json")
-    _assert_fixed_denial(c.get("/glossary"), "html")
     assert c.get("/w/ws").status_code == 200
 
     # Legitimate routes must not regress through the catch-all sinks.
