@@ -1,5 +1,8 @@
 <div class="meta">
   <p class="meta-kicker">{{ t('ref.kicker') }}{% if label %} · {{ label }}{% endif %}</p>
+  {% if public_read %}
+  <h3 class="meta-title">{{ title }}</h3>
+  {% else %}
   <form class="meta-rename" hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/title"
         hx-target="#meta" hx-swap="innerHTML">
     <input class="meta-title-input" name="title" value="{{ title }}"
@@ -8,11 +11,18 @@
            hx-on:keydown="if(event.key==='Escape'){this.value=this.dataset.orig;this.blur();}">
     <button type="submit" class="meta-rename-save" title="{{ t('ref.rename_save') }}">{{ t('ref.rename_save') }}</button>
   </form>
+  {% endif %}
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
   {% if can_edit_time %}
   <div class="meta-label">{{ t('tl.time') }}</div>
   <div class="meta-time">
     <div class="dlg-label">{{ t('tl.occurred') }}</div>
+    {% if public_read %}
+    <div class="meta-time-row">
+      <span class="added">{{ occurred_iso or '—' }}</span>
+      <span class="src {% if occurred_src == 'user' %}user{% elif occurred_src == 'unknown' %}unknown{% endif %}">{% if occurred_src == 'user' %}{{ t('tl.src_user') }}{% elif occurred_src == 'id' %}{{ t('tl.src_id') }}{% else %}{{ t('tl.src_unknown') }}{% endif %}</span>
+    </div>
+    {% else %}
     <form class="meta-time-row" hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/occurred"
           hx-target="#meta" hx-swap="innerHTML">
       <input type="date" name="occurred_at" value="{{ occurred_iso }}"
@@ -20,6 +30,7 @@
              hx-target="#meta" hx-swap="innerHTML" hx-trigger="change">
       <span class="src {% if occurred_src == 'user' %}user{% elif occurred_src == 'unknown' %}unknown{% endif %}">{% if occurred_src == 'user' %}{{ t('tl.src_user') }}{% elif occurred_src == 'id' %}{{ t('tl.src_id') }}{% else %}{{ t('tl.src_unknown') }}{% endif %}</span>
     </form>
+    {% endif %}
     <div class="dlg-label" style="margin-top:12px">{{ t('tl.added') }}</div>
     <div class="meta-time-row">
       <span class="added">{{ added_display }}</span>
@@ -37,6 +48,7 @@
     </ul>
   </div>
   {% endif %}
+  {% if not public_read %}
   <button type="button" class="btn btn-step btn-add-ref"
           onclick="document.getElementById('attach-dlg').showModal()">{{ t('ref.attach_btn') }}</button>
   {% if show_retry %}
@@ -74,12 +86,13 @@
       </div>
     </form>
   </dialog>
+  {% endif %}
   <div class="meta-label">{{ t('forms.label') }}</div>
   <table class="meta-forms">
     <tbody>
     {% for f in forms %}
     <tr class="{% if f.previewable %}is-prev {% elif f.openable %}is-open {% endif %}{% if f.role == 'digest' %}is-primary {% endif %}{% if f.key == preview_key %}on{% endif %}"
-        {% if f.previewable %}hx-get="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ f.key }}" hx-target="#reader"{% elif f.openable %}hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ f.key }}/open" hx-swap="none"{% endif %}>
+        {% if f.previewable %}hx-get="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ f.key }}" hx-target="#reader"{% elif f.openable and not public_read %}hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ f.key }}/open" hx-swap="none"{% endif %}>
       <td class="mf-role" title="{{ f.location }}">
         <span class="mf-role-main">{{ f.role_label }}</span>
         {% if f.filename %}<span class="mf-name">{{ f.filename }}</span>{% endif %}
@@ -89,12 +102,13 @@
           <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
         {% if f.previewable %}<span class="mf-prev">{{ t('forms.preview') }}</span>
-        {% elif f.openable %}<span class="mf-prev">{{ t('forms.open') }}</span>{% endif %}
+        {% elif f.openable and not public_read %}<span class="mf-prev">{{ t('forms.open') }}</span>{% endif %}
       </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
+  {% if not public_read %}
   <div class="meta-danger-zone">
     <button type="button" class="btn btn-danger-ghost"
             onclick="document.getElementById('del-ref-dlg').showModal()">{{ t('ref.delete_btn') }}</button>
@@ -122,5 +136,6 @@
       </div>
     </form>
   </dialog>
+  {% endif %}
 </div>
 {% include "_reader_oob.html" %}

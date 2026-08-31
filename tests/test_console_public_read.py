@@ -52,8 +52,26 @@ def test_s2_writes_denied_and_missing_workspace_404(tmp_path):
     assert 'hx-post="/workspaces"' not in home.text
 
 
+def test_s2_ref_meta_hides_write_actions_in_public_read(tmp_path):
+    """点参考时右栏仍走 Console 模板；只读面不得露出 Attach / Reprocess。"""
+    root, rid, slug = _full_public_root(tmp_path)
+    pub = _public_client(root)
+    meta = pub.get(f"/w/{slug}/ref/{rid}")
+    assert meta.status_code == 200
+    assert "+ Attach material" not in meta.text
+    assert "↻ Reprocess" not in meta.text
+    assert f'hx-post="/w/{slug}/ref/{rid}/attach"' not in meta.text
+    assert f'hx-post="/w/{slug}/ref/{rid}/retry"' not in meta.text
+    assert f'hx-post="/w/{slug}/ref/{rid}/delete"' not in meta.text
+    assert f'hx-post="/w/{slug}/ref/{rid}/title"' not in meta.text
+    attach = pub.post(f"/w/{slug}/ref/{rid}/attach", data={"path": "/tmp/x"})
+    assert attach.status_code == 404
+    retry = pub.post(f"/w/{slug}/ref/{rid}/retry")
+    assert retry.status_code == 404
+
+
 def test_console_mode_still_lists_all_and_allows_write_chrome(tmp_path):
-    root, _, _ = _full_public_root(tmp_path)
+    root, rid, slug = _full_public_root(tmp_path)
     Workspace.init(root / "secret", topic="secret-private")
     c = TestClient(create_app(root, mode="console"))
     home = c.get("/")
@@ -61,3 +79,7 @@ def test_console_mode_still_lists_all_and_allows_write_chrome(tmp_path):
     assert "/w/ws" in home.text
     assert "/w/secret" in home.text
     assert 'hx-post="/workspaces"' in home.text
+    meta = c.get(f"/w/{slug}/ref/{rid}")
+    assert meta.status_code == 200
+    assert "+ Attach material" in meta.text
+    assert "↻ Reprocess" in meta.text
