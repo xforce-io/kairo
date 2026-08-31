@@ -26,24 +26,32 @@ def create_app(root: Path, *, mode: str = "console") -> FastAPI:
     """Build a web app.
 
     ``mode="console"`` (default) is the local Console.
-    ``mode="public-read"`` is the isolated anonymous public surface (#118).
+    ``mode="public-read"`` reuses the Console shell with a public-read gate (#200).
     Any other runtime mode fails closed (never silently falls back to Console).
     """
     if mode not in _ALLOWED_MODES:
         raise UnknownAppMode(
             f"unknown app mode: {mode!r} (expected console or public-read)"
         )
-    if mode == "public-read":
-        from kairo.web.public import create_public_app
-
-        return create_public_app(Path(root))
-
-    app = FastAPI(title="kairo console")
+    public = mode == "public-read"
+    app = FastAPI(
+        title="kairo public-read" if public else "kairo console",
+        **(
+            {"docs_url": None, "redoc_url": None, "openapi_url": None}
+            if public
+            else {}
+        ),
+    )
     app.state.root = Path(root)
+    app.state.public_read = public
     app.state.templates = Jinja2Templates(directory=str(_HERE / "templates"))
     app.state.registry = TaskRegistry()
     app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
     app.include_router(router)
+    if public:
+        from kairo.web.public import attach_public_surface
+
+        attach_public_surface(app)
     return app
 
 

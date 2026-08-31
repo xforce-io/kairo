@@ -611,7 +611,9 @@ def test_public_home_minimal(tmp_path):
     c = _public_client(tmp_path)
     r = c.get("/")
     assert r.status_code == 200
-    assert "Public documents" in r.text
+    assert "kairo" in r.text.lower()
+    assert "Public documents" not in r.text
+    assert 'hx-post="/workspaces"' not in r.text
     assert "/w/" not in r.text
 
 
@@ -821,7 +823,6 @@ def test_s2_path_and_ref_id_bypass_denied(tmp_path):
     root, _, _ = _full_public_root(tmp_path)
     c = _public_client(root)
     for path in (
-        "/w/ws",
         "/w/ws/understanding.md",
         "/api/public/v1/documents/understanding.md",
         f"/p/2026-01-01-pub",
@@ -829,13 +830,15 @@ def test_s2_path_and_ref_id_bypass_denied(tmp_path):
     ):
         r = c.get(path)
         assert r.status_code == 404
+    assert c.get("/w/ws").status_code == 200
 
 
-def test_s2_console_routes_absent_on_public_app(tmp_path):
+def test_s2_console_write_and_unknown_routes_denied_on_public_app(tmp_path):
     root, _, _ = _full_public_root(tmp_path)
     pub = _public_client(root)
     con = _console_client(root)
-    for path in ("/w/ws", "/w/ws/references", "/tasks"):
+    assert pub.get("/w/ws").status_code == 200
+    for path in ("/w/ws/references", "/tasks"):
         r = pub.get(path)
         assert r.status_code == 404
         assert r.headers.get("cache-control") == "no-store"
@@ -1677,8 +1680,9 @@ def test_create_app_mode_public_read_factory(tmp_path):
     routes = {getattr(r, "path", None) for r in app.routes}
     assert "/p/search" in routes
     assert "/p/{locator}" in routes
-    assert "/w/{slug}" not in routes
     assert "/healthz" in routes
+    c = _public_client(tmp_path)
+    assert c.get("/").status_code == 200
     # Closed public surface: no framework OpenAPI/docs/redoc routes (L2 §8.2).
     assert "/openapi.json" not in routes
     assert "/docs" not in routes
@@ -1799,9 +1803,11 @@ def test_s2_encoded_and_unmatched_public_paths_fixed_denial(tmp_path):
         assert "content-disposition" not in {k.lower() for k in g.headers.keys()}
         assert "content-disposition" not in {k.lower() for k in h.headers.keys()}
 
-    # Outside public namespaces: still fixed JSON 404 (no console/docs leak).
-    for path in ("/w/ws", "/something-else", "/glossary"):
-        _assert_fixed_denial(c.get(path), "json")
+    # Unknown paths stay fixed JSON 404 (no docs leak). Console read of a
+    # published workspace is the #200 human path; glossary stays denied.
+    _assert_fixed_denial(c.get("/something-else"), "json")
+    _assert_fixed_denial(c.get("/glossary"), "html")
+    assert c.get("/w/ws").status_code == 200
 
     # Legitimate routes must not regress through the catch-all sinks.
     assert c.get(f"/p/{LOC_TARGET}").status_code == 200

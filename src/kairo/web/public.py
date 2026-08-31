@@ -1223,6 +1223,12 @@ def _public_unmatched_kind(raw_path: str) -> str:
     # HTML public page namespace (including /p and encoded probes).
     if path == "/p" or path.startswith("/p/"):
         return "html"
+    if path == "/w" or path.startswith("/w/"):
+        return "html"
+    if path in {"/timeline", "/knowledge", "/glossary"} or path.startswith(
+        ("/timeline", "/knowledge", "/glossary")
+    ):
+        return "html"
     # Outside the closed public surface: still a fixed JSON 404 so framework
     # defaults (docs/console detail bodies) never leak.
     return "json"
@@ -1236,45 +1242,39 @@ def _fixed_unmatched_response(kind: str) -> Response:
     return _html_404()
 
 
-def create_public_app(root: Path) -> FastAPI:
-    """Build the isolated public-read FastAPI app (no Console routes)."""
-    # Disable framework docs/OpenAPI surfaces — not part of the closed public
-    # route set (L2 §8.2). Health, home, and explicit public routes remain.
-    app = FastAPI(
-        title="kairo public-read",
-        docs_url=None,
-        redoc_url=None,
-        openapi_url=None,
-    )
-    app.state.root = Path(root)
-    app.state.reader = AnonymousPublicReader(Path(root))
-    # FastAPI 0.138+ nests ``include_router`` under ``_IncludedRouter``,
-    # which has no ``.path``. Extend the app router directly so ``app.routes``
-    # exposes the public path set (``/p/search``, ``/p/{locator}``, …) while
-    # keeping the same route objects and match order from ``build_public_router``.
-    app.router.routes.extend(build_public_router().routes)
+def attach_public_surface(app: FastAPI) -> None:
+    """Hang locator API, /readyz, write-block, and fixed 404 onto Console app (#200)."""
+    app.state.reader = AnonymousPublicReader(Path(app.state.root))
+    app.router.routes.extend(build_public_router(include_home=False).routes)
+
+    @app.middleware("http")
+    async def _public_block_writes(request: Request, call_next):
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            kind = _public_unmatched_kind(_request_raw_path(request))
+            return _fixed_unmatched_response(kind)
+        return await call_next(request)
 
     @app.exception_handler(404)
     async def _public_not_found(request: Request, exc: Exception) -> Response:
-        # Collapse every unmatched path — including %2F / %252F probes that
-        # never reach a locator/member handler — onto the representation-
-        # specific fixed PublicNotFound surface (no-store, fixed body).
         _ = exc
         kind = _public_unmatched_kind(_request_raw_path(request))
         return _fixed_unmatched_response(kind)
 
     @app.exception_handler(405)
     async def _public_method_not_allowed(request: Request, exc: Exception) -> Response:
-        # Method mismatches on public paths must not expose framework default
-        # bodies either; same fixed denial as an unknown route.
         _ = exc
         kind = _public_unmatched_kind(_request_raw_path(request))
         return _fixed_unmatched_response(kind)
 
-    return app
+
+def create_public_app(root: Path) -> FastAPI:
+    """Backward-compatible factory; public-read now reuses Console (#200)."""
+    from kairo.web.server import create_app
+
+    return create_app(Path(root), mode="public-read")
 
 
-def build_public_router() -> APIRouter:
+def build_public_router(*, include_home: bool = True) -> APIRouter:
     router = APIRouter()
 
     def reader(request: Request) -> AnonymousPublicReader:
@@ -1295,18 +1295,19 @@ def build_public_router() -> APIRouter:
             return JSONResponse({"ok": False}, status_code=503, headers=_NO_STORE)
         return JSONResponse({"ok": True}, headers=_NO_STORE)
 
-    @router.get("/", response_class=HTMLResponse)
-    def public_home() -> HTMLResponse:
-        body = (
-            "<h1>Public documents</h1>"
-            "<p class=\"muted\">Anonymous read-only surface for explicitly "
-            "public documents.</p>"
-            "<p><a href=\"/p/search\">Search</a></p>"
-        )
-        return HTMLResponse(
-            _page_shell("kairo public", body),
-            headers=_NO_STORE,
-        )
+    if include_home:
+        @router.get("/", response_class=HTMLResponse)
+        def public_home() -> HTMLResponse:
+            body = (
+                "<h1>Public documents</h1>"
+                "<p class=\"muted\">Anonymous read-only surface for explicitly "
+                "public documents.</p>"
+                "<p><a href=\"/p/search\">Search</a></p>"
+            )
+            return HTMLResponse(
+                _page_shell("kairo public", body),
+                headers=_NO_STORE,
+            )
 
     # Static search MUST be registered before /p/{locator}
     @router.get("/p/search", response_class=HTMLResponse)
