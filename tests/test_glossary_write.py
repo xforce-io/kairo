@@ -103,6 +103,18 @@ def test_workspace_todo_hint_is_one_line(tmp_path):
     digest.parent.mkdir(parents=True, exist_ok=True)
     digest.write_text("天溯系统\n")
     ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    from kairo.knowledge_review import ingest_candidates as ingest_knowledge
+
+    other = ws.root / "references/x/digest.md"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text("天溯系统")
+    ingest_knowledge(
+        ws.root,
+        source_kind="digest",
+        path="references/x/digest.md",
+        source_text="天溯系统",
+        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+    )
     html = _client(root).get("/w/ws").text
     hints = re.findall(
         r'<a class="gl-todo-hint"[^>]*href="([^"]+)"', html

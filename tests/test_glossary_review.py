@@ -112,12 +112,13 @@ def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
 
     step(ws, provider=CandidateProvider())
 
-    from kairo.knowledge_review import open_candidates as knowledge_open_candidates
+    from kairo.knowledge_review import load_review as knowledge_load_review
 
-    candidates = knowledge_open_candidates(ws.root)
-    assert len(candidates) == 1
-    assert candidates[0].title == "天溯"
-    assert candidates[0].quote == "天溯系统"
+    review = knowledge_load_review(ws.root)
+    assert len(review.candidates) == 1
+    assert review.candidates[0].title == "天溯"
+    assert review.candidates[0].quote == "天溯系统"
+    assert review.candidates[0].status == "sighted"
 
 
 def test_delete_ref_invalidates_pending(tmp_path):
@@ -171,6 +172,18 @@ def test_web_review_actions(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
     ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
     cid = open_candidates(ws.root)[0].id
+    from kairo.knowledge_review import ingest_candidates as ingest_knowledge
+
+    other = ws.root / "references/x/digest.md"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text("天溯系统")
+    ingest_knowledge(
+        ws.root,
+        source_kind="digest",
+        path="references/x/digest.md",
+        source_text="天溯系统",
+        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+    )
     c = TestClient(create_app(root))
     page = c.get("/glossary?workspace=ws")
     assert page.status_code == 200
@@ -187,6 +200,10 @@ def test_web_promote_then_root_reject_on_console(tmp_path):
 
     digest = ws.root / "references" / rid / "digest.md"
     ingest_knowledge(ws.root, source_kind="digest", path=f"references/{rid}/digest.md", source_text=digest.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
+    other = ws.root / "references/x/digest.md"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text(digest.read_text())
+    ingest_knowledge(ws.root, source_kind="digest", path="references/x/digest.md", source_text=other.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
     entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
     c = TestClient(create_app(root))
     r = c.post(f"/w/ws/knowledge/{entry.id}/promote")
@@ -207,6 +224,10 @@ def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
 
     digest = ws.root / "references" / rid / "digest.md"
     ingest_knowledge(ws.root, source_kind="digest", path=f"references/{rid}/digest.md", source_text=digest.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
+    other = ws.root / "references/x/digest.md"
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_text(digest.read_text())
+    ingest_knowledge(ws.root, source_kind="digest", path="references/x/digest.md", source_text=other.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
     entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
     candidate = promote_entry(ws.root, entry.id)
 

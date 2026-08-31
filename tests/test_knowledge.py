@@ -25,18 +25,160 @@ from kairo.knowledge import (
 from kairo.knowledge_matcher import KnowledgeMatcher, MatchBudget
 from kairo.knowledge_review import (
     MAX_DRAFTS_PER_SOURCE,
+    KnowledgeCandidate,
+    KnowledgeReview,
     accept_global,
     accept_workspace,
+    ignore,
     ingest_candidates,
     invalidate_stale,
     load_review,
     parse_extract_yaml,
     promote,
+    save_review,
+    todo_count,
 )
 from kairo.provider import StubProvider
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 from kairo.models import ProductState, TargetState
+
+
+def _ingest(ws, title, quote, path, *, kind="digest", **extra):
+    target = ws.root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.is_file() and quote not in target.read_text():
+        target.write_text(target.read_text() + "\n" + quote)
+    elif not target.is_file():
+        target.write_text(quote)
+    ingest_candidates(
+        ws.root,
+        source_kind=kind,
+        path=path,
+        source_text=target.read_text(),
+        drafts=[{"title": title, "quote": quote, **extra}],
+    )
+
+
+def _ingest_pending(ws, title, quote, path="references/a/digest.md"):
+    other = "references/b/digest.md" if path != "references/b/digest.md" else "references/c/digest.md"
+    _ingest(ws, title, quote, path)
+    _ingest(ws, title, quote, other)
+    return next(c for c in load_review(ws.root).candidates if c.title == title)
+
+
+def test_same_title_two_digest_paths_merge_and_count(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    _ingest(ws, "专名", "证据", "references/a/digest.md")
+    review = load_review(ws.root)
+    assert len(review.candidates) == 1
+    assert review.candidates[0].status == "sighted"
+    assert todo_count(ws.root) == 0
+    _ingest(ws, "专名", "证据", "references/b/digest.md")
+    review = load_review(ws.root)
+    assert len(review.candidates) == 1
+    assert review.candidates[0].status == "pending"
+    assert {item.path for item in review.candidates[0].sources} == {
+        "references/a/digest.md",
+        "references/b/digest.md",
+    }
+    assert todo_count(ws.root) == 1
+
+
+def test_understanding_or_corpus_qualifies_immediately(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    _ingest(ws, "理解层专名", "证据", "understanding.md", kind="compose")
+    assert load_review(ws.root).candidates[0].status == "pending"
+    assert todo_count(ws.root) == 1
+    src = tmp_path / "whitepaper.md"
+    src.write_text("基线专名")
+    rid = ws.add([src], source_class="corpus", copy=True)
+    path = f"references/{rid}/source.md"
+    _ingest(ws, "基线专名", "基线专名", path)
+    names = {c.title: c.status for c in load_review(ws.root).candidates}
+    assert names["基线专名"] == "pending"
+    assert todo_count(ws.root) == 2
+
+
+def test_ignored_same_title_does_not_return_to_pending(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    candidate = _ingest_pending(ws, "专名", "证据")
+    ignore(ws.root, candidate.id)
+    _ingest(ws, "专名", "证据", "references/c/digest.md")
+    review = load_review(ws.root)
+    assert len(review.candidates) == 1
+    assert review.candidates[0].status == "ignored"
+    assert todo_count(ws.root) == 0
+
+
+def test_load_old_yaml_coalesces_same_title_into_one_pending(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    for name, quote in (("a", "出处甲"), ("b", "出处乙")):
+        digest = ws.root / "references" / name / "digest.md"
+        digest.parent.mkdir(parents=True)
+        digest.write_text(quote)
+    save_review(
+        ws.root,
+        KnowledgeReview(
+            candidates=[
+                KnowledgeCandidate(
+                    id="kc-" + "a" * 20,
+                    title="同名",
+                    source_kind="digest",
+                    path="references/a/digest.md",
+                    quote="出处甲",
+                    content_hash="1" * 64,
+                    fingerprint="2" * 64,
+                    status="pending",
+                ),
+                KnowledgeCandidate(
+                    id="kc-" + "c" * 20,
+                    title="同名",
+                    source_kind="digest",
+                    path="references/b/digest.md",
+                    quote="出处乙",
+                    content_hash="3" * 64,
+                    fingerprint="4" * 64,
+                    status="pending",
+                ),
+            ]
+        ),
+    )
+    assert todo_count(ws.root) == 1
+    review = load_review(ws.root)
+    assert len(review.candidates) == 1
+    assert review.candidates[0].status == "pending"
+    assert {item.path for item in review.candidates[0].sources} == {
+        "references/a/digest.md",
+        "references/b/digest.md",
+    }
+
+
+def test_knowledge_need_attention_counts_pending_not_sighted(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    _ingest(ws, "专名", "证据", "references/a/digest.md")
+    client = TestClient(create_app(root))
+    dash = client.get("/w/ws", headers={"accept-language": "en"})
+    assert "need attention" not in dash.text
+    page = client.get("/knowledge?workspace=ws", headers={"accept-language": "en"})
+    assert "Knowledge candidates to review · 0" in page.text
+    assert "专名" not in page.text.split("Knowledge candidates to review", 1)[1]
+    _ingest(ws, "专名", "证据", "references/b/digest.md")
+    dash = client.get("/w/ws", headers={"accept-language": "en"})
+    assert "Knowledge: 1 item(s) need attention" in dash.text
+    page = client.get("/knowledge?workspace=ws", headers={"accept-language": "en"})
+    assert "Knowledge candidates to review · 1" in page.text
+    assert "专名" in page.text
 
 
 def _entry(title: str, *, scope: str = "global", aliases=(), description=""):
@@ -85,28 +227,14 @@ def test_review_accept_global_and_stale_source(tmp_path):
     digest = ws.root / "references" / "r" / "digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("锚点来自材料")
-    ingest_candidates(
-        ws.root,
-        source_kind="digest",
-        path="references/r/digest.md",
-        source_text=digest.read_text(),
-        drafts=[{"title": "锚点", "description": "定义", "quote": "锚点来自材料"}],
-    )
-    candidate = load_review(ws.root).candidates[0]
+    candidate = _ingest_pending(ws, "锚点", "锚点来自材料", "references/r/digest.md")
     entry = accept_workspace(ws.root, candidate.id)
     assert entry.scope == "workspace" and load_workspace(ws.root)[1] is False
     # 新候选可走 global 审核；删出处不会反向删知识。
-    ingest_candidates(
-        ws.root,
-        source_kind="digest",
-        path="references/r/digest.md",
-        source_text=digest.read_text(),
-        drafts=[{"title": "全局锚", "quote": "锚点来自材料"}],
-    )
-    candidate = load_review(ws.root).candidates[-1]
+    candidate = _ingest_pending(ws, "全局锚", "锚点来自材料", "references/r/digest.md")
     promoted_local = accept_workspace(ws.root, candidate.id)
     promote(ws.root, promoted_local.id)
-    candidate = load_review(ws.root).candidates[-1]
+    candidate = next(c for c in load_review(ws.root).candidates if c.status == "pending_global")
     global_entry = accept_global(root, ws.root, candidate.id)
     assert global_entry.scope == "global" and global_entry.id == promoted_local.id
     assert not any(item.id == promoted_local.id for item in load_workspace(ws.root)[0].entries)
@@ -160,8 +288,7 @@ def test_knowledge_web_add_and_candidate_actions(tmp_path):
     digest = ws.root / "references" / "r" / "digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("候选证据")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="候选证据", drafts=[{"title": "候选锚", "quote": "候选证据"}])
-    candidate = load_review(ws.root).candidates[0]
+    candidate = _ingest_pending(ws, "候选锚", "候选证据", "references/r/digest.md")
     page = client.post(f"/w/ws/knowledge/candidates/{candidate.id}/accept")
     assert page.status_code == 200 and "候选锚" in page.text
     assert 'href="/knowledge"' in client.get("/").text
@@ -222,7 +349,7 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("evidence")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="evidence", drafts=[{"title": "candidate", "quote": "evidence"}])
+    _ingest_pending(ws, "candidate", "evidence", "references/r/digest.md")
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
     assert "Merge target" in page.text and "aliases and source" in page.text
     # 顶栏语言切换按钮固定显示“中”；知识功能区域本身的英文页不得漏出中文。
@@ -366,8 +493,7 @@ def test_legacy_workspace_api_and_old_candidate_route_keep_v2_authority(tmp_path
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("证据")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "候选", "quote": "证据"}])
-    candidate = load_review(ws.root).candidates[0]
+    candidate = _ingest_pending(ws, "候选", "证据", "references/r/digest.md")
     response = TestClient(create_app(root)).post(f"/w/ws/glossary/candidates/{candidate.id}/accept")
     assert response.status_code == 200
     accepted = load_workspace(ws.root)[0].entries[0]
@@ -398,8 +524,7 @@ def test_global_accept_replays_journal_before_stale_after_local_failure(tmp_path
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("evidence")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="evidence", drafts=[{"title": "global", "quote": "evidence"}])
-    local = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    local = accept_workspace(ws.root, _ingest_pending(ws, "global", "evidence", "references/r/digest.md").id)
     promotion = promote(ws.root, local.id)
     import kairo.knowledge_review as module
 
@@ -480,8 +605,7 @@ def test_global_accept_retries_to_consistent_authorities(tmp_path, monkeypatch):
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("可定位证据")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="可定位证据", drafts=[{"title": "待提升", "quote": "可定位证据"}])
-    local = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    local = accept_workspace(ws.root, _ingest_pending(ws, "待提升", "可定位证据", "references/r/digest.md").id)
     promotion = promote(ws.root, local.id)
     import kairo.knowledge_review as review_module
 
@@ -570,8 +694,7 @@ def test_pending_candidate_can_be_edited_in_web(tmp_path):
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("候选证据")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="候选证据", drafts=[{"title": "旧标题", "quote": "候选证据"}])
-    candidate = load_review(ws.root).candidates[0]
+    candidate = _ingest_pending(ws, "旧标题", "候选证据", "references/r/digest.md")
     page = TestClient(create_app(root)).post(f"/w/ws/knowledge/candidates/{candidate.id}", data={"title": "新标题", "description": "已编辑", "aliases": "别名", "tags": "tag"})
     assert page.status_code == 200 and "新标题" in page.text
     changed = load_review(ws.root).candidates[0]
@@ -585,8 +708,7 @@ def test_workspace_accept_replays_journal_after_review_failure(tmp_path, monkeyp
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("证据")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "可恢复", "quote": "证据"}])
-    candidate = load_review(ws.root).candidates[0]
+    candidate = _ingest_pending(ws, "可恢复", "证据", "references/r/digest.md")
     import kairo.knowledge_review as review_module
 
     original = review_module.save_review
@@ -679,13 +801,14 @@ def test_ingest_replaces_pending_for_same_path_and_caps_drafts(tmp_path):
         source_text=body,
         drafts=[{"title": "旧甲", "quote": "证据甲"}, {"title": "旧乙", "quote": "证据乙"}],
     )
-    kept = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    _ingest(ws, "旧甲", "证据甲", "references/b/digest.md")
+    kept = accept_workspace(ws.root, next(c.id for c in load_review(ws.root).candidates if c.title == "旧甲"))
     drafts = [{"title": f"新{i}", "quote": "证据丙"} for i in range(MAX_DRAFTS_PER_SOURCE + 5)]
     ingest_candidates(ws.root, source_kind="digest", path=path, source_text=body, drafts=drafts)
     review = load_review(ws.root)
-    pending = [c for c in review.candidates if c.status == "pending"]
-    assert all(c.title.startswith("新") for c in pending)
-    assert len(pending) == MAX_DRAFTS_PER_SOURCE
+    fresh = [c for c in review.candidates if c.title.startswith("新")]
+    assert all(c.status == "sighted" for c in fresh)
+    assert len(fresh) == MAX_DRAFTS_PER_SOURCE
     assert any(c.status == "accepted" and c.title == "旧甲" for c in review.candidates)
     assert kept.id in {c.merged_into for c in review.candidates if c.status == "accepted"}
 
@@ -697,13 +820,7 @@ def test_knowledge_queue_is_compact_without_merge_when_empty(tmp_path):
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("证据")
-    ingest_candidates(
-        ws.root,
-        source_kind="digest",
-        path="references/r/digest.md",
-        source_text="证据",
-        drafts=[{"title": "数据质量智能体", "quote": "证据"}],
-    )
+    _ingest_pending(ws, "数据质量智能体", "证据", "references/r/digest.md")
     html = TestClient(create_app(root)).get("/knowledge?workspace=ws").text
     assert "数据质量智能体" in html
     assert "Merge target" not in html and "合并目标" not in html
@@ -721,8 +838,7 @@ def test_unicode_workspace_slug_is_retained_in_source(tmp_path):
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("证据")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "中文范围", "quote": "证据"}])
-    entry = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    entry = accept_workspace(ws.root, _ingest_pending(ws, "中文范围", "证据", "references/r/digest.md").id)
     assert entry.sources[0].workspace_slug == "能源梳理"
 
 
@@ -777,8 +893,7 @@ def test_transaction_replay_covers_workspace_and_global_merge_after_source_remov
     digest.write_text("证据")
     base = new_entry(title="目标", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [base]}))
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": "合并", "quote": "证据"}])
-    candidate = load_review(ws.root).candidates[0]
+    candidate = _ingest_pending(ws, "合并", "证据", "references/r/digest.md")
     import kairo.knowledge_review as module
     original = module.save_review
     monkeypatch.setattr(module, "save_review", lambda *_: (_ for _ in ()).throw(OSError("review")))
@@ -818,8 +933,7 @@ def test_prepared_journal_recovers_when_second_transaction_write_fails(tmp_path,
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("证据")
-    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="证据", drafts=[{"title": f"候选-{operation}", "quote": "证据"}])
-    candidate = load_review(ws.root).candidates[0]
+    candidate = _ingest_pending(ws, f"候选-{operation}", "证据", "references/r/digest.md")
     target_id = ""
     if operation == "merge_workspace":
         target = new_entry(title="本地目标", scope="workspace")

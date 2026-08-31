@@ -1688,6 +1688,8 @@ def _knowledge_page(
             )
             review = invalidate_stale(serve / selected)
             for candidate in review.candidates:
+                if candidate.status not in {"pending", "pending_global", "rejected_global"}:
+                    continue
                 row = candidate.model_dump()
                 row["available"] = (serve / selected / candidate.path).is_file()
                 if candidate.suggestion:

@@ -29,7 +29,8 @@ from kairo.knowledge_matcher import KnowledgeMatcher
 
 
 OPEN = frozenset({"pending", "pending_global"})
-_CANDIDATE_STATUSES = frozenset({"pending", "pending_global", "accepted", "merged", "ignored", "stale", "rejected_global"})
+_LOCKED = frozenset({"ignored", "accepted", "merged", "pending_global", "rejected_global"})
+_CANDIDATE_STATUSES = frozenset({"sighted", "pending", "pending_global", "accepted", "merged", "ignored", "stale", "rejected_global"})
 MAX_DRAFTS_PER_SOURCE = 12
 
 
@@ -50,7 +51,7 @@ class KnowledgeCandidate(BaseModel):
     quote: str
     content_hash: str
     fingerprint: str
-    status: str = "pending"
+    status: str = "sighted"
     merged_into: str = ""
     reject_reason: str = ""
     suggestion: dict[str, str] = Field(default_factory=dict)
@@ -185,6 +186,9 @@ def load_review(workspace_root: Path) -> KnowledgeReview:
             _ensure_legacy_promotion_entries(workspace_root, review)
             save_review(workspace_root, review)
             legacy_path.replace(legacy_path.with_suffix(".yaml.migrated"))
+            review, _ = coalesce_by_title(review, workspace_root)
+            _validate_review(review)
+            save_review(workspace_root, review)
             return review
         except (OSError, yaml.YAMLError, ValueError) as exc:
             raise KnowledgeError(f"旧审核队列迁移失败:{exc}", path=legacy_path) from exc
@@ -212,6 +216,10 @@ def load_review(workspace_root: Path) -> KnowledgeReview:
             _validate_review(review)
             save_review(workspace_root, review)
             legacy_path.replace(legacy_path.with_suffix(".yaml.migrated"))
+        review, coalesced = coalesce_by_title(review, workspace_root)
+        if coalesced:
+            _validate_review(review)
+            save_review(workspace_root, review)
         return review
     except (yaml.YAMLError, ValueError) as exc:
         raise KnowledgeError(f"审核队列无法解析:{exc}", path=path) from exc
@@ -222,12 +230,161 @@ def save_review(workspace_root: Path, review: KnowledgeReview) -> None:
     _atomic_write(review_path(workspace_root), review.model_dump())
 
 
+_STATUS_KEEP_RANK = {
+    "pending_global": 0,
+    "rejected_global": 1,
+    "accepted": 2,
+    "merged": 3,
+    "ignored": 4,
+    "pending": 5,
+    "sighted": 6,
+    "stale": 7,
+}
+
+
+def coalesce_by_title(
+    review: KnowledgeReview, workspace_root: Path
+) -> tuple[KnowledgeReview, bool]:
+    """同一规范化标题合成一条，重算门槛。打开旧 yaml 与 ingest 共用。"""
+    groups: dict[str, list[KnowledgeCandidate]] = {}
+    order: list[str] = []
+    for candidate in review.candidates:
+        key = normalize_term(candidate.title)
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append(candidate)
+    merged: list[KnowledgeCandidate] = []
+    changed = False
+    for key in order:
+        items = groups[key]
+        keeper = sorted(
+            items, key=lambda c: (_STATUS_KEEP_RANK.get(c.status, 9), c.id)
+        )[0]
+        sources: list[KnowledgeSource] = []
+        for item in items:
+            for source in _candidate_sources(item, workspace_root):
+                sources = _upsert_source(sources, source)
+        fp = title_fingerprint(keeper.title)
+        primary = sources[-1] if sources else None
+        updates = {
+            "fingerprint": fp,
+            "sources": sources,
+            "updated_at": keeper.updated_at or _now(),
+        }
+        if primary is not None:
+            updates.update(
+                path=primary.path,
+                quote=primary.quote or keeper.quote,
+                content_hash=primary.content_hash or keeper.content_hash,
+            )
+        if len(items) > 1 or keeper.fingerprint != fp or list(keeper.sources) != sources:
+            changed = True
+        keeper = keeper.model_copy(update=updates)
+        if keeper.status not in _LOCKED:
+            nxt = apply_review_threshold(keeper, workspace_root)
+            if nxt.status != keeper.status:
+                changed = True
+            keeper = nxt
+        merged.append(keeper)
+    if not changed and len(merged) == len(review.candidates):
+        return review, False
+    return (
+        review.model_copy(update={"candidates": merged}),
+        True,
+    )
+
+
 def _hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
 def _fingerprint(source_kind: str, path: str, title: str, quote: str) -> str:
+    """旧单句身份；打开旧 yaml 时仍用来读入，随即合并成标题指纹。"""
     return _hash(f"{source_kind}\n{path}\n{normalize_term(title)}\n{quote.strip()}")
+
+
+def title_fingerprint(title: str) -> str:
+    return _hash(normalize_term(title))
+
+
+def _source_paths(candidate: KnowledgeCandidate) -> list[str]:
+    paths: list[str] = []
+    seen: set[str] = set()
+    for source in candidate.sources:
+        if source.path and source.path not in seen:
+            paths.append(source.path)
+            seen.add(source.path)
+    if candidate.path and candidate.path not in seen:
+        paths.append(candidate.path)
+    return paths
+
+
+def _is_digest_path(path: str) -> bool:
+    return Path(path).name == "digest.md"
+
+
+def _is_understanding_path(path: str) -> bool:
+    return Path(path).name == "understanding.md"
+
+
+def _is_corpus_path(workspace_root: Path, path: str) -> bool:
+    parts = Path(path).parts
+    if len(parts) < 2 or parts[0] != "references":
+        return False
+    try:
+        from kairo.workspace import Workspace
+
+        ws = Workspace.open(Path(workspace_root))
+        man = ws.read_manifest(parts[1])
+    except Exception:
+        return False
+    sc = ws.constitution.source_classes.get(man.source_class)
+    return sc is not None and not sc.fold
+
+
+def qualifies_for_review(candidate: KnowledgeCandidate, workspace_root: Path) -> bool:
+    """≥2 篇 digest，或 understanding，或 corpus/基线。"""
+    paths = _source_paths(candidate)
+    if any(_is_understanding_path(p) for p in paths):
+        return True
+    if any(_is_corpus_path(workspace_root, p) for p in paths):
+        return True
+    return len({p for p in paths if _is_digest_path(p)}) >= 2
+
+
+def apply_review_threshold(
+    candidate: KnowledgeCandidate, workspace_root: Path
+) -> KnowledgeCandidate:
+    if candidate.status in _LOCKED:
+        return candidate
+    if not _source_paths(candidate):
+        if candidate.status != "stale":
+            return candidate.model_copy(update={"status": "stale", "updated_at": _now()})
+        return candidate
+    want = "pending" if qualifies_for_review(candidate, workspace_root) else "sighted"
+    if candidate.status != want:
+        return candidate.model_copy(update={"status": want, "updated_at": _now()})
+    return candidate
+
+
+def _upsert_source(
+    sources: list[KnowledgeSource], incoming: KnowledgeSource
+) -> list[KnowledgeSource]:
+    return [item for item in sources if item.path != incoming.path] + [incoming]
+
+
+def _drop_path(
+    candidate: KnowledgeCandidate, path: str
+) -> KnowledgeCandidate:
+    sources = [item for item in candidate.sources if item.path != path]
+    updates: dict = {"sources": sources, "updated_at": _now()}
+    if candidate.path == path and sources:
+        last = sources[-1]
+        updates.update(
+            path=last.path, quote=last.quote, content_hash=last.content_hash
+        )
+    return candidate.model_copy(update=updates)
 
 
 def _candidate_sources(candidate: KnowledgeCandidate, workspace_root: Path) -> list[KnowledgeSource]:
@@ -257,22 +414,46 @@ def _primary_source(candidate: KnowledgeCandidate, workspace_root: Path) -> Know
 
 
 def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
-    review = load_review(workspace_root)
+    review = load_review(workspace_root)  # load 已按标题合并并重算门槛
     changed = False
     root = Path(workspace_root)
     for index, candidate in enumerate(review.candidates):
-        if candidate.status not in OPEN:
+        if candidate.status in _LOCKED:
             continue
         if candidate.entry_id and candidate.path == "review/manual":
             # 人工创建条目可被提升但没有材料出处；不伪造来源，也不立即 stale。
             continue
-        # 多出处候选只要仍有一个可定位材料就可继续审核；不固定 sources[0]。
         sources = _candidate_sources(candidate, root)
-        alive = any(_source_alive(root, source) for source in sources)
         if not sources:
-            alive = candidate.path == "review/manual"
+            if candidate.path == "review/manual":
+                continue
+            nxt = candidate.model_copy(update={"status": "stale", "updated_at": _now()})
+            if nxt.status != candidate.status:
+                review.candidates[index] = nxt
+                changed = True
+            continue
+        alive = [source for source in sources if _source_alive(root, source)]
         if not alive:
-            review.candidates[index] = candidate.model_copy(update={"status": "stale", "updated_at": _now()})
+            review.candidates[index] = candidate.model_copy(
+                update={"status": "stale", "sources": [], "updated_at": _now()}
+            )
+            changed = True
+            continue
+        updates: dict = {"sources": alive}
+        last = alive[-1]
+        updates.update(
+            path=last.path,
+            quote=last.quote or candidate.quote,
+            content_hash=last.content_hash or candidate.content_hash,
+        )
+        pruned = candidate.model_copy(update=updates)
+        nxt = apply_review_threshold(pruned, workspace_root)
+        if (
+            nxt.status != candidate.status
+            or [(item.path, item.quote) for item in nxt.sources]
+            != [(item.path, item.quote) for item in candidate.sources]
+        ):
+            review.candidates[index] = nxt
             changed = True
     if changed:
         save_review(workspace_root, review)
@@ -284,7 +465,7 @@ def open_candidates(workspace_root: Path) -> list[KnowledgeCandidate]:
 
 
 def todo_count(workspace_root: Path) -> int:
-    review = load_review(workspace_root)
+    review = invalidate_stale(workspace_root)
     return sum(c.status in OPEN for c in review.candidates) + len(review.extract_errors)
 
 
@@ -299,65 +480,118 @@ def ingest_candidates(
 ) -> KnowledgeReview:
     if source_kind not in {"digest", "compose"}:
         raise KnowledgeError(f"未知候选来源:{source_kind}")
+    _safe_path(path)
     review = invalidate_stale(workspace_root)
     error_key = _error_key(source_kind, path)
     review.extract_errors.pop(error_key, None)
     review.extract_error_versions.pop(error_key, None)
     review.extract_error_meta.pop(error_key, None)
-    # 同材料重抽：丢掉该 path 上未审 pending，不叠历史。已终态保留。
-    review.candidates = [
-        c
-        for c in review.candidates
-        if not (
-            c.path == path
-            and c.source_kind == source_kind
-            and c.status == "pending"
-        )
-    ]
-    existing = {c.fingerprint for c in review.candidates}
     source_hash = _hash(source_text)
-    added = 0
+    src_kind = (
+        "understanding"
+        if _is_understanding_path(path)
+        else "digest"
+    )
+    incoming = KnowledgeSource(
+        kind=src_kind,
+        path=path,
+        quote="",
+        content_hash=source_hash,
+        workspace_slug=Path(workspace_root).name,
+    )
+    seen: set[str] = set()
+    added_new = 0
     for draft in drafts:
         title = str(draft.get("title", draft.get("name", ""))).strip()
         quote = str(draft.get("quote", "")).strip()
         if not title or not quote or quote not in source_text:
             continue
-        fp = _fingerprint(source_kind, path, title, quote)
-        if fp in existing:
-            continue
-        if added >= MAX_DRAFTS_PER_SOURCE:
-            break
+        fp = title_fingerprint(title)
+        seen.add(fp)
+        src = incoming.model_copy(update={"quote": quote})
         aliases = [
             KnowledgeAlias(value=str(value).strip())
             for value in draft.get("aliases", draft.get("aka", [])) or []
             if str(value).strip()
         ]
-        candidate = KnowledgeCandidate(
-            id="kc-" + fp[:20],
-            title=title,
-            aliases=aliases,
-            description=str(draft.get("description", draft.get("note", ""))).strip(),
-            tags=[str(x).strip() for x in draft.get("tags", []) or [] if str(x).strip()],
-            source_kind=source_kind,
-            path=path,
-            quote=quote,
-            content_hash=source_hash,
-            fingerprint=fp,
-            sources=[KnowledgeSource(
-                kind="understanding" if source_kind == "compose" and path == "understanding.md" else "digest",
+        tags = [str(x).strip() for x in draft.get("tags", []) or [] if str(x).strip()]
+        description = str(draft.get("description", draft.get("note", ""))).strip()
+        index = next(
+            (
+                i
+                for i, c in enumerate(review.candidates)
+                if c.fingerprint == fp or normalize_term(c.title) == normalize_term(title)
+            ),
+            None,
+        )
+        if index is None:
+            if added_new >= MAX_DRAFTS_PER_SOURCE:
+                continue
+            added_new += 1
+            candidate = KnowledgeCandidate(
+                id="kc-" + fp[:20],
+                title=title,
+                aliases=aliases,
+                description=description,
+                tags=tags,
+                source_kind=source_kind,
                 path=path,
                 quote=quote,
                 content_hash=source_hash,
-                workspace_slug=Path(workspace_root).name,
-            )],
-            updated_at=_now(),
+                fingerprint=fp,
+                sources=[src],
+                updated_at=_now(),
+            )
+            candidate = apply_review_threshold(candidate, workspace_root)
+            if matcher is not None:
+                candidate = candidate.model_copy(
+                    update={
+                        "suggestion": matcher.suggest(
+                            [candidate.title, *(a.value for a in aliases)]
+                        )
+                    }
+                )
+            review.candidates.append(candidate)
+            continue
+        current = review.candidates[index]
+        sources = _upsert_source(list(current.sources), src)
+        updates = {
+            "sources": sources,
+            "path": path,
+            "quote": quote,
+            "content_hash": source_hash,
+            "source_kind": source_kind,
+            "fingerprint": fp,
+            "updated_at": _now(),
+        }
+        if description:
+            updates["description"] = description
+        if aliases:
+            updates["aliases"] = aliases
+        if tags:
+            updates["tags"] = tags
+        current = current.model_copy(update=updates)
+        if current.status not in _LOCKED:
+            current = apply_review_threshold(current, workspace_root)
+            if matcher is not None:
+                current = current.model_copy(
+                    update={
+                        "suggestion": matcher.suggest(
+                            [current.title, *(a.value for a in current.aliases)]
+                        )
+                    }
+                )
+        review.candidates[index] = current
+    for index, current in enumerate(review.candidates):
+        if current.fingerprint in seen:
+            continue
+        if current.status not in {"sighted", "pending"}:
+            continue
+        if path not in _source_paths(current):
+            continue
+        review.candidates[index] = apply_review_threshold(
+            _drop_path(current, path), workspace_root
         )
-        # 建议只影响 UI，不自动确认或覆盖。
-        if matcher is not None:
-            candidate = candidate.model_copy(update={"suggestion": matcher.suggest([candidate.title, *(a.value for a in aliases)])})
-        review.candidates.append(candidate)
-        existing.add(fp)
-        added += 1
     save_review(workspace_root, review)
     return review
 
@@ -692,35 +926,45 @@ def promote_entry(workspace_root: Path, entry_id: str) -> KnowledgeCandidate:
     if entry is None or entry.status != "confirmed":
         raise KnowledgeError("只能提升已确认的本地知识条目")
     review = load_review(workspace_root)
-    existing = next((c for c in review.candidates if c.entry_id == entry_id and c.status in {"pending_global", "rejected_global", "stale"}), None)
-    if existing:
-        if existing.status == "pending_global":
-            return existing
-        source = next((item for item in entry.sources if _source_alive(workspace_root, item)), entry.sources[0] if entry.sources else None)
-        refreshed = existing.model_copy(update={
-            "title": entry.title,
-            "aliases": entry.aliases,
-            "description": entry.description,
-            "tags": entry.tags,
-            "source_kind": "compose" if source and source.kind == "understanding" else "digest",
-            "path": source.path if source else "review/manual",
-            "quote": source.quote if source else entry.title,
-            "content_hash": source.content_hash if source else _hash(entry.title),
-            "sources": entry.sources,
-            "status": "pending_global",
-            "reject_reason": "",
-            "updated_at": _now(),
-        })
-        review.candidates[review.candidates.index(existing)] = refreshed
-        save_review(workspace_root, review)
-        return refreshed
-    # 无出处的人工条目不伪造 constitution/digest 出处；其审核候选仍可稳定追踪。
+    existing = next(
+        (
+            c
+            for c in review.candidates
+            if c.entry_id == entry_id
+            or c.merged_into == entry_id
+            or normalize_term(c.title) == normalize_term(entry.title)
+        ),
+        None,
+    )
     source = next((item for item in entry.sources if _source_alive(workspace_root, item)), entry.sources[0] if entry.sources else None)
     source_path = source.path if source else "review/manual"
     source_quote = source.quote if source else entry.title
     source_hash = source.content_hash if source and source.content_hash else _hash(entry.title)
-    fp = _fingerprint("compose", source_path, entry.title, source_quote)
-    candidate = KnowledgeCandidate(id="kc-" + fp[:20], title=entry.title, aliases=entry.aliases, description=entry.description, tags=entry.tags, source_kind="compose" if source and source.kind == "understanding" else "digest", path=source_path, quote=source_quote, content_hash=source_hash, fingerprint=fp, status="pending_global", entry_id=entry.id, sources=entry.sources, updated_at=_now())
+    fp = title_fingerprint(entry.title)
+    payload = {
+        "title": entry.title,
+        "aliases": entry.aliases,
+        "description": entry.description,
+        "tags": entry.tags,
+        "source_kind": "compose" if source and source.kind == "understanding" else "digest",
+        "path": source_path,
+        "quote": source_quote,
+        "content_hash": source_hash,
+        "fingerprint": fp,
+        "sources": entry.sources,
+        "status": "pending_global",
+        "entry_id": entry.id,
+        "reject_reason": "",
+        "updated_at": _now(),
+    }
+    if existing:
+        if existing.status == "pending_global" and existing.entry_id == entry_id:
+            return existing
+        refreshed = existing.model_copy(update=payload)
+        review.candidates[review.candidates.index(existing)] = refreshed
+        save_review(workspace_root, review)
+        return refreshed
+    candidate = KnowledgeCandidate(id="kc-" + fp[:20], **payload)
     review.candidates.append(candidate)
     save_review(workspace_root, review)
     return candidate
