@@ -56,6 +56,26 @@ def _web_installed() -> bool:
     return True
 
 
+def _skill_md_bytes(md: Path) -> bytes | None:
+    try:
+        if md.is_file():
+            return md.read_bytes()
+    except OSError:
+        return None
+    return None
+
+
+def _canonical_matches_packaged(canon: Path, src_file: Path) -> bool:
+    """True iff canon/SKILL.md exists and its bytes equal the packaged operator skill."""
+    got = _skill_md_bytes(canon / _SKILL_MD)
+    if got is None:
+        return False
+    try:
+        return got == src_file.read_bytes()
+    except OSError:
+        return False
+
+
 def doctor_lines(*, home: Path | None = None) -> list[str]:
     """只读体检文案。不写盘。"""
     lines = [f"kairo {__version__}"]
@@ -100,8 +120,10 @@ def doctor_lines(*, home: Path | None = None) -> list[str]:
         lines.append("skill 源: ⚠ 包内没有 SKILL.md")
     else:
         lines.append(f"skill 源: {src}")
-    if (canon / _SKILL_MD).is_file():
+    if src is not None and _canonical_matches_packaged(canon, src):
         lines.append(f"skill: 已 connect ({canon})")
+    elif (canon / _SKILL_MD).is_file():
+        lines.append(f"skill: 未 connect（正文与包内 skill 不一致: {canon}）")
     else:
         lines.append(f"skill: 未 connect  → kairo connect  （或 {_NPX_HINT}）")
     return lines
@@ -139,13 +161,26 @@ def _link_or_copy(src: Path, dest: Path) -> str:
 
 
 def connect_skill(*, home: Path | None = None) -> list[str]:
-    """把包内 skill 拷到 ~/.agents/skills/kairo，并对已装 agent 挂链。"""
+    """把包内 skill 拷到 ~/.agents/skills/kairo，并对已装 agent 挂链。
+
+    Refuse when canonical is a symlink or an existing SKILL.md that does not
+    match the packaged source — never write through a foreign target.
+    """
     src_file = skill_source_file()
     if src_file is None:
         raise FileNotFoundError("找不到 SKILL.md（wheel 未打包 skill）")
     h = home or _home()
     canon = canonical_skill_dir(h)
-    _install_canonical(src_file, canon)
+    matches = _canonical_matches_packaged(canon, src_file)
+    if canon.is_symlink() or ((canon / _SKILL_MD).is_file() and not matches):
+        if not matches:
+            return [
+                f"canonical occupied, not written: {canon}"
+                "（正文与包内 skill 不一致，拒绝覆盖）"
+            ]
+        # Symlink whose SKILL.md already matches: do not write through; still mount.
+    else:
+        _install_canonical(src_file, canon)
     lines = [f"canonical: {canon / _SKILL_MD}"]
     mounted = 0
     for agent in agent_mounts(h):
