@@ -15,13 +15,13 @@
     <nav class="console-nav">
       <a href="/" class="{% if nav_active == 'workspaces' %}on{% endif %}">{{ t('nav.workspaces') }}</a>
       <a href="/timeline" class="{% if nav_active == 'timeline' %}on{% endif %}">{{ t('nav.timeline') }}</a>
+      {% if not public_read %}
+      <a href="/knowledge" class="{% if nav_active == 'knowledge' %}on{% endif %}">{{ t('nav.knowledge') }}</a>
+      {% endif %}
     </nav>
     {% block topnav %}{% endblock %}
     <span class="crumb">{% block subtitle %}{% endblock %}</span>
     <span class="top-end">
-      {% if not public_read %}
-      <a href="/knowledge" class="root-gl{% if nav_active == 'knowledge' %} on{% endif %}">{{ t('header.knowledge') }}</a>
-      {% endif %}
       <span class="lang-switch">
         <a href="/set-lang/en" class="{% if lang == 'en' %}on{% endif %}">EN</a>
         <a href="/set-lang/zh" class="{% if lang == 'zh' %}on{% endif %}">中</a>

@@ -1729,6 +1729,7 @@ def _knowledge_page(
         "knowledge.html",
         {
             "nav_active": "knowledge",
+            "root": str(serve),
             "slugs": slugs,
             "selected_slug": selected,
             "global_entries": global_entries,

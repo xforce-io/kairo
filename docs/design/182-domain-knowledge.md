@@ -56,7 +56,7 @@ Issue [#182](https://github.com/xforce-io/kairo/issues/182)。Kairo 已保存 re
 
 #### 信息架构与入口
 
-顶栏现有弱链接 “Glossary/公共真名册” 演进为“知识”，仍不挤入 Workspaces/Timeline 主导航。`/knowledge` 是新的统一维护页；已迁移为 v2 的 `/glossary` 以 303 到 `/knowledge` 并保留合法 `?workspace=`，未迁移的旧册继续以兼容页只读/维护，避免书签与旧自动化突然失效。旧 `/w/{slug}/glossary` 同样保留兼容入口，迁移后导向统一知识页。
+顶栏 Knowledge 与 Workspaces、Timeline 同属主导航（#211）；public-read 仍隐藏该入口。`/knowledge` 是统一维护页；已迁移为 v2 的 `/glossary` 以 303 到 `/knowledge` 并保留合法 `?workspace=`，未迁移的旧册继续以兼容页只读/维护，避免书签与旧自动化突然失效。旧 `/w/{slug}/glossary` 同样保留兼容入口，迁移后导向统一知识页。
 
 workspace 三栏页不恢复第二套维护后台。右侧 ACTIONS 在待审核候选、待全局审核、提取失败、知识 hash 漂移中任一存在时仅显示一行“知识有 N 项待处理”，链接到已选 workspace 的知识页；无待办则不显示。Run 成功摘要旁显示本次“知识候选 N / 知识变化 N”，点击进入同一筛选视图，不把审核动作塞进运行面板。
 

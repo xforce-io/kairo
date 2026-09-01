@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block subtitle %}{{ t('knowledge.subtitle') }}{% endblock %}
+{% block subtitle %}{{ root }}{% if selected_slug %} · {{ selected_slug }}{% endif %}{% endblock %}
 {% block body %}
 <div class="dash-head"><p class="dlg-hint">{{ t('knowledge.hint') }}</p></div>
 {% if error %}<p class="ref-blocks glossary-error" role="alert">{{ t('knowledge.save_error').format(error=error) }}</p>{% endif %}
