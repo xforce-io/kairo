@@ -1136,14 +1136,31 @@ def _parse_tags(tags: str) -> list[str]:
     return [p.strip() for p in tags.replace("，", ",").split(",") if p.strip()]
 
 
+def _knowledge_drift_ref_title(workspace: Workspace | None, ref_id: str) -> str:
+    if workspace is None:
+        return ref_id
+    try:
+        man = workspace.read_manifest(ref_id)
+    except (OSError, ValueError):
+        return ref_id
+    title = (man.title or "").strip() or ref_id
+    day = (man.occurred_at or "")[:10]
+    if day:
+        return f"{title} · {day}"
+    return title
+
+
 def _knowledge_drift_rows(
     state: State,
     current_hash: str,
     *,
     live_targets: set[str],
+    slug: str = "",
+    workspace: Workspace | None = None,
 ) -> list[dict[str, str]]:
     """仅报告实际消费知识上下文的产物，避免把原料/证据误报为待重算。"""
     rows: list[dict[str, str]] = []
+    ws_href = f"/w/{quote(slug)}" if slug else ""
     for path, product in state.products.items():
         parts = path.split("/")
         consumes_knowledge = (
@@ -1152,11 +1169,29 @@ def _knowledge_drift_rows(
             and parts[2] in {"digest.md", "prose.md"}
         )
         if consumes_knowledge and product.knowledge_hash != current_hash:
+            ref_id = parts[1]
+            kind = "digest" if parts[2] == "digest.md" else "prose"
             # re-step 的 reference 契约接收 ref_id，而不是产物路径。
-            rows.append({"path": path, "target": parts[1]})
+            rows.append(
+                {
+                    "path": path,
+                    "target": ref_id,
+                    "kind": kind,
+                    "title": _knowledge_drift_ref_title(workspace, ref_id),
+                    "href": f"{ws_href}?ref={quote(ref_id)}" if ws_href else "",
+                }
+            )
     for path, target_state in state.targets.items():
         if path in live_targets and target_state.knowledge_hash != current_hash:
-            rows.append({"path": path, "target": path})
+            rows.append(
+                {
+                    "path": path,
+                    "target": path,
+                    "kind": "live",
+                    "title": path,
+                    "href": ws_href,
+                }
+            )
     return rows
 
 
@@ -1170,7 +1205,13 @@ def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
         state = ws.read_state()
         live_targets = {target.path for target in ws.constitution.live_targets()}
         knowledge_todos += len(
-            _knowledge_drift_rows(state, current, live_targets=live_targets)
+            _knowledge_drift_rows(
+                state,
+                current,
+                live_targets=live_targets,
+                slug=ws.root.name,
+                workspace=ws,
+            )
         )
         return knowledge_todos
     except ValueError:
@@ -1684,7 +1725,13 @@ def _knowledge_page(
                 target.path for target in workspace.constitution.live_targets()
             }
             drift.extend(
-                _knowledge_drift_rows(state, current, live_targets=live_targets)
+                _knowledge_drift_rows(
+                    state,
+                    current,
+                    live_targets=live_targets,
+                    slug=selected,
+                    workspace=workspace,
+                )
             )
             review = invalidate_stale(serve / selected)
             for candidate in review.candidates:

@@ -360,6 +360,38 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .gl-section { padding-top: 4px; border-top: 1px solid var(--line); margin-top: 8px; }
 .gl-section:first-of-type { border-top: none; margin-top: 0; }
 .ref-blocks { margin: 10px 0 12px; padding: 10px 12px; border-radius: 8px; background: #f7ecec; border: 1px solid #e2b6b6; }
+.knowledge-drift {
+  margin: 10px 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--pine-soft, #eef4ef);
+  border: 1px solid var(--line, #d5ddd7);
+}
+.knowledge-drift-banner,
+.knowledge-drift-summary {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--ink-soft, #4a534c);
+  line-height: 1.45;
+}
+.knowledge-drift-summary { color: var(--muted, #6b746e); font-size: 12.5px; }
+.knowledge-drift-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.knowledge-drift-list + .knowledge-drift-list { margin-top: 4px; }
+.knowledge-drift-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  padding: 6px 0;
+  border-top: 1px solid var(--line, #d5ddd7);
+}
+.knowledge-drift-list a { text-decoration: none; font-weight: 500; }
+.knowledge-drift-list form { display: inline; margin: 0; }
+.knowledge-drift-list button { width: auto; }
 .ref-block-list { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: #7a3030; }
 .ref-block-list code { font-size: 12px; }
 #kairo-toast {
@@ -798,6 +830,8 @@ header.top .root-gl.on { color: var(--pine-deep); }
     margin: 8px 0;
   }
   .knowledge-responsive .ref-blocks button { width: 100%; margin: 0; }
+  .knowledge-responsive .knowledge-drift-list li { display: flex; }
+  .knowledge-responsive .knowledge-drift-list button { width: auto; }
 }
 
 /* 导出 PDF:打印时只保留阅读区正文,裁掉外壳与按钮 */
