@@ -289,30 +289,42 @@ def test_dashboard_journal_in_unpinned_grid_without_pins(tmp_path):
     assert any(c in {"总结", "%E6%80%BB%E7%BB%93"} for c in cards) or "总结" in html
 
 
-def test_knowledge_is_header_utility_not_console_nav(tmp_path):
-    """#182: 知识在顶栏弱链，不进主导航，不在 dash-head。"""
+def test_knowledge_is_console_nav_not_utility(tmp_path):
+    """#211: Knowledge 在主导航，不在右侧弱链，不在 dash-head。"""
     Workspace.init(tmp_path / "ws", topic="t")
-    html = _client(tmp_path).get("/").text
-    nav = _console_nav(html)
-    assert 'href="/knowledge"' not in nav
-    header = _header(html)
-    assert re.search(r'href="/knowledge"', header)
-    assert "Knowledge" in header
-    start = html.find('class="dash-head"')
-    end = html.find('class="grid"')
+    client = _client(tmp_path)
+    for path in ("/", "/timeline"):
+        html = client.get(path).text
+        nav = _console_nav(html)
+        assert 'href="/knowledge"' in nav
+        header = _header(html)
+        assert header.count('href="/knowledge"') == 1
+        assert "root-gl" not in header
+        assert "Knowledge" in nav
+    dash = client.get("/").text
+    start = dash.find('class="dash-head"')
+    end = dash.find('class="grid"')
     assert start != -1 and end != -1 and start < end
-    assert 'href="/knowledge"' not in html[start:end]
+    assert 'href="/knowledge"' not in dash[start:end]
 
 
-def test_knowledge_page_marks_utility_on(tmp_path):
-    """#182: /knowledge 弱链为当前项，主导航不选中。"""
+def test_knowledge_page_marks_console_nav_on(tmp_path):
+    """#211: /knowledge 主导航选中 Knowledge；crumb 不重复页名。"""
     Workspace.init(tmp_path / "ws", topic="t")
-    html = _client(tmp_path).get("/knowledge").text
+    client = _client(tmp_path)
+    html = client.get("/knowledge").text
     nav = _console_nav(html)
-    assert 'href="/knowledge"' not in nav
+    assert re.search(r'<a href="/knowledge" class="on">', nav)
     assert re.search(r'<a href="/" class="on">', nav) is None
     assert re.search(r'<a href="/timeline" class="on">', nav) is None
-    assert re.search(r'href="/knowledge"[^>]*\bon\b', _header(html))
+    assert "root-gl" not in _header(html)
     crumb = re.search(r'<span class="crumb">(.*?)</span>', html, re.S)
     assert crumb is not None
-    assert "Knowledge" in crumb.group(1)
+    text = crumb.group(1)
+    assert "Knowledge" not in text and "知识" not in text
+    assert str(tmp_path) in text
+    selected = client.get("/knowledge?workspace=ws").text
+    selected_crumb = re.search(r'<span class="crumb">(.*?)</span>', selected, re.S)
+    assert selected_crumb is not None
+    assert "ws" in selected_crumb.group(1)
+    assert "Knowledge" not in selected_crumb.group(1)

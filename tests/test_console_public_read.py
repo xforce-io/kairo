@@ -18,6 +18,7 @@ def test_s1_home_lists_all_workspaces_like_console(tmp_path):
     assert home.status_code == 200
     assert "/static/app.css" in home.text
     assert "kairo" in home.text.lower()
+    assert 'href="/knowledge"' not in home.text
     assert "/w/ws" in home.text
     assert "/w/secret" in home.text
     assert "secret-private" in home.text

@@ -77,17 +77,18 @@ def _ws_panel(html: str) -> str | None:
 
 
 def test_web_knowledge_button_on_workspace(tmp_path):
-    """#182: 课题页无维护按钮；顶栏弱链去 /knowledge，不进主导航。"""
+    """#211: 课题页无维护按钮；Knowledge 在主导航，不在右侧弱链。"""
     Workspace.init(tmp_path / "ws", topic="t")
     r = _client(tmp_path).get("/w/ws")
     assert r.status_code == 200
     assert 'hx-get="/w/ws/glossary"' not in r.text
     assert 'class="gl-todo-hint"' not in r.text
     nav = _console_nav(r.text)
-    assert 'href="/knowledge"' not in nav
+    assert 'href="/knowledge"' in nav
     header = _header(r.text)
-    assert re.search(r'href="/knowledge"', header)
-    assert "Knowledge" in header or "知识" in header
+    assert header.count('href="/knowledge"') == 1
+    assert "root-gl" not in header
+    assert "Knowledge" in nav or "知识" in nav
 
 
 def test_workspace_todo_hint_is_one_line(tmp_path):
