@@ -93,17 +93,19 @@ def test_web_knowledge_button_on_workspace(tmp_path):
 
 def test_workspace_todo_hint_is_one_line(tmp_path):
     """#174 S2: 有待办时恰好一行，href 含 ?workspace=。"""
-    from kairo.glossary_review import ingest_candidates
+    from kairo.knowledge_review import ingest_candidates
 
     root = tmp_path
     ws = Workspace.init(root / "ws", topic="t")
-    src = root / "n.txt"
-    src.write_text("讨论天溯系统")
-    rid = ws.add([src])
-    digest = ws.root / "references" / rid / "digest.md"
-    digest.parent.mkdir(parents=True, exist_ok=True)
-    digest.write_text("天溯系统\n")
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    understanding = ws.root / "understanding.md"
+    understanding.write_text("天溯系统\n")
+    ingest_candidates(
+        ws.root,
+        source_kind="compose",
+        path="understanding.md",
+        source_text=understanding.read_text(),
+        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+    )
     html = _client(root).get("/w/ws").text
     hints = re.findall(
         r'<a class="gl-todo-hint"[^>]*href="([^"]+)"', html

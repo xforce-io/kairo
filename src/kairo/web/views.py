@@ -1298,7 +1298,7 @@ def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
             )
         )
         return knowledge_todos
-    except (OSError, ValueError):
+    except ValueError:
         return 1
 
 
@@ -1823,6 +1823,13 @@ def _knowledge_page(
                     continue
                 row = candidate.model_dump()
                 row["available"] = (serve / selected / candidate.path).is_file()
+                row["sources"] = [
+                    {
+                        **source.model_dump(),
+                        "available": (serve / selected / source.path).is_file(),
+                    }
+                    for source in candidate.sources
+                ]
                 if candidate.suggestion:
                     targets = {entry.id: entry.title for entry in [*local_entries, *global_entries]}
                     parts = []

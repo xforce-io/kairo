@@ -112,12 +112,15 @@ def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
 
     step(ws, provider=CandidateProvider())
 
+    from kairo.knowledge_review import load_review as knowledge_load_review
     from kairo.knowledge_review import open_candidates as knowledge_open_candidates
 
-    candidates = knowledge_open_candidates(ws.root)
+    candidates = knowledge_load_review(ws.root).candidates
     assert len(candidates) == 1
     assert candidates[0].title == "天溯"
     assert candidates[0].quote == "天溯系统"
+    assert candidates[0].status == "sighted"
+    assert knowledge_open_candidates(ws.root) == []
 
 
 def test_delete_ref_invalidates_pending(tmp_path):
@@ -168,16 +171,31 @@ def test_todo_count_sums_open_extract_and_pending(tmp_path):
 
 
 def test_web_review_actions(tmp_path):
+    from kairo.knowledge_review import (
+        ingest_candidates as ingest_knowledge,
+        open_candidates as knowledge_open,
+    )
+
     ws, rid, root = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
-    cid = open_candidates(ws.root)[0].id
+    understanding = ws.root / "understanding.md"
+    body = understanding.read_text() if understanding.is_file() else ""
+    if "天溯系统" not in body:
+        understanding.write_text((body + "\n天溯系统\n").lstrip())
+    ingest_knowledge(
+        ws.root,
+        source_kind="compose",
+        path="understanding.md",
+        source_text=understanding.read_text(),
+        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+    )
+    cid = knowledge_open(ws.root)[0].id
     c = TestClient(create_app(root))
-    page = c.get("/glossary?workspace=ws")
+    page = c.get("/knowledge?workspace=ws")
     assert page.status_code == 200
     assert "天溯" in page.text
-    r = c.post(f"/w/ws/glossary/candidates/{cid}/ignore")
+    r = c.post(f"/w/ws/knowledge/candidates/{cid}/ignore")
     assert r.status_code == 200
-    assert open_candidates(ws.root) == []
+    assert knowledge_open(ws.root) == []
 
 
 def test_web_promote_then_root_reject_on_console(tmp_path):
@@ -185,8 +203,17 @@ def test_web_promote_then_root_reject_on_console(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
     from kairo.knowledge_review import accept_workspace as accept_knowledge_workspace, ingest_candidates as ingest_knowledge, load_review as load_knowledge_review
 
-    digest = ws.root / "references" / rid / "digest.md"
-    ingest_knowledge(ws.root, source_kind="digest", path=f"references/{rid}/digest.md", source_text=digest.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
+    understanding = ws.root / "understanding.md"
+    body = understanding.read_text() if understanding.is_file() else ""
+    if "天溯系统" not in body:
+        understanding.write_text((body + "\n天溯系统\n").lstrip())
+    ingest_knowledge(
+        ws.root,
+        source_kind="compose",
+        path="understanding.md",
+        source_text=understanding.read_text(),
+        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+    )
     entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
     c = TestClient(create_app(root))
     r = c.post(f"/w/ws/knowledge/{entry.id}/promote")
@@ -205,8 +232,17 @@ def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
     from kairo.knowledge_review import accept_workspace as accept_knowledge_workspace, ingest_candidates as ingest_knowledge, load_review as load_knowledge_review, promote_entry
 
-    digest = ws.root / "references" / rid / "digest.md"
-    ingest_knowledge(ws.root, source_kind="digest", path=f"references/{rid}/digest.md", source_text=digest.read_text(), drafts=[{"title": "天溯", "quote": "天溯系统"}])
+    understanding = ws.root / "understanding.md"
+    body = understanding.read_text() if understanding.is_file() else ""
+    if "天溯系统" not in body:
+        understanding.write_text((body + "\n天溯系统\n").lstrip())
+    ingest_knowledge(
+        ws.root,
+        source_kind="compose",
+        path="understanding.md",
+        source_text=understanding.read_text(),
+        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+    )
     entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
     candidate = promote_entry(ws.root, entry.id)
 
