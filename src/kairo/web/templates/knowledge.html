@@ -94,8 +94,23 @@
     {% if candidates %}<ul class="dlg-bullets knowledge-queue">{% for candidate in candidates %}<li>
       <strong>{{ candidate.title }}</strong>
       <span class="gl-aka">{{ t('knowledge.candidate_from').format(kind=t('knowledge.source_kind_' ~ candidate.source_kind),status=t('knowledge.status_' ~ candidate.status)) }}</span>
+      {% if candidate.sources and candidate.sources|length > 1 %}
+      <ul class="knowledge-source-list">
+        {% for source in candidate.sources %}
+        <li>
+          {% if source.quote %}<div class="gl-note">{{ source.quote }}</div>{% endif %}
+          {% if source.path.startswith('references/') %}
+          <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}?ref={{ source.path.split('/')[1] | urlencode }}">{{ source.path }}</a>{% if source.available is defined and not source.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
+          {% else %}
+          <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}">{{ source.path }}</a>{% if source.available is defined and not source.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
       <div class="gl-note">{{ candidate.quote }}</div>
       <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}?ref={{ candidate.path.split('/')[1] if candidate.path.startswith('references/') else '' }}">{{ candidate.path }}</a>{% if not candidate.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
+      {% endif %}
       {% if candidate.status == 'pending' %}
         {% if candidate.suggestion_text %}<div class="gl-aka">{{ t('knowledge.suggestion').format(value=candidate.suggestion_text) }}</div>{% endif %}
         <form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/candidates/{{ candidate.id }}/accept" style="display:inline"><button class="btn btn-ghost btn-regen">{{ t('knowledge.accept_workspace') }}</button></form>

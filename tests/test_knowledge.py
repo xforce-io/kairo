@@ -26,14 +26,18 @@ from kairo.knowledge import (
 from kairo.knowledge_matcher import KnowledgeMatcher, MatchBudget
 from kairo.knowledge_review import (
     MAX_DRAFTS_PER_SOURCE,
+    KnowledgeCandidate,
     KnowledgeReview,
     accept_global,
     accept_workspace,
+    ignore,
     ingest_candidates,
     invalidate_stale,
     load_review,
     parse_extract_yaml,
     promote,
+    review_path,
+    save_review,
     todo_count,
 )
 from kairo.provider import StubProvider
@@ -148,6 +152,165 @@ def test_digest_and_compose_only_use_confirmed_matching_knowledge(tmp_path):
     understanding = (ws.root / "understanding.md").read_text()
     assert "领域知识上下文" in digest and "电网锚" in digest
     assert "领域知识上下文" in understanding and "电网锚" in understanding
+
+
+def _write_digest(ws: Workspace, ref_id: str, text: str) -> str:
+    path = f"references/{ref_id}/digest.md"
+    target = ws.root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    return path
+
+
+def test_ingest_single_digest_is_sighted_not_todo(tmp_path):
+    """#203 S1：单篇 digest 只目击，不进待审。"""
+    ws = Workspace.init(tmp_path / "ws")
+    path = _write_digest(ws, "a", "专名出现一次")
+    ingest_candidates(
+        ws.root,
+        source_kind="digest",
+        path=path,
+        source_text="专名出现一次",
+        drafts=[{"title": "专名T", "quote": "专名出现一次"}],
+    )
+    review = load_review(ws.root)
+    assert len(review.candidates) == 1
+    assert review.candidates[0].status == "sighted"
+    assert todo_count(ws.root) == 0
+
+
+def test_ingest_second_digest_merges_title_and_enters_pending(tmp_path):
+    """#203 S1：第二篇同名 digest 合成一条两出处并待审。"""
+    ws = Workspace.init(tmp_path / "ws")
+    a = _write_digest(ws, "a", "专名在甲")
+    b = _write_digest(ws, "b", "专名在乙")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="专名在甲",
+        drafts=[{"title": "专名T", "quote": "专名在甲"}],
+    )
+    ingest_candidates(
+        ws.root, source_kind="digest", path=b, source_text="专名在乙",
+        drafts=[{"title": "专名T", "quote": "专名在乙"}],
+    )
+    review = load_review(ws.root)
+    assert len(review.candidates) == 1
+    item = review.candidates[0]
+    assert item.status == "pending"
+    assert {source.path for source in item.sources} == {a, b}
+    assert todo_count(ws.root) == 1
+
+
+def test_understanding_or_corpus_ingest_is_pending_immediately(tmp_path):
+    """#203 S2：understanding 或 corpus 一篇即待审。"""
+    ws = Workspace.init(tmp_path / "ws")
+    understanding = ws.root / "understanding.md"
+    understanding.write_text("综合里的锚点")
+    ingest_candidates(
+        ws.root,
+        source_kind="compose",
+        path="understanding.md",
+        source_text="综合里的锚点",
+        drafts=[{"title": "综合锚", "quote": "综合里的锚点"}],
+    )
+    review = load_review(ws.root)
+    assert review.candidates[0].status == "pending"
+    assert todo_count(ws.root) == 1
+
+    src = tmp_path / "base.txt"
+    src.write_text("基线专名在此")
+    rid = ws.add([src], ref_id="base", source_class="corpus")
+    corpus_path = _write_digest(ws, rid, "基线专名在此")
+    ingest_candidates(
+        ws.root,
+        source_kind="digest",
+        path=corpus_path,
+        source_text="基线专名在此",
+        drafts=[{"title": "基线专名", "quote": "基线专名在此"}],
+    )
+    corpus_item = next(c for c in load_review(ws.root).candidates if c.title == "基线专名")
+    assert corpus_item.status == "pending"
+    assert todo_count(ws.root) == 2
+
+
+def test_reingest_does_not_reopen_ignored_accepted_or_merged(tmp_path):
+    """#203 S2：终态只更新出处，不回到 pending。"""
+    ws = Workspace.init(tmp_path / "ws")
+    a = _write_digest(ws, "a", "同一专名甲")
+    b = _write_digest(ws, "b", "同一专名乙")
+    ingest_candidates(ws.root, source_kind="digest", path=a, source_text="同一专名甲", drafts=[{"title": "锁定名", "quote": "同一专名甲"}])
+    ingest_candidates(ws.root, source_kind="digest", path=b, source_text="同一专名乙", drafts=[{"title": "锁定名", "quote": "同一专名乙"}])
+    cid = load_review(ws.root).candidates[0].id
+    ignore(ws.root, cid)
+    c = _write_digest(ws, "c", "同一专名丙")
+    ingest_candidates(ws.root, source_kind="digest", path=c, source_text="同一专名丙", drafts=[{"title": "锁定名", "quote": "同一专名丙"}])
+    item = load_review(ws.root).candidates[0]
+    assert item.status == "ignored"
+    assert c in {source.path for source in item.sources}
+    assert todo_count(ws.root) == 0
+
+
+def test_load_review_merges_legacy_duplicate_pending_titles(tmp_path):
+    """#203 S3：旧 yaml 同名两条 pending 打开后合成一条、待办 1。"""
+    ws = Workspace.init(tmp_path / "ws")
+    a = _write_digest(ws, "a", "旧摘录甲")
+    b = _write_digest(ws, "b", "旧摘录乙")
+    h = "ab" * 32
+    save_review(
+        ws.root,
+        KnowledgeReview(
+            candidates=[
+                KnowledgeCandidate(
+                    id="kc-" + "a" * 20,
+                    title="旧同名",
+                    source_kind="digest",
+                    path=a,
+                    quote="旧摘录甲",
+                    content_hash=h,
+                    fingerprint="11" * 32,
+                    status="pending",
+                    sources=[KnowledgeSource(kind="digest", path=a, quote="旧摘录甲", content_hash=h)],
+                    updated_at="2026-08-01T00:00:00+00:00",
+                ),
+                KnowledgeCandidate(
+                    id="kc-" + "b" * 20,
+                    title="旧同名",
+                    source_kind="digest",
+                    path=b,
+                    quote="旧摘录乙",
+                    content_hash=h,
+                    fingerprint="22" * 32,
+                    status="pending",
+                    sources=[KnowledgeSource(kind="digest", path=b, quote="旧摘录乙", content_hash=h)],
+                    updated_at="2026-08-01T00:00:00+00:00",
+                ),
+            ]
+        ),
+    )
+    review = load_review(ws.root)
+    assert len(review.candidates) == 1
+    assert {source.path for source in review.candidates[0].sources} == {a, b}
+    assert todo_count(ws.root) == 1
+    assert review_path(ws.root).is_file()
+
+
+def test_knowledge_confirm_card_lists_each_source_quote(tmp_path):
+    """确认时列出每条出处的链接与摘录；单篇目击不进名单。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = _write_digest(ws, "a", "出处甲摘录")
+    b = _write_digest(ws, "b", "出处乙摘录")
+    only = _write_digest(ws, "only", "偶尔出现")
+    ingest_candidates(ws.root, source_kind="digest", path=a, source_text="出处甲摘录", drafts=[{"title": "多源名", "quote": "出处甲摘录"}])
+    ingest_candidates(ws.root, source_kind="digest", path=b, source_text="出处乙摘录", drafts=[{"title": "多源名", "quote": "出处乙摘录"}])
+    ingest_candidates(ws.root, source_kind="digest", path=only, source_text="偶尔出现", drafts=[{"title": "偶尔词", "quote": "偶尔出现"}])
+    html = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"}).text
+    queue = html.split("Knowledge candidates to review", 1)[1]
+    assert "多源名" in queue
+    assert "出处甲摘录" in queue and "出处乙摘录" in queue
+    assert 'href="/w/ws?ref=a"' in queue and 'href="/w/ws?ref=b"' in queue
+    assert "偶尔词" not in queue
+    assert "Knowledge candidates to review · 1" in html
 
 
 def test_knowledge_web_add_and_candidate_actions(tmp_path):
