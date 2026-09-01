@@ -16,6 +16,23 @@
           data-share-path="/w/{{ slug | urlencode }}?ref={{ ref_id | urlencode }}"
           data-share-copied="{{ t('ref.share_copied') }}"
           data-share-prompt="{{ t('ref.share_prompt') }}">{{ t('ref.share_btn') }}</button>
+  {% if not public_read %}
+  <form class="meta-lock" hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/public"
+        hx-target="#meta" hx-swap="innerHTML">
+    <input type="hidden" name="public" value="{{ '0' if is_public else '1' }}">
+    <button type="submit" class="btn btn-ghost"
+            data-public-lock="{{ 'unlocked' if is_public else 'locked' }}"
+            title="{{ t('ref.lock_unlocked') if is_public else t('ref.lock_locked') }}"
+            aria-label="{{ t('ref.lock_unlocked') if is_public else t('ref.lock_locked') }}">
+      {% if is_public %}
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 7.5-2"/></svg>
+      {% else %}
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      {% endif %}
+      {{ t('ref.lock_unlocked') if is_public else t('ref.lock_locked') }}
+    </button>
+  </form>
+  {% endif %}
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
   {% if can_edit_time %}
   <div class="meta-label">{{ t('tl.time') }}</div>
