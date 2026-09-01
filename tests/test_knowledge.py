@@ -213,6 +213,47 @@ def test_knowledge_desktop_edit_form_uses_bounded_grid_for_full_width_save(tmp_p
     assert "grid-column: 1 / -1" in css[start : start + 1000]
 
 
+def test_knowledge_review_queue_omits_stale_candidates(tmp_path):
+    """#219: 待审名单只含可处理项；过期档案不占 attention。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    live = ws.root / "references/ok/digest.md"
+    live.parent.mkdir(parents=True)
+    live.write_text("keep me")
+    ingest_candidates(
+        ws.root,
+        source_kind="digest",
+        path="references/ok/digest.md",
+        source_text="keep me",
+        drafts=[{"title": "LiveTerm", "quote": "keep me"}],
+    )
+    expired = ws.root / "references/old/digest.md"
+    expired.parent.mkdir(parents=True)
+    expired.write_text("old quote here")
+    ingest_candidates(
+        ws.root,
+        source_kind="digest",
+        path="references/old/digest.md",
+        source_text="old quote here",
+        drafts=[{"title": "ExpiredTerm", "quote": "old quote here"}],
+    )
+    expired.write_text("rewritten without the excerpt")
+    invalidate_stale(ws.root)
+    assert any(c.status == "stale" and c.title == "ExpiredTerm" for c in load_review(ws.root).candidates)
+
+    page = TestClient(create_app(root)).get(
+        "/knowledge?workspace=ws", headers={"accept-language": "en"}
+    )
+    queue = page.text.split("Knowledge candidates to review", 1)[1]
+    assert "LiveTerm" in queue
+    assert "Accept to this workspace" in queue
+    assert "ExpiredTerm" not in queue
+    assert "Completed: stale" not in page.text
+    assert "Knowledge candidates to review · 1" in page.text
+    assert load_review(ws.root).candidates  # 档案仍在磁盘
+
+
 def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
