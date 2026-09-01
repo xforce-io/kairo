@@ -146,6 +146,13 @@ def _validate_review(review: KnowledgeReview) -> None:
         ids.add(candidate.id)
 
 
+def _cleanup_tmp(tmp: Path) -> None:
+    try:
+        tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _atomic_write(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(path.name + ".tmp")
@@ -153,8 +160,21 @@ def _atomic_write(path: Path, payload) -> None:
         tmp.write_text(yaml.safe_dump(payload, allow_unicode=True, sort_keys=False), encoding="utf-8")
         tmp.replace(path)
     except Exception as exc:
-        tmp.unlink(missing_ok=True)
+        _cleanup_tmp(tmp)
         raise KnowledgeError(f"保存审核队列失败:{exc}", path=path) from exc
+
+
+def _try_persist_legacy_migration(
+    workspace_root: Path, review: KnowledgeReview, legacy_path: Path
+) -> None:
+    """可写根一次性落盘；只读根保留内存队列、不抛。"""
+    try:
+        _ensure_legacy_promotion_entries(workspace_root, review)
+        save_review(workspace_root, review)
+        if legacy_path.is_file():
+            legacy_path.replace(legacy_path.with_suffix(".yaml.migrated"))
+    except (OSError, KnowledgeError):
+        return
 
 
 def load_review(workspace_root: Path) -> KnowledgeReview:
@@ -182,9 +202,7 @@ def load_review(workspace_root: Path) -> KnowledgeReview:
                 migrated.append(KnowledgeCandidate(id="kc-" + fp[:20], legacy_id=str(old.get("id", "")) if str(old.get("id", "")).startswith("gc-") else "", title=title, aliases=[KnowledgeAlias(value=str(x)) for x in old.get("aka", []) if str(x).strip()], description=str(old.get("note", "")), source_kind="digest", path=candidate_path, quote=quote or "[旧候选缺少引文]", content_hash=content_hash, fingerprint=fp, status=status if status in _CANDIDATE_STATUSES else "stale", merged_into=str(old.get("merged_into", "")), reject_reason=str(old.get("reject_reason", "")), updated_at=_now()))
             review = KnowledgeReview(candidates=migrated, extract_errors={str(k): str(v) for k, v in raw.get("extract_errors", {}).items()})
             _validate_review(review)
-            _ensure_legacy_promotion_entries(workspace_root, review)
-            save_review(workspace_root, review)
-            legacy_path.replace(legacy_path.with_suffix(".yaml.migrated"))
+            _try_persist_legacy_migration(workspace_root, review, legacy_path)
             return review
         except (OSError, yaml.YAMLError, ValueError) as exc:
             raise KnowledgeError(f"旧审核队列迁移失败:{exc}", path=legacy_path) from exc
@@ -192,29 +210,31 @@ def load_review(workspace_root: Path) -> KnowledgeReview:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         review = KnowledgeReview.model_validate(data)
         _validate_review(review)
-        # 运行已先创建 v2 文件时，仍把遗留 #165 候选一次性并入，不能让它成为孤岛。
-        legacy_path = _legacy_review_path(workspace_root)
-        if legacy_path.is_file():
-            legacy = yaml.safe_load(legacy_path.read_text(encoding="utf-8")) or {}
-            known = {candidate.fingerprint for candidate in review.candidates}
-            for old in legacy.get("candidates", []):
-                if not isinstance(old, dict):
-                    raise KnowledgeError("旧审核候选必须是 mapping", path=legacy_path)
-                ref_id, title, quote = str(old.get("ref_id", "")).strip(), str(old.get("name", "")).strip(), str(old.get("quote", "")).strip()
-                candidate_path = f"references/{ref_id}/digest.md"
-                fp = str(old.get("fingerprint") or _fingerprint("digest", candidate_path, title, quote))
-                if fp in known or not title or not quote:
-                    continue
-                source = Path(workspace_root) / candidate_path
-                review.candidates.append(KnowledgeCandidate(id="kc-" + fp[:20], legacy_id=str(old.get("id", "")) if str(old.get("id", "")).startswith("gc-") else "", title=title, aliases=[KnowledgeAlias(value=str(x)) for x in old.get("aka", []) if str(x).strip()], description=str(old.get("note", "")), source_kind="digest", path=candidate_path, quote=quote, content_hash=_hash(source.read_text(encoding="utf-8")) if source.is_file() else _hash(""), fingerprint=fp, status={"pending_root": "pending_global", "root_rejected": "rejected_global"}.get(str(old.get("status", "pending")), str(old.get("status", "pending"))), merged_into=str(old.get("merged_into", "")), reject_reason=str(old.get("reject_reason", "")), updated_at=_now()))
-                known.add(fp)
-            _ensure_legacy_promotion_entries(workspace_root, review)
-            _validate_review(review)
-            save_review(workspace_root, review)
-            legacy_path.replace(legacy_path.with_suffix(".yaml.migrated"))
-        return review
     except (yaml.YAMLError, ValueError) as exc:
         raise KnowledgeError(f"审核队列无法解析:{exc}", path=path) from exc
+    # 运行已先创建 v2 文件时，仍把遗留 #165 候选一次性并入，不能让它成为孤岛。
+    legacy_path = _legacy_review_path(workspace_root)
+    if not legacy_path.is_file():
+        return review
+    try:
+        legacy = yaml.safe_load(legacy_path.read_text(encoding="utf-8")) or {}
+        known = {candidate.fingerprint for candidate in review.candidates}
+        for old in legacy.get("candidates", []):
+            if not isinstance(old, dict):
+                raise KnowledgeError("旧审核候选必须是 mapping", path=legacy_path)
+            ref_id, title, quote = str(old.get("ref_id", "")).strip(), str(old.get("name", "")).strip(), str(old.get("quote", "")).strip()
+            candidate_path = f"references/{ref_id}/digest.md"
+            fp = str(old.get("fingerprint") or _fingerprint("digest", candidate_path, title, quote))
+            if fp in known or not title or not quote:
+                continue
+            source = Path(workspace_root) / candidate_path
+            review.candidates.append(KnowledgeCandidate(id="kc-" + fp[:20], legacy_id=str(old.get("id", "")) if str(old.get("id", "")).startswith("gc-") else "", title=title, aliases=[KnowledgeAlias(value=str(x)) for x in old.get("aka", []) if str(x).strip()], description=str(old.get("note", "")), source_kind="digest", path=candidate_path, quote=quote, content_hash=_hash(source.read_text(encoding="utf-8")) if source.is_file() else _hash(""), fingerprint=fp, status={"pending_root": "pending_global", "root_rejected": "rejected_global"}.get(str(old.get("status", "pending")), str(old.get("status", "pending"))), merged_into=str(old.get("merged_into", "")), reject_reason=str(old.get("reject_reason", "")), updated_at=_now()))
+            known.add(fp)
+        _validate_review(review)
+    except (yaml.YAMLError, ValueError) as exc:
+        raise KnowledgeError(f"审核队列无法解析:{exc}", path=path) from exc
+    _try_persist_legacy_migration(workspace_root, review, legacy_path)
+    return review
 
 
 def save_review(workspace_root: Path, review: KnowledgeReview) -> None:

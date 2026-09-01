@@ -1298,7 +1298,7 @@ def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
             )
         )
         return knowledge_todos
-    except ValueError:
+    except (OSError, ValueError):
         return 1
 
 

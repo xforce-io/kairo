@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import errno
+from pathlib import Path
+
+import yaml
 from fastapi.testclient import TestClient
 
+from kairo.knowledge_review import KnowledgeReview
 from kairo.web.public import PUBLIC_STATE_FILENAME
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -114,6 +119,46 @@ def test_s3_console_lock_toggles_public_read_access(tmp_path):
     missing = pub.get(f"/w/{slug}/ref/no-such-ref")
     assert closed.status_code == 404
     assert closed.text == missing.text
+
+
+def test_public_read_get_workspace_200_when_review_write_hits_erofs(tmp_path, monkeypatch):
+    """#222 leftover empty glossary_review.yaml must not 500 a read-only GET."""
+    root, _, slug = _full_public_root(tmp_path)
+    kairo_dir = root / slug / ".kairo"
+    kairo_dir.mkdir(exist_ok=True)
+    (kairo_dir / "knowledge_review.yaml").write_text(
+        yaml.safe_dump(KnowledgeReview().model_dump(), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    (kairo_dir / "glossary_review.yaml").write_text(
+        "candidates: []\nextract_errors: {}\n", encoding="utf-8"
+    )
+
+    def _erofs(path: Path) -> OSError:
+        return OSError(errno.EROFS, "Read-only file system", str(path))
+
+    orig_write = Path.write_text
+    orig_unlink = Path.unlink
+
+    def write_text(self: Path, *args, **kwargs):
+        if self.name == "knowledge_review.yaml.tmp":
+            raise _erofs(self)
+        return orig_write(self, *args, **kwargs)
+
+    def unlink(self: Path, missing_ok: bool = False):
+        if self.name == "knowledge_review.yaml.tmp":
+            raise _erofs(self)
+        return orig_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "write_text", write_text)
+    monkeypatch.setattr(Path, "unlink", unlink)
+
+    r = TestClient(
+        create_app(root, mode="public-read"), raise_server_exceptions=False
+    ).get(f"/w/{slug}")
+    assert r.status_code == 200
+    assert "Internal Server Error" not in r.text
+    assert slug in r.text
 
 
 def test_corrupt_snapshot_lock_does_not_write(tmp_path):
