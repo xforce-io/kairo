@@ -34,6 +34,7 @@ from kairo.knowledge_review import (
     ingest_candidates,
     invalidate_stale,
     load_review,
+    merge_workspace,
     parse_extract_yaml,
     promote,
     review_path,
@@ -239,17 +240,46 @@ def test_understanding_or_corpus_ingest_is_pending_immediately(tmp_path):
 def test_reingest_does_not_reopen_ignored_accepted_or_merged(tmp_path):
     """#203 S2：终态只更新出处，不回到 pending。"""
     ws = Workspace.init(tmp_path / "ws")
-    a = _write_digest(ws, "a", "同一专名甲")
-    b = _write_digest(ws, "b", "同一专名乙")
-    ingest_candidates(ws.root, source_kind="digest", path=a, source_text="同一专名甲", drafts=[{"title": "锁定名", "quote": "同一专名甲"}])
-    ingest_candidates(ws.root, source_kind="digest", path=b, source_text="同一专名乙", drafts=[{"title": "锁定名", "quote": "同一专名乙"}])
-    cid = load_review(ws.root).candidates[0].id
-    ignore(ws.root, cid)
-    c = _write_digest(ws, "c", "同一专名丙")
-    ingest_candidates(ws.root, source_kind="digest", path=c, source_text="同一专名丙", drafts=[{"title": "锁定名", "quote": "同一专名丙"}])
-    item = load_review(ws.root).candidates[0]
-    assert item.status == "ignored"
-    assert c in {source.path for source in item.sources}
+
+    def lock_then_reingest(title: str, action: str) -> KnowledgeCandidate:
+        a = _write_digest(ws, f"{action}-a", f"{title}甲")
+        b = _write_digest(ws, f"{action}-b", f"{title}乙")
+        ingest_candidates(
+            ws.root, source_kind="digest", path=a, source_text=f"{title}甲", drafts=[{"title": title, "quote": f"{title}甲"}]
+        )
+        ingest_candidates(
+            ws.root, source_kind="digest", path=b, source_text=f"{title}乙", drafts=[{"title": title, "quote": f"{title}乙"}]
+        )
+        cid = next(item.id for item in load_review(ws.root).candidates if item.title == title)
+        if action == "ignored":
+            ignore(ws.root, cid)
+        elif action == "accepted":
+            accept_workspace(ws.root, cid)
+        else:
+            target = new_entry(title=f"{title}目标", scope="workspace")
+            save_workspace(
+                ws.root,
+                load_workspace(ws.root)[0].model_copy(
+                    update={"entries": [*load_workspace(ws.root)[0].entries, target]}
+                ),
+            )
+            merge_workspace(ws.root, cid, target.id)
+        extra = _write_digest(ws, f"{action}-c", f"{title}丙")
+        ingest_candidates(
+            ws.root,
+            source_kind="digest",
+            path=extra,
+            source_text=f"{title}丙",
+            drafts=[{"title": title, "quote": f"{title}丙"}],
+        )
+        item = next(row for row in load_review(ws.root).candidates if row.title == title)
+        assert item.status == action
+        assert extra in {source.path for source in item.sources}
+        return item
+
+    lock_then_reingest("锁定忽略", "ignored")
+    lock_then_reingest("锁定采纳", "accepted")
+    lock_then_reingest("锁定合并", "merged")
     assert todo_count(ws.root) == 0
 
 
@@ -982,6 +1012,8 @@ def test_ingest_replaces_pending_for_same_path_and_caps_drafts(tmp_path):
     pending = [c for c in review.candidates if c.status == "pending"]
     assert all(c.title.startswith("新") for c in pending)
     assert len(pending) == MAX_DRAFTS_PER_SOURCE
+    dropped = next(c for c in review.candidates if c.title == "旧乙")
+    assert dropped.status == "stale" and dropped.sources == []
     assert any(c.status == "accepted" and c.title == "旧甲" for c in review.candidates)
     assert kept.id in {c.merged_into for c in review.candidates if c.status == "accepted"}
 

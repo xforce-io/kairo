@@ -291,14 +291,14 @@ def _is_corpus_path(workspace_root: Path, path: str) -> bool:
     if len(parts) < 2 or parts[0] != "references":
         return False
     try:
-        from kairo.workspace import Workspace
+        from kairo.timeline import is_fold_class
+        from kairo.workspace import Workspace, WorkspaceNotFound
 
         ws = Workspace.open(Path(workspace_root))
         man = ws.read_manifest(parts[1])
-    except Exception:
+    except (OSError, WorkspaceNotFound, ValueError, yaml.YAMLError):
         return False
-    sc = ws.constitution.source_classes.get(man.source_class)
-    return sc is not None and not sc.fold
+    return not is_fold_class(ws, man.source_class)
 
 
 def qualifies_for_review(candidate: KnowledgeCandidate, workspace_root: Path) -> bool:
