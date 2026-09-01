@@ -127,6 +127,8 @@ def test_doctor_foreign_adapter_symlink_is_not_connected(tmp_path, monkeypatch):
     _plant_foreign_adapter(tmp_path)
     text = "\n".join(doctor_lines(home=tmp_path))
     assert _CONNECTED_OK not in text
+    assert "未 connect" in text
+    assert "不一致" in text
 
 
 def test_doctor_mismatched_file_is_not_connected(tmp_path, monkeypatch):
@@ -136,6 +138,8 @@ def test_doctor_mismatched_file_is_not_connected(tmp_path, monkeypatch):
     (canon / "SKILL.md").write_text(_ADAPTER_STUB, encoding="utf-8")
     text = "\n".join(doctor_lines(home=tmp_path))
     assert _CONNECTED_OK not in text
+    assert "未 connect" in text
+    assert "不一致" in text
 
 
 def test_connect_does_not_clobber_foreign_adapter_symlink(tmp_path):
@@ -162,6 +166,40 @@ def test_connect_does_not_overwrite_mismatched_canonical_file(tmp_path):
     connect_skill(home=tmp_path)
     assert _sha256(md) == before
     assert md.read_text(encoding="utf-8") == _ADAPTER_STUB
+
+
+def test_connect_does_not_write_through_matching_skill_md_symlink(tmp_path):
+    foreign = tmp_path / "library" / "kairo"
+    foreign.mkdir(parents=True)
+    foreign_md = foreign / "SKILL.md"
+    foreign_md.write_text(_packaged_skill_text(), encoding="utf-8")
+    before = _sha256(foreign_md)
+    before_mtime = foreign_md.stat().st_mtime
+    canon = tmp_path / ".agents" / "skills" / "kairo"
+    canon.mkdir(parents=True)
+    (canon / "SKILL.md").symlink_to(foreign_md)
+    (tmp_path / ".claude").mkdir()
+    lines = connect_skill(home=tmp_path)
+    assert _sha256(foreign_md) == before
+    assert foreign_md.stat().st_mtime == before_mtime
+    assert (canon / "SKILL.md").is_symlink()
+    assert "canonical:" not in "\n".join(lines)
+    assert not (tmp_path / ".claude" / "skills" / "kairo").exists()
+
+
+def test_connect_does_not_write_through_mismatched_skill_md_symlink(tmp_path):
+    foreign = tmp_path / "library" / "kairo"
+    foreign.mkdir(parents=True)
+    foreign_md = foreign / "SKILL.md"
+    foreign_md.write_text(_ADAPTER_STUB, encoding="utf-8")
+    before = _sha256(foreign_md)
+    canon = tmp_path / ".agents" / "skills" / "kairo"
+    canon.mkdir(parents=True)
+    (canon / "SKILL.md").symlink_to(foreign_md)
+    connect_skill(home=tmp_path)
+    assert _sha256(foreign_md) == before
+    assert foreign_md.read_text(encoding="utf-8") == _ADAPTER_STUB
+    assert (canon / "SKILL.md").is_symlink()
 
 
 def test_connect_empty_home_writes_packaged_skill_bytes(tmp_path):

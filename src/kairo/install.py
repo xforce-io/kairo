@@ -172,15 +172,14 @@ def connect_skill(*, home: Path | None = None) -> list[str]:
     h = home or _home()
     canon = canonical_skill_dir(h)
     matches = _canonical_matches_packaged(canon, src_file)
-    if canon.is_symlink() or ((canon / _SKILL_MD).is_file() and not matches):
-        if not matches:
-            return [
-                f"canonical occupied, not written: {canon}"
-                "（正文与包内 skill 不一致，拒绝覆盖）"
-            ]
-        # Symlink whose SKILL.md already matches: do not write through; still mount.
-    else:
-        _install_canonical(src_file, canon)
+    md = canon / _SKILL_MD
+    foreign = canon.is_symlink() or md.is_symlink()
+    if foreign or (md.is_file() and not matches):
+        return [
+            f"canonical occupied, not written: {canon} "
+            "（外链或正文与包内 skill 不一致，拒绝覆盖）"
+        ]
+    _install_canonical(src_file, canon)
     lines = [f"canonical: {canon / _SKILL_MD}"]
     mounted = 0
     for agent in agent_mounts(h):
