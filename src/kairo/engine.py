@@ -12,6 +12,7 @@ from kairo.history import snapshot
 from kairo.models import REASON_PROVIDER_FAILED, TargetState
 from kairo.rules import (
     REASON_COMPOSE_MIGRATION_REQUIRED,
+    REASON_DIGEST_DEGRADED,
     REASON_EXPLICIT_RECOMPOSE,
     ComposeRule,
     DigestRule,
@@ -322,6 +323,14 @@ def _run_plan_mode(pending: int, retryable: int, non_retryable: int) -> str:
     return "clean"
 
 
+def _product_block_retryable(reason: str | None) -> bool:
+    """reference 产物 blocked 是否可由普通 Run 清派生产物后重试。
+
+    digest-degraded 是终态:Run 不得 unlink 已保护的 digest.md。
+    """
+    return reason != REASON_DIGEST_DEGRADED
+
+
 def workspace_run_plan(ws) -> dict:
     """#75/#161:主按钮状态机输入,区分总 blocked 与 Run 可重试 blocked。"""
     pending_n = len(pending(ws))
@@ -329,7 +338,10 @@ def workspace_run_plan(ws) -> dict:
     for ref_id in ws.list_reference_ids():
         blocks = ref_product_blocks(ws, ref_id)
         if blocks:
-            blocked_refs.append({"ref_id": ref_id, "blocks": blocks})
+            retryable = all(_product_block_retryable(b["reason"]) for b in blocks)
+            blocked_refs.append(
+                {"ref_id": ref_id, "blocks": blocks, "retryable": retryable}
+            )
     blocked_targets: list[dict] = []
     live_paths = {t.path for t in ws.constitution.live_targets()}
     for path, ts in ws.read_state().targets.items():
@@ -348,7 +360,10 @@ def workspace_run_plan(ws) -> dict:
             )
     blocked_ref_n = sum(len(b["blocks"]) for b in blocked_refs)
     blocked_n = blocked_ref_n + len(blocked_targets)
-    retryable_n = blocked_ref_n + sum(b["retryable"] for b in blocked_targets)
+    retryable_ref_n = sum(
+        len(b["blocks"]) for b in blocked_refs if b["retryable"]
+    )
+    retryable_n = retryable_ref_n + sum(b["retryable"] for b in blocked_targets)
     non_retryable_n = blocked_n - retryable_n
     mode = _run_plan_mode(pending_n, retryable_n, non_retryable_n)
     return {
@@ -375,7 +390,8 @@ def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
         retry_blocked = plan["retryable_blocked_count"] > 0
     if retry_blocked:
         for item in plan["blocked_refs"]:
-            clear_reference_products(ws, item["ref_id"])
+            if item.get("retryable", True):
+                clear_reference_products(ws, item["ref_id"])
         clear_provider_failed_targets(ws)
     return step(ws, provider)
 

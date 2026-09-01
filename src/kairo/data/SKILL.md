@@ -39,7 +39,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | 事实到哪了 / 总结结论 / 结论是什么 | **先** `kairo status`，再读 `understanding.md`（见下节）；必要时下钻 digest，**不**把 raw transcript 当最终结论 |
 | 为什么卡住 / blocked / 怎么推进 | 依据 `status` 的 `⚠ blocked:…` 与下表解释含义与选项；**未确认不写** |
 | 推进一下 / step / 调和 | **默认**说明副作用（烧 LLM token、可能改文档）→ 确认后 `kairo step`（不自动清终态 blocked） |
-| 与 Web 主按钮一致 / run / 含终态 blocked 一并重试 | `kairo run` 在有终态 blocked 时会先清派生产物再 step，副作用比 `step` 更重（可重烧 ASR/LLM）——**勿把口语「推进」默认落成 run**；须单独讲清并确认 |
+| 与 Web 主按钮一致 / run / 含终态 blocked 一并重试 | `kairo run` 在有**可重试**终态 blocked 时会先清派生产物再 step，副作用比 `step` 更重（可重烧 ASR/LLM）；`digest-degraded` 等不可重试终态不会被 Run 清掉——**勿把口语「推进」默认落成 run**；须单独讲清并确认 |
 | 重算 / re-step / 重试某条 | 说明副作用（文档级重综合可能丢手改；ref 级重产 digest）→ 确认后 `kairo re-step …` / `kairo retry-ref <id>` |
 | 接受手改 / accept | 说明将钉为新基线、解除 `manual-edit` → 确认后 `kairo accept <doc>` |
 | 回退 / rollback | 说明文档回退到快照、references 不动 → 确认后 `kairo rollback <seq>`（可先 `kairo history` / `kairo diff` 只读预览） |
@@ -79,6 +79,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 | `missing-source` | 源路径不可达 | 恢复源或 `--copy` 重登记 |
 | `manual-edit` | 文档被手改，待接受 | 确认后 `kairo accept <doc>`；或放弃手改再 `re-step`（会丢手改，必须讲清） |
 | `compose-degraded` | 综合输出骤缩，已拒绝覆盖以保护旧文档 | 终态；确认后 `re-step` 重算。若 `understanding.md` 已超过 20,000 字符，按 `compose-migration-required` 观察与恢复 |
+| `digest-degraded` | 纪要输出骤缩，已拒绝覆盖以保护旧 digest | 终态；普通 Run 不会清掉该 digest。确认后 `kairo re-step <id>` / `retry-ref` |
 | `compose-migration-required` | 旧 `understanding.md` 超过 20,000 字符，普通 run 不静默压缩（含超长 leftover `compose-degraded`） | 说明“全量重综合会压缩历史正文，失败保留旧版”；确认后 `kairo re-step understanding.md` |
 | `compose-over-budget` | 候选 `understanding.md` 超过 20,000 字符，已拒绝覆盖 | 终态；确认压缩代价后 `kairo re-step understanding.md` |
 | `compose-provenance-invalid` | 候选溯源结构无效，已拒绝覆盖 | 终态；检查来源后确认 `re-step` |
@@ -87,7 +88,7 @@ description: Use when the user wants to operate kairo topic-workspaces in a sess
 规则摘要：
 
 - 前置条件变化后，部分 blocked 在下次 `step` **自动**重试（如配好 ASR 后的 `no-asr`）
-- `asr-failed` / `convert-failed` / `compose-degraded` / `compose-migration-required` / `compose-over-budget` / `compose-provenance-invalid` 视为**终态**，需手动 `re-step` / `retry-ref`
+- `asr-failed` / `convert-failed` / `compose-degraded` / `digest-degraded` / `compose-migration-required` / `compose-over-budget` / `compose-provenance-invalid` 视为**终态**，需手动 `re-step` / `retry-ref`
 - skill **解释 + 给选项**；**绝不**未授权就 `accept` / `step` / `re-step`
 
 ## 铁律
