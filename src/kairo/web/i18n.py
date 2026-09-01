@@ -338,6 +338,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.review_too_long": "At most {n} days.",
         "tl.review_no_digest": "No digests yet — cannot write a review.",
         "tl.review_failed": "Could not write the review.",
+        "tl.review_readonly": "This surface is read-only — cannot write a review.",
     },
     "zh": {
         "nav.workspaces": "工作区",
@@ -669,6 +670,7 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.review_too_long": "一次最多 {n} 天。",
         "tl.review_no_digest": "还没有纪要，写不出回顾。",
         "tl.review_failed": "回顾生成失败。",
+        "tl.review_readonly": "此面只读，不能写回顾。",
     },
 }
 
