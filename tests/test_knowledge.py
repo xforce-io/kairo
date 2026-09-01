@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from fastapi.testclient import TestClient
 from typer.testing import CliRunner
@@ -25,6 +26,7 @@ from kairo.knowledge import (
 from kairo.knowledge_matcher import KnowledgeMatcher, MatchBudget
 from kairo.knowledge_review import (
     MAX_DRAFTS_PER_SOURCE,
+    KnowledgeReview,
     accept_global,
     accept_workspace,
     ingest_candidates,
@@ -32,6 +34,7 @@ from kairo.knowledge_review import (
     load_review,
     parse_extract_yaml,
     promote,
+    todo_count,
 )
 from kairo.provider import StubProvider
 from kairo.web.server import create_app
@@ -546,6 +549,46 @@ def test_matcher_suggest_keeps_short_and_manual_aliases_out_of_auto_match():
     matcher = KnowledgeMatcher([entry, _entry("另一个", scope="workspace", aliases=["冲突"])])
     assert matcher.match("XY manual").matches == ()
     assert matcher.suggest(["XY", "manual", "A"]) == {"XY": "merge:ke-A", "manual": "merge:ke-A", "A": "merge:ke-A"}
+
+
+def _plant_empty_legacy_review_pair(ws_root: Path) -> tuple[Path, Path]:
+    kairo_dir = ws_root / ".kairo"
+    kairo_dir.mkdir(exist_ok=True)
+    v2 = kairo_dir / "knowledge_review.yaml"
+    legacy = kairo_dir / "glossary_review.yaml"
+    v2.write_text(
+        yaml.safe_dump(KnowledgeReview().model_dump(), allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
+    legacy.write_text("candidates: []\nextract_errors: {}\n", encoding="utf-8")
+    return v2, legacy
+
+
+def test_load_review_and_todo_count_skip_write_on_readonly_legacy(tmp_path):
+    ws = Workspace.init(tmp_path / "ws")
+    v2, legacy = _plant_empty_legacy_review_pair(ws.root)
+    kairo_dir = ws.root / ".kairo"
+    before_v2 = v2.read_bytes()
+    kairo_dir.chmod(0o555)
+    try:
+        review = load_review(ws.root)
+        assert review.candidates == []
+        assert todo_count(ws.root) == 0
+        assert legacy.is_file()
+        assert v2.read_bytes() == before_v2
+        assert not (kairo_dir / "knowledge_review.yaml.tmp").exists()
+    finally:
+        kairo_dir.chmod(0o755)
+
+
+def test_load_review_migrates_empty_legacy_on_writable_root(tmp_path):
+    ws = Workspace.init(tmp_path / "ws")
+    v2, legacy = _plant_empty_legacy_review_pair(ws.root)
+    review = load_review(ws.root)
+    assert review.candidates == []
+    assert v2.is_file()
+    assert not legacy.exists()
+    assert (ws.root / ".kairo" / "glossary_review.yaml.migrated").is_file()
 
 
 def test_legacy_review_migrates_once_and_old_web_routes_use_knowledge(tmp_path):
