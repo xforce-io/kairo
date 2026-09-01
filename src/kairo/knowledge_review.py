@@ -268,14 +268,13 @@ _STATUS_KEEP_RANK = {
 
 
 def _source_paths(candidate: KnowledgeCandidate) -> list[str]:
+    """以 sources 为准。空 sources 表示当前无有效出处，不回退到遗留 path。"""
     paths: list[str] = []
     seen: set[str] = set()
     for source in candidate.sources:
         if source.path and source.path not in seen:
             paths.append(source.path)
             seen.add(source.path)
-    if candidate.path and candidate.path not in seen:
-        paths.append(candidate.path)
     return paths
 
 
@@ -409,7 +408,9 @@ def _with_title_coalesce(workspace_root: Path, review: KnowledgeReview) -> Knowl
 def _candidate_sources(candidate: KnowledgeCandidate, workspace_root: Path) -> list[KnowledgeSource]:
     """兼容旧单出处字段，并总是向提升/合并提供完整且去重的出处集合。"""
     sources = list(candidate.sources)
-    if candidate.path != "review/manual":
+    if candidate.status == "stale" and not sources:
+        return []
+    if candidate.path and candidate.path != "review/manual":
         sources = _append_source(sources, _source(candidate, workspace_root))
     return sources
 
