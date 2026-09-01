@@ -487,11 +487,8 @@ def _exit_if_run_failed(ws: Workspace) -> None:
             err=True,
         )
         raise typer.Exit(1)
-    blocked = [
-        item
-        for item in workspace_run_plan(ws)["blocked_targets"]
-        if not item["retryable"]
-    ]
+    plan = workspace_run_plan(ws)
+    blocked = [item for item in plan["blocked_targets"] if not item["retryable"]]
     if blocked:
         item = blocked[0]
         hint = (
@@ -503,6 +500,18 @@ def _exit_if_run_failed(ws: Workspace) -> None:
         )
         typer.secho(
             f"Error: {item['path']} blocked:{item['reason']}{hint}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+    product_blocked = [
+        item for item in plan["blocked_refs"] if not item.get("retryable", True)
+    ]
+    if product_blocked:
+        item = product_blocked[0]
+        reason = item["blocks"][0]["reason"] if item["blocks"] else "blocked"
+        typer.secho(
+            f"Error: {item['ref_id']} blocked:{reason} — see kairo status",
             fg=typer.colors.RED,
             err=True,
         )

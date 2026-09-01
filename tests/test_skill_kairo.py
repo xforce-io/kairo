@@ -110,6 +110,7 @@ def test_skill_blocked_closed_set():
         "missing-source",
         "manual-edit",
         "compose-degraded",
+        "digest-degraded",
         "compose-migration-required",
         "compose-over-budget",
         "compose-provenance-invalid",

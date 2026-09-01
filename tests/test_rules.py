@@ -2,11 +2,13 @@ import sys
 
 import yaml
 
+from kairo.engine import step
 from kairo.models import Form, GlossaryEntry, Manifest, ProductState, State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import (
     REASON_COMPOSE_MIGRATION_REQUIRED,
     REASON_COMPOSE_OVER_BUDGET,
+    REASON_DIGEST_DEGRADED,
     REASON_EXPLICIT_RECOMPOSE,
     UNDERSTANDING_MAX_CHARS,
     ComposeRule,
@@ -709,6 +711,72 @@ def test_compose_from_scratch_not_guarded(tmp_path):
     _understanding_item(ws, prov, state).run(state)
     assert "短小但合法的首版正文" in (ws.root / "understanding.md").read_text()
     assert state.targets["understanding.md"].status == "ok"
+
+
+
+def _digest_item(ws, prov, state=None):
+    return DigestRule(ws, prov).discover(state)[0]
+
+
+def _long_digest_prior() -> str:
+    prior = "完整的记忆纪要。" * 400
+    assert _COMPOSE_MIN_PRIOR_LEN < len(prior)
+    return prior
+
+
+def test_digest_blocks_degraded_output_and_keeps_prior(tmp_path):
+    """已有足够长 digest 时,骤缩候选不得覆盖,产品 blocked,step 不循环。"""
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("会议正文")
+    rid = ws.add([source])
+    prior = _long_digest_prior()
+    key = _make_digest(ws, rid, prior)
+    state = State()
+    prov = _FixedProvider("无法生成纪要：sandbox_apply: Operation not permitted")
+    item = _digest_item(ws, prov, state)
+    item.run(state)
+    assert (ws.root / key).read_text() == prior
+    ps = state.products[key]
+    assert ps.status == "blocked" and ps.reason == REASON_DIGEST_DEGRADED
+    assert _digest_item(ws, prov, state).is_stale(state) is False
+    ws.write_state(state)
+    step(ws, _FixedProvider("step 不得覆盖"))
+    assert (ws.root / key).read_text() == prior
+    assert ws.read_state().products[key].reason == REASON_DIGEST_DEGRADED
+
+
+def test_digest_from_scratch_not_guarded(tmp_path):
+    """无足够长 prior 时,短候选仍写入且 ok。"""
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("会议正文")
+    rid = ws.add([source])
+    state = State()
+    content = "短小首版纪要。"
+    prov = _FixedProvider(content)
+    item = _digest_item(ws, prov, state)
+    item.run(state)
+    digest = ws.root / f"references/{rid}/digest.md"
+    assert digest.read_text() == content
+    assert state.products[item.key].status == "ok"
+
+
+def test_digest_short_prior_not_guarded(tmp_path):
+    """prior 过短时不误拦(与 compose 同一阈值)。"""
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "m.txt"
+    source.write_text("会议正文")
+    rid = ws.add([source])
+    short_prior = "短纪要"
+    assert len(short_prior) <= _COMPOSE_MIN_PRIOR_LEN
+    key = _make_digest(ws, rid, short_prior)
+    state = State()
+    content = "另一短候选"
+    prov = _FixedProvider(content)
+    _digest_item(ws, prov, state).run(state)
+    assert (ws.root / key).read_text() == content
+    assert state.products[key].status == "ok"
 
 
 def test_leftover_degraded_oversized_is_observed_as_migration(tmp_path):

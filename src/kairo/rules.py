@@ -339,12 +339,22 @@ _CATALOG_DISCIPLINE = (
 
 # 退化护栏(#28):上一版充分长却被骤缩覆盖 → 极可能是 agent 吐了变更说明而非全文。
 # 阈值保守,仅拦灾难性缩水;正常的重组/修正/推翻不会触发。
+# digest 写路径共用同一谓词,避免失败短文盖掉长纪要。
 _COMPOSE_MIN_PRIOR_LEN = 2000
 _COMPOSE_DEGRADE_RATIO = 0.5
 UNDERSTANDING_MAX_CHARS = 20_000
 REASON_COMPOSE_MIGRATION_REQUIRED = "compose-migration-required"
 REASON_COMPOSE_OVER_BUDGET = "compose-over-budget"
 REASON_EXPLICIT_RECOMPOSE = "explicit-recompose"
+REASON_DIGEST_DEGRADED = "digest-degraded"
+
+
+def is_catastrophic_shrink(prior: str, candidate: str) -> bool:
+    """上一版充分长且候选不及一半 → 灾难性骤缩。无/过短 prior 不拦。"""
+    return (
+        len(prior) > _COMPOSE_MIN_PRIOR_LEN
+        and len(candidate) < _COMPOSE_DEGRADE_RATIO * len(prior)
+    )
 
 
 def leftover_degraded_requires_migration(ws, path: str, ts) -> bool:
@@ -596,7 +606,17 @@ class DigestRule:
                     diagnostic=make_provider_diagnostic("digest", self.provider, exc),
                 )
                 return
-            (self.ws.root / key).write_text(content)
+            dest = self.ws.root / key
+            prior = dest.read_text() if dest.is_file() else ""
+            if is_catastrophic_shrink(prior, content):
+                # 与 compose #28 同谓词:拒绝覆盖,input_hash 对齐使 step 收敛。
+                state.products[key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_DIGEST_DEGRADED,
+                )
+                return
+            dest.write_text(content)
             from kairo.knowledge_review import extract_after_success
 
             state.products[key] = ProductState(
@@ -623,7 +643,7 @@ class DigestRule:
                 # glossary_review 在首次读取时原子迁移，此后只保留 knowledge_review 单一路径。
 
         def is_stale(state: State) -> bool:
-            # input_hash 匹配即收敛(含 #98 provider-failed 终态);hash 变(正文/附件)才重试
+            # input_hash 匹配即收敛(含 provider-failed / digest-degraded 终态);hash 变才重试
             ps = state.products.get(key)
             return ps is None or ps.input_hash != input_hash
 
@@ -1026,11 +1046,7 @@ class ComposeRule:
                 state.targets[key] = ts
                 return
             # 退化护栏(#28):溯源有效后再判灾难性骤缩;全量重综合沿用既有例外。
-            if (
-                not full_recompose
-                and len(current) > _COMPOSE_MIN_PRIOR_LEN
-                and len(content) < _COMPOSE_DEGRADE_RATIO * len(current)
-            ):
+            if not full_recompose and is_catastrophic_shrink(current, content):
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
                 ts.reason = "compose-degraded"
