@@ -41,7 +41,53 @@
   {% if selected_slug %}<section class="gl-ws-panel">
     <form method="get" action="/knowledge" class="dlg-form"><input type="hidden" name="workspace" value="{{ selected_slug }}"><label class="dlg-label">{{ t('knowledge.filter') }}</label><input name="filter" value="{{ knowledge_filter }}" placeholder="{{ t('knowledge.filter_ph') }}" aria-label="{{ t('knowledge.filter') }}"><button class="btn btn-ghost btn-regen">{{ t('knowledge.apply_filter') }}</button></form>
     <div class="meta-label">{{ t('knowledge.local').format(slug=selected_slug,n=local_entries|length) }}</div>
-    {% if knowledge_drift %}<div class="ref-blocks" role="status"><strong>{{ t('knowledge.drift').format(n=knowledge_drift|length) }}</strong>{% for item in knowledge_drift %}<div>{{ t('knowledge.drift_item').format(path=item.path) }} <form method="post" action="/w/{{ selected_slug|urlencode }}/step" style="display:inline"><input type="hidden" name="target" value="{{ item.target }}"><button class="btn btn-ghost btn-regen">{{ t('knowledge.restep') }}</button></form></div>{% endfor %}</div>{% endif %}
+    {% if knowledge_drift %}
+    <aside class="knowledge-drift" role="status">
+      <p class="knowledge-drift-banner">{{ t('knowledge.drift_banner').format(n=knowledge_drift|length) }}</p>
+      {% set digest_rows = knowledge_drift | selectattr('kind', 'equalto', 'digest') | list %}
+      {% set prose_rows = knowledge_drift | selectattr('kind', 'equalto', 'prose') | list %}
+      {% set live_rows = knowledge_drift | selectattr('kind', 'equalto', 'live') | list %}
+      <p class="knowledge-drift-summary">{% if digest_rows %}{{ t('knowledge.drift_n_digest').format(n=digest_rows|length) }}{% endif %}{% if digest_rows and (prose_rows or live_rows) %} · {% endif %}{% if prose_rows %}{{ t('knowledge.drift_n_prose').format(n=prose_rows|length) }}{% endif %}{% if prose_rows and live_rows %} · {% endif %}{% if live_rows %}{{ t('knowledge.drift_n_live').format(n=live_rows|length) }}{% endif %}</p>
+      {% if digest_rows or prose_rows %}
+      <ul class="knowledge-drift-list">
+        {% for item in digest_rows %}
+        <li>
+          <a href="{{ item.href }}">{{ item.title }}</a>
+          <span class="gl-aka">{{ t('knowledge.drift_kind_digest') }}</span>
+          <form method="post" action="/w/{{ selected_slug | urlencode }}/step">
+            <input type="hidden" name="target" value="{{ item.target }}">
+            <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_digest') }}</button>
+          </form>
+        </li>
+        {% endfor %}
+        {% for item in prose_rows %}
+        <li>
+          <a href="{{ item.href }}">{{ item.title }}</a>
+          <span class="gl-aka">{{ t('knowledge.drift_kind_prose') }}</span>
+          <form method="post" action="/w/{{ selected_slug | urlencode }}/step">
+            <input type="hidden" name="target" value="{{ item.target }}">
+            <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_prose') }}</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if live_rows %}
+      <ul class="knowledge-drift-list">
+        {% for item in live_rows %}
+        <li>
+          <a href="{{ item.href }}">{{ item.title }}</a>
+          <span class="gl-aka">{{ t('knowledge.drift_kind_live') }}</span>
+          <form method="post" action="/w/{{ selected_slug | urlencode }}/step">
+            <input type="hidden" name="target" value="{{ item.target }}">
+            <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_live') }}</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </aside>
+    {% endif %}
     {% if local_entries %}<table class="meta-forms glossary-table"><tbody>{% for entry in local_entries %}<tr><td class="mf-role"><strong>{{ entry.title }}</strong> <span class="gl-aka">{{ t('knowledge.status_' ~ entry.status) }} · {{ t('knowledge.scope_workspace') }}</span>{% if entry.description %}<div class="gl-note">{{ entry.description }}</div>{% endif %}{% for source in entry.sources %}<a class="gl-aka" href="/w/{{ selected_slug|urlencode }}?ref={{ source.path.split('/')[1] if source.path.startswith('references/') else '' }}">{{ source.path }}{% if not source.available %}（{{ t('knowledge.source_missing') }}）{% endif %}</a>{% endfor %}</td><td class="mf-actions">{% if entry.status != 'obsolete' %}<form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/{{ entry.id }}/obsolete"><button class="btn btn-ghost btn-regen">{{ t('knowledge.obsolete') }}</button></form>{% endif %}<form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/{{ entry.id }}"><input name="title" value="{{ entry.title }}" required aria-label="{{ t('knowledge.title_ph') }}"><input name="description" value="{{ entry.description }}" placeholder="{{ t('knowledge.description_ph') }}" aria-label="{{ t('knowledge.description_ph') }}"><input name="aliases" value="{% for alias in entry.aliases %}{{ alias.value }}{% if not loop.last %}, {% endif %}{% endfor %}" placeholder="{{ t('knowledge.aliases_ph') }}" aria-label="{{ t('knowledge.aliases_ph') }}"><input name="tags" value="{{ entry.tags|join(', ') }}" placeholder="{{ t('knowledge.tags_ph') }}" aria-label="{{ t('knowledge.tags_ph') }}"><button class="btn btn-ghost btn-regen">{{ t('knowledge.save_edit') }}</button></form>{% if entry.status == 'confirmed' %}<form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/{{ entry.id }}/promote"><button class="btn btn-ghost btn-regen">{{ t('knowledge.promote') }}</button></form>{% endif %}</td></tr>{% endfor %}</tbody></table>{% else %}<p class="panel-hint">{{ t('knowledge.local_empty') }}</p>{% endif %}
     <form class="dlg-form glossary-add" method="post" action="/w/{{ selected_slug|urlencode }}/knowledge"><label class="dlg-label">{{ t('knowledge.add_local') }}</label><input name="title" required placeholder="{{ t('knowledge.title_ph') }}" aria-label="{{ t('knowledge.title_ph') }}"><input name="description" placeholder="{{ t('knowledge.description_ph') }}" aria-label="{{ t('knowledge.description_ph') }}"><input name="aliases" placeholder="{{ t('knowledge.aliases_ph') }}" aria-label="{{ t('knowledge.aliases_ph') }}"><input name="tags" placeholder="{{ t('knowledge.tags_ph') }}" aria-label="{{ t('knowledge.tags_ph') }}"><button class="btn btn-step dlg-go">{{ t('knowledge.add') }}</button></form>
     <div class="meta-label" style="margin-top:18px">{{ t('knowledge.candidates').format(n=candidate_open_count) }}</div>

@@ -36,7 +36,7 @@ from kairo.knowledge_review import (
 from kairo.provider import StubProvider
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
-from kairo.models import ProductState, TargetState
+from kairo.models import Manifest, ProductState, TargetState
 
 
 def _entry(title: str, *, scope: str = "global", aliases=(), description=""):
@@ -233,25 +233,64 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     assert "confirmed ·" not in chinese.text and "digest · pending" not in chinese.text
 
 
+def _drift_region(html: str) -> str:
+    m = re.search(
+        r'<aside class="knowledge-drift"[^>]*>.*?</aside>', html, re.S
+    )
+    assert m, "missing knowledge-drift status region"
+    return m.group(0)
+
+
 def test_knowledge_drift_is_visible_and_offers_manual_restep(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
+    ws.write_manifest(
+        "r", Manifest(id="r", title="Kickoff", occurred_at="2026-08-11")
+    )
     entry = new_entry(title="current", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
     state = ws.read_state()
     state.products["references/r/digest.md"] = ProductState(input_hash="x", knowledge_hash="old")
     ws.write_state(state)
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
-    assert "Knowledge context drift" in page.text
-    assert 'name="target" value="r"' in page.text
-    assert "Re-step with current knowledge" in page.text
+    region = _drift_region(page.text)
+    assert 'role="status"' in region
+    assert 'role="alert"' not in region
+    assert "ref-blocks" not in region
+    assert "Knowledge has been updated" in region
+    assert "not yet recorrected" in region
+    assert "later" in region
+    assert "Kickoff" in region and "2026-08-11" in region
+    assert 'href="/w/ws?ref=r"' in region
+    assert 'name="target" value="r"' in region
+    assert "Recorrect digest with current knowledge" in region
+    assert "Recorrect overview with current knowledge" not in region
+    assert "Knowledge context drift" not in page.text
+    assert "knowledge changed after this product was made" not in page.text
+    assert "Recorrect all" not in page.text
+    assert "Re-step with current knowledge" not in page.text
+    chinese = TestClient(create_app(root)).get(
+        "/knowledge?workspace=ws", headers={"accept-language": "zh"}
+    )
+    zh = _drift_region(chinese.text)
+    assert "知识已更新" in zh
+    assert "尚未按当前知识校正" in zh
+    assert "稍后" in zh
+    assert "按当前知识重做纪要" in zh
+    assert "知识上下文漂移" not in chinese.text
 
 
 def test_knowledge_drift_only_lists_products_that_consume_knowledge(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
+    ws.write_manifest(
+        "r", Manifest(id="r", title="Kickoff", occurred_at="2026-08-11")
+    )
+    ws.write_manifest(
+        "meeting", Manifest(id="meeting", title="Weekly", occurred_at="2026-08-18")
+    )
     entry = new_entry(title="current", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
     state = ws.read_state()
@@ -263,6 +302,7 @@ def test_knowledge_drift_only_lists_products_that_consume_knowledge(tmp_path):
         state.products[path] = ProductState(input_hash="source")
     state.products["references/r/digest.md"] = ProductState(input_hash="digest")
     state.products["references/r/prose.md"] = ProductState(input_hash="prose")
+    state.products["references/meeting/digest.md"] = ProductState(input_hash="digest2")
     state.targets["understanding.md"] = TargetState()
     state.targets["assessment.md"] = TargetState()
     ws.write_state(state)
@@ -272,14 +312,26 @@ def test_knowledge_drift_only_lists_products_that_consume_knowledge(tmp_path):
     page = TestClient(create_app(root)).get(
         "/knowledge?workspace=ws", headers={"accept-language": "en"}
     )
-
-    assert "Knowledge context drift · 3" in page.text
+    region = _drift_region(page.text)
+    assert "4 product" in region
+    assert "Kickoff" in region and "Weekly" in region
+    assert "understanding.md" in region
+    assert 'href="/w/ws?ref=r"' in region
+    assert 'href="/w/ws?ref=meeting"' in region
+    assert 'href="/w/ws"' in region
     assert page.text.count('name="target" value="r"') == 2
-    assert 'value="understanding.md"' in page.text
+    assert 'name="target" value="meeting"' in region
+    assert 'value="understanding.md"' in region
+    assert "Recorrect digest with current knowledge" in region
+    assert "Recorrect readable prose with current knowledge" in region
+    assert "Recorrect overview with current knowledge" in region
+    assert "Recorrect digest with current knowledge" != "Recorrect overview with current knowledge"
     assert 'value="assessment.md"' not in page.text
-    assert "transcript.md: knowledge changed" not in page.text
-    assert "source_text.md: knowledge changed" not in page.text
-    assert "evidence.md: knowledge changed" not in page.text
+    assert "transcript.md" not in region
+    assert "source_text.md" not in region
+    assert "evidence.md" not in region
+    assert "knowledge changed after this product was made" not in page.text
+    assert "Recorrect all" not in page.text
 
 
 def test_knowledge_drift_restep_retries_the_reference(tmp_path, monkeypatch):
@@ -299,9 +351,12 @@ def test_knowledge_drift_restep_retries_the_reference(tmp_path, monkeypatch):
 
     client = TestClient(create_app(root))
     page = client.get("/knowledge?workspace=ws", headers={"accept-language": "en"})
-    assert 'name="target" value="r"' in page.text
-    assert "references/r/prose.md: knowledge changed" in page.text
+    region = _drift_region(page.text)
+    assert 'name="target" value="r"' in region
     assert 'name="target" value="references/r/digest.md"' not in page.text
+    assert "knowledge changed after this product was made" not in page.text
+    assert "Recorrect digest with current knowledge" in region
+    assert "Recorrect readable prose with current knowledge" in region
 
     response = client.post("/w/ws/step", data={"target": "r"})
     task_id = re.search(r"/w/ws/step/([0-9a-f]+)/stream", response.text)
