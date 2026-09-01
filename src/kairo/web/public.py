@@ -93,11 +93,13 @@ Rules (fail-closed):
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import html
 import json
 import os
 import re
+import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
@@ -771,6 +773,232 @@ def load_public_read_state(serve_root: Path) -> GenerationSnapshot:
         candidates=candidates,
         valid=True,
     )
+
+
+class PublicationWriteError(Exception):
+    """Console lock failed to evolve the publication snapshot."""
+
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
+def public_bounds(
+    serve_root: Path,
+) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str]]] | None:
+    """Published workspace / target / reference identities, or None if invalid."""
+    snap = load_public_read_state(serve_root)
+    if not snap.valid:
+        return None
+    slugs: set[str] = set()
+    targets: set[tuple[str, str]] = set()
+    refs: set[tuple[str, str]] = set()
+    for bound in snap.locator_to_root.values():
+        slugs.add(bound.workspace)
+        if bound.kind == "target" and bound.target_path:
+            targets.add((bound.workspace, bound.target_path))
+        if bound.kind == "reference" and bound.ref_id:
+            refs.add((bound.workspace, bound.ref_id))
+    return slugs, targets, refs
+
+
+_IMAGE_MEDIA = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
+}
+_TEXT_MEDIA_SUFFIXES = {
+    ".md",
+    ".markdown",
+    ".txt",
+    ".text",
+    ".vtt",
+    ".srt",
+    ".log",
+}
+
+
+def _member_media(path: Path) -> tuple[str, bool]:
+    ext = path.suffix.lower()
+    if ext in _IMAGE_MEDIA:
+        return _IMAGE_MEDIA[ext], False
+    if ext in {".md", ".markdown"}:
+        return "text/markdown; charset=utf-8", True
+    if ext in _TEXT_MEDIA_SUFFIXES:
+        return "text/plain; charset=utf-8", True
+    return "application/octet-stream", False
+
+
+def _frozen_member(key: str, file: Path, rel: str, label: str) -> dict | None:
+    if not _is_ordinary_file(file):
+        return None
+    rel_n = _validate_rel_path(rel, allow_nested=True)
+    if rel_n is None:
+        return None
+    sha = _sha256_file(file)
+    if sha is None:
+        return None
+    media, text_capable = _member_media(file)
+    dname = _validate_download_name(file.name)
+    lab = _validate_member_label(label)
+    cat = _category_for_key(key)
+    if dname is None or lab is None or cat is None:
+        return None
+    return {
+        "key": key,
+        "sha256": sha,
+        "path": rel_n,
+        "category": cat,
+        "label": lab,
+        "media_type": media,
+        "download_name": dname,
+        "text_capable": text_capable,
+    }
+
+
+def freeze_reference_root(ws: Workspace, ref_id: str) -> dict | None:
+    """Build a v3 reference root from the current controlled closure, or None."""
+    if ref_id not in ws.list_reference_ids():
+        return None
+    ref_dir = ws.references_dir() / ref_id
+    try:
+        ref_resolved = ref_dir.resolve()
+    except OSError:
+        return None
+    man = ws.read_manifest(ref_id)
+    members: list[dict] = []
+    claimed: set[str] = set()
+    digest = _frozen_member("digest", ref_dir / "digest.md", "digest.md", "digest")
+    if digest:
+        members.append(digest)
+        claimed.add("digest.md")
+    prose = _frozen_member("prose", ref_dir / "prose.md", "prose.md", "prose")
+    if prose:
+        members.append(prose)
+        claimed.add("prose.md")
+    form_i = 0
+    for form in man.forms:
+        loc = Path(form.location)
+        path = loc if loc.is_absolute() else ws.root / loc
+        try:
+            resolved = path.resolve()
+        except OSError:
+            continue
+        if not _is_ordinary_file(path):
+            continue
+        if resolved != ref_resolved and ref_resolved not in resolved.parents:
+            continue
+        rel = resolved.relative_to(ref_resolved).as_posix()
+        if rel in claimed:
+            continue
+        label = (form.role or "form").strip() or "form"
+        item = _frozen_member(f"form-{form_i}", path, rel, label)
+        if item is None:
+            continue
+        members.append(item)
+        claimed.add(rel)
+        form_i += 1
+    if not members:
+        return None
+    entry: dict = {
+        "locator": "p-" + secrets.token_urlsafe(16),
+        "kind": "reference",
+        "workspace": ws.root.name,
+        "ref_id": ref_id,
+        "members": members,
+    }
+    label = _clean_label(man.title)
+    if label:
+        entry["display_label"] = label
+    return entry
+
+
+def _is_same_reference(root: dict, workspace: str, ref_id: str) -> bool:
+    return (
+        root.get("kind") == "reference"
+        and root.get("workspace") == workspace
+        and root.get("ref_id") == ref_id
+    )
+
+
+def set_reference_public(
+    serve_root: Path, ws: Workspace, ref_id: str, *, public: bool
+) -> None:
+    """Evolve public-read.json for one reference identity. Fail closed on corrupt."""
+    serve_root = Path(serve_root)
+    path = serve_root / PUBLIC_STATE_FILENAME
+    lock_path = serve_root / ".public-read.lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        _set_reference_public_locked(serve_root, path, ws, ref_id, public=public)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def _set_reference_public_locked(
+    serve_root: Path,
+    path: Path,
+    ws: Workspace,
+    ref_id: str,
+    *,
+    public: bool,
+) -> None:
+    snap = load_public_read_state(serve_root)
+    missing = (not snap.valid) and snap.error == "missing"
+    if not snap.valid and not missing:
+        raise PublicationWriteError("corrupt")
+    ik = ("reference", ws.root.name, ref_id)
+    already = bool(snap.valid and ik in snap.identity_to_locator)
+    if already == public:
+        return
+    if public:
+        entry = freeze_reference_root(ws, ref_id)
+        if entry is None:
+            raise PublicationWriteError("empty")
+    else:
+        entry = None
+    if snap.valid:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        data = PublicReadStateFile.model_validate(raw)
+        roots = [item.model_dump(exclude_none=True) for item in data.roots]
+        generation = data.generation
+    else:
+        roots = []
+        generation = 0
+    roots = [
+        item
+        for item in roots
+        if not _is_same_reference(item, ws.root.name, ref_id)
+    ]
+    if entry is not None:
+        roots.append(entry)
+    payload = {
+        "version": PUBLIC_STATE_VERSION,
+        "generation": generation + 1,
+        "roots": roots,
+    }
+    PublicReadStateFile.model_validate(payload)
+    previous = path.read_bytes() if path.is_file() else None
+    tmp = path.with_name(PUBLIC_STATE_FILENAME + ".tmp")
+    tmp.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+    check = load_public_read_state(serve_root)
+    if not check.valid:
+        if previous is None:
+            try:
+                path.unlink()
+            except OSError:
+                pass
+        else:
+            path.write_bytes(previous)
+        raise PublicationWriteError("invalid")
 
 
 # ---------------------------------------------------------------------------

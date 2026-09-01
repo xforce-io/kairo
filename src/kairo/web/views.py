@@ -61,6 +61,11 @@ from kairo.timeline import (
 from kairo.web.discovery import activity_label, scan_workspaces
 from kairo.web.pins import read_pins, toggle_pin
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
+from kairo.web.public import (
+    PublicationWriteError,
+    public_bounds,
+    set_reference_public,
+)
 from kairo.web.render import render_markdown
 from kairo.web.tasks import classify_task, stream_events
 from kairo.models import State
@@ -82,6 +87,39 @@ def _t(request: Request):
 
 def _is_public_read(request: Request) -> bool:
     return bool(getattr(request.app.state, "public_read", False))
+
+
+def _public_bounds(
+    request: Request,
+) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str]]] | None:
+    return public_bounds(Path(request.app.state.root))
+
+
+def _deny_unpublished() -> None:
+    raise HTTPException(status_code=404)
+
+
+def _require_public_ref(request: Request, slug: str, ref_id: str) -> None:
+    if not _is_public_read(request):
+        return
+    bounds = _public_bounds(request)
+    if bounds is None or (slug, ref_id) not in bounds[2]:
+        _deny_unpublished()
+
+
+def _require_public_target(request: Request, slug: str, path: str) -> None:
+    if not _is_public_read(request):
+        return
+    bounds = _public_bounds(request)
+    if bounds is None or (slug, path) not in bounds[1]:
+        _deny_unpublished()
+
+
+def _is_public_ref(request: Request, slug: str, ref_id: str) -> bool:
+    bounds = _public_bounds(request)
+    if bounds is None:
+        return False
+    return (slug, ref_id) in bounds[2]
 
 
 def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
@@ -121,6 +159,10 @@ def _knowledge_error_text(request: Request, raw: str) -> str:
 
 
 def _open(request: Request, slug: str) -> Workspace:
+    if _is_public_read(request):
+        bounds = _public_bounds(request)
+        if bounds is None or slug not in bounds[0]:
+            raise HTTPException(status_code=404, detail="workspace not found")
     try:
         return Workspace.open(Path(request.app.state.root) / slug)
     except WorkspaceNotFound:
@@ -370,6 +412,12 @@ def dashboard(
     t = _t(request)
     root = request.app.state.root
     items = scan_workspaces(root)
+    if _is_public_read(request):
+        bounds = _public_bounds(request)
+        if bounds is None:
+            items = []
+        else:
+            items = [s for s in items if s.slug in bounds[0]]
     filt = _dash_filter(filter)
     pin_list = read_pins(root)
     pinned, rest, qn = _dash_groups(items, pin_list, q or "", filt)
@@ -710,6 +758,14 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
     ws = _open(request, slug)
     streams, corpus = _split_refs(ws)
     targets = _target_states(ws)
+    if _is_public_read(request):
+        bounds = _public_bounds(request)
+        if bounds is None:
+            raise HTTPException(status_code=404)
+        _, pub_targets, pub_refs = bounds
+        streams = [r for r in streams if (slug, r["id"]) in pub_refs]
+        corpus = [r for r in corpus if (slug, r["id"]) in pub_refs]
+        targets = [t for t in targets if (slug, t["path"]) in pub_targets]
     running = request.app.state.registry.current(slug)
     ids = {r["id"] for r in streams} | {r["id"] for r in corpus}
     select_ref = ref if ref in ids else None
@@ -739,6 +795,7 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
 @router.get("/w/{slug}/doc", response_class=HTMLResponse)
 def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ws = _open(request, slug)
+    _require_public_target(request, slug, path)
     target = _safe_doc(ws, path)
     exportable = path in {t.path for t in ws.constitution.targets}
     return _render(
@@ -806,6 +863,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
+    _require_public_ref(request, slug, ref_id)
     t = _t(request)
     man = ws.read_manifest(ref_id)
     forms = _ref_forms(ws, ref_id, man, t)
@@ -864,8 +922,31 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "occurred_iso": occ.isoformat() if occ else "",
             "occurred_src": occ_src,
             "added_display": added_dt.astimezone().strftime("%Y-%m-%d %H:%M"),
+            "is_public": _is_public_ref(request, slug, ref_id),
         },
     )
+
+
+@router.post("/w/{slug}/ref/{ref_id}/public", response_class=HTMLResponse)
+def ref_public_view(
+    request: Request,
+    slug: str,
+    ref_id: str,
+    public: str = Form(""),
+) -> HTMLResponse:
+    if _is_public_read(request):
+        raise HTTPException(status_code=404)
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    want = (public or "").strip() in {"1", "true", "on"}
+    try:
+        set_reference_public(Path(request.app.state.root), ws, ref_id, public=want)
+    except PublicationWriteError as exc:
+        key = "ref.lock_failed"
+        status = 409 if exc.code in {"corrupt", "invalid"} else 400
+        raise HTTPException(status_code=status, detail=_t(request)(key)) from exc
+    return ref_view(request, slug, ref_id)
 
 
 @router.post("/w/{slug}/ref/{ref_id}/occurred", response_class=HTMLResponse)
@@ -899,6 +980,7 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
+    _require_public_ref(request, slug, ref_id)
     man = ws.read_manifest(ref_id)
     if key == "digest":
         path, role = ws.references_dir() / ref_id / "digest.md", "digest"
@@ -947,6 +1029,7 @@ def ref_form_file(request: Request, slug: str, ref_id: str, key: str) -> FileRes
     ws = _open(request, slug)
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
+    _require_public_ref(request, slug, ref_id)
     man = ws.read_manifest(ref_id)
     try:
         idx = int(key)
@@ -1005,6 +1088,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ws = _open(request, slug)
     if path not in {t.path for t in ws.constitution.targets}:
         raise HTTPException(status_code=404, detail="target not found")
+    _require_public_target(request, slug, path)
     return _render(
         request,
         "_target_meta.html",

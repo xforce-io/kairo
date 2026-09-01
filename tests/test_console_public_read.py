@@ -1,56 +1,142 @@
-"""#200 public-read reuses Console shell with a permission gate."""
+"""#200/#218 public-read reuses Console shell with a permission gate."""
 
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from kairo.web.public import PUBLIC_STATE_FILENAME
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 from test_public_read import _full_public_root, _public_client
 
+_PRIV_REF = "2026-01-02-priv"
 
-def test_s1_home_lists_all_workspaces_like_console(tmp_path):
-    root, _, _ = _full_public_root(tmp_path)
+
+def _console_client(root) -> TestClient:
+    return TestClient(create_app(root, mode="console"))
+
+
+def _add_secret_workspace(root) -> None:
     Workspace.init(root / "secret", topic="secret-private")
     (root / "secret" / "understanding.md").write_text("private-body\n", encoding="utf-8")
-    c = _public_client(root)
-    home = c.get("/")
+
+
+def test_s1_console_lists_unpublished_public_read_does_not(tmp_path):
+    root, rid, slug = _full_public_root(tmp_path)
+    _add_secret_workspace(root)
+    console = _console_client(root)
+    pub = _public_client(root)
+
+    chome = console.get("/")
+    assert chome.status_code == 200
+    assert "/w/ws" in chome.text
+    assert "/w/secret" in chome.text
+    assert "secret-private" in chome.text
+    cws = console.get("/w/secret")
+    assert cws.status_code == 200
+    cpriv = console.get(f"/w/{slug}/ref/{_PRIV_REF}")
+    assert cpriv.status_code == 200
+    assert f'data-public-lock="locked"' in cpriv.text
+    assert f'hx-post="/w/{slug}/ref/{_PRIV_REF}/public"' in cpriv.text
+    pub_meta = console.get(f"/w/{slug}/ref/{rid}")
+    assert pub_meta.status_code == 200
+    assert f'data-public-lock="unlocked"' in pub_meta.text
+
+    home = pub.get("/")
     assert home.status_code == 200
     assert "/static/app.css" in home.text
     assert "kairo" in home.text.lower()
     assert 'href="/knowledge"' not in home.text
     assert "/w/ws" in home.text
-    assert "/w/secret" in home.text
-    assert "secret-private" in home.text
+    assert "/w/secret" not in home.text
+    assert "secret-private" not in home.text
     assert 'hx-post="/workspaces"' not in home.text
     assert "card-trash" not in home.text
-    ws = c.get("/w/ws")
+    ws = pub.get("/w/ws")
     assert ws.status_code == 200
     assert "understanding.md" in ws.text
     assert "run-btn" not in ws.text
     assert "btn-add-ref" not in ws.text
-    doc = c.get("/w/ws/doc", params={"path": "understanding.md"})
+    assert _PRIV_REF not in ws.text
+    doc = pub.get("/w/ws/doc", params={"path": "understanding.md"})
     assert doc.status_code == 200
     assert "alpha-secret-token" in doc.text
-    secret_page = c.get("/w/secret")
-    assert secret_page.status_code == 200
 
 
-def test_s2_writes_denied_and_missing_workspace_404(tmp_path):
-    root, _, _ = _full_public_root(tmp_path)
+def test_s2_unpublished_matches_missing_404_and_writes_denied(tmp_path):
+    root, _, slug = _full_public_root(tmp_path)
+    _add_secret_workspace(root)
     before = sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
-    c = _public_client(root)
-    missing = c.get("/w/no-such-ws")
-    assert missing.status_code == 404
-    post = c.post("/workspaces", data={"topic": "injected"})
+    pub = _public_client(root)
+    missing_ws = pub.get("/w/no-such-ws")
+    hidden_ws = pub.get("/w/secret")
+    assert missing_ws.status_code == 404
+    assert hidden_ws.status_code == 404
+    assert hidden_ws.text == missing_ws.text
+    missing_ref = pub.get(f"/w/{slug}/ref/no-such-ref")
+    hidden_ref = pub.get(f"/w/{slug}/ref/{_PRIV_REF}")
+    assert missing_ref.status_code == 404
+    assert hidden_ref.status_code == 404
+    assert hidden_ref.text == missing_ref.text
+    post = pub.post("/workspaces", data={"topic": "injected"})
     assert post.status_code == 404
-    run = c.post("/w/ws/run")
+    run = pub.post("/w/ws/run")
     assert run.status_code == 404
+    lock = pub.post(f"/w/{slug}/ref/{_PRIV_REF}/public", data={"public": "1"})
+    assert lock.status_code == 404
     assert not (root / "injected").exists()
     after = sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
     assert after == before
-    home = c.get("/")
+    home = pub.get("/")
     assert 'hx-post="/workspaces"' not in home.text
+
+
+def test_s3_console_lock_toggles_public_read_access(tmp_path):
+    root, _, slug = _full_public_root(tmp_path)
+    console = _console_client(root)
+    pub = _public_client(root)
+    assert pub.get(f"/w/{slug}/ref/{_PRIV_REF}").status_code == 404
+    unlock = console.post(
+        f"/w/{slug}/ref/{_PRIV_REF}/public", data={"public": "1"}
+    )
+    assert unlock.status_code == 200
+    assert f'data-public-lock="unlocked"' in unlock.text
+    opened = pub.get(f"/w/{slug}/ref/{_PRIV_REF}")
+    assert opened.status_code == 200
+    assert "data-public-lock" not in opened.text
+    assert f'hx-post="/w/{slug}/ref/{_PRIV_REF}/public"' not in opened.text
+    lock = console.post(
+        f"/w/{slug}/ref/{_PRIV_REF}/public", data={"public": "0"}
+    )
+    assert lock.status_code == 200
+    assert f'data-public-lock="locked"' in lock.text
+    closed = pub.get(f"/w/{slug}/ref/{_PRIV_REF}")
+    missing = pub.get(f"/w/{slug}/ref/no-such-ref")
+    assert closed.status_code == 404
+    assert closed.text == missing.text
+
+
+def test_corrupt_snapshot_lock_does_not_write(tmp_path):
+    root, _, slug = _full_public_root(tmp_path)
+    state = root / PUBLIC_STATE_FILENAME
+    state.write_text("{nope", encoding="utf-8")
+    before = state.read_bytes()
+    console = _console_client(root)
+    r = console.post(
+        f"/w/{slug}/ref/{_PRIV_REF}/public", data={"public": "1"}
+    )
+    assert r.status_code == 409
+    assert state.read_bytes() == before
+
+
+def test_s4_public_read_meta_has_no_publication_control(tmp_path):
+    root, rid, slug = _full_public_root(tmp_path)
+    pub = _public_client(root)
+    meta = pub.get(f"/w/{slug}/ref/{rid}")
+    assert meta.status_code == 200
+    assert "data-public-lock" not in meta.text
+    assert f'hx-post="/w/{slug}/ref/{rid}/public"' not in meta.text
+    assert "+ Attach material" not in meta.text
 
 
 def test_s2_ref_meta_hides_write_actions_in_public_read(tmp_path):

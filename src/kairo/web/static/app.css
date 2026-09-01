@@ -535,6 +535,8 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .meta-rename-save { flex: none; opacity: 0; padding: 3px 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--paper); color: var(--pine-deep); font-size: 12px; cursor: pointer; transition: opacity .14s ease; }
 .meta-rename:hover .meta-rename-save, .meta-title-input:focus + .meta-rename-save { opacity: 1; }
 .meta-hint { color: var(--ink-soft); font-size: 12.5px; font-style: italic; margin: 0 0 14px; }
+.meta-lock { margin: 0 0 10px; }
+.meta-lock .btn { justify-content: flex-start; }
 .meta-label { font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 16px 2px 8px; }
 
 /* 形态表(窄栏:role + 复制路径 + 预览) */
