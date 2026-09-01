@@ -80,14 +80,25 @@
           <button type="button" class="btn" disabled>{{ t('tl.review_btn') }}</button>
           {% elif digest_n == 0 %}
           <p class="rev-hint">{{ t('tl.review_no_digest') }}</p>
+          {% elif public_read %}
+          <p class="rev-hint">{{ t('tl.review_hint').format(d=digest_n, n=no_digest_n) }}</p>
+          <p class="rev-hint">{{ t('tl.review_readonly') }}</p>
           {% else %}
           <p class="rev-hint">{{ t('tl.review_hint').format(d=digest_n, n=no_digest_n) }}</p>
           <form method="post" action="/timeline/review"
-                onsubmit="var b=this.querySelector('[type=submit]');b.disabled=true;b.textContent='{{ t('run.running') }}';">
+                onsubmit="var b=this.querySelector('[type=submit]');b.disabled=true;b.dataset.label=b.getAttribute('data-review-label')||b.textContent;b.textContent='{{ t('run.running') }}';">
             <input type="hidden" name="from" value="{{ range_from }}">
             <input type="hidden" name="to" value="{{ range_to }}">
-            <button type="submit" class="btn">{{ t('tl.review_btn') }}</button>
+            <button type="submit" class="btn" data-review-label="{{ t('tl.review_btn') }}">{{ t('tl.review_btn') }}</button>
           </form>
+          <script>
+          window.addEventListener('pageshow', function () {
+            document.querySelectorAll('form[action="/timeline/review"] button[data-review-label]').forEach(function (b) {
+              b.disabled = false;
+              b.textContent = b.getAttribute('data-review-label');
+            });
+          });
+          </script>
           {% endif %}
         </div>
         {% endif %}

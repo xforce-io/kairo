@@ -241,3 +241,26 @@ def test_nav_links_on_dashboard(tmp_path):
     r = _client(tmp_path).get("/")
     assert r.status_code == 200
     assert 'href="/timeline"' in r.text
+
+
+def test_timeline_review_submit_label_restores_on_pageshow(tmp_path):
+    """#210 S2: 提交失败/Back 不得把写回顾按钮冻在 Running…。"""
+    root, wa, _ = _two_ws(tmp_path)
+    (wa.references_dir() / "2026-08-25-weekly" / "digest.md").write_text("周会")
+    r = _client(root).get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
+    assert r.status_code == 200
+    html = r.text
+    assert 'action="/timeline/review"' in html
+    assert "Write this review" in html or "写这段回顾" in html
+    assert 'data-review-label="' in html
+    assert "pageshow" in html
+    assert "data-review-label" in html.split("pageshow", 1)[-1]
+    btn = re.search(
+        r'<button[^>]*type="submit"[^>]*data-review-label="([^"]+)"[^>]*>',
+        html,
+    )
+    assert btn is not None
+    label = btn.group(1)
+    assert label in ("Write this review", "写这段回顾")
+    assert "Running" not in label
+    assert "运行中" not in label

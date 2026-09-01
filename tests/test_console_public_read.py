@@ -156,3 +156,36 @@ def test_console_mode_still_lists_all_and_allows_write_chrome(tmp_path):
     assert meta.status_code == 200
     assert "+ Attach material" in meta.text
     assert "↻ Reprocess" in meta.text
+
+
+def test_s1_timeline_range_hides_write_review_in_public_read(tmp_path):
+    """#210: public-read 区间有 digest 也不得提交写回顾；Console 仍可写。"""
+    from test_timeline_web import _two_ws
+
+    root, wa, _ = _two_ws(tmp_path)
+    (wa.references_dir() / "2026-08-25-weekly" / "digest.md").write_text("周会")
+    pub = TestClient(create_app(root, mode="public-read"))
+    r = pub.get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
+    assert r.status_code == 200
+    assert r.text.count('action="/timeline/review"') == 0
+    assert "Write this review" not in r.text
+    assert "写这段回顾" not in r.text
+    assert (
+        "This surface is read-only — cannot write a review." in r.text
+        or "此面只读，不能写回顾。" in r.text
+    )
+    before = sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
+    post = pub.post(
+        "/timeline/review",
+        data={"from": "2026-08-24", "to": "2026-08-25"},
+        follow_redirects=False,
+    )
+    assert post.status_code == 404
+    after = sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
+    assert after == before
+
+    con = TestClient(create_app(root, mode="console"))
+    cr = con.get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
+    assert cr.status_code == 200
+    assert 'action="/timeline/review"' in cr.text
+    assert "Write this review" in cr.text or "写这段回顾" in cr.text
