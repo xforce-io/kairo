@@ -597,9 +597,14 @@ def test_knowledge_drift_restep_retries_the_reference(tmp_path, monkeypatch):
     assert "Recorrect digest with current knowledge" in region
     assert "Recorrect readable prose with current knowledge" in region
 
-    response = client.post("/w/ws/step", data={"target": "r"})
-    task_id = re.search(r"/w/ws/step/([0-9a-f]+)/stream", response.text)
-    assert response.status_code == 200 and task_id
+    response = client.post(
+        "/w/ws/step", data={"target": "r"}, follow_redirects=False
+    )
+    assert response.status_code == 303
+    page = client.get(response.headers["location"])
+    task_id = re.search(r"/w/ws/step/([0-9a-f]+)/stream", page.text)
+    assert task_id
+    assert "<!doctype html>" in page.text and "/static/app.css" in page.text
     stream = client.get(f"/w/ws/step/{task_id.group(1)}/stream")
     assert "reference 不存在" not in stream.text
     from kairo.knowledge import current_hash

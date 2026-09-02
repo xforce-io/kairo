@@ -234,7 +234,7 @@ def test_web_empty_workspace_post_run_is_noop(tmp_path):
     """#134:空 workspace POST /run 不启 job。"""
     Workspace.init(tmp_path / "ws", topic="t")
     app = create_app(tmp_path)
-    r = TestClient(app).post("/w/ws/run")
+    r = TestClient(app).post("/w/ws/run", headers={"HX-Request": "true"})
     assert r.status_code == 200
     assert "Nothing to do" in r.text or "没有待办" in r.text
     assert app.state.registry.current("ws") is None

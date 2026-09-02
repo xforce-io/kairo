@@ -13,5 +13,6 @@
        hx-trigger="sse:done"
        hx-target="#step-area"
        hx-swap="innerHTML"></div>
-  <button class="btn btn-ghost" hx-post="/w/{{ slug }}/step/{{ task_id }}/cancel" hx-target="#step-area">{{ t('step.cancel') }}</button>
+  <button class="btn btn-ghost" hx-post="/w/{{ slug }}/step/{{ task_id }}/cancel"
+          hx-target="this" hx-swap="outerHTML">{{ t('step.cancel') }}</button>
 </div>

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}{{ t('error.title') }} · kairo console{% endblock %}
+{% block body %}
+<main class="error-page">
+  <section class="error-card" role="alert">
+    <p class="meta-kicker">HTTP {{ status_code }}</p>
+    <h1>{{ t('error.title') }}</h1>
+    <p>{{ message }}</p>
+    <a class="btn btn-step error-back" href="/">{{ t('error.back') }}</a>
+  </section>
+</main>
+{% endblock %}

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from fastapi.testclient import TestClient
 
 from kairo.engine import clear_reference_products, ref_product_blocks, retry_reference, step
-from kairo.models import ProductState, State
+from kairo.models import ProductState
 from kairo.provider import StubProvider
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -89,6 +87,8 @@ def test_web_retry_starts_task(tmp_path, monkeypatch):
         input_hash="h", status="blocked", reason="asr-failed"
     )
     ws.write_state(state)
-    r = TestClient(create_app(tmp_path)).post(f"/w/ws/ref/{rid}/retry")
+    r = TestClient(create_app(tmp_path)).post(
+        f"/w/ws/ref/{rid}/retry", headers={"HX-Request": "true"}
+    )
     assert r.status_code == 200
     assert "stream" in r.text

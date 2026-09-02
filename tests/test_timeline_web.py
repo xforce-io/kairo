@@ -230,6 +230,36 @@ def test_timeline_review_too_long_skips_provider(tmp_path, monkeypatch):
     assert not (root / "总结").exists()
 
 
+def test_timeline_review_failure_stays_in_console_shell(tmp_path, monkeypatch):
+    """#228 S3:浏览器原生表单失败返回本地化完整页，机器请求仍是 JSON。"""
+    root, wa, _ = _two_ws(tmp_path)
+    (wa.references_dir() / "2026-08-25-weekly" / "digest.md").write_text("周会")
+
+    def fail(*_args, **_kwargs):
+        from kairo.review import ReviewError
+
+        raise ReviewError("empty")
+
+    monkeypatch.setattr("kairo.web.views.generate_review_body", fail)
+    data = {"from": "2026-08-24", "to": "2026-08-25"}
+    client = _client(root)
+    html = client.post(
+        "/timeline/review",
+        data=data,
+        headers={"accept": "text/html", "accept-language": "zh"},
+    )
+    assert html.status_code == 400
+    assert "<!doctype html>" in html.text and "kairo" in html.text
+    assert "操作未完成" in html.text and "返回工作区" in html.text
+    assert not html.text.lstrip().startswith("{")
+
+    machine = client.post(
+        "/timeline/review", data=data, headers={"accept": "application/json"}
+    )
+    assert machine.status_code == 400
+    assert machine.json()["detail"]
+
+
 def test_workspace_ref_query_selects(tmp_path):
     root, _, _ = _two_ws(tmp_path)
     r = _client(root).get("/w/alpha", params={"ref": "2026-08-25-weekly"})
