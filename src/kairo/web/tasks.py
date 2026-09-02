@@ -130,7 +130,9 @@ _FATAL_AGENT_LINE = re.compile(
     r"|error sending request"
     r"|cli-chat-proxy\.grok\.com"
     r"|cli agent timeout"
-    r"|provider-failed"
+    # 只有 Kairo 规则层主动写出的错误行才代表 provider 失败。Codex 等
+    # agent 的正常输出或已加载 skill 可能讨论这个状态名，不能据一个裸词误报。
+    r"|^\s*error:\s*provider-failed(?:\s+stage=[\w-]+)?(?:\s*:|\s*$)"
     r")"
 )
 

@@ -220,6 +220,10 @@ def test_is_fatal_agent_line_matches_grok_proxy_errors():
         '(https://cli-chat-proxy.grok.com/v1/responses)"'
     )
     assert is_fatal_agent_line("RuntimeError: CLI agent timeout after 600s: grok")
+    assert is_fatal_agent_line("Error: provider-failed stage=digest: CLI agent timeout")
+    assert not is_fatal_agent_line(
+        "- `asr-failed` / `provider-failed` are terminal states requiring retry"
+    )
     assert not is_fatal_agent_line("INFO: step progressed")
     assert not is_fatal_agent_line("")
 
@@ -239,6 +243,22 @@ def test_classify_task_failed_on_fatal_lines_even_if_exit_zero():
     r = classify_task(t)
     assert r.kind == "failed"
     assert "error" in r.message.lower() or "Internal" in r.message
+
+
+def test_classify_task_succeeds_when_normal_log_mentions_provider_failed():
+    """#105 回归: agent/skill 的普通状态说明不能覆盖成功退出码。"""
+    t = StepTask(
+        task_id="normal-provider-wording",
+        slug="ws",
+        done=True,
+        exit_code=0,
+        lines=[
+            "digest finished",
+            "- `provider-failed` is retried explicitly after an error",
+        ],
+    )
+
+    assert classify_task(t).kind == "succeeded"
 
 
 def test_classify_task_running_until_done():
