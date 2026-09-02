@@ -42,6 +42,15 @@ body {
 a { color: inherit; }
 .muted { color: var(--muted); }
 
+.error-page { max-width: 720px; margin: 0 auto; padding: 64px 28px; }
+.error-card {
+  padding: 28px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--card); box-shadow: var(--shadow);
+}
+.error-card h1 { margin: 4px 0 8px; font-family: var(--serif); font-size: 26px; }
+.error-card p { color: var(--ink-soft); }
+.error-card .error-back { display: inline-block; width: auto; margin-top: 10px; text-decoration: none; }
+
 /* ---- 顶栏 ---- */
 header.top {
   position: sticky; top: 0; z-index: 20;

@@ -127,7 +127,7 @@ def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
     (tmp_path / "m.txt").write_text("会议内容")
     ws.add([tmp_path / "m.txt"])
     c = TestClient(create_app(tmp_path))
-    r = c.post("/w/ws/step")
+    r = c.post("/w/ws/step", headers={"HX-Request": "true"})
     assert r.status_code == 200
     # 片段含 SSE 容器 + task_id 指向 stream 端点
     assert "/stream" in r.text
@@ -142,6 +142,25 @@ def test_step_endpoint_runs_and_streams(tmp_path, monkeypatch):
     assert (tmp_path / "ws" / "understanding.md").is_file()
 
 
+def test_non_htmx_step_redirects_to_full_workspace_shell(tmp_path):
+    """#228 S1:原生表单不得把运行片段当整页打开。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    task = app.state.registry.start(
+        "ws", ws.root, [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
+    c = TestClient(app)
+    response = c.post("/w/ws/step", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == f"/w/ws?task_id={task.task_id}"
+    page = c.get(response.headers["location"])
+    assert "<!doctype html>" in page.text
+    assert "/static/app.css" in page.text and "/static/htmx.min.js" in page.text
+    assert f"/w/ws/step/{task.task_id}/stream" in page.text
+    app.state.registry.cancel(task.task_id)
+    _wait(task, timeout=5)
+
+
 def test_step_done_loads_run_summary_not_full_body(tmp_path, monkeypatch):
     # #75/#97:done 后进 run-summary(带 task_id),不能灌 body,也不能 sse-swap="done"。
     monkeypatch.setenv("KAIRO_STUB", "1")
@@ -149,7 +168,7 @@ def test_step_done_loads_run_summary_not_full_body(tmp_path, monkeypatch):
     (tmp_path / "m.txt").write_text("会议内容")
     ws.add([tmp_path / "m.txt"])
     c = TestClient(create_app(tmp_path))
-    r = c.post("/w/ws/step")
+    r = c.post("/w/ws/step", headers={"HX-Request": "true"})
     assert r.status_code == 200
     assert 'sse-swap="done"' not in r.text
     assert 'hx-target="body"' not in r.text
@@ -342,6 +361,30 @@ def test_run_summary_missing_task_not_success(tmp_path, monkeypatch):
     assert "No remaining blocks" not in r2.text
 
 
+def test_cancel_keeps_sse_until_done_and_refreshes_run_button(tmp_path):
+    """#228 S2:取消只换按钮，SSE done 继续负责终态与 OOB 状态刷新。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    app = create_app(tmp_path)
+    task = app.state.registry.start(
+        "ws", ws.root, [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
+    c = TestClient(app)
+    page = c.get("/w/ws")
+    assert 'hx-target="this"' in page.text and 'hx-swap="outerHTML"' in page.text
+    response = c.post(
+        f"/w/ws/step/{task.task_id}/cancel", headers={"HX-Request": "true"}
+    )
+    assert response.status_code == 200
+    assert "disabled" in response.text
+    assert "Cancelling" in response.text or "正在取消" in response.text
+    assert "step-area" not in response.text
+    _wait(task, timeout=5)
+    summary = c.get(f"/w/ws/run-summary?task_id={task.task_id}")
+    assert "cancelled" in summary.text.lower() or "已取消" in summary.text
+    button = summary.text.split('id="run-btn-wrap"', 1)[1]
+    assert "Running" not in button and "运行中" not in button
+
+
 def test_cancel_kills_running_task(tmp_path):
     reg = TaskRegistry()
     slow = [sys.executable, "-c", "import time; time.sleep(30)"]
@@ -376,7 +419,7 @@ def test_step_attaches_running_task_not_busy_text(tmp_path, monkeypatch):
     c = TestClient(app)
     slow = [sys.executable, "-c", "import time; time.sleep(3)"]
     task = app.state.registry.start("ws", ws.root, slow)
-    r = c.post("/w/ws/step")
+    r = c.post("/w/ws/step", headers={"HX-Request": "true"})
     assert r.status_code == 200
     body = r.text
     # 附着运行视图,不是冷 busy 句
@@ -404,7 +447,7 @@ def test_run_start_oob_disables_button(tmp_path, monkeypatch):
     ws.add([tmp_path / "m.txt"])
     app = create_app(tmp_path)
     c = TestClient(app)
-    r = c.post("/w/ws/run")
+    r = c.post("/w/ws/run", headers={"HX-Request": "true"})
     assert r.status_code == 200
     body = r.text
     m = re.search(r"/w/ws/step/([0-9a-f]+)/stream", body)
@@ -580,7 +623,7 @@ def test_run_first_paint_has_progress_and_collapsed_log(tmp_path, monkeypatch):
     (tmp_path / "m.txt").write_text("会议内容")
     ws.add([tmp_path / "m.txt"])
     c = TestClient(create_app(tmp_path))
-    r = c.post("/w/ws/run")
+    r = c.post("/w/ws/run", headers={"HX-Request": "true"})
     assert r.status_code == 200
     body = r.text
     assert 'id="run-progress"' in body
@@ -633,7 +676,11 @@ def test_step_with_target_triggers_restep(tmp_path, monkeypatch):
     step(ws, select_provider())  # 先产出 understanding.md
     (tmp_path / "ws" / "understanding.md").write_text("STALE-手改")
     c = TestClient(create_app(tmp_path))
-    r = c.post("/w/ws/step", data={"target": "understanding.md"})
+    r = c.post(
+        "/w/ws/step",
+        data={"target": "understanding.md"},
+        headers={"HX-Request": "true"},
+    )
     assert r.status_code == 200
     import re
     m = re.search(r"/w/ws/step/([0-9a-f]+)/stream", r.text)

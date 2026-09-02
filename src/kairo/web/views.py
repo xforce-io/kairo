@@ -754,7 +754,12 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)
-def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLResponse:
+def workspace_view(
+    request: Request,
+    slug: str,
+    ref: str | None = None,
+    task_id: str | None = None,
+) -> HTMLResponse:
     ws = _open(request, slug)
     streams, corpus = _split_refs(ws)
     targets = _target_states(ws)
@@ -766,7 +771,12 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
         streams = [r for r in streams if (slug, r["id"]) in pub_refs]
         corpus = [r for r in corpus if (slug, r["id"]) in pub_refs]
         targets = [t for t in targets if (slug, t["path"]) in pub_targets]
-    running = request.app.state.registry.current(slug)
+    registry = request.app.state.registry
+    running = registry.current(slug)
+    requested_task = registry.get(task_id) if task_id else None
+    if requested_task is not None and requested_task.slug != slug:
+        requested_task = None
+    shown_task = running or requested_task
     ids = {r["id"] for r in streams} | {r["id"] for r in corpus}
     select_ref = ref if ref in ids else None
     return _render(
@@ -779,10 +789,10 @@ def workspace_view(request: Request, slug: str, ref: str | None = None) -> HTMLR
             "streams": streams,
             "corpus": corpus,
             "select_ref": select_ref,
-            "run_task_id": running.task_id if running else None,
+            "run_task_id": shown_task.task_id if shown_task else None,
             **(
-                _step_template_vars(request, ws, slug, running)
-                if running is not None
+                _step_template_vars(request, ws, slug, shown_task)
+                if shown_task is not None
                 else {}
             ),
             **_run_button_ctx(request, ws, slug),
@@ -2135,7 +2145,12 @@ def _step_template_vars(request: Request, ws: Workspace, slug: str, task) -> dic
 def _step_response(
     request: Request, ws: Workspace, slug: str, task
 ) -> HTMLResponse:
-    """#114:运行视图 + OOB 主按钮 disabled Running…(start 与 attach 共用)。"""
+    """HTMX 得运行片段；完整导航回工作区壳并附着同一任务。"""
+    if not request.headers.get("hx-request"):
+        return RedirectResponse(
+            "/w/" + quote(slug) + "?task_id=" + quote(task.task_id),
+            status_code=303,
+        )
     step = _render(
         request, "_step.html", _step_template_vars(request, ws, slug, task)
     ).body.decode()
@@ -2166,6 +2181,8 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
         # #75:无 target 的「推进」= run(自动清 blocked)
         plan = workspace_run_plan(ws)
         if plan["mode"] == "clean":
+            if not request.headers.get("hx-request"):
+                return RedirectResponse("/w/" + quote(slug), status_code=303)
             return HTMLResponse(
                 f'<p class="muted run-summary">{_t(request)("run.clean_msg")}</p>'
             )
@@ -2524,5 +2541,7 @@ def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="task not found")
     ok = request.app.state.registry.cancel(task_id)
     t = _t(request)
-    msg = t("step.canceled") if ok else t("step.cannot_cancel")
-    return HTMLResponse(f'<p class="muted">{msg}</p>')
+    if ok:
+        # 只替换按钮，保留 SSE 与 done hook；终态摘要负责刷新主按钮和状态圆点。
+        return HTMLResponse(f'<button class="btn btn-ghost" disabled>{t("step.canceling")}</button>')
+    return HTMLResponse(f'<span class="muted">{t("step.cannot_cancel")}</span>')

@@ -5,10 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from kairo.web.i18n import resolve_lang, translator
 from kairo.web.tasks import TaskRegistry
 from kairo.web.views import router
 
@@ -48,6 +51,29 @@ def create_app(root: Path, *, mode: str = "console") -> FastAPI:
     app.state.registry = TaskRegistry()
     app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
     app.include_router(router)
+    if not public:
+        @app.exception_handler(StarletteHTTPException)
+        async def console_http_error(request: Request, exc: StarletteHTTPException):
+            headers = exc.headers or {}
+            if request.headers.get("hx-request") or "text/html" not in request.headers.get("accept", ""):
+                return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+            lang = resolve_lang(request)
+            t = translator(lang)
+            message = exc.detail if isinstance(exc.detail, str) else t("error.request_failed")
+            return app.state.templates.TemplateResponse(
+                request,
+                "error.html",
+                {
+                    "nav_active": "",
+                    "lang": lang,
+                    "t": t,
+                    "public_read": False,
+                    "status_code": exc.status_code,
+                    "message": message,
+                },
+                status_code=exc.status_code,
+                headers=headers,
+            )
     if public:
         from kairo.web.public import attach_public_surface
 

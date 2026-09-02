@@ -29,5 +29,33 @@
     </span>
   </header>
   {% block body %}{% endblock %}
+  <script>
+    // Shared toast and HTMX error fallback; local error slots take precedence.
+    document.body.addEventListener('kairoToast', function (e) {
+      var msg = (e.detail && (e.detail.value || e.detail)) || '';
+      if (!msg) return;
+      var el = document.getElementById('kairo-toast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'kairo-toast';
+        el.setAttribute('role', 'status');
+        document.body.appendChild(el);
+      }
+      el.textContent = typeof msg === 'string' ? msg : JSON.stringify(msg);
+      el.classList.add('show');
+      clearTimeout(el._t);
+      el._t = setTimeout(function () { el.classList.remove('show'); }, 4200);
+    });
+    document.body.addEventListener('htmx:responseError', function (e) {
+      var elt = e.detail && e.detail.elt;
+      var scope = elt && elt.closest && (elt.closest('dialog') || elt.closest('form'));
+      if (scope && scope.querySelector('.dlg-err, .ws-error')) return;
+      var msg = elt && elt.dataset && elt.dataset.errorFallback;
+      try { msg = JSON.parse(e.detail.xhr.responseText).detail || msg; } catch (_) {}
+      document.body.dispatchEvent(new CustomEvent('kairoToast', {
+        detail: { value: msg || '{{ t("error.request_failed") }}' }
+      }));
+    });
+  </script>
 </body>
 </html>

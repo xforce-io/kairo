@@ -11,6 +11,16 @@ def _client(root):
     return TestClient(create_app(root))
 
 
+def test_workspace_has_global_htmx_error_fallback(tmp_path):
+    """#228 S4:没有就地错误槽的局部写入仍有统一可见提示。"""
+    Workspace.init(tmp_path / "ws", topic="t")
+    page = _client(tmp_path).get("/w/ws", headers={"accept-language": "en"})
+    assert "htmx:responseError" in page.text
+    assert "kairo-toast" in page.text
+    assert "Request failed. Please try again." in page.text
+    assert ".dlg-err, .ws-error" in page.text  # 有专属错误槽时不重复 toast
+
+
 def test_add_ref_by_path(tmp_path):
     Workspace.init(tmp_path / "ws", topic="t")
     src = tmp_path / "note.txt"
@@ -355,7 +365,9 @@ def test_post_prose_starts_task(tmp_path, monkeypatch):
     # 子进程继承环境;确保 stub
     monkeypatch.setenv("KAIRO_STUB", "1")
     os.environ["KAIRO_STUB"] = "1"
-    r = _client(tmp_path).post(f"/w/ws/ref/{rid}/prose")
+    r = _client(tmp_path).post(
+        f"/w/ws/ref/{rid}/prose", headers={"HX-Request": "true"}
+    )
     assert r.status_code == 200
     assert "step/" in r.text and "stream" in r.text  # 任务区片段
     # 等子进程写完
