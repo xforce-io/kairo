@@ -985,3 +985,44 @@ header.top .root-gl.on { color: var(--pine-deep); }
   .dash-head .new-ws input { width: auto; min-width: 140px; flex: 1; }
   .grid { padding: 16px 16px 48px; }
 }
+
+/* public-read 人读拒绝：壳内空架，不是裸 404 */
+.empty-shelf {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 64px);
+  padding: 48px 24px 72px;
+  text-align: center;
+}
+.empty-shelf h1 {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--ink);
+}
+.empty-shelf p {
+  margin: 0 0 28px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  max-width: 28em;
+}
+.empty-shelf-back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 18px;
+  border-radius: 9px;
+  background: var(--pine);
+  color: #fbfaf6;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+.empty-shelf-back:hover { background: var(--pine-deep); }
+.empty-shelf-back:focus-visible {
+  outline: 2px solid var(--pine);
+  outline-offset: 3px;
+}

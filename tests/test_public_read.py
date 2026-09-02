@@ -12,7 +12,9 @@ manifests or member bytes.
 from __future__ import annotations
 
 import hashlib
+import html
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -744,6 +746,43 @@ def _deny_matrix_paths(locator: str, member: str = "body"):
     return _deny_root_paths(locator) + _deny_member_paths(locator, member)
 
 
+_SHELF_COPY = {
+    "en": {
+        "title": "Nothing to read here",
+        "line": "This address isn't readable.",
+        "back": "Back to workspaces",
+        "nav": "Workspaces",
+    },
+    "zh": {
+        "title": "没有这份阅读",
+        "line": "这个地址现在读不到。",
+        "back": "回工作区",
+        "nav": "工作区",
+    },
+}
+
+
+def _assert_html_shelf_denial(resp, *, lang: str = "en") -> None:
+    """Public-read human HTML denial: in-shell empty shelf, isomorphic copy."""
+    assert resp.status_code == 404
+    assert resp.headers.get("cache-control") == "no-store"
+    copy = _SHELF_COPY[lang]
+    text = html.unescape(resp.text)
+    assert "<h1>Not found</h1>" not in text
+    assert copy["title"] in text
+    assert copy["line"] in text
+    assert copy["back"] in text
+    assert text.count(copy["back"]) == 1
+    assert copy["nav"] in text
+    assert ">read</span>" in text
+    assert 'href="/set-lang/en"' in text
+    assert 'href="/set-lang/zh"' in text
+    assert "SECRET" not in text
+    assert "card-main" not in text
+    assert "card-grid" not in text
+    assert re.search(r"\d+\s+workspaces", text) is None
+
+
 def _assert_fixed_denial(resp, kind: str):
     assert resp.status_code == 404
     assert resp.headers.get("cache-control") == "no-store"
@@ -753,21 +792,25 @@ def _assert_fixed_denial(resp, kind: str):
         assert resp.content == b""
         assert "content-disposition" not in {k.lower() for k in resp.headers.keys()}
     else:
-        assert "Not found" in resp.text
-        assert "SECRET" not in resp.text
+        _assert_html_shelf_denial(resp, lang="en")
 
 
 def _assert_isomorphic_denials(client, paths):
     samples = []
+    html_bodies = []
     for kind, path in paths:
         r = client.get(path)
         _assert_fixed_denial(r, kind)
         samples.append((kind, r.status_code, r.headers.get("cache-control")))
+        if kind == "html":
+            html_bodies.append(r.text)
     by_kind: dict[str, list] = {}
     for kind, status, cc in samples:
         by_kind.setdefault(kind, []).append((status, cc))
     for rows in by_kind.values():
         assert len({(s, c_) for s, c_ in rows}) == 1
+    if html_bodies:
+        assert len(set(html_bodies)) == 1
 
 
 @pytest.mark.parametrize(

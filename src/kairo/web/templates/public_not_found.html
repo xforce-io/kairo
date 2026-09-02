@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}kairo{% endblock %}
+{% block subtitle %}{% endblock %}
+{% block body %}
+<div class="empty-shelf">
+  <h1>{{ t('public.shelf_title') }}</h1>
+  <p>{{ t('public.shelf_line') }}</p>
+  <a class="empty-shelf-back" href="/">{{ t('public.shelf_back') }}</a>
+</div>
+{% endblock %}

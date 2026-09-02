@@ -108,6 +108,7 @@ from fastapi import APIRouter, FastAPI, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from kairo.web.i18n import resolve_lang, translator
 from kairo.web.render import render_markdown
 from kairo.workspace import Workspace, WorkspaceNotFound
 
@@ -120,11 +121,6 @@ PUBLIC_STATE_VERSION = 3
 
 _NO_STORE = {"Cache-Control": "no-store"}
 _JSON_NOT_FOUND = {"error": "not_found"}
-_HTML_NOT_FOUND = (
-    "<!doctype html><html><head><meta charset=\"utf-8\">"
-    "<title>Not found</title></head>"
-    "<body><h1>Not found</h1></body></html>"
-)
 
 # locator: p- + URL-safe token with ≥128 bits entropy (token_urlsafe(16) → 22 chars)
 _LOCATOR_RE = re.compile(r"^p-[A-Za-z0-9_-]{22,}$")
@@ -1382,8 +1378,21 @@ class AnonymousPublicReader:
 # ---------------------------------------------------------------------------
 
 
-def _html_404() -> HTMLResponse:
-    return HTMLResponse(_HTML_NOT_FOUND, status_code=404, headers=_NO_STORE)
+def _html_404(request: Request) -> HTMLResponse:
+    """In-shell empty-shelf HTML denial; language from cookie / Accept-Language."""
+    lang = resolve_lang(request)
+    return request.app.state.templates.TemplateResponse(
+        request,
+        "public_not_found.html",
+        {
+            "lang": lang,
+            "t": translator(lang),
+            "public_read": True,
+            "nav_active": "",
+        },
+        status_code=404,
+        headers=_NO_STORE,
+    )
 
 
 def _json_404() -> JSONResponse:
@@ -1462,12 +1471,12 @@ def _public_unmatched_kind(raw_path: str) -> str:
     return "json"
 
 
-def _fixed_unmatched_response(kind: str) -> Response:
+def _fixed_unmatched_response(kind: str, request: Request) -> Response:
     if kind == "file":
         return _empty_404()
     if kind == "json":
         return _json_404()
-    return _html_404()
+    return _html_404(request)
 
 
 def attach_public_surface(app: FastAPI) -> None:
@@ -1479,20 +1488,20 @@ def attach_public_surface(app: FastAPI) -> None:
     async def _public_block_writes(request: Request, call_next):
         if request.method not in {"GET", "HEAD", "OPTIONS"}:
             kind = _public_unmatched_kind(_request_raw_path(request))
-            return _fixed_unmatched_response(kind)
+            return _fixed_unmatched_response(kind, request)
         return await call_next(request)
 
     @app.exception_handler(404)
     async def _public_not_found(request: Request, exc: Exception) -> Response:
         _ = exc
         kind = _public_unmatched_kind(_request_raw_path(request))
-        return _fixed_unmatched_response(kind)
+        return _fixed_unmatched_response(kind, request)
 
     @app.exception_handler(405)
     async def _public_method_not_allowed(request: Request, exc: Exception) -> Response:
         _ = exc
         kind = _public_unmatched_kind(_request_raw_path(request))
-        return _fixed_unmatched_response(kind)
+        return _fixed_unmatched_response(kind, request)
 
 
 def create_public_app(root: Path) -> FastAPI:
@@ -1547,7 +1556,7 @@ def build_public_router(*, include_home: bool = True) -> APIRouter:
         try:
             hits = rdr.search(q)
         except PublicNotFound:
-            return _html_404()
+            return _html_404(request)
         items = []
         for p in hits:
             label = html.escape(p.display_label or p.locator)
@@ -1572,7 +1581,7 @@ def build_public_router(*, include_home: bool = True) -> APIRouter:
         try:
             permit = rdr.permit(locator, "presentation")
         except PublicNotFound:
-            return _html_404()
+            return _html_404(request)
         assert permit.presentation is not None
         pres = permit.presentation
         label = html.escape(pres.display_label or permit.locator)
@@ -1606,10 +1615,10 @@ def build_public_router(*, include_home: bool = True) -> APIRouter:
         try:
             permit = rdr.permit(locator, member)
         except PublicNotFound:
-            return _html_404()
+            return _html_404(request)
         m = permit.member
         if m is None or m.text is None:
-            return _html_404()
+            return _html_404(request)
         title = html.escape(permit.display_label or permit.locator)
         if (m.media_type or "").startswith("text/markdown") or (
             m.download_name or ""
@@ -1666,7 +1675,7 @@ def build_public_router(*, include_home: bool = True) -> APIRouter:
         try:
             permit = rdr.permit(locator, "presentation")
         except PublicNotFound:
-            return _html_404()
+            return _html_404(request)
         _ = permit
         body = (
             f"<h1>References</h1>"
@@ -1754,12 +1763,12 @@ def build_public_router(*, include_home: bool = True) -> APIRouter:
         response_model=None,
         include_in_schema=False,
     )
-    def public_p_sink(rest: str = "") -> Response:
+    def public_p_sink(request: Request, rest: str = "") -> Response:
         _ = rest
         # Representation from the residual path shape (file vs HTML page).
         if "/file/" in f"/p/{rest}":
             return _empty_404()
-        return _html_404()
+        return _html_404(request)
 
     @router.api_route(
         "/api/public/v1/{rest:path}",
