@@ -12,7 +12,11 @@ from kairo.knowledge_review import KnowledgeReview
 from kairo.web.public import PUBLIC_STATE_FILENAME
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
-from test_public_read import _full_public_root, _public_client
+from test_public_read import (
+    _assert_html_shelf_denial,
+    _full_public_root,
+    _public_client,
+)
 
 _PRIV_REF = "2026-01-02-priv"
 
@@ -77,12 +81,28 @@ def test_s2_unpublished_matches_missing_404_and_writes_denied(tmp_path):
     hidden_ws = pub.get("/w/secret")
     assert missing_ws.status_code == 404
     assert hidden_ws.status_code == 404
+    _assert_html_shelf_denial(missing_ws, lang="en")
+    _assert_html_shelf_denial(hidden_ws, lang="en")
     assert hidden_ws.text == missing_ws.text
+    assert "no-such-ws" not in missing_ws.text
+    assert "secret-private" not in hidden_ws.text
     missing_ref = pub.get(f"/w/{slug}/ref/no-such-ref")
     hidden_ref = pub.get(f"/w/{slug}/ref/{_PRIV_REF}")
     assert missing_ref.status_code == 404
     assert hidden_ref.status_code == 404
+    _assert_html_shelf_denial(missing_ref, lang="en")
+    _assert_html_shelf_denial(hidden_ref, lang="en")
     assert hidden_ref.text == missing_ref.text
+    opened = pub.get(f"/w/{slug}")
+    assert opened.status_code == 200
+    assert "understanding.md" in opened.text
+    zh = pub.get("/w/no-such-ws", headers={"accept-language": "zh"})
+    _assert_html_shelf_denial(zh, lang="zh")
+    zh_cookie = pub.get("/w/secret", cookies={"lang": "zh"})
+    _assert_html_shelf_denial(zh_cookie, lang="zh")
+    assert zh.text == zh_cookie.text
+    assert zh.status_code == missing_ws.status_code == 404
+    assert zh.headers.get("cache-control") == missing_ws.headers.get("cache-control")
     post = pub.post("/workspaces", data={"topic": "injected"})
     assert post.status_code == 404
     run = pub.post("/w/ws/run")
