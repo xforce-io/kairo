@@ -66,6 +66,16 @@ app.add_typer(glossary_app, name="glossary")
 app.add_typer(knowledge_app, name="knowledge")
 backup_app = typer.Typer(help="remote 完整备份:push / verify / restore")
 app.add_typer(backup_app, name="backup")
+project_app = typer.Typer(help="Project：创建、关联 Workspace、查看")
+app.add_typer(project_app, name="project")
+settings_app = typer.Typer(help="本机 Settings：分区与连接健康")
+app.add_typer(settings_app, name="settings")
+datasource_app = typer.Typer(help="Project 数据源")
+app.add_typer(datasource_app, name="datasource")
+task_app = typer.Typer(help="Task / Run / Artifact")
+app.add_typer(task_app, name="task")
+artifact_app = typer.Typer(help="阅读 Artifact")
+app.add_typer(artifact_app, name="artifact")
 
 
 def _open_ws() -> Workspace:
@@ -1039,3 +1049,278 @@ def knowledge_rm(
 ) -> None:
     """删除知识条目。"""
     glossary_rm(index=index, scope=scope, root=root)
+
+
+def _dump(as_json: bool, payload) -> None:
+    if as_json:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        typer.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+
+
+def _cli_root(root: Path | None) -> Path:
+    return _serve_root(root)
+
+
+@project_app.command("list")
+def project_list(
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import list_projects, project_to_dict
+
+    items = [project_to_dict(p) for p in list_projects(_cli_root(root))]
+    _dump(as_json, items)
+
+
+@project_app.command("create")
+def project_create(
+    name: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, create_project, project_to_dict
+
+    try:
+        project = create_project(_cli_root(root), name)
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, project_to_dict(project))
+
+
+@project_app.command("show")
+def project_show(
+    project_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, get_project, project_to_dict
+
+    try:
+        _dump(as_json, project_to_dict(get_project(_cli_root(root), project_id)))
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@project_app.command("edit")
+def project_edit_cmd(
+    project_id: str = typer.Argument(...),
+    name: str = typer.Option(..., "--name"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, edit_project, project_to_dict
+
+    try:
+        _dump(as_json, project_to_dict(edit_project(_cli_root(root), project_id, name=name)))
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@project_app.command("link")
+def project_link(
+    project_id: str = typer.Argument(...),
+    slug: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, link_workspace, project_to_dict
+
+    try:
+        _dump(as_json, project_to_dict(link_workspace(_cli_root(root), project_id, slug)))
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@project_app.command("unlink")
+def project_unlink(
+    project_id: str = typer.Argument(...),
+    slug: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, project_to_dict, unlink_workspace
+
+    try:
+        _dump(as_json, project_to_dict(unlink_workspace(_cli_root(root), project_id, slug)))
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@settings_app.command("show")
+def settings_show(as_json: bool = typer.Option(True, "--json/--no-json")) -> None:
+    from kairo.settings import SettingsError, as_public_dict
+
+    try:
+        _dump(as_json, as_public_dict())
+    except SettingsError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@settings_app.command("set")
+def settings_set_cmd(
+    path: str = typer.Argument(..., help="如 connections.tencent-docs.authorized"),
+    value: str = typer.Argument(...),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.settings import SettingsError, as_public_dict, set_dotted
+
+    try:
+        set_dotted(path, value)
+        _dump(as_json, as_public_dict())
+    except SettingsError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@datasource_app.command("add")
+def datasource_add(
+    project_id: str = typer.Argument(...),
+    url: str = typer.Option(..., "--url"),
+    kind: str = typer.Option(..., "--kind", help="spreadsheet 或 smartsheet"),
+    purpose: str = typer.Option("", "--purpose"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, add_datasource
+
+    try:
+        ds = add_datasource(_cli_root(root), project_id, url=url, kind=kind, purpose=purpose)
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, ds.model_dump())
+
+
+@datasource_app.command("read")
+def datasource_read_cmd(
+    project_id: str = typer.Argument(...),
+    ds_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, read_project_datasource
+    from kairo.readers import ReadError
+
+    try:
+        text = read_project_datasource(_cli_root(root), project_id, ds_id)
+    except (ProjectError, ReadError) as e:
+        payload = {"ok": False, "code": getattr(e, "code", "error"), "error": str(e)}
+        _dump(as_json, payload)
+        raise typer.Exit(1) from None
+    _dump(as_json, {"ok": True, "content": text})
+
+
+@datasource_app.command("rm")
+def datasource_rm(
+    project_id: str = typer.Argument(...),
+    ds_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, project_to_dict, remove_datasource
+
+    try:
+        _dump(as_json, project_to_dict(remove_datasource(_cli_root(root), project_id, ds_id)))
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+
+
+@task_app.command("create")
+def task_create_cmd(
+    project_id: str = typer.Argument(...),
+    name: str = typer.Option(..., "--name"),
+    datasource_id: str = typer.Option(..., "--datasource"),
+    schedule: str = typer.Option("once", "--schedule"),
+    interval_hours: int = typer.Option(None, "--interval-hours"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, create_task
+
+    try:
+        task = create_task(
+            _cli_root(root),
+            project_id,
+            name=name,
+            datasource_id=datasource_id,
+            schedule=schedule,
+            interval_hours=interval_hours,
+        )
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, task.model_dump())
+
+
+@task_app.command("edit")
+def task_edit_cmd(
+    project_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(...),
+    name: str = typer.Option(None, "--name"),
+    schedule: str = typer.Option(None, "--schedule"),
+    enabled: bool = typer.Option(None, "--enabled/--disabled"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, edit_task
+
+    try:
+        task = edit_task(
+            _cli_root(root),
+            project_id,
+            task_id,
+            name=name,
+            schedule=schedule,
+            enabled=enabled,
+        )
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, task.model_dump())
+
+
+@task_app.command("run")
+def task_run_cmd(
+    project_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, run_task
+
+    try:
+        record = run_task(_cli_root(root), project_id, task_id)
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, record.model_dump())
+    if record.status != "succeeded":
+        raise typer.Exit(1)
+
+
+@artifact_app.command("show")
+def artifact_show(
+    project_id: str = typer.Argument(...),
+    run_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, get_run, read_artifact
+
+    serve = _cli_root(root)
+    try:
+        run = get_run(serve, project_id, run_id)
+        body = read_artifact(serve, project_id, run_id)
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, {"run": run.model_dump(), "artifact": body})
+

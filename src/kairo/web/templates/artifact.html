@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ run.task_name }}{% endblock %}
+{% block body %}
+<p><a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
+<p class="meta">Run {{ run.id }} · Task v{{ run.task_version }} · {{ run.datasource_url }}</p>
+<div class="card" style="padding:20px">{{ body_html | safe }}</div>
+{% endblock %}
