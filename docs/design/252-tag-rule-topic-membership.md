@@ -3,7 +3,7 @@
 - Issue: [#252](https://github.com/xforce-io/kairo/issues/252)
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/252#issuecomment-5526943722)，[115 备份门禁](https://github.com/xforce-io/kairo/issues/252#issuecomment-5526995754)
 - 分支: `feat/252-tag-rule-topic-membership`
-- 状态: Draft
+- 状态: Approved
 - 日期: 2026-09-03
 
 本文件是 #252 的详细设计唯一事实源。Issue 只保留摘要与本链接。
