@@ -423,6 +423,8 @@ def dashboard(
     pin_list = read_pins(root)
     pinned, rest, qn = _dash_groups(items, pin_list, q or "", filt)
     now = datetime.datetime.now().astimezone()
+    from kairo.refs import RefError, topic_members
+
     for s in (*pinned, *rest):
         s.when = activity_label(
             s.last_activity,
@@ -430,6 +432,11 @@ def dashboard(
             today=t("dash.today"),
             yesterday=t("dash.yesterday"),
         )
+        try:
+            s.member_count = len(topic_members(root, s.slug))
+        except RefError:
+            # 损坏的包含规则不应让首页不可用；沿用本 Topic 的本地资料数。
+            s.member_count = s.ref_count
     match_n = len(pinned) + len(rest)
     return _render(
         request,
@@ -594,6 +601,9 @@ def timeline_view(
         month_label = q.month.strftime("%B %Y")
     prev_d = shift_month_day(q.day, -1)
     next_d = shift_month_day(q.day, 1)
+    timeline_back = request.url.path
+    if request.url.query:
+        timeline_back += "?" + request.url.query
     return _render(
         request,
         "timeline.html",
@@ -623,6 +633,7 @@ def timeline_view(
             "too_long": too_long,
             "max_range_days": MAX_RANGE_DAYS,
             "tag_filters": tag_filters,
+            "timeline_back": timeline_back,
         },
     )
 
@@ -706,9 +717,13 @@ def delete_workspace_view(
     slug: str,
     confirm_name: str = Form(""),
 ) -> HTMLResponse:
-    """#78:dashboard 删除 workspace;须键入 slug 全等确认。"""
+    """首页删除 Topic；确认使用用户可见的 Topic 名，而非实现目录名。"""
     t = _t(request)
-    if confirm_name.strip() != slug:
+    try:
+        topic_name = Workspace.open(Path(request.app.state.root) / slug).constitution.topic
+    except WorkspaceNotFound:
+        raise HTTPException(status_code=404, detail=t("err.ws_not_found")) from None
+    if confirm_name.strip() != topic_name:
         raise HTTPException(status_code=400, detail=t("err.ws_confirm_mismatch"))
     if request.app.state.registry.is_running(slug):
         raise HTTPException(status_code=409, detail=t("err.ws_busy"))
@@ -797,35 +812,62 @@ def topic_alias(slug: str) -> RedirectResponse:
 
 
 @router.get("/refs/{ref_id}", response_class=HTMLResponse)
-def global_ref_view(request: Request, ref_id: str) -> HTMLResponse:
-    from kairo.refs import RefError, resolve_open
+def global_ref_view(
+    request: Request, ref_id: str, home: str = "", back: str = ""
+) -> HTMLResponse:
+    from kairo.refs import (
+        RefError,
+        list_all_refs,
+        list_topic_slugs,
+        open_topic,
+        resolve_open,
+        topic_members,
+    )
 
-    if _is_public_read(request):
-        _deny_unpublished()
+    home = "" if home == "global" else home
     try:
-        ws, rid = resolve_open(_serve(request), "", ref_id)
+        ws, rid = resolve_open(_serve(request), home, ref_id)
     except RefError:
         raise HTTPException(status_code=404, detail="reference not found")
+    _require_public_ref(request, home, rid)
     man = ws.read_manifest(rid)
-    title = escape(man.title or rid)
+    serve = _serve(request)
+    rec = next(
+        (r for r in list_all_refs(serve) if r.home == home and r.id == rid),
+        None,
+    )
+    related_topics = []
+    public_slugs = None
+    if _is_public_read(request):
+        bounds = _public_bounds(request)
+        public_slugs = bounds[0] if bounds is not None else set()
+    if rec is not None:
+        for slug in list_topic_slugs(serve):
+            if public_slugs is not None and slug not in public_slugs:
+                continue
+            try:
+                if any(member.key == rec.key for member in topic_members(serve, slug)):
+                    related_topics.append(
+                        {"slug": slug, "title": open_topic(serve, slug).constitution.topic}
+                    )
+            except RefError:
+                continue
     digest = ws.references_dir() / rid / "digest.md"
-    chunks = [
-        "<!doctype html><html><body>",
-        f"<h1>{title}</h1>",
-        f"<p class='ref-id'>{escape(rid)}</p>",
-    ]
-    if digest.is_file():
-        chunks.append(
-            "<section class='digest'><h2>digest</h2><pre>"
-            + escape(digest.read_text(encoding="utf-8"))
-            + "</pre></section>"
-        )
-    for form in man.forms:
-        chunks.append(
-            f"<p class='form'>{escape(form.role)} {escape(form.location)}</p>"
-        )
-    chunks.append("</body></html>")
-    return HTMLResponse("".join(chunks))
+    return _render(
+        request,
+        "global_ref.html",
+        {
+            "nav_active": "timeline",
+            "ref": rec,
+            "title": man.title or rid,
+            "ref_id": rid,
+            "tags": rec.tags if rec is not None else [],
+            "related_topics": related_topics,
+            "digest": digest.read_text(encoding="utf-8") if digest.is_file() else "",
+            "forms": man.forms,
+            "back_url": back if back.startswith("/timeline") else "/timeline",
+        },
+    )
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)
@@ -2641,15 +2683,27 @@ def _serve(request: Request) -> Path:
 @router.get("/projects", response_class=HTMLResponse)
 def projects_page(request: Request, error: str | None = None) -> HTMLResponse:
     _console_only(request)
-    from kairo.projects import list_projects
+    from kairo.projects import list_projects, list_runs
+    from kairo.refs import project_member_refs
 
+    serve = _serve(request)
+    project_cards = []
+    for project in list_projects(serve):
+        runs = list_runs(serve, project.id)
+        project_cards.append(
+            {
+                "project": project,
+                "member_ref_count": len(project_member_refs(serve, project.workspace_slugs)),
+                "latest_run": runs[0] if runs else None,
+            }
+        )
     return _render(
         request,
         "projects.html",
         {
             "nav_active": "projects",
-            "root": str(_serve(request)),
-            "projects": list_projects(_serve(request)),
+            "root": str(serve),
+            "projects": project_cards,
             "error": error or "",
         },
     )
@@ -2680,13 +2734,17 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
     from kairo.web.discovery import scan_workspaces
 
     serve = _serve(request)
+    available_topics = scan_workspaces(serve)
+    by_slug = {item.slug: item for item in available_topics}
+    linked_topics = [by_slug[slug] for slug in project.workspace_slugs if slug in by_slug]
     return _render(
         request,
         "project.html",
         {
             "nav_active": "projects",
             "project": project,
-            "available_workspaces": scan_workspaces(serve),
+            "available_workspaces": available_topics,
+            "linked_topics": linked_topics,
             "member_refs": project_member_refs(serve, project.workspace_slugs),
             "runs": list_runs(serve, project_id),
             "error": error,
@@ -3192,4 +3250,3 @@ def api_run_get(request: Request, project_id: str, run_id: str) -> JSONResponse:
     except ProjectError as e:
         return _api_error(e, 404)
     return JSONResponse({"ok": True, "run": run.model_dump(), "artifact": artifact})
-

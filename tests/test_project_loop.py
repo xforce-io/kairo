@@ -217,10 +217,15 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert html_projects.status_code == 200
     assert "综合能源" in html_projects.text
     assert "Projects" in html_projects.text or "项目" in html_projects.text
+    assert "Ref" in html_projects.text
+    assert "Last run:" in html_projects.text
+    assert "Succeeded" in html_projects.text or "Failed" in html_projects.text
     html_proj = client.get(f"/projects/{pid}")
     assert html_proj.status_code == 200
-    assert "alpha-ws" in html_proj.text
+    assert "阿尔法" in html_proj.text
     assert 'name="workspaces"' in html_proj.text
+    assert '<details class="topic-picker">' in html_proj.text
+    assert '<details class="topic-picker" open>' not in html_proj.text
     assert 'placeholder="slug"' not in html_proj.text
     assert 'name="slug"' not in html_proj.text
     assert 'name="kind"' not in html_proj.text
@@ -232,7 +237,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
         follow_redirects=True,
     )
     assert both.status_code == 200
-    assert "alpha-ws" in both.text and "beta-ws" in both.text
+    assert "阿尔法" in both.text and "贝塔" in both.text
     sheet = client.post(
         f"/projects/{pid}/datasources",
         data={"url": "https://docs.qq.com/sheet/Denergy2", "purpose": "装机"},

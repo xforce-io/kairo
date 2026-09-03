@@ -120,12 +120,16 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
     timeline = client.get("/timeline", params={"mode": "recent"})
     assert timeline.status_code == 200
     assert "loose-note" in timeline.text
+    assert 'href="/refs/loose-note?home=global&back=/timeline%3Fmode%3Drecent"' in timeline.text
+    assert "energy" in timeline.text
     tagged_html = client.get("/timeline", params={"mode": "recent", "tag": "energy"})
     assert "loose-note" in tagged_html.text
-    opened = client.get("/refs/loose-note")
+    opened = client.get("/refs/loose-note", params={"back": "/timeline?mode=recent"})
     assert opened.status_code == 200
     assert "loose-note" in opened.text
-    assert "note.txt" in opened.text or "form" in opened.text
+    assert "energy" in opened.text
+    assert "Related topics" in opened.text
+    assert 'href="/timeline?mode=recent"' in opened.text
 
     alias = client.get("/topics/energy", follow_redirects=False)
     assert alias.status_code == 303

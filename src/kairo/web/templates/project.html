@@ -15,29 +15,14 @@
   {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
   {% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
 
-  {% if member_refs is defined %}
-  <section class="obj-block">
-    <h2 class="obj-label">{{ t('proj.members') }}</h2>
-    {% if member_refs %}
-    <ul class="obj-list">
-      {% for r in member_refs %}
-      <li class="obj-row"><a href="{% if r.home %}/w/{{ r.home | urlencode }}?ref={{ r.id | urlencode }}{% else %}/refs/{{ r.id | urlencode }}{% endif %}">{{ r.title }}</a></li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="panel-hint">{{ t('proj.members_empty') }}</p>
-    {% endif %}
-  </section>
-  {% endif %}
-
   <section class="obj-block">
     <h2 class="obj-label">{{ t('proj.workspaces') }}</h2>
-    {% if project.workspace_slugs %}
-    <ul class="chip-row">
-      {% for slug in project.workspace_slugs %}
-      <li class="chip">
-        <a href="/w/{{ slug | urlencode }}">{{ slug }}</a>
-        <form method="post" action="/projects/{{ project.id }}/workspaces/{{ slug | urlencode }}/unlink">
+    {% if linked_topics %}
+    <ul class="topic-link-list">
+      {% for topic in linked_topics %}
+      <li class="topic-link">
+        <a href="/topics/{{ topic.slug | urlencode }}">{{ topic.topic }}</a>
+        <form method="post" action="/projects/{{ project.id }}/workspaces/{{ topic.slug | urlencode }}/unlink">
           <button type="submit" class="chip-x" aria-label="{{ t('proj.unlink') }}">×</button>
         </form>
       </li>
@@ -47,26 +32,44 @@
     <p class="panel-hint">{{ t('proj.ws_empty') }}</p>
     {% endif %}
     {% if available_workspaces %}
-    <form class="chooser" method="post" action="/projects/{{ project.id }}/workspaces">
-      <input type="search" class="chooser-filter" placeholder="{{ t('proj.filter_ws') }}"
-             aria-label="{{ t('proj.filter_ws') }}"
-             oninput="var q=this.value.toLowerCase(); this.form.querySelectorAll('.chooser-item').forEach(function(el){el.hidden=q && el.dataset.label.indexOf(q)<0;});">
-      <div class="chooser-list" role="group" aria-label="{{ t('proj.workspaces') }}">
-        {% for ws in available_workspaces %}
-        <label class="chooser-item" data-label="{{ (ws.topic ~ ' ' ~ ws.slug) | lower }}">
-          <input type="checkbox" name="workspaces" value="{{ ws.slug }}"
-                 {% if ws.slug in project.workspace_slugs %}checked{% endif %}>
-          <span class="chooser-name">{{ ws.topic }}</span>
-          <span class="chooser-id">{{ ws.slug }}</span>
-        </label>
-        {% endfor %}
-      </div>
-      <button type="submit" class="btn btn-step btn-inline">{{ t('proj.save_links') }}</button>
-    </form>
+    <details class="topic-picker"{% if error %} open{% endif %}>
+      <summary>{{ t('proj.associate_topics') }}</summary>
+      <form class="chooser" method="post" action="/projects/{{ project.id }}/workspaces">
+        <p class="panel-hint">{{ t('proj.associate_hint') }}</p>
+        <input type="search" class="chooser-filter" placeholder="{{ t('proj.filter_ws') }}"
+               aria-label="{{ t('proj.filter_ws') }}"
+               oninput="var q=this.value.toLowerCase(); this.form.querySelectorAll('.chooser-item').forEach(function(el){el.hidden=q && el.dataset.label.indexOf(q)<0;});">
+        <div class="chooser-list" role="group" aria-label="{{ t('proj.workspaces') }}">
+          {% for ws in available_workspaces %}
+          <label class="chooser-item" data-label="{{ (ws.topic ~ ' ' ~ ws.slug) | lower }}">
+            <input type="checkbox" name="workspaces" value="{{ ws.slug }}"
+                   {% if ws.slug in project.workspace_slugs %}checked{% endif %}>
+            <span class="chooser-name">{{ ws.topic }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-step btn-inline">{{ t('proj.save_links') }}</button>
+      </form>
+    </details>
     {% else %}
     <p class="panel-hint">{{ t('proj.no_ws_yet') }}</p>
     {% endif %}
   </section>
+
+  {% if member_refs is defined %}
+  <section class="obj-block">
+    <h2 class="obj-label">{{ t('proj.members') }}</h2>
+    {% if member_refs %}
+    <ul class="obj-list">
+      {% for r in member_refs %}
+      <li class="obj-row"><a href="/refs/{{ r.id | urlencode }}?home={{ (r.home or 'global') | urlencode }}">{{ r.title }}</a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('proj.members_empty') }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
 
   <section class="obj-block">
     <h2 class="obj-label">{{ t('proj.datasources') }}</h2>

@@ -1,8 +1,8 @@
 {% extends "base.html" %}
-{% block subtitle %}{% if has_query %}{{ root }} · {{ match_n }} / {{ total_n }} {{ t('dash.workspaces_suffix') }}{% else %}{{ root }} · {{ total_n }} {{ t('dash.workspaces_suffix') }}{% endif %}{% endblock %}
+{% block subtitle %}{% if has_query %}{{ root }} · {{ match_n }} / {{ total_n }} {{ t('dash.topics_suffix') }}{% else %}{{ root }} · {{ total_n }} {{ t('dash.topics_suffix') }}{% endif %}{% endblock %}
 {% block body %}
 {% macro ws_card(s, pinned) %}
-  <div class="card{% if pinned %} pinned{% endif %}">
+  <div class="card topic-card{% if pinned %} pinned{% endif %}">
     {% if not public_read and not s.journal %}
     <form class="card-pin-form" method="post" action="/workspaces/{{ s.slug | urlencode }}/pin">
       <input type="hidden" name="q" value="{{ q }}">
@@ -20,19 +20,20 @@
       </button>
     </form>
     {% endif %}
-    <a class="card-main" href="/w/{{ s.slug | urlencode }}">
+    <a class="card-main" href="/topics/{{ s.slug | urlencode }}">
       <h3>{{ s.topic }}{% if s.journal %} <span class="kind-chip">{{ t('dash.kind_review') }}</span>{% endif %}</h3>
-      <div class="meta"><span class="when">{{ s.when }}</span><span class="slug">{{ s.slug }}</span></div>
+      <div class="meta"><span class="when">{{ s.when }}</span></div>
+      <p class="topic-state">
+        {% if s.blocked_count %}{{ t('dash.state_blocked') }}
+        {% elif s.stale_count %}{{ t('dash.state_attention') }}
+        {% elif s.member_count %}{{ t('dash.state_ready') }}
+        {% else %}{{ t('dash.state_empty') }}{% endif %}
+      </p>
       <div class="badges">
-        {% if s.journal %}
-        <span class="badge journal">{{ s.stream_count }} {{ t('dash.badge_journal') }}</span>
-        {% else %}
-        <span class="badge stream">{{ s.stream_count }} {{ t('dash.badge_stream') }}</span>
-        <span class="badge corpus">{{ s.corpus_count }} {{ t('dash.badge_corpus') }}</span>
-        {% endif %}
-        {% if s.stale_count %}<span class="badge stale">{{ s.stale_count }} {{ t('dash.badge_stale') }}</span>{% endif %}
-        {% if s.blocked_count %}<span class="badge blocked">⚠ {{ s.blocked_count }}</span>{% endif %}
+        <span class="badge stream">{{ t('dash.ref_count').format(n=s.member_count) }}</span>
+        {% if s.blocked_count %}<span class="badge blocked">{{ t('dash.needs_attention') }}</span>{% elif s.stale_count %}<span class="badge stale">{{ t('dash.needs_attention') }}</span>{% endif %}
       </div>
+      <span class="card-next">{% if s.blocked_count or s.stale_count %}{{ t('dash.continue') }}{% else %}{{ t('dash.open_topic') }}{% endif %} →</span>
     </a>
     {% if not public_read %}
     <button type="button" class="card-trash" title="{{ t('dash.delete_btn') }}"
@@ -165,14 +166,14 @@
     });
 
     window.kairoOpenDelWs = function (btn) {
-      expected = btn.dataset.slug || '';
-      var topic = btn.dataset.topic || expected;
+      expected = btn.dataset.topic || '';
+      var topic = expected;
       lead.textContent = leadTpl.replace('{topic}', topic);
       expectedEl.textContent = expected;
       input.value = '';
       err.hidden = true;
       err.textContent = '';
-      form.setAttribute('hx-post', '/workspaces/' + encodeURIComponent(expected) + '/delete');
+      form.setAttribute('hx-post', '/workspaces/' + encodeURIComponent(btn.dataset.slug || '') + '/delete');
       if (window.htmx) htmx.process(form);
       sync();
       dlg.showModal();

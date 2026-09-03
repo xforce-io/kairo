@@ -34,8 +34,8 @@ def test_dashboard_card_link_is_url_encoded(tmp_path):
     Workspace.init(tmp_path / "v1 draft", topic="v1 draft")
     c = _client(tmp_path)
     r = c.get("/")
-    assert 'href="/w/v1%20draft"' in r.text
-    assert 'href="/w/v1 draft"' not in r.text
+    assert 'href="/topics/v1%20draft"' in r.text
+    assert 'href="/topics/v1 draft"' not in r.text
     # 编码后的路径可正常打开
     assert c.get("/w/v1 draft").status_code == 200
 
