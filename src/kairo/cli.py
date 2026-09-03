@@ -1123,14 +1123,20 @@ def project_edit_cmd(
 @project_app.command("link")
 def project_link(
     project_id: str = typer.Argument(...),
-    slug: str = typer.Argument(...),
+    slugs: list[str] = typer.Argument(..., help="一个或多个已有 workspace slug"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
     from kairo.projects import ProjectError, link_workspace, project_to_dict
 
+    serve = _cli_root(root)
     try:
-        _dump(as_json, project_to_dict(link_workspace(_cli_root(root), project_id, slug)))
+        project = None
+        for slug in slugs:
+            project = link_workspace(serve, project_id, slug)
+        if project is None:
+            raise ProjectError("至少指定一个 workspace")
+        _dump(as_json, project_to_dict(project))
     except ProjectError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
@@ -1183,7 +1189,7 @@ def settings_set_cmd(
 def datasource_add(
     project_id: str = typer.Argument(...),
     url: str = typer.Option(..., "--url"),
-    kind: str = typer.Option(..., "--kind", help="spreadsheet 或 smartsheet"),
+    kind: str = typer.Option(None, "--kind", help="可选；默认由 URL 推断，不必填 spreadsheet"),
     purpose: str = typer.Option("", "--purpose"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),

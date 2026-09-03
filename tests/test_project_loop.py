@@ -84,8 +84,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert "token" not in json.dumps(disk).lower()
     assert "api_key" not in json.dumps(disk).lower()
 
-    linked = _load(_cli(["project", "link", pid, "alpha-ws"], serve, monkeypatch))
-    linked = _load(_cli(["project", "link", pid, "beta-ws"], serve, monkeypatch))
+    linked = _load(_cli(["project", "link", pid, "alpha-ws", "beta-ws"], serve, monkeypatch))
     assert set(linked["workspace_slugs"]) == {"alpha-ws", "beta-ws"}
     unlinked = _load(_cli(["project", "unlink", pid, "beta-ws"], serve, monkeypatch))
     assert unlinked["workspace_slugs"] == ["alpha-ws"]
@@ -103,8 +102,6 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
                 pid,
                 "--url",
                 "https://docs.qq.com/sheet/Denergy",
-                "--kind",
-                "spreadsheet",
                 "--purpose",
                 "装机",
             ],
@@ -114,6 +111,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     )
     ds_id = ds["id"]
     assert ds["connection_id"] == "tencent-docs"
+    assert ds["reader"] == "tencent-docs"
     read_ok = _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
     assert read_ok["ok"] is True
     assert "solar,80" in read_ok["content"]
@@ -126,23 +124,20 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
 
     _load(_cli(["settings", "set", "connections.tencent-docs.authorized", "true"], serve, monkeypatch))
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", ok_cmd], serve, monkeypatch))
-    bad_ds = _load(
-        _cli(
-            [
-                "datasource",
-                "add",
-                pid,
-                "--url",
-                "https://example.com/not-docs",
-                "--kind",
-                "spreadsheet",
-            ],
-            serve,
-            monkeypatch,
-        )
+    bad_add = _cli(
+        ["datasource", "add", pid, "--url", "https://example.com/not-docs"],
+        serve,
+        monkeypatch,
     )
-    bad_link = _cli(["datasource", "read", pid, bad_ds["id"]], serve, monkeypatch)
-    assert json.loads(bad_link.output)["code"] == "invalid_link"
+    assert bad_add.exit_code != 0
+    assert "invalid_link" in bad_add.output or "无法识别" in bad_add.output
+    notion_add = _cli(
+        ["datasource", "add", pid, "--url", "https://www.notion.so/page"],
+        serve,
+        monkeypatch,
+    )
+    assert notion_add.exit_code != 0
+    assert "unsupported" in notion_add.output or "尚未接入" in notion_add.output
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", deny_cmd], serve, monkeypatch))
     perm2 = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
@@ -208,6 +203,9 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     settings_api = client.get("/api/settings").json()
     assert settings_api["settings"]["general"]["locale"] == "zh"
     assert settings_api["settings"]["connections"]["tencent-docs"]["authorized"] is True
+    assert settings_api["settings"]["connections"]["tencent-docs"]["label"] == "腾讯文档"
+    assert settings_api["settings"]["connections"]["wecom"]["live"] is False
+    assert settings_api["settings"]["connections"]["notion"]["live"] is False
     assert "test-token-not-for-project" not in json.dumps(settings_api)
 
     patched = client.patch("/api/settings", json={"path": "general.locale", "value": "en"}).json()
@@ -222,8 +220,46 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     html_proj = client.get(f"/projects/{pid}")
     assert html_proj.status_code == 200
     assert "alpha-ws" in html_proj.text
-    assert "Create task" in html_proj.text
+    assert 'name="workspaces"' in html_proj.text
+    assert 'placeholder="slug"' not in html_proj.text
+    assert 'name="slug"' not in html_proj.text
+    assert 'name="kind"' not in html_proj.text
+    assert "<option value=\"spreadsheet\">" not in html_proj.text
     assert "Create project" not in html_proj.text
+    both = client.post(
+        f"/projects/{pid}/workspaces",
+        data={"workspaces": ["alpha-ws", "beta-ws"]},
+        follow_redirects=True,
+    )
+    assert both.status_code == 200
+    assert "alpha-ws" in both.text and "beta-ws" in both.text
+    sheet = client.post(
+        f"/projects/{pid}/datasources",
+        data={"url": "https://docs.qq.com/sheet/Denergy2", "purpose": "装机"},
+        follow_redirects=True,
+    )
+    assert sheet.status_code == 200
+    assert "Tencent Docs" in sheet.text or "腾讯文档" in sheet.text
+    assert "Create task" in sheet.text
+    assert 'name="kind"' not in sheet.text
+    smart = client.post(
+        f"/projects/{pid}/datasources",
+        data={"url": "https://docs.qq.com/smartsheet/Senergy"},
+        follow_redirects=True,
+    )
+    assert smart.status_code == 200
+    silent = client.post(
+        f"/projects/{pid}/datasources",
+        data={"url": "https://example.com/not-docs"},
+        follow_redirects=True,
+    )
+    assert silent.status_code == 200
+    assert "无法识别" in silent.text or "invalid" in silent.text.lower()
+    urls = " ".join(
+        d["url"] for d in client.get(f"/api/projects/{pid}").json()["project"]["datasources"]
+    )
+    assert "example.com" not in urls
+    assert 'name="kind"' not in silent.text
     html_art = client.get(f"/projects/{pid}/runs/{run1['id']}")
     assert html_art.status_code == 200
     assert 'class="doc"' in html_art.text
@@ -238,6 +274,9 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert "Projects" in settings_html.text
     assert "Workspaces" in settings_html.text
     assert "Timeline" in settings_html.text
+    assert "腾讯文档" in settings_html.text
+    assert "企微文档" in settings_html.text
+    assert "Notion" in settings_html.text
     assert "周报修订" not in settings_html.text
     assert run1["id"] not in settings_html.text
 
@@ -262,8 +301,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     ds2 = client.post(
         f"/api/projects/{pid}/datasources",
         json={
-            "url": "https://docs.qq.com/smartsheet/Senergy",
-            "kind": "smartsheet",
+            "url": "https://docs.qq.com/smartsheet/Senergy-api",
             "purpose": "风险",
         },
     ).json()
@@ -316,7 +354,31 @@ def test_reader_classifies_generic_cmd_errors_as_read_failed(tmp_path, monkeypat
             read_tencent_docs(url, "spreadsheet", conn)
             raise AssertionError("expected ReadError")
         except ReadError as exc:
-            assert exc.code == READ_FAILED, (src, exc.code, str(exc))
+            assert exc.code == READ_FAILED
+
+
+def test_infer_source_classifies_platforms():
+    from kairo.readers import INVALID_LINK, UNSUPPORTED, ReadError, infer_source
+
+    sheet = infer_source("https://docs.qq.com/sheet/Denergy")
+    assert sheet.reader == "tencent-docs" and sheet.kind == "spreadsheet" and sheet.live
+    smart = infer_source("https://docs.qq.com/smartsheet/Senergy")
+    assert smart.reader == "tencent-docs" and smart.kind == "smartsheet"
+    try:
+        infer_source("https://example.com/not-docs")
+        raise AssertionError("expected invalid")
+    except ReadError as exc:
+        assert exc.code == INVALID_LINK
+    try:
+        infer_source("https://www.notion.so/abc")
+        raise AssertionError("expected unsupported")
+    except ReadError as exc:
+        assert exc.code == UNSUPPORTED
+    try:
+        infer_source("https://doc.weixin.qq.com/sheet/x")
+        raise AssertionError("expected unsupported")
+    except ReadError as exc:
+        assert exc.code == UNSUPPORTED
 
 
 def test_reader_rejects_lookalike_hosts_and_bad_cmd_placeholders(tmp_path):

@@ -20,6 +20,10 @@ _FORBIDDEN_KEYS = frozenset({"token", "api_key", "password", "secret", "credenti
 class ProjectError(ValueError):
     """Project 域操作非法。"""
 
+    def __init__(self, message: str, *, code: str | None = None):
+        self.code = code
+        super().__init__(message)
+
 
 def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -198,26 +202,51 @@ def unlink_workspace(serve: Path, project_id: str, slug: str) -> Project:
     return save_project(serve, project)
 
 
+def set_workspaces(serve: Path, project_id: str, slugs: list[str]) -> Project:
+    """一次提交替换关联集合；只接受已存在的 workspace。"""
+    seen: list[str] = []
+    for raw in slugs:
+        slug = (raw or "").strip()
+        if not slug:
+            continue
+        if not workspace_exists(serve, slug):
+            raise ProjectError(f"workspace 不存在:{slug}")
+        if slug not in seen:
+            seen.append(slug)
+    project = get_project(serve, project_id)
+    project.workspace_slugs = seen
+    return save_project(serve, project)
+
+
 def add_datasource(
     serve: Path,
     project_id: str,
     *,
     url: str,
-    kind: str,
+    kind: str | None = None,
     purpose: str = "",
-    connection_id: str = CONNECTION_TENCENT,
-    reader: str = CONNECTION_TENCENT,
+    connection_id: str | None = None,
+    reader: str | None = None,
 ) -> DataSource:
-    if kind not in ("spreadsheet", "smartsheet"):
-        raise ProjectError(f"不支持的类型:{kind}")
+    from kairo.readers import ReadError, infer_source
+
+    try:
+        inferred = infer_source(url)
+    except ReadError as exc:
+        raise ProjectError(str(exc), code=exc.code) from exc
+    if not inferred.live:
+        raise ProjectError(str(f"{inferred.label} Reader 尚未接入"), code="unsupported_reader")
+    internal_kind = inferred.kind
+    if kind in ("spreadsheet", "smartsheet"):
+        internal_kind = kind
     project = get_project(serve, project_id)
     ds = DataSource(
         id=_new_id("ds"),
-        connection_id=connection_id,
+        connection_id=connection_id or inferred.connection_id,
         url=url.strip(),
-        kind=kind,
+        kind=internal_kind,
         purpose=purpose.strip(),
-        reader=reader,
+        reader=reader or inferred.reader,
     )
     project.datasources.append(ds)
     save_project(serve, project)
