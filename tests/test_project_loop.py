@@ -414,3 +414,38 @@ def test_reader_rejects_lookalike_hosts_and_bad_cmd_placeholders(tmp_path):
         raise AssertionError("expected read_failed")
     except ReadError as exc:
         assert exc.code == READ_FAILED
+
+
+def test_obj_page_actions_are_inline_not_full_width(tmp_path, monkeypatch):
+    """Project/Settings 操作按钮不得被 .btn { width:100% } 或 column flex stretch 拉满。"""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    Workspace.init(serve / "alpha-ws", topic="阿尔法")
+    created = _load(_cli(["project", "create", "能源团队管理"], serve, monkeypatch))
+    client = TestClient(create_app(serve))
+
+    page = client.get("/settings")
+    assert page.status_code == 200
+    assert 'href="/static/app.css?v=' in page.text
+    assert 'class="conn-grid"' in page.text
+    assert 'class="conn-card"' in page.text
+
+    css = client.get("/static/app.css")
+    assert css.status_code == 200
+    text = css.text
+    assert ".btn {" in text and "width: 100%" in text
+    assert ".obj-page .btn" in text
+    brace = text.index("{", text.index(".obj-page .btn"))
+    block = text[brace : text.index("}", brace) + 1]
+    assert "width: auto" in block
+    assert "align-self: flex-start" in block or "align-self: start" in block
+    assert "flex: none" in block or "flex:none" in block
+
+    proj = client.get(f"/projects/{created['id']}")
+    assert proj.status_code == 200
+    assert 'class="chooser"' in proj.text
+    assert 'class="btn btn-step btn-inline"' in proj.text
+    assert 'class="btn btn-ghost btn-inline"' in proj.text
+    settings_btns = page.text
+    assert 'class="btn btn-step btn-inline"' in settings_btns
+    assert 'class="btn btn-ghost btn-inline"' in settings_btns

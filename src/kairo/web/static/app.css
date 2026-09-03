@@ -498,7 +498,18 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .btn-ghost { background: transparent; color: var(--ink-soft); border-color: var(--line-2); }
 .btn-ghost:hover { background: #ece5d6; }
 .panel-hint { color: var(--muted); font-size: 13px; padding: 2px 4px; }
-.btn-inline { width: auto; margin: 0; padding: 8px 14px; }
+.btn-inline,
+.obj-page .btn,
+.obj-add .btn,
+.obj-actions .btn,
+.obj-rename .btn,
+.chooser .btn {
+  width: auto;
+  margin: 0;
+  padding: 8px 14px;
+  flex: none;
+  align-self: flex-start;
+}
 .obj-page { max-width: 860px; margin: 0 auto; padding: 28px 28px 64px; }
 .obj-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 28px; }
 .obj-kicker { margin: 0 0 6px; font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
