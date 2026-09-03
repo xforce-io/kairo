@@ -9,7 +9,15 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from kairo.cli import app
-from kairo.refs import add_global_ref, add_tag, list_all_refs, set_include_tags, topic_members
+from kairo.refs import (
+    add_global_ref,
+    add_tag,
+    list_all_refs,
+    run_ref_ids,
+    set_include_tags,
+    timeline_digest_path,
+    topic_members,
+)
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 
@@ -123,7 +131,11 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
     topic_page = client.get("/w/energy")
     assert topic_page.status_code == 200
     assert "loose-note" in topic_page.text
+    assert 'href="/refs/loose-note"' in topic_page.text
+    assert client.get("/refs/loose-note").status_code == 200
     assert "Data sources" not in topic_page.text
+    assert home_id not in run_ref_ids(topic_a)
+    assert run_ref_ids(topic_a) == []
     assert understanding.read_text(encoding="utf-8") == "历史结论"
 
     proj = client.get(f"/projects/{pid}")
@@ -168,3 +180,9 @@ def test_untagged_global_ref_not_in_topic(tmp_path):
     assert any(r.id == "orphan" for r in list_all_refs(serve))
     add_tag(serve, home="", ref_id="orphan", tag="energy")
     assert {m.id for m in topic_members(serve, "t1")} == {"orphan"}
+    digest = timeline_digest_path(serve, "", "orphan")
+    digest.parent.mkdir(parents=True, exist_ok=True)
+    digest.write_text("纪要", encoding="utf-8")
+    assert digest.is_file()
+    ws = Workspace.open(serve / "t1")
+    assert run_ref_ids(ws) == []

@@ -9,6 +9,8 @@
     </div>
     <form class="tl-tags" method="get" action="/timeline">
       <input type="hidden" name="day" value="{{ day_iso }}">
+      {% if view == 'recent' %}<input type="hidden" name="mode" value="recent">{% endif %}
+      {% if view == 'unknown' %}<input type="hidden" name="unknown" value="1">{% endif %}
       <label class="sr-only" for="tl-tag">{{ t('tl.filter_tag') }}</label>
       <input id="tl-tag" name="tag" value="{{ tag_filters | join(' ') }}" placeholder="{{ t('tl.filter_tag') }}">
       <button type="submit" class="btn btn-ghost btn-inline">{{ t('tl.filter_tag') }}</button>

@@ -335,7 +335,9 @@ def workspace_run_plan(ws) -> dict:
     """#75/#161:主按钮状态机输入,区分总 blocked 与 Run 可重试 blocked。"""
     pending_n = len(pending(ws))
     blocked_refs: list[dict] = []
-    for ref_id in ws.list_reference_ids():
+    from kairo.refs import run_ref_ids
+
+    for ref_id in run_ref_ids(ws):
         blocks = ref_product_blocks(ws, ref_id)
         if blocks:
             retryable = all(_product_block_retryable(b["reason"]) for b in blocks)

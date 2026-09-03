@@ -566,10 +566,12 @@ def timeline_view(
                 order.append(key)
             buckets[key].append(it)
         range_groups = [{"key": k, "entries": buckets[k]} for k in order]
+    from kairo.refs import timeline_digest_path
+
     digest_n = sum(
         1
         for it in day_items
-        if (Path(request.app.state.root) / it.workspace / "references" / it.id / "digest.md").is_file()
+        if timeline_digest_path(Path(request.app.state.root), it.workspace, it.id).is_file()
     )
     span = range_day_count(r0, r1) if range_on else 1
     too_long = span > MAX_RANGE_DAYS
@@ -726,15 +728,33 @@ def _split_refs(ws: Workspace, serve: Path | None = None):
         from kairo.refs import RefError, topic_members
 
         try:
+            from kairo.refs import ref_nav
+
             for rec in topic_members(serve, ws.root.name):
-                item = {"id": rec.id, "title": rec.title, "home": rec.home}
+                nav = ref_nav(rec.home, rec.id)
+                item = {
+                    "id": rec.id,
+                    "title": rec.title,
+                    "home": rec.home,
+                    "href": nav["href"],
+                    "hx": nav["hx"],
+                }
                 (corpus if rec.source_class == "corpus" else streams).append(item)
             return streams, corpus
         except RefError:
             pass
+    from kairo.refs import ref_nav
+
     for ref_id in ws.list_reference_ids():
         man = ws.read_manifest(ref_id)
-        item = {"id": ref_id, "title": man.title, "home": ws.root.name}
+        nav = ref_nav(ws.root.name, ref_id)
+        item = {
+            "id": ref_id,
+            "title": man.title,
+            "home": ws.root.name,
+            "href": nav["href"],
+            "hx": nav["hx"],
+        }
         (corpus if man.source_class == "corpus" else streams).append(item)
     return streams, corpus
 
@@ -780,6 +800,8 @@ def topic_alias(slug: str) -> RedirectResponse:
 def global_ref_view(request: Request, ref_id: str) -> HTMLResponse:
     from kairo.refs import RefError, resolve_open
 
+    if _is_public_read(request):
+        _deny_unpublished()
     try:
         ws, rid = resolve_open(_serve(request), "", ref_id)
     except RefError:
@@ -2914,9 +2936,15 @@ async def api_topic_include_put(request: Request, slug: str) -> JSONResponse:
     from kairo.refs import RefError, set_include_tags, topic_members
 
     body = await request.json()
+    if "include_tags" not in body:
+        return _api_error(RefError("include_tags 必填"))
     tags = body.get("include_tags")
     try:
-        saved = set_include_tags(_serve(request), slug, list(tags) if tags is not None else [])
+        saved = set_include_tags(
+            _serve(request),
+            slug,
+            None if tags is None else list(tags),
+        )
         members = topic_members(_serve(request), slug)
     except RefError as e:
         return _api_error(e)

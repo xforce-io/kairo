@@ -30,7 +30,9 @@ class ReviewError(ValueError):
 
 
 def digest_path(root: Path, it: TimelineItem) -> Path:
-    return Path(root) / it.workspace / "references" / it.id / "digest.md"
+    from kairo.refs import timeline_digest_path
+
+    return timeline_digest_path(root, it.workspace, it.id)
 
 
 def collect_digests(
@@ -157,6 +159,8 @@ def is_journal_item(it: TimelineItem, root: Path | None = None) -> bool:
         try:
             from kairo.kind import is_journal_workspace
 
+            if not it.workspace:
+                return False
             ws = Workspace.open(Path(root) / it.workspace)
             if is_journal_workspace(ws):
                 return True

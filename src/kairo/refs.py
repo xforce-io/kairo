@@ -297,6 +297,38 @@ def resolve_open(serve: Path, home: str, ref_id: str) -> tuple[Workspace, str]:
     return ws, ref_id
 
 
+def run_ref_ids(ws: Workspace) -> list[str]:
+    """本 Topic 知识 Run 要处理的本地 home Ref。
+
+    include_tags 缺省：全部本地 id。显式 []：无。非空：仅当前成员且 home 为本 Topic。
+    """
+    local = list(ws.list_reference_ids())
+    rules = include_tags_of(ws)
+    if rules is None:
+        return local
+    if not rules:
+        return []
+    try:
+        members = topic_members(ws.root.parent, ws.root.name)
+    except RefError:
+        return local
+    allowed = {m.id for m in members if m.home == ws.root.name}
+    return [rid for rid in local if rid in allowed]
+
+
+def timeline_digest_path(root: Path, workspace: str, ref_id: str) -> Path:
+    if workspace:
+        return Path(root) / workspace / "references" / ref_id / "digest.md"
+    return global_home_path(root) / "references" / ref_id / "digest.md"
+
+
+def ref_nav(home: str, ref_id: str) -> dict[str, str | None]:
+    if home:
+        href = f"/w/{home}?ref={ref_id}"
+        return {"href": href, "hx": f"/w/{home}/ref/{ref_id}"}
+    return {"href": f"/refs/{ref_id}", "hx": None}
+
+
 def digest_paths_for(records: list[RefRecord]) -> list[str]:
     out: list[str] = []
     for rec in records:
