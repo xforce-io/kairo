@@ -3,7 +3,7 @@
 - Issue: [#249](https://github.com/xforce-io/kairo/issues/249)
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/249#issuecomment-5525624606)
 - 分支: `feat/249-topic-first-console-ia`
-- 状态: Draft
+- 状态: Approved
 - 日期: 2026-09-03
 
 本文件是详细设计唯一事实源。Issue 只保留摘要与本链接。
