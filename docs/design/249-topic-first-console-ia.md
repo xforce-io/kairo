@@ -47,6 +47,8 @@ flowchart LR
   Project --> Run[Task / Run / Artifact]
 ```
 
+可审阅的高保真页面示例见 [mockups.html](249-topic-first-console-ia/mockups.html)：它包含 Topics 状态总览、全局 Ref Timeline、Project 渐进式关联 Topic，以及 390px 窄屏四个可切换页面。该页面是本节的视觉验收样例；文字规格与样例冲突时，以本节对象边界和状态表为准。
+
 #### Topics
 
 Topics 首页的首要任务是定位或创建研究对象。顶部保留搜索、状态筛选与「新建 Topic」；列表按现有置顶/最近规则分组。每张卡片按固定顺序呈现：Topic 名、简短研究状态、资料概况、一个与状态相符的主要动作。数量是辅助信息，不以实现目录名充当第二标题。卡片打开 Topic 详情，危险操作不与进入详情竞争。
