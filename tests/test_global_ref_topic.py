@@ -182,6 +182,13 @@ def test_untagged_global_ref_not_in_topic(tmp_path):
     assert any(r.id == "orphan" for r in list_all_refs(serve))
     add_tag(serve, home="", ref_id="orphan", tag="energy")
     assert {m.id for m in topic_members(serve, "t1")} == {"orphan"}
+    csrc = tmp_path / "c.txt"
+    csrc.write_text("c")
+    add_global_ref(serve, [csrc], ref_id="g-corpus", source_class="corpus")
+    add_tag(serve, home="", ref_id="g-corpus", tag="energy")
+    page = TestClient(create_app(serve)).get("/w/t1")
+    assert 'href="/refs/orphan"' in page.text
+    assert 'href="/refs/g-corpus"' in page.text
     digest = timeline_digest_path(serve, "", "orphan")
     digest.parent.mkdir(parents=True, exist_ok=True)
     digest.write_text("纪要", encoding="utf-8")

@@ -79,7 +79,7 @@
       <div class="nav-section">{{ t('nav.corpus') }}</div>
       {% if corpus %}
       {% for r in corpus %}
-      <a class="nav-doc is-ref {% if select_ref == r.id %}is-active{% endif %}" href="/w/{{ slug | urlencode }}?ref={{ r.id | urlencode }}" hx-get="/w/{{ slug | urlencode }}/ref/{{ r.id }}" hx-target="#meta" hx-push-url="/w/{{ slug | urlencode }}?ref={{ r.id | urlencode }}">
+      <a class="nav-doc is-ref {% if select_ref == r.id %}is-active{% endif %}" href="{{ r.href }}"{% if r.hx %} hx-get="{{ r.hx }}" hx-target="#meta" hx-push-url="{{ r.href }}"{% endif %}>
         <span class="name">{{ r.title }}</span>
       </a>
       {% endfor %}
