@@ -1,9 +1,9 @@
 # #242 全局 Ref 与 Topic 模型
 
 - Issue: [#242](https://github.com/xforce-io/kairo/issues/242)
-- L1: [修订 Draft](https://github.com/xforce-io/kairo/issues/242#issuecomment-5524111562)（人工确认折衷：digest 一份且不搬家、无 Topic 入库、单一 Timeline、Ref 不直连 Project、Tag 包含规则、用户词改为 Topic）
+- L1: [修订](https://github.com/xforce-io/kairo/issues/242#issuecomment-5524111562)（人工 Approved：digest 一份且不搬家、无 Topic 入库、单一 Timeline、Ref 不直连 Project、Tag 包含规则、用户词改为 Topic）
 - 分支: `feat/242-global-ref-topic`
-- 状态: Draft
+- 状态: Approved
 - 日期: 2026-09-03
 - 子 Issue: [#243](https://github.com/xforce-io/kairo/issues/243) [#244](https://github.com/xforce-io/kairo/issues/244) [#245](https://github.com/xforce-io/kairo/issues/245) [#246](https://github.com/xforce-io/kairo/issues/246) [#247](https://github.com/xforce-io/kairo/issues/247)
 
