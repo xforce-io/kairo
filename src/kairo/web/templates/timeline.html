@@ -30,9 +30,9 @@
     <section class="tl-day">
       <div class="tl-day-head"><h2>{{ g.key }}</h2><span class="count">{{ g.entries|length }}</span></div>
       {% for it in g.entries %}
-      <a class="tl-row" href="{% if it.workspace and it.workspace != 'global' %}/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}{% else %}/refs/{{ it.id | urlencode }}{% endif %}">
+      <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
         <span class="tl-title">{{ it.title }}</span>
-        <span class="tl-ws">{{ it.topic }}</span>
+        <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
         <span class="tl-meta">{{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {% if it.occurred_at %}{{ t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) }}{% else %}{{ t('tl.occurred_unknown') }}{% endif %}</span>
       </a>
       {% endfor %}
@@ -71,9 +71,9 @@
       <section class="tl-day unknown">
         <div class="tl-day-head"><h2>{{ t('tl.src_unknown') }}</h2><span class="count">{{ unknown_n }}</span></div>
         {% for it in unknown_items %}
-        <a class="tl-row" href="{% if it.workspace and it.workspace != 'global' %}/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}{% else %}/refs/{{ it.id | urlencode }}{% endif %}">
+        <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
           <span class="tl-title">{{ it.title }}</span>
-          <span class="tl-ws">{{ it.topic }}</span>
+          <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
           <span class="tl-meta">{{ it.id }}</span>
         </a>
         {% endfor %}
@@ -117,9 +117,9 @@
           {% for g in range_groups %}
           <div class="tl-range-day">{{ g.key }}</div>
           {% for it in g.entries %}
-          <a class="tl-row" href="{% if it.workspace and it.workspace != 'global' %}/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}{% else %}/refs/{{ it.id | urlencode }}{% endif %}">
+          <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
             <span class="tl-title">{{ it.title }}</span>
-            <span class="tl-ws">{{ it.topic }}</span>
+            <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
           </a>
           {% endfor %}
           {% else %}
@@ -127,9 +127,9 @@
           {% endfor %}
         {% else %}
           {% for it in day_items %}
-          <a class="tl-row" href="{% if it.workspace and it.workspace != 'global' %}/w/{{ it.workspace | urlencode }}?ref={{ it.id | urlencode }}{% else %}/refs/{{ it.id | urlencode }}{% endif %}">
+          <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
             <span class="tl-title">{{ it.title }}</span>
-            <span class="tl-ws">{{ it.topic }}</span>
+            <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
             <span class="tl-meta">{% if it.occurred_at %}{{ it.occurred_at.strftime('%m-%d') }}{% else %}{{ it.id }}{% endif %}</span>
           </a>
           {% else %}

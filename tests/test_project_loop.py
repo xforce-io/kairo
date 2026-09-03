@@ -217,10 +217,15 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert html_projects.status_code == 200
     assert "综合能源" in html_projects.text
     assert "Projects" in html_projects.text or "项目" in html_projects.text
+    assert "Ref" in html_projects.text
+    assert "Last run:" in html_projects.text
+    assert "Succeeded" in html_projects.text or "Failed" in html_projects.text
     html_proj = client.get(f"/projects/{pid}")
     assert html_proj.status_code == 200
-    assert "alpha-ws" in html_proj.text
+    assert "阿尔法" in html_proj.text
     assert 'name="workspaces"' in html_proj.text
+    assert '<details class="topic-picker">' in html_proj.text
+    assert '<details class="topic-picker" open>' not in html_proj.text
     assert 'placeholder="slug"' not in html_proj.text
     assert 'name="slug"' not in html_proj.text
     assert 'name="kind"' not in html_proj.text
@@ -232,7 +237,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
         follow_redirects=True,
     )
     assert both.status_code == 200
-    assert "alpha-ws" in both.text and "beta-ws" in both.text
+    assert "阿尔法" in both.text and "贝塔" in both.text
     sheet = client.post(
         f"/projects/{pid}/datasources",
         data={"url": "https://docs.qq.com/sheet/Denergy2", "purpose": "装机"},
@@ -335,6 +340,35 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     pub = TestClient(create_app(serve, mode="public-read"), raise_server_exceptions=False)
     assert pub.get("/api/settings").status_code == 404
     assert pub.get(f"/projects/{pid}/runs/{run1['id']}").status_code == 404
+
+
+def test_legacy_schedule_metadata_remains_readable_and_preserved(tmp_path):
+    from kairo.projects import edit_project, get_project
+
+    project_id = "prj-legacy"
+    project_dir = tmp_path / ".kairo" / "projects" / project_id
+    project_dir.mkdir(parents=True)
+    state = {"tsk-legacy": {"mode": "armed", "next_due_at": "2026-09-03T08:00:00+00:00"}}
+    (project_dir / "project.json").write_text(
+        json.dumps(
+            {
+                "id": project_id,
+                "name": "旧项目",
+                "workspace_slugs": [],
+                "datasources": [],
+                "tasks": [],
+                "schedule_states": state,
+                "created_at": "2026-09-03T00:00:00+00:00",
+                "updated_at": "2026-09-03T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert get_project(tmp_path, project_id).schedule_states == state
+    edit_project(tmp_path, project_id, name="已迁移项目")
+    saved = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert saved["schedule_states"] == state
 
 
 def test_reader_classifies_generic_cmd_errors_as_read_failed(tmp_path, monkeypatch):

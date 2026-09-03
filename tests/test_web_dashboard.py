@@ -23,7 +23,7 @@ def _utime(path: Path, ts: float) -> None:
 
 
 def _cards(html: str) -> list[str]:
-    return re.findall(r'class="card-main"[^>]*href="/w/([^"]+)"', html)
+    return re.findall(r'class="card-main"[^>]*href="/topics/([^"]+)"', html)
 
 
 def _mk(root: Path, slug: str, topic: str, age: float) -> Workspace:
@@ -132,7 +132,7 @@ def test_dashboard_pin_prepends_and_sections(tmp_path):
     assert "b-ws" in pins
     html = r.text
     assert "Pinned" in html and "Recent" in html
-    assert html.index("Pinned") < html.index('href="/w/b-ws"') < html.index("Recent")
+    assert html.index("Pinned") < html.index('href="/topics/b-ws"') < html.index("Recent")
     cards = _cards(html)
     assert cards[0] == "b-ws"
     assert cards[1:] == ["c-ws", "a-ws"]
@@ -217,19 +217,19 @@ def test_dashboard_journal_card_chip_and_count(tmp_path, monkeypatch):
     journal.add([src], ref_id="r2", occurred_at="2026-08-25", role="source_text")
     html = _client(tmp_path).get("/").text
     assert "系统" not in html
-    m = re.search(r'href="/w/%E6%80%BB%E7%BB%93".*?</a>', html, re.S) or re.search(
-        r'href="/w/总结".*?</a>', html, re.S
+    m = re.search(r'href="/topics/%E6%80%BB%E7%BB%93".*?</a>', html, re.S) or re.search(
+        r'href="/topics/总结".*?</a>', html, re.S
     )
     assert m, html[:500]
     card = m.group(0)
     assert "回顾" in card or "Review" in card
-    assert "2 篇" in card or "2 notes" in card
+    assert "2 条 Ref" in card or "2 Ref" in card
     assert "观测" not in card and "obs" not in card
     assert "基线" not in card and "baseline" not in card
     assert "待 step" not in card and "to step" not in card
-    energy = re.search(r'href="/w/energy".*?</a>', html, re.S)
+    energy = re.search(r'href="/topics/energy".*?</a>', html, re.S)
     assert energy
-    assert "观测" in energy.group(0) or "obs" in energy.group(0)
+    assert "0 条 Ref" in energy.group(0) or "0 Ref" in energy.group(0)
 
 
 def test_dashboard_journal_shows_stale_when_attachment_pending(tmp_path):
@@ -241,12 +241,12 @@ def test_dashboard_journal_shows_stale_when_attachment_pending(tmp_path):
     spoken.write_text("口述要点")
     journal.add([spoken], ref_id=rid, role="transcript")
     html = _client(tmp_path).get("/").text
-    m = re.search(r'href="/w/%E6%80%BB%E7%BB%93".*?</a>', html, re.S) or re.search(
-        r'href="/w/总结".*?</a>', html, re.S
+    m = re.search(r'href="/topics/%E6%80%BB%E7%BB%93".*?</a>', html, re.S) or re.search(
+        r'href="/topics/总结".*?</a>', html, re.S
     )
     assert m, html[:500]
     card = m.group(0)
-    assert "待 step" in card or "to step" in card
+    assert "需要处理" in card or "Needs attention" in card
 
 
 def test_dashboard_journal_sits_with_pins(tmp_path):
@@ -260,11 +260,11 @@ def test_dashboard_journal_sits_with_pins(tmp_path):
     pin_at = html.find("Pinned") if "Pinned" in html else html.find("置顶")
     recent_at = html.find("Recent") if "Recent" in html else html.find("最近")
     assert pin_at != -1 and recent_at != -1
-    j_at = html.find('href="/w/%E6%80%BB%E7%BB%93"')
+    j_at = html.find('href="/topics/%E6%80%BB%E7%BB%93"')
     if j_at < 0:
-        j_at = html.find('href="/w/总结"')
-    e_at = html.find('href="/w/energy"')
-    o_at = html.find('href="/w/other"')
+        j_at = html.find('href="/topics/总结"')
+    e_at = html.find('href="/topics/energy"')
+    o_at = html.find('href="/topics/other"')
     assert pin_at < j_at < recent_at
     assert pin_at < e_at < recent_at
     assert recent_at < o_at
