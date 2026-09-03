@@ -222,8 +222,13 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     html_proj = client.get(f"/projects/{pid}")
     assert html_proj.status_code == 200
     assert "alpha-ws" in html_proj.text
+    assert "Create task" in html_proj.text
+    assert "Create project" not in html_proj.text
     html_art = client.get(f"/projects/{pid}/runs/{run1['id']}")
     assert html_art.status_code == 200
+    assert 'class="doc"' in html_art.text
+    assert 'class="card"' not in html_art.text
+    assert "<h1>" in html_art.text
     assert run1["id"] in html_art.text
     assert "Task version: 1" in html_art.text or "v1" in html_art.text
 

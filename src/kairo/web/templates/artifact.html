@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block subtitle %}{{ run.task_name }}{% endblock %}
 {% block body %}
-<p><a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
-<p class="meta">Run {{ run.id }} · Task v{{ run.task_version }} · {{ run.datasource_url }}</p>
-<div class="card" style="padding:20px">{{ body_html | safe }}</div>
+<p class="artifact-back"><a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
+<article class="doc">
+  <p class="doc-kicker"><span class="dk-title">{{ run.task_name }}</span></p>
+  <p class="meta-hint">Run {{ run.id }} · Task v{{ run.task_version }} · {{ run.datasource_url }}</p>
+  {{ body_html | safe }}
+</article>
 {% endblock %}
