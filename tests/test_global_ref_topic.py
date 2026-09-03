@@ -64,7 +64,8 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
     assert "2026-09-01-meet" in ids
     assert "loose-note" in ids
     loose = next(row for row in tl if row["id"] == "loose-note")
-    assert loose["workspace"] == ""
+    assert loose["workspace"] == "global"
+    assert loose["home"] == ""
     assert loose["tags"] == []
 
     tagged = _load(
@@ -124,6 +125,7 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
     opened = client.get("/refs/loose-note")
     assert opened.status_code == 200
     assert "loose-note" in opened.text
+    assert "note.txt" in opened.text or "form" in opened.text
 
     alias = client.get("/topics/energy", follow_redirects=False)
     assert alias.status_code == 303

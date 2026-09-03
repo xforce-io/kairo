@@ -159,7 +159,7 @@ def is_journal_item(it: TimelineItem, root: Path | None = None) -> bool:
         try:
             from kairo.kind import is_journal_workspace
 
-            if not it.workspace:
+            if not it.workspace or it.workspace == "global":
                 return False
             ws = Workspace.open(Path(root) / it.workspace)
             if is_journal_workspace(ws):

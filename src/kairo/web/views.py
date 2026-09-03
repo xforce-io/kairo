@@ -808,10 +808,24 @@ def global_ref_view(request: Request, ref_id: str) -> HTMLResponse:
         raise HTTPException(status_code=404, detail="reference not found")
     man = ws.read_manifest(rid)
     title = escape(man.title or rid)
-    return HTMLResponse(
-        f"<!doctype html><html><body><h1>{title}</h1>"
-        f"<p class='ref-id'>{escape(rid)}</p></body></html>"
-    )
+    digest = ws.references_dir() / rid / "digest.md"
+    chunks = [
+        "<!doctype html><html><body>",
+        f"<h1>{title}</h1>",
+        f"<p class='ref-id'>{escape(rid)}</p>",
+    ]
+    if digest.is_file():
+        chunks.append(
+            "<section class='digest'><h2>digest</h2><pre>"
+            + escape(digest.read_text(encoding="utf-8"))
+            + "</pre></section>"
+        )
+    for form in man.forms:
+        chunks.append(
+            f"<p class='form'>{escape(form.role)} {escape(form.location)}</p>"
+        )
+    chunks.append("</body></html>")
+    return HTMLResponse("".join(chunks))
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)

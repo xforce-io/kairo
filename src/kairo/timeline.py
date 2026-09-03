@@ -109,9 +109,11 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
                 topic_name = ws.constitution.topic
             except Exception:
                 topic_name = rec.home
+        else:
+            topic_name = "global"
         items.append(
             TimelineItem(
-                workspace=rec.home,
+                workspace=rec.home or "global",
                 topic=topic_name,
                 id=ref_id,
                 title=man.title or ref_id,
@@ -143,7 +145,7 @@ def item_as_json(it: TimelineItem) -> dict:
         "occurred_source": it.occurred_source,
         "added_at": it.added_at.isoformat(),
         "tags": list(it.tags),
-        "home": it.workspace,
+        "home": "" if it.workspace in ("", "global") else it.workspace,
     }
 
 

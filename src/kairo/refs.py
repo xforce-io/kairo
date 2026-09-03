@@ -316,10 +316,14 @@ def run_ref_ids(ws: Workspace) -> list[str]:
     return [rid for rid in local if rid in allowed]
 
 
+def is_global_home(workspace: str) -> bool:
+    return not workspace or workspace == "global"
+
+
 def timeline_digest_path(root: Path, workspace: str, ref_id: str) -> Path:
-    if workspace:
-        return Path(root) / workspace / "references" / ref_id / "digest.md"
-    return global_home_path(root) / "references" / ref_id / "digest.md"
+    if is_global_home(workspace):
+        return global_home_path(root) / "references" / ref_id / "digest.md"
+    return Path(root) / workspace / "references" / ref_id / "digest.md"
 
 
 def ref_nav(home: str, ref_id: str) -> dict[str, str | None]:

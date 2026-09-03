@@ -175,7 +175,9 @@ HTML：`/`、`/w/{slug}`、`/timeline?tag=`、`/refs/{id}`、`/projects/{id}`。
 
 ## 12. 开放问题
 
-无。排除/AND/钉住明确后续。#234 仍后续。
+把 **home 在其他 Topic 或全局库** 的成员 digest 折进本 Topic `understanding.md`：本期知识 Run 只 digest/fold **本 Topic 目录内的成员**；全局/跨 Topic 成员可打开、可出现在列表，但不在本 Topic step 中重算或折入。后续单独做。
+
+排除/AND/钉住明确后续。#234 仍后续。
 
 ## 13. 关联
 
