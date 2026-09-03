@@ -342,6 +342,35 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert pub.get(f"/projects/{pid}/runs/{run1['id']}").status_code == 404
 
 
+def test_legacy_schedule_metadata_remains_readable_and_preserved(tmp_path):
+    from kairo.projects import edit_project, get_project
+
+    project_id = "prj-legacy"
+    project_dir = tmp_path / ".kairo" / "projects" / project_id
+    project_dir.mkdir(parents=True)
+    state = {"tsk-legacy": {"mode": "armed", "next_due_at": "2026-09-03T08:00:00+00:00"}}
+    (project_dir / "project.json").write_text(
+        json.dumps(
+            {
+                "id": project_id,
+                "name": "旧项目",
+                "workspace_slugs": [],
+                "datasources": [],
+                "tasks": [],
+                "schedule_states": state,
+                "created_at": "2026-09-03T00:00:00+00:00",
+                "updated_at": "2026-09-03T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert get_project(tmp_path, project_id).schedule_states == state
+    edit_project(tmp_path, project_id, name="已迁移项目")
+    saved = json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+    assert saved["schedule_states"] == state
+
+
 def test_reader_classifies_generic_cmd_errors_as_read_failed(tmp_path, monkeypatch):
     from kairo.readers import READ_FAILED, ReadError, read_tencent_docs
     from kairo.settings import Connection
