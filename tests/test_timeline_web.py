@@ -69,6 +69,22 @@ def test_timeline_recent_lists_by_added(tmp_path):
     assert "notes-candidate" in r.text
 
 
+def test_timeline_tag_form_keeps_recent_and_unknown_queries_valid(tmp_path):
+    root, _, _ = _two_ws(tmp_path)
+    client = _client(root)
+
+    recent = client.get("/timeline", params={"mode": "recent"})
+    assert recent.status_code == 200
+    assert 'name="mode" value="recent"' in recent.text
+    assert 'name="day"' not in recent.text
+
+    unknown = client.get("/timeline", params={"unknown": "1", "month": "2026-08"})
+    assert unknown.status_code == 200
+    assert 'name="unknown" value="1"' in unknown.text
+    assert 'name="month" value="2026-08"' in unknown.text
+    assert 'name="day"' not in unknown.text
+
+
 def test_fold_false_cannot_post_occurred(tmp_path):
     root, wa, _ = _two_ws(tmp_path)
     c = _client(root)
