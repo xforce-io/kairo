@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ root }}{% endblock %}
+{% block body %}
+<div class="dash-head">
+  <form class="new-ws" method="post" action="/projects">
+    <input name="name" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
+    <button type="submit">{{ t('proj.create') }}</button>
+  </form>
+</div>
+{% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
+<div class="grid">
+  {% if projects %}
+    {% for p in projects %}
+    <div class="card">
+      <a class="card-main" href="/projects/{{ p.id }}">
+        <h3>{{ p.name }}</h3>
+        <div class="meta"><span class="slug">{{ p.id }}</span></div>
+        <div class="badges">
+          <span class="badge stream">{{ p.workspace_slugs|length }} {{ t('proj.workspaces') }}</span>
+          <span class="badge corpus">{{ p.datasources|length }} {{ t('proj.datasources') }}</span>
+        </div>
+      </a>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="panel-hint">{{ t('proj.empty') }}</p>
+  {% endif %}
+</div>
+{% endblock %}

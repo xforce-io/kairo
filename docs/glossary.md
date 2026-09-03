@@ -40,3 +40,11 @@
 | 最近结果 | 源环境为某个 remote 保留的最近一次备份尝试记录，含尝试时间、成功时间、backup_id 与成败。 | 同步日志 |
 | 重叠跳过 | 同一 remote 上一轮仍在运行时，本轮不启动第二次备份并留下可判定记录。 | 取消 |
 | 数据根 | 容器内 public-read 进程打开的 serve root，必须经 current 跟随到该 generation 的 `data/`。 | 挂载点、备份根 |
+| Project | serve root 上的业务聚合对象，多对多关联 workspace，不拥有其内容。 | 课题、工作区组 |
+| Settings | 本机全局控制台，存放规则、默认值与连接健康，不存放单一 Project 的业务内容。 | 项目设置、系统偏好 |
+| 连接 | Settings 中一条外部授权记录；凭据只在本机，Project 只引用其 id。 | 账号、token 对象 |
+| Data Source | Project 内对外部资料的配置：连接引用、链接、类型、业务用途与 Reader。 | 数据连接、表格源 |
+| Reader | 按类型读取 Data Source 的可替换能力；本期为腾讯文档表格或智能表格。 | 爬虫、导入器 |
+| Task | Project 内可编辑的工作定义，一次性或按规则触发。 | 作业、流水线 |
+| Run | 一次 Task 触发的不可变记录，冻结当时 Task 版本与输入。 | 执行、job |
+| Artifact | 成功 Run 产生的可阅读正文，追溯到该 Run、当时 Task 版本与输入 Data Source。 | 报告、产物文档 |

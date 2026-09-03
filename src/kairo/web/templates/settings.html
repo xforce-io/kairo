@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block subtitle %}Settings{% endblock %}
+{% block body %}
+{% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
+<section class="gl-section" id="general">
+  <div class="meta-label">{{ t('set.general') }}</div>
+  <form class="dlg-form" method="post" action="/settings">
+    <input type="hidden" name="path" value="general.locale">
+    <label class="dlg-label">{{ t('set.locale') }}</label>
+    <input name="value" value="{{ settings.general.locale or '' }}">
+    <button class="btn btn-step">{{ t('set.save') }}</button>
+  </form>
+</section>
+<section class="gl-section" id="projects">
+  <div class="meta-label">{{ t('set.projects') }}</div>
+  <p class="panel-hint">{{ settings.projects }}</p>
+</section>
+<section class="gl-section" id="workspaces">
+  <div class="meta-label">{{ t('set.workspaces') }}</div>
+  <p class="panel-hint">{{ settings.workspaces }}</p>
+</section>
+<section class="gl-section" id="timeline">
+  <div class="meta-label">{{ t('set.timeline') }}</div>
+  <p class="panel-hint">{{ settings.timeline }}</p>
+</section>
+<section class="gl-section">
+  <div class="meta-label">{{ t('set.connections') }}</div>
+  {% for name, conn in settings.connections.items() %}
+  <p>{{ name }} · {{ t('set.health') }}: {{ conn.health }} · authorized={{ conn.authorized }} · env={{ conn.token_env }}</p>
+  <form class="dlg-form" method="post" action="/settings" style="display:inline">
+    <input type="hidden" name="path" value="connections.{{ name }}.authorized">
+    <input type="hidden" name="value" value="true">
+    <button class="btn btn-step">{{ t('set.authorize') }}</button>
+  </form>
+  <form class="dlg-form" method="post" action="/settings" style="display:inline">
+    <input type="hidden" name="path" value="connections.{{ name }}.authorized">
+    <input type="hidden" name="value" value="false">
+    <button class="btn btn-ghost">{{ t('set.revoke') }}</button>
+  </form>
+  {% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ project.name }}{% endblock %}
+{% block body %}
+<div class="dash-head"><h2>{{ project.name }}</h2>
+  <form class="new-ws" method="post" action="/projects/{{ project.id }}/edit">
+    <input name="name" value="{{ project.name }}" required>
+    <button type="submit">{{ t('proj.edit') }}</button>
+  </form>
+</div>
+{% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
+{% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
+
+<section class="gl-section">
+  <div class="meta-label">{{ t('proj.workspaces') }}</div>
+  {% if project.workspace_slugs %}
+  <ul class="dlg-bullets">
+    {% for slug in project.workspace_slugs %}
+    <li><a href="/w/{{ slug | urlencode }}">{{ slug }}</a>
+      <form method="post" action="/projects/{{ project.id }}/workspaces/{{ slug | urlencode }}/unlink" style="display:inline">
+        <button class="btn btn-ghost btn-regen">{{ t('proj.unlink') }}</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="panel-hint">{{ t('proj.ws_empty') }}</p>{% endif %}
+  <form class="dlg-form" method="post" action="/projects/{{ project.id }}/workspaces">
+    <input name="slug" placeholder="slug" required aria-label="{{ t('proj.link') }}">
+    <button class="btn btn-step">{{ t('proj.link') }}</button>
+  </form>
+</section>
+
+<section class="gl-section">
+  <div class="meta-label">{{ t('proj.datasources') }}</div>
+  {% if project.datasources %}
+  <ul class="dlg-bullets">
+    {% for ds in project.datasources %}
+    <li>{{ ds.kind }} · {{ ds.url }} · {{ ds.purpose }}
+      <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/read" style="display:inline">
+        <button class="btn btn-ghost btn-regen">{{ t('proj.read') }}</button>
+      </form>
+      <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/delete" style="display:inline">
+        <button class="btn btn-ghost btn-regen">{{ t('proj.remove') }}</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="panel-hint">{{ t('proj.ds_empty') }}</p>{% endif %}
+  <form class="dlg-form" method="post" action="/projects/{{ project.id }}/datasources">
+    <input name="url" placeholder="https://docs.qq.com/sheet/..." required>
+    <select name="kind" aria-label="kind">
+      <option value="spreadsheet">spreadsheet</option>
+      <option value="smartsheet">smartsheet</option>
+    </select>
+    <input name="purpose" placeholder="purpose">
+    <button class="btn btn-step">{{ t('proj.add_ds') }}</button>
+  </form>
+</section>
+
+<section class="gl-section">
+  <div class="meta-label">{{ t('proj.tasks') }}</div>
+  {% if project.tasks %}
+  <ul class="dlg-bullets">
+    {% for task in project.tasks %}
+    <li>{{ task.name }} v{{ task.version }} · {{ task.schedule }}
+      <form method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}/run" style="display:inline">
+        <button class="btn btn-step">{{ t('proj.run') }}</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="panel-hint">{{ t('proj.task_empty') }}</p>{% endif %}
+  {% if project.datasources %}
+  <form class="dlg-form" method="post" action="/projects/{{ project.id }}/tasks">
+    <input name="name" placeholder="{{ t('proj.name_ph') }}" required>
+    <select name="datasource_id">{% for ds in project.datasources %}<option value="{{ ds.id }}">{{ ds.kind }}</option>{% endfor %}</select>
+    <select name="schedule"><option value="once">once</option><option value="interval">interval</option></select>
+    <button class="btn btn-step">{{ t('proj.create') }}</button>
+  </form>
+  {% endif %}
+</section>
+
+<section class="gl-section">
+  <div class="meta-label">{{ t('proj.runs') }}</div>
+  {% if runs %}
+  <ul class="dlg-bullets">
+    {% for run in runs %}
+    <li>{{ run.status }} · {{ run.task_name }} v{{ run.task_version }}
+      {% if run.status == 'succeeded' %}
+      <a href="/projects/{{ project.id }}/runs/{{ run.id }}">Artifact</a>
+      {% else %}{{ run.reason }}{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}<p class="panel-hint">{{ t('proj.run_empty') }}</p>{% endif %}
+</section>
+{% endblock %}
