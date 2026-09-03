@@ -2601,12 +2601,15 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
         project = get_project(_serve(request), project_id)
     except ProjectError:
         raise HTTPException(status_code=404)
+    from kairo.web.discovery import scan_workspaces
+
     return _render(
         request,
         "project.html",
         {
             "nav_active": "projects",
             "project": project,
+            "available_workspaces": scan_workspaces(_serve(request)),
             "runs": list_runs(_serve(request), project_id),
             "error": error,
             "notice": notice,
@@ -2627,12 +2630,14 @@ def project_edit_form(request: Request, project_id: str, name: str = Form(...)) 
 
 
 @router.post("/projects/{project_id}/workspaces")
-def project_link_form(request: Request, project_id: str, slug: str = Form(...)) -> HTMLResponse:
+async def project_link_form(request: Request, project_id: str) -> HTMLResponse:
     _console_only(request)
-    from kairo.projects import ProjectError, link_workspace
+    from kairo.projects import ProjectError, set_workspaces
 
+    form = await request.form()
+    slugs = [str(v) for v in form.getlist("workspaces")]
     try:
-        link_workspace(_serve(request), project_id, slug)
+        set_workspaces(_serve(request), project_id, slugs)
     except ProjectError as e:
         return project_page(request, project_id, error=str(e))
     return RedirectResponse(f"/projects/{project_id}", status_code=303)
@@ -2655,14 +2660,13 @@ def project_ds_add_form(
     request: Request,
     project_id: str,
     url: str = Form(...),
-    kind: str = Form(...),
     purpose: str = Form(""),
 ) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, add_datasource
 
     try:
-        add_datasource(_serve(request), project_id, url=url, kind=kind, purpose=purpose)
+        add_datasource(_serve(request), project_id, url=url, purpose=purpose)
     except ProjectError as e:
         return project_page(request, project_id, error=str(e))
     return RedirectResponse(f"/projects/{project_id}", status_code=303)
@@ -2833,11 +2837,15 @@ async def api_project_patch(request: Request, project_id: str) -> JSONResponse:
 @router.post("/api/projects/{project_id}/workspaces")
 async def api_project_link(request: Request, project_id: str) -> JSONResponse:
     _console_only(request)
-    from kairo.projects import ProjectError, link_workspace, project_to_dict
+    from kairo.projects import ProjectError, link_workspace, project_to_dict, set_workspaces
 
     body = await request.json()
+    slugs = body.get("workspaces")
     try:
-        project = link_workspace(_serve(request), project_id, body.get("slug") or "")
+        if isinstance(slugs, list):
+            project = set_workspaces(_serve(request), project_id, [str(s) for s in slugs])
+        else:
+            project = link_workspace(_serve(request), project_id, body.get("slug") or "")
     except ProjectError as e:
         return _api_error(e)
     return JSONResponse({"ok": True, "project": project_to_dict(project)})
@@ -2887,7 +2895,7 @@ async def api_ds_add(request: Request, project_id: str) -> JSONResponse:
             _serve(request),
             project_id,
             url=body.get("url") or "",
-            kind=body.get("kind") or "",
+            kind=body.get("kind") or None,
             purpose=body.get("purpose") or "",
         )
     except ProjectError as e:

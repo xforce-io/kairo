@@ -12,6 +12,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 PARTITIONS = ("general", "projects", "workspaces", "timeline")
 CONNECTION_TENCENT = "tencent-docs"
+CONNECTION_WECOM = "wecom"
+CONNECTION_NOTION = "notion"
+
+# id, label, token_env, live
+READER_CATALOG: tuple[tuple[str, str, str, bool], ...] = (
+    (CONNECTION_TENCENT, "腾讯文档", "TENCENT_DOCS_TOKEN", True),
+    (CONNECTION_WECOM, "企微文档", "WECOM_TOKEN", False),
+    (CONNECTION_NOTION, "Notion", "NOTION_TOKEN", False),
+)
 
 
 class SettingsError(ValueError):
@@ -34,7 +43,9 @@ class SettingsDoc(BaseModel):
     workspaces: dict[str, Any] = Field(default_factory=dict)
     timeline: dict[str, Any] = Field(default_factory=dict)
     connections: dict[str, Connection] = Field(
-        default_factory=lambda: {CONNECTION_TENCENT: Connection()}
+        default_factory=lambda: {
+            cid: Connection(token_env=env) for cid, _label, env, _live in READER_CATALOG
+        }
     )
 
 
@@ -68,8 +79,9 @@ def load_settings() -> SettingsDoc:
     parsed = {}
     for key, val in connections.items():
         parsed[key] = Connection.model_validate(val if isinstance(val, dict) else {})
-    if CONNECTION_TENCENT not in parsed:
-        parsed[CONNECTION_TENCENT] = Connection()
+    for cid, _label, env, _live in READER_CATALOG:
+        if cid not in parsed:
+            parsed[cid] = Connection(token_env=env)
     return SettingsDoc(
         general=dict(raw.get("general") or {"locale": "zh"}),
         projects=dict(raw.get("projects") or {}),
@@ -93,16 +105,29 @@ def save_settings(doc: SettingsDoc) -> None:
 def as_public_dict(doc: SettingsDoc | None = None) -> dict[str, Any]:
     """对外展示：连接健康不含 token 值。"""
     doc = doc or load_settings()
+    catalog = {cid: (label, live) for cid, label, _env, live in READER_CATALOG}
     connections = {}
-    for name, conn in doc.connections.items():
+    ordered = [cid for cid, *_ in READER_CATALOG] + [
+        name for name in doc.connections if name not in catalog
+    ]
+    for name in ordered:
+        conn = doc.connections.get(name)
+        if conn is None:
+            continue
         token_present = bool(os.environ.get(conn.token_env or ""))
-        if not conn.authorized:
+        live = catalog.get(name, (name, False))[1]
+        if not live:
+            health = "unavailable"
+        elif not conn.authorized:
             health = "unauthorized"
         elif token_present:
             health = "authorized"
         else:
             health = "missing_token"
         connections[name] = {
+            "id": name,
+            "label": catalog.get(name, (name, False))[0],
+            "live": live,
             "authorized": conn.authorized,
             "token_env": conn.token_env,
             "cmd_set": bool(conn.cmd),

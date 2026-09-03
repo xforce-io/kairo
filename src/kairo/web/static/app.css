@@ -498,6 +498,38 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .btn-ghost { background: transparent; color: var(--ink-soft); border-color: var(--line-2); }
 .btn-ghost:hover { background: #ece5d6; }
 .panel-hint { color: var(--muted); font-size: 13px; padding: 2px 4px; }
+.btn-inline { width: auto; margin: 0; padding: 8px 14px; }
+.obj-page { max-width: 860px; margin: 0 auto; padding: 28px 28px 64px; }
+.obj-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 28px; }
+.obj-kicker { margin: 0 0 6px; font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.obj-title { margin: 0; font-family: var(--serif); font-size: 32px; font-weight: 600; }
+.obj-rename { display: flex; gap: 8px; align-items: center; }
+.obj-rename input { width: 12rem; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); }
+.obj-block { margin: 0 0 32px; padding-top: 18px; border-top: 1px solid var(--line); }
+.obj-label { margin: 0 0 12px; font-size: 13px; font-weight: 600; letter-spacing: .04em; color: var(--ink-soft); }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; margin: 0 0 14px; padding: 0; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px 4px 12px; border: 1px solid var(--line-2); border-radius: 999px; background: var(--card); font-size: 13px; }
+.chip a { text-decoration: none; color: var(--ink); }
+.chip-x { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 0 4px; }
+.chip-x:hover { color: var(--clay); }
+.chooser { display: flex; flex-direction: column; gap: 10px; }
+.chooser-filter { padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--paper-2); }
+.chooser-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 10px; padding: 6px; background: var(--card); }
+.chooser-item { display: flex; align-items: baseline; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.chooser-item:hover { background: var(--pine-soft); }
+.chooser-name { font-weight: 600; }
+.chooser-id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.obj-list { list-style: none; margin: 0 0 14px; padding: 0; }
+.obj-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.obj-actions, .obj-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.obj-add input, .obj-add select { flex: 1; min-width: 10rem; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; }
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
+.conn-card { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+.conn-name { font-weight: 600; margin-bottom: 6px; }
+@media (max-width: 720px) {
+  .obj-head { flex-direction: column; }
+  .obj-title { font-size: 26px; }
+}
 
 /* step 日志面板 #157 三层:人话进度 / 运行健康 / 折叠原始日志 */
 #step-area { margin-top: 4px; }

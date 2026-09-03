@@ -1,43 +1,64 @@
 {% extends "base.html" %}
-{% block subtitle %}Settings{% endblock %}
+{% block subtitle %}{{ t('nav.settings') }}{% endblock %}
 {% block body %}
-{% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
-{% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
-<section class="gl-section" id="general">
-  <div class="meta-label">{{ t('set.general') }}</div>
-  <form class="dlg-form" method="post" action="/settings">
-    <input type="hidden" name="path" value="general.locale">
-    <label class="dlg-label">{{ t('set.locale') }}</label>
-    <input name="value" value="{{ settings.general.locale or '' }}">
-    <button class="btn btn-step">{{ t('set.save') }}</button>
-  </form>
-</section>
-<section class="gl-section" id="projects">
-  <div class="meta-label">{{ t('set.projects') }}</div>
-  <p class="panel-hint">{{ settings.projects }}</p>
-</section>
-<section class="gl-section" id="workspaces">
-  <div class="meta-label">{{ t('set.workspaces') }}</div>
-  <p class="panel-hint">{{ settings.workspaces }}</p>
-</section>
-<section class="gl-section" id="timeline">
-  <div class="meta-label">{{ t('set.timeline') }}</div>
-  <p class="panel-hint">{{ settings.timeline }}</p>
-</section>
-<section class="gl-section">
-  <div class="meta-label">{{ t('set.connections') }}</div>
-  {% for name, conn in settings.connections.items() %}
-  <p>{{ name }} · {{ t('set.health') }}: {{ conn.health }} · authorized={{ conn.authorized }} · env={{ conn.token_env }}</p>
-  <form class="dlg-form" method="post" action="/settings" style="display:inline">
-    <input type="hidden" name="path" value="connections.{{ name }}.authorized">
-    <input type="hidden" name="value" value="true">
-    <button class="btn btn-step">{{ t('set.authorize') }}</button>
-  </form>
-  <form class="dlg-form" method="post" action="/settings" style="display:inline">
-    <input type="hidden" name="path" value="connections.{{ name }}.authorized">
-    <input type="hidden" name="value" value="false">
-    <button class="btn btn-ghost">{{ t('set.revoke') }}</button>
-  </form>
-  {% endfor %}
-</section>
+<div class="obj-page">
+  <header class="obj-head">
+    <div>
+      <p class="obj-kicker">{{ t('nav.settings') }}</p>
+      <h1 class="obj-title">{{ t('set.conn_title') }}</h1>
+    </div>
+  </header>
+  {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
+  {% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
+
+  <section class="obj-block" id="connections">
+    <h2 class="obj-label">{{ t('set.connections') }}</h2>
+    <ul class="conn-grid">
+      {% for name, conn in settings.connections.items() %}
+      <li class="conn-card">
+        <div class="conn-name">{{ conn.label or name }}</div>
+        <p class="chooser-id">{{ t('set.health') }} · {{ conn.health }}</p>
+        {% if conn.live %}
+        <div class="obj-actions">
+          <form method="post" action="/settings">
+            <input type="hidden" name="path" value="connections.{{ name }}.authorized">
+            <input type="hidden" name="value" value="true">
+            <button class="btn btn-step btn-inline">{{ t('set.authorize') }}</button>
+          </form>
+          <form method="post" action="/settings">
+            <input type="hidden" name="path" value="connections.{{ name }}.authorized">
+            <input type="hidden" name="value" value="false">
+            <button class="btn btn-ghost btn-inline">{{ t('set.revoke') }}</button>
+          </form>
+        </div>
+        {% else %}
+        <p class="panel-hint">{{ t('set.unavailable') }}</p>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+
+  <section class="obj-block" id="general">
+    <h2 class="obj-label">{{ t('set.general') }}</h2>
+    <form class="obj-add" method="post" action="/settings">
+      <input type="hidden" name="path" value="general.locale">
+      <label class="dlg-label">{{ t('set.locale') }}</label>
+      <input name="value" value="{{ settings.general.locale or '' }}">
+      <button class="btn btn-step btn-inline">{{ t('set.save') }}</button>
+    </form>
+  </section>
+  <section class="obj-block" id="projects">
+    <h2 class="obj-label">{{ t('set.projects') }}</h2>
+    <p class="panel-hint">{{ t('set.partition_empty') }}</p>
+  </section>
+  <section class="obj-block" id="workspaces">
+    <h2 class="obj-label">{{ t('set.workspaces') }}</h2>
+    <p class="panel-hint">{{ t('set.partition_empty') }}</p>
+  </section>
+  <section class="obj-block" id="timeline">
+    <h2 class="obj-label">{{ t('set.timeline') }}</h2>
+    <p class="panel-hint">{{ t('set.partition_empty') }}</p>
+  </section>
+</div>
 {% endblock %}

@@ -43,8 +43,8 @@
 | Project | serve root 上的业务聚合对象，多对多关联 workspace，不拥有其内容。 | 课题、工作区组 |
 | Settings | 本机全局控制台，存放规则、默认值与连接健康，不存放单一 Project 的业务内容。 | 项目设置、系统偏好 |
 | 连接 | Settings 中一条外部授权记录；凭据只在本机，Project 只引用其 id。 | 账号、token 对象 |
-| Data Source | Project 内对外部资料的配置：连接引用、链接、类型、业务用途与 Reader。 | 数据连接、表格源 |
-| Reader | 按类型读取 Data Source 的可替换能力；本期为腾讯文档表格或智能表格。 | 爬虫、导入器 |
+| Data Source | Project 内对外部资料的配置：连接引用、链接、用途与 Reader；平台由 URL 推断。 | 数据连接、表格源 |
+| Reader | 按平台读取 Data Source 的可替换能力（腾讯文档、企微、Notion）；不是 spreadsheet 类别。 | 爬虫、导入器、文件类型 |
 | Task | Project 内可编辑的工作定义，一次性或按规则触发。 | 作业、流水线 |
 | Run | 一次 Task 触发的不可变记录，冻结当时 Task 版本与输入。 | 执行、job |
 | Artifact | 成功 Run 产生的可阅读正文，追溯到该 Run、当时 Task 版本与输入 Data Source。 | 报告、产物文档 |
