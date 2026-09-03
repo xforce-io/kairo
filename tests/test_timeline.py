@@ -181,7 +181,7 @@ def test_scan_skips_corpus_and_broken(tmp_path):
     items = scan_timeline(root)
     ids = {it.id for it in items}
     assert "2026-08-24-meet" in ids
-    assert "base" not in ids
+    assert "base" in ids
     assert "broken" not in ids
 
 
@@ -200,7 +200,7 @@ def test_custom_fold_class_eligibility(tmp_path):
     # workspace is tmp_path itself if we scan parent... scan children of parent
     # tmp_path is the ws root, scan parent to find it
     found = {it.id for it in scan_timeline(tmp_path.parent) if it.workspace == tmp_path.name}
-    assert "n1" in found and "s1" not in found
+    assert "n1" in found and "s1" in found
 
 
 def test_resolve_timeline_query_mutex():

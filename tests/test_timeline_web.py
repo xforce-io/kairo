@@ -69,6 +69,22 @@ def test_timeline_recent_lists_by_added(tmp_path):
     assert "notes-candidate" in r.text
 
 
+def test_timeline_tag_form_keeps_recent_and_unknown_queries_valid(tmp_path):
+    root, _, _ = _two_ws(tmp_path)
+    client = _client(root)
+
+    recent = client.get("/timeline", params={"mode": "recent"})
+    assert recent.status_code == 200
+    assert 'name="mode" value="recent"' in recent.text
+    assert 'name="day"' not in recent.text
+
+    unknown = client.get("/timeline", params={"unknown": "1", "month": "2026-08"})
+    assert unknown.status_code == 200
+    assert 'name="unknown" value="1"' in unknown.text
+    assert 'name="month" value="2026-08"' in unknown.text
+    assert 'name="day"' not in unknown.text
+
+
 def test_fold_false_cannot_post_occurred(tmp_path):
     root, wa, _ = _two_ws(tmp_path)
     c = _client(root)
@@ -250,7 +266,7 @@ def test_timeline_review_failure_stays_in_console_shell(tmp_path, monkeypatch):
     )
     assert html.status_code == 400
     assert "<!doctype html>" in html.text and "kairo" in html.text
-    assert "操作未完成" in html.text and "返回工作区" in html.text
+    assert "操作未完成" in html.text and "返回主题" in html.text
     assert not html.text.lstrip().startswith("{")
 
     machine = client.post(

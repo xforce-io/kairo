@@ -2,7 +2,12 @@
 
 | 规范名 | 一句话定义 | 禁止别称 |
 |---|---|---|
-| workspace | 一个 topic 的自包含目录，内含 constitution、参考与产物。 | 课题仓、空间 |
+| Topic | 知识加工对象：研究问题、constitution、结论与 agent 上下文；资料成员由包含规则计算，不独占文件。 | Workspace（用户词）、课题、保存的筛选器 |
+| workspace | Topic 的磁盘目录实现名，内含 constitution、home 参考与产物。仅代码与兼容字段使用。 | 课题仓、空间 |
+| Ref | 一份资料的全局身份：稳定 id、来源、发生时间与至多一份 digest。 | 资料副本 |
+| Tag | 打在 Ref 上的分类标签，可多选，不拥有资料。 | 文件夹、Inbox |
+| Timeline | serve root 上唯一的全局资料时间流，按发生日浏览全部可访问 Ref。 | Inbox、排期 |
+| 包含规则 | Topic 声明的 Tag 列表；Ref 命中其中任一即成为成员。 | 智能合集、AND 规则 |
 | constitution | workspace 里声明期望状态的 `constitution.yaml`，step 朝它调和。 | 宪法文件 |
 | 真名册 | 按层登记的领域规范名、说明与别名表，是后续文本产物的权威输入。 | — |
 | 生效真名册 | 同一 workspace 上 root 与 workspace 两层按覆盖规则合并后的最终条目集。 | 合并表 |
@@ -40,7 +45,7 @@
 | 最近结果 | 源环境为某个 remote 保留的最近一次备份尝试记录，含尝试时间、成功时间、backup_id 与成败。 | 同步日志 |
 | 重叠跳过 | 同一 remote 上一轮仍在运行时，本轮不启动第二次备份并留下可判定记录。 | 取消 |
 | 数据根 | 容器内 public-read 进程打开的 serve root，必须经 current 跟随到该 generation 的 `data/`。 | 挂载点、备份根 |
-| Project | serve root 上的业务聚合对象，多对多关联 workspace，不拥有其内容。 | 课题、工作区组 |
+| Project | serve root 上的业务聚合对象，多对多关联 Topic，不拥有其内容。 | 课题、工作区组 |
 | Settings | 本机全局控制台，存放规则、默认值与连接健康，不存放单一 Project 的业务内容。 | 项目设置、系统偏好 |
 | 连接 | Settings 中一条外部授权记录；凭据只在本机，Project 只引用其 id。 | 账号、token 对象 |
 | Data Source | Project 内对外部资料的配置：连接引用、链接、用途与 Reader；平台由 URL 推断。 | 数据连接、表格源 |

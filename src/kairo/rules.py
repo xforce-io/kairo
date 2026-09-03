@@ -236,7 +236,9 @@ class TransformRule:
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
-        for ref_id in self.ws.list_reference_ids():
+        from kairo.refs import run_ref_ids
+
+        for ref_id in run_ref_ids(self.ws):
             man = self.ws.read_manifest(ref_id)
             sc = self.ws.constitution.source_classes.get(man.source_class)
             if sc is not None and not sc.fold:
@@ -393,7 +395,9 @@ class NormalizeRule:
         if not self.enabled:  # 默认关:不产 prose(可选档案)
             return []
         items: list[WorkItem] = []
-        for ref_id in self.ws.list_reference_ids():
+        from kairo.refs import run_ref_ids
+
+        for ref_id in run_ref_ids(self.ws):
             man = self.ws.read_manifest(ref_id)
             # 源分层:corpus(fold=False)是只读参考层,不规范化(与不 digest 一致)。
             sc = self.ws.constitution.source_classes.get(man.source_class)
@@ -549,7 +553,9 @@ class DigestRule:
         if not stage_enabled(self.ws, "digest"):
             return []
         items: list[WorkItem] = []
-        for ref_id in self.ws.list_reference_ids():
+        from kairo.refs import run_ref_ids
+
+        for ref_id in run_ref_ids(self.ws):
             man = self.ws.read_manifest(ref_id)
             # 源分层(#13 v2):fold=False 的类(corpus)是只读参考层,不 digest。
             sc = self.ws.constitution.source_classes.get(man.source_class)
@@ -671,7 +677,9 @@ class ReviewFoldRule:
         if not is_journal_workspace(self.ws):
             return []
         items: list[WorkItem] = []
-        for ref_id in self.ws.list_reference_ids():
+        from kairo.refs import run_ref_ids
+
+        for ref_id in run_ref_ids(self.ws):
             man = self.ws.read_manifest(ref_id)
             src = next((f for f in man.forms if f.role == "source_text"), None)
             if src is None:
@@ -794,7 +802,9 @@ class ComposeRule:
 
     def _all_digests(self) -> dict[str, str]:
         out: dict[str, str] = {}
-        for ref_id in self.ws.list_reference_ids():
+        from kairo.refs import run_ref_ids
+
+        for ref_id in run_ref_ids(self.ws):
             # 源分层(#13 v2):只折叠 fold=True 的源;corpus(参考层)的 digest 不计入。
             if not self._is_fold_class(self.ws.read_manifest(ref_id).source_class):
                 continue

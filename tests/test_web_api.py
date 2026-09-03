@@ -139,7 +139,7 @@ def test_workspace_view_splits_stream_and_corpus(tmp_path, monkeypatch):
     _add_corpus_dir(tmp_path, ws)
     r = TestClient(create_app(tmp_path)).get("/w/ws")
     assert r.status_code == 200
-    assert "Workspaces" in r.text and "Timeline" in r.text
+    assert "Topics" in r.text and "Timeline" in r.text
     assert ">References<" in r.text and ">Corpus<" in r.text
     assert "nav-group-corpus" in r.text
     ref_seg, corpus_seg = r.text.split(">Corpus<", 1)

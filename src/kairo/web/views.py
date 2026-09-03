@@ -47,6 +47,7 @@ from kairo.timeline import (
     cell_href,
     effective_added_at,
     effective_occurred,
+    filter_by_tags,
     filter_range,
     format_range_label,
     is_fold_class,
@@ -487,6 +488,7 @@ def timeline_view(
     unknown: str | None = None,
     start: str | None = Query(None, alias="from"),
     end: str | None = Query(None, alias="to"),
+    tag: list[str] | None = Query(None),
 ) -> HTMLResponse:
     t = _t(request)
     try:
@@ -501,6 +503,11 @@ def timeline_view(
     except TimelineQueryError:
         raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
     items = scan_timeline(request.app.state.root)
+    tag_filters = []
+    for raw in tag or []:
+        tag_filters.extend(part for part in str(raw).split() if part)
+    if tag_filters:
+        items = filter_by_tags(items, tag_filters)
     unknown_items = [it for it in items if it.occurred_at is None]
     counts: dict[str, int] = {}
     for it in items:
@@ -559,10 +566,12 @@ def timeline_view(
                 order.append(key)
             buckets[key].append(it)
         range_groups = [{"key": k, "entries": buckets[k]} for k in order]
+    from kairo.refs import timeline_digest_path
+
     digest_n = sum(
         1
         for it in day_items
-        if (Path(request.app.state.root) / it.workspace / "references" / it.id / "digest.md").is_file()
+        if timeline_digest_path(Path(request.app.state.root), it.workspace, it.id).is_file()
     )
     span = range_day_count(r0, r1) if range_on else 1
     too_long = span > MAX_RANGE_DAYS
@@ -613,6 +622,7 @@ def timeline_view(
             "no_digest_n": len(day_items) - digest_n,
             "too_long": too_long,
             "max_range_days": MAX_RANGE_DAYS,
+            "tag_filters": tag_filters,
         },
     )
 
@@ -711,12 +721,40 @@ def delete_workspace_view(
     return HTMLResponse("", headers={"HX-Redirect": "/"})
 
 
-def _split_refs(ws: Workspace):
-    """参考分两层:stream(观测,进『参考』组)/ corpus(基线,单独置底)。"""
+def _split_refs(ws: Workspace, serve: Path | None = None):
+    """参考分两层:stream(观测,进『参考』组)/ corpus(基线,单独置底)。成员走包含规则。"""
     streams, corpus = [], []
+    if serve is not None:
+        from kairo.refs import RefError, topic_members
+
+        try:
+            from kairo.refs import ref_nav
+
+            for rec in topic_members(serve, ws.root.name):
+                nav = ref_nav(rec.home, rec.id)
+                item = {
+                    "id": rec.id,
+                    "title": rec.title,
+                    "home": rec.home,
+                    "href": nav["href"],
+                    "hx": nav["hx"],
+                }
+                (corpus if rec.source_class == "corpus" else streams).append(item)
+            return streams, corpus
+        except RefError:
+            pass
+    from kairo.refs import ref_nav
+
     for ref_id in ws.list_reference_ids():
         man = ws.read_manifest(ref_id)
-        item = {"id": ref_id, "title": man.title}
+        nav = ref_nav(ws.root.name, ref_id)
+        item = {
+            "id": ref_id,
+            "title": man.title,
+            "home": ws.root.name,
+            "href": nav["href"],
+            "hx": nav["hx"],
+        }
         (corpus if man.source_class == "corpus" else streams).append(item)
     return streams, corpus
 
@@ -753,6 +791,43 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
     }
 
 
+@router.get("/topics/{slug}", response_class=RedirectResponse)
+def topic_alias(slug: str) -> RedirectResponse:
+    return RedirectResponse("/w/" + quote(slug), status_code=303)
+
+
+@router.get("/refs/{ref_id}", response_class=HTMLResponse)
+def global_ref_view(request: Request, ref_id: str) -> HTMLResponse:
+    from kairo.refs import RefError, resolve_open
+
+    if _is_public_read(request):
+        _deny_unpublished()
+    try:
+        ws, rid = resolve_open(_serve(request), "", ref_id)
+    except RefError:
+        raise HTTPException(status_code=404, detail="reference not found")
+    man = ws.read_manifest(rid)
+    title = escape(man.title or rid)
+    digest = ws.references_dir() / rid / "digest.md"
+    chunks = [
+        "<!doctype html><html><body>",
+        f"<h1>{title}</h1>",
+        f"<p class='ref-id'>{escape(rid)}</p>",
+    ]
+    if digest.is_file():
+        chunks.append(
+            "<section class='digest'><h2>digest</h2><pre>"
+            + escape(digest.read_text(encoding="utf-8"))
+            + "</pre></section>"
+        )
+    for form in man.forms:
+        chunks.append(
+            f"<p class='form'>{escape(form.role)} {escape(form.location)}</p>"
+        )
+    chunks.append("</body></html>")
+    return HTMLResponse("".join(chunks))
+
+
 @router.get("/w/{slug}", response_class=HTMLResponse)
 def workspace_view(
     request: Request,
@@ -761,7 +836,7 @@ def workspace_view(
     task_id: str | None = None,
 ) -> HTMLResponse:
     ws = _open(request, slug)
-    streams, corpus = _split_refs(ws)
+    streams, corpus = _split_refs(ws, Path(request.app.state.root))
     targets = _target_states(ws)
     if _is_public_read(request):
         bounds = _public_bounds(request)
@@ -1108,7 +1183,7 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
 
 def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
     # 仅 stream:该片段唯一的注入点是参考组的上传表单;corpus 自成一组,不混入
-    streams, _ = _split_refs(ws)
+    streams, _ = _split_refs(ws, Path(request.app.state.root))
     return _render(request, "_refs_list.html", {"slug": slug, "refs": streams})
 
 
@@ -2458,7 +2533,7 @@ def delete_ref(
         step = _render(
             request, "_step.html", _step_template_vars(request, ws, slug, task)
         ).body.decode()
-        streams, _corpus = _split_refs(ws)
+        streams, _corpus = _split_refs(ws, Path(request.app.state.root))
         refs = _render(
             request, "_refs_list.html", {"slug": slug, "refs": streams}
         ).body.decode()
@@ -2601,16 +2676,19 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
         project = get_project(_serve(request), project_id)
     except ProjectError:
         raise HTTPException(status_code=404)
+    from kairo.refs import project_member_refs
     from kairo.web.discovery import scan_workspaces
 
+    serve = _serve(request)
     return _render(
         request,
         "project.html",
         {
             "nav_active": "projects",
             "project": project,
-            "available_workspaces": scan_workspaces(_serve(request)),
-            "runs": list_runs(_serve(request), project_id),
+            "available_workspaces": scan_workspaces(serve),
+            "member_refs": project_member_refs(serve, project.workspace_slugs),
+            "runs": list_runs(serve, project_id),
             "error": error,
             "notice": notice,
         },
@@ -2782,6 +2860,117 @@ def settings_set_form(request: Request, path: str = Form(...), value: str = Form
     return RedirectResponse("/settings", status_code=303)
 
 
+@router.get("/api/refs")
+def api_refs_list(request: Request) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import list_all_refs
+
+    refs = [
+        {
+            "home": r.home,
+            "id": r.id,
+            "key": r.key,
+            "title": r.title,
+            "tags": r.tags,
+            "source_class": r.source_class,
+            "digest": str(r.digest_path) if r.digest_path else None,
+        }
+        for r in list_all_refs(_serve(request))
+    ]
+    return JSONResponse({"ok": True, "refs": refs})
+
+
+@router.post("/api/refs")
+async def api_refs_create(request: Request) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import add_global_ref
+    from kairo.workspace import AddError
+
+    body = await request.json()
+    path = body.get("path") or ""
+    try:
+        rid = add_global_ref(_serve(request), [path], occurred_at=body.get("occurred_at"))
+    except AddError as e:
+        return _api_error(e)
+    return JSONResponse({"ok": True, "id": rid, "home": ""})
+
+
+@router.post("/api/refs/{ref_id}/tags")
+async def api_ref_tag_add(request: Request, ref_id: str) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import RefError, add_tag
+
+    body = await request.json()
+    try:
+        tags = add_tag(
+            _serve(request),
+            home=body.get("home") or "",
+            ref_id=ref_id,
+            tag=body.get("tag") or "",
+        )
+    except RefError as e:
+        return _api_error(e)
+    return JSONResponse({"ok": True, "tags": tags})
+
+
+@router.delete("/api/refs/{ref_id}/tags/{tag}")
+def api_ref_tag_rm(request: Request, ref_id: str, tag: str, home: str = "") -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import RefError, remove_tag
+
+    try:
+        tags = remove_tag(_serve(request), home=home, ref_id=ref_id, tag=tag)
+    except RefError as e:
+        return _api_error(e)
+    return JSONResponse({"ok": True, "tags": tags})
+
+
+@router.get("/api/topics/{slug}/include")
+def api_topic_include_get(request: Request, slug: str) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import RefError, include_tags_of, open_topic, topic_members
+
+    try:
+        ws = open_topic(_serve(request), slug)
+        members = topic_members(_serve(request), slug)
+    except RefError as e:
+        return _api_error(e, 404)
+    return JSONResponse(
+        {
+            "ok": True,
+            "include_tags": include_tags_of(ws),
+            "members": [{"home": m.home, "id": m.id, "title": m.title} for m in members],
+        }
+    )
+
+
+@router.put("/api/topics/{slug}/include")
+async def api_topic_include_put(request: Request, slug: str) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import RefError, set_include_tags, topic_members
+
+    body = await request.json()
+    if "include_tags" not in body:
+        return _api_error(RefError("include_tags 必填"))
+    tags = body.get("include_tags")
+    try:
+        saved = set_include_tags(
+            _serve(request),
+            slug,
+            None if tags is None else list(tags),
+        )
+        members = topic_members(_serve(request), slug)
+    except RefError as e:
+        return _api_error(e)
+    return JSONResponse(
+        {
+            "ok": True,
+            "include_tags": saved,
+            "members": [{"home": m.home, "id": m.id, "title": m.title} for m in members],
+        }
+    )
+
+
 @router.get("/api/projects")
 def api_projects_list(request: Request) -> JSONResponse:
     _console_only(request)
@@ -2841,6 +3030,8 @@ async def api_project_link(request: Request, project_id: str) -> JSONResponse:
 
     body = await request.json()
     slugs = body.get("workspaces")
+    if slugs is None:
+        slugs = body.get("topics")
     try:
         if isinstance(slugs, list):
             project = set_workspaces(_serve(request), project_id, [str(s) for s in slugs])
@@ -2861,6 +3052,11 @@ def api_project_unlink(request: Request, project_id: str, slug: str) -> JSONResp
     except ProjectError as e:
         return _api_error(e)
     return JSONResponse({"ok": True, "project": project_to_dict(project)})
+
+
+@router.post("/api/projects/{project_id}/topics")
+async def api_project_link_topics(request: Request, project_id: str) -> JSONResponse:
+    return await api_project_link(request, project_id)
 
 
 @router.get("/api/settings")

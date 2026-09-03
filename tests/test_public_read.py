@@ -750,14 +750,14 @@ _SHELF_COPY = {
     "en": {
         "title": "Nothing to read here",
         "line": "This address isn't readable.",
-        "back": "Back to workspaces",
-        "nav": "Workspaces",
+        "back": "Back to topics",
+        "nav": "Topics",
     },
     "zh": {
         "title": "没有这份阅读",
         "line": "这个地址现在读不到。",
-        "back": "回工作区",
-        "nav": "工作区",
+        "back": "回主题",
+        "nav": "主题",
     },
 }
 

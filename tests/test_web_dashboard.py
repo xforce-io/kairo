@@ -75,7 +75,7 @@ def test_dashboard_search_and_filters(tmp_path, monkeypatch):
 
     r = c.get("/", params={"q": "zzzz-nope"})
     assert _cards(r.text) == []
-    assert "No workspaces match" in r.text
+    assert "No topics match" in r.text
     assert "Clear filters" in r.text
     assert 'name="q"' in r.text
     assert "No workspace here" not in r.text

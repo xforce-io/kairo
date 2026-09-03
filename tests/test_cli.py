@@ -20,7 +20,7 @@ def test_cli_help_shows_quickstart():
 
 @pytest.mark.parametrize(
     "cmd",
-    [["status"], ["step"], ["add", "x.txt"], ["index"], ["history"], ["diff"], ["prose", "x"]],
+    [["status"], ["step"], ["index"], ["history"], ["diff"], ["prose", "x"]],
 )
 def test_cli_friendly_error_outside_workspace(tmp_path, monkeypatch, cmd):
     """#22 ②:非工作区给友好错误,非零退出,不吐 traceback。"""
