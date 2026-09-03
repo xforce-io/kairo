@@ -30,7 +30,9 @@ def validate_tencent_url(url: str, kind: str) -> None:
         raise ReadError(INVALID_LINK, "链接为空")
     parsed = urlparse(text)
     host = (parsed.hostname or "").lower()
-    if parsed.scheme not in ("http", "https") or not host.endswith("docs.qq.com"):
+    if parsed.scheme not in ("http", "https") or not (
+        host == "docs.qq.com" or host.endswith(".docs.qq.com")
+    ):
         raise ReadError(INVALID_LINK, "不是腾讯文档链接")
     path = parsed.path.lower()
     if kind == "spreadsheet" and "/sheet" not in path:
@@ -66,7 +68,7 @@ def read_tencent_docs(
         raise ReadError(READ_FAILED, "未配置腾讯文档读取命令")
     try:
         argv = [part.format(url=url) for part in shlex.split(cmd)]
-    except ValueError as exc:
+    except (ValueError, KeyError, IndexError) as exc:
         raise ReadError(READ_FAILED, f"命令无法解析:{exc}") from exc
     try:
         proc = runner(argv, capture_output=True, text=True, check=False)

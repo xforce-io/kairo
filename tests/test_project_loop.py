@@ -312,3 +312,24 @@ def test_reader_classifies_generic_cmd_errors_as_read_failed(tmp_path, monkeypat
             raise AssertionError("expected ReadError")
         except ReadError as exc:
             assert exc.code == READ_FAILED, (src, exc.code, str(exc))
+
+
+def test_reader_rejects_lookalike_hosts_and_bad_cmd_placeholders(tmp_path):
+    from kairo.readers import INVALID_LINK, READ_FAILED, ReadError, read_tencent_docs
+    from kairo.settings import Connection
+
+    conn = Connection(authorized=True, cmd="true {url}")
+    try:
+        read_tencent_docs("https://notdocs.qq.com/sheet/Denergy", "spreadsheet", conn)
+        raise AssertionError("expected invalid_link")
+    except ReadError as exc:
+        assert exc.code == INVALID_LINK
+    try:
+        read_tencent_docs(
+            "https://docs.qq.com/sheet/Denergy",
+            "spreadsheet",
+            Connection(authorized=True, cmd="echo {missing}"),
+        )
+        raise AssertionError("expected read_failed")
+    except ReadError as exc:
+        assert exc.code == READ_FAILED
