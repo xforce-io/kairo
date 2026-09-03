@@ -357,6 +357,20 @@ def test_reader_classifies_generic_cmd_errors_as_read_failed(tmp_path, monkeypat
             assert exc.code == READ_FAILED
 
 
+def test_cli_multi_link_is_atomic(tmp_path, monkeypatch):
+    from kairo.workspace import Workspace
+
+    serve = tmp_path / "root"
+    serve.mkdir()
+    Workspace.init(serve / "alpha-ws", topic="阿尔法")
+    monkeypatch.chdir(serve)
+    created = _load(_cli(["project", "create", "P"], serve, monkeypatch))
+    failed = _cli(["project", "link", created["id"], "alpha-ws", "missing-ws"], serve, monkeypatch)
+    assert failed.exit_code != 0
+    shown = _load(_cli(["project", "show", created["id"]], serve, monkeypatch))
+    assert shown["workspace_slugs"] == []
+
+
 def test_infer_source_classifies_platforms():
     from kairo.readers import INVALID_LINK, UNSUPPORTED, ReadError, infer_source
 

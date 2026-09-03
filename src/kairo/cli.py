@@ -1127,15 +1127,11 @@ def project_link(
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
-    from kairo.projects import ProjectError, link_workspace, project_to_dict
+    from kairo.projects import ProjectError, link_workspaces, project_to_dict
 
     serve = _cli_root(root)
     try:
-        project = None
-        for slug in slugs:
-            project = link_workspace(serve, project_id, slug)
-        if project is None:
-            raise ProjectError("至少指定一个 workspace")
+        project = link_workspaces(serve, project_id, slugs)
         _dump(as_json, project_to_dict(project))
     except ProjectError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)

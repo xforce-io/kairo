@@ -185,14 +185,26 @@ def edit_project(serve: Path, project_id: str, *, name: str | None = None) -> Pr
 
 
 def link_workspace(serve: Path, project_id: str, slug: str) -> Project:
-    slug = (slug or "").strip()
-    if not slug:
-        raise ProjectError("workspace slug 不能为空")
-    if not workspace_exists(serve, slug):
-        raise ProjectError(f"workspace 不存在:{slug}")
+    return link_workspaces(serve, project_id, [slug])
+
+
+def link_workspaces(serve: Path, project_id: str, slugs: list[str]) -> Project:
+    """校验全部 slug 后再写入，失败不留下部分关联。"""
+    cleaned: list[str] = []
+    for raw in slugs:
+        slug = (raw or "").strip()
+        if not slug:
+            raise ProjectError("workspace slug 不能为空")
+        if not workspace_exists(serve, slug):
+            raise ProjectError(f"workspace 不存在:{slug}")
+        if slug not in cleaned:
+            cleaned.append(slug)
+    if not cleaned:
+        raise ProjectError("至少指定一个 workspace")
     project = get_project(serve, project_id)
-    if slug not in project.workspace_slugs:
-        project.workspace_slugs.append(slug)
+    for slug in cleaned:
+        if slug not in project.workspace_slugs:
+            project.workspace_slugs.append(slug)
     return save_project(serve, project)
 
 
