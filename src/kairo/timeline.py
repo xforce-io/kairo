@@ -80,45 +80,57 @@ class TimelineItem:
     occurred_at: dt.date | None
     occurred_source: str
     added_at: dt.datetime
+    tags: tuple[str, ...] = ()
 
 
 def scan_timeline(root: Path | str) -> list[TimelineItem]:
-    """扫 serve root 下一层；损坏 manifest 跳过；fold=false 排除。"""
-    from kairo.workspace import Workspace, WorkspaceNotFound
+    """扫全部可访问 Ref（Topic home + 全局库）；损坏 manifest 跳过。"""
+    from kairo.refs import list_all_refs, resolve_open
+    from kairo.workspace import WorkspaceNotFound
 
     root = Path(root).resolve()
     items: list[TimelineItem] = []
     if not root.is_dir():
         return items
-    for child in sorted(root.iterdir(), key=lambda p: p.name):
-        if not child.is_dir() or not (child / "constitution.yaml").is_file():
-            continue
+    for rec in list_all_refs(root):
         try:
-            ws = Workspace.open(child)
-        except WorkspaceNotFound:
+            ws, ref_id = resolve_open(root, rec.home, rec.id)
+            man = ws.read_manifest(ref_id)
+        except (WorkspaceNotFound, Exception):
             continue
-        for ref_id in ws.list_reference_ids():
+        occ, src = effective_occurred(ref_id, man.occurred_at)
+        man_path = ws.references_dir() / ref_id / "manifest.yaml"
+        if not man_path.is_file():
+            continue
+        added = effective_added_at(man.added_at, man_path)
+        topic_name = rec.home
+        if rec.home:
             try:
-                man = ws.read_manifest(ref_id)
+                topic_name = ws.constitution.topic
             except Exception:
-                continue
-            if not is_fold_class(ws, man.source_class):
-                continue
-            occ, src = effective_occurred(ref_id, man.occurred_at)
-            man_path = ws.references_dir() / ref_id / "manifest.yaml"
-            added = effective_added_at(man.added_at, man_path)
-            items.append(
-                TimelineItem(
-                    workspace=child.name,
-                    topic=ws.constitution.topic,
-                    id=ref_id,
-                    title=man.title or ref_id,
-                    occurred_at=occ,
-                    occurred_source=src,
-                    added_at=added,
-                )
+                topic_name = rec.home
+        items.append(
+            TimelineItem(
+                workspace=rec.home,
+                topic=topic_name,
+                id=ref_id,
+                title=man.title or ref_id,
+                occurred_at=occ,
+                occurred_source=src,
+                added_at=added,
+                tags=tuple(rec.tags),
             )
+        )
     return items
+
+
+def filter_by_tags(items: list[TimelineItem], tags: list[str]) -> list[TimelineItem]:
+    """多 Tag 筛选为 AND：结果必须带上给出的每一个 Tag。"""
+    wanted = [t for t in tags if t]
+    if not wanted:
+        return items
+    need = set(wanted)
+    return [it for it in items if need.issubset(set(it.tags))]
 
 
 def item_as_json(it: TimelineItem) -> dict:
@@ -130,6 +142,8 @@ def item_as_json(it: TimelineItem) -> dict:
         "occurred_at": it.occurred_at.isoformat() if it.occurred_at else None,
         "occurred_source": it.occurred_source,
         "added_at": it.added_at.isoformat(),
+        "tags": list(it.tags),
+        "home": it.workspace,
     }
 
 

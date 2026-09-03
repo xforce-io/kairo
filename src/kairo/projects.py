@@ -451,5 +451,6 @@ def run_task(serve: Path, project_id: str, task_id: str) -> RunRecord:
 
 def project_to_dict(project: Project) -> dict[str, Any]:
     data = project.model_dump()
+    data["topic_slugs"] = list(data.get("workspace_slugs") or [])
     _assert_no_secrets(data)
     return data

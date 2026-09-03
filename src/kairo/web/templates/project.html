@@ -15,6 +15,21 @@
   {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
   {% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
 
+  {% if member_refs is defined %}
+  <section class="obj-block">
+    <h2 class="obj-label">{{ t('proj.members') }}</h2>
+    {% if member_refs %}
+    <ul class="obj-list">
+      {% for r in member_refs %}
+      <li class="obj-row"><a href="{% if r.home %}/w/{{ r.home | urlencode }}?ref={{ r.id | urlencode }}{% else %}/refs/{{ r.id | urlencode }}{% endif %}">{{ r.title }}</a></li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('proj.members_empty') }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
   <section class="obj-block">
     <h2 class="obj-label">{{ t('proj.workspaces') }}</h2>
     {% if project.workspace_slugs %}

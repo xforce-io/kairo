@@ -250,7 +250,7 @@ def test_timeline_review_failure_stays_in_console_shell(tmp_path, monkeypatch):
     )
     assert html.status_code == 400
     assert "<!doctype html>" in html.text and "kairo" in html.text
-    assert "操作未完成" in html.text and "返回工作区" in html.text
+    assert "操作未完成" in html.text and "返回主题" in html.text
     assert not html.text.lstrip().startswith("{")
 
     machine = client.post(

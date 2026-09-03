@@ -110,6 +110,8 @@ def scan_workspaces(root: Path) -> list[WorkspaceSummary]:
     root = Path(root)
     out: list[WorkspaceSummary] = []
     for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        if d.name.startswith("."):
+            continue
         if not (d / "constitution.yaml").exists():
             continue
         try:

@@ -272,7 +272,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert settings_html.status_code == 200
     assert "General" in settings_html.text
     assert "Projects" in settings_html.text
-    assert "Workspaces" in settings_html.text
+    assert "Topics" in settings_html.text
     assert "Timeline" in settings_html.text
     assert "腾讯文档" in settings_html.text
     assert "企微文档" in settings_html.text

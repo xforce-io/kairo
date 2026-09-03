@@ -66,8 +66,12 @@ app.add_typer(glossary_app, name="glossary")
 app.add_typer(knowledge_app, name="knowledge")
 backup_app = typer.Typer(help="remote 完整备份:push / verify / restore")
 app.add_typer(backup_app, name="backup")
-project_app = typer.Typer(help="Project：创建、关联 Workspace、查看")
+project_app = typer.Typer(help="Project：创建、关联 Topic、查看")
 app.add_typer(project_app, name="project")
+tag_app = typer.Typer(help="Ref Tag：add / rm / list")
+app.add_typer(tag_app, name="tag")
+include_app = typer.Typer(help="Topic 包含规则：set / clear / show")
+app.add_typer(include_app, name="include")
 settings_app = typer.Typer(help="本机 Settings：分区与连接健康")
 app.add_typer(settings_app, name="settings")
 datasource_app = typer.Typer(help="Project 数据源")
@@ -318,23 +322,40 @@ def add(
     occurred_at: str = typer.Option(
         None, "--occurred", help="发生日 YYYY-MM-DD;不改 id"
     ),
+    root: Path = typer.Option(
+        None, "--root", "-r", help="serve root;非 Topic 目录时写入全局库"
+    ),
 ) -> None:
-    """登记 reference。文件=指针/可选 copy;目录 stream=一条多形态;目录 --corpus=基线树指针。
+    """登记 Ref。cwd 为 Topic 则 home 在该 Topic;否则写入全局库。"""
+    from kairo.refs import add_global_ref
+    from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
-    追加到已有参考:`kairo add photo.png --to <ref_id> --copy`(与 Web attach 同路径)。
-    """
-    ws = _open_ws()
+    try:
+        ws = Workspace.open(Path.cwd())
+    except WorkspaceNotFound:
+        ws = None
     try:
         if occurred_at and corpus:
             raise AddError("fold=false 不能设发生时间")
-        rid = ws.add(
-            files,
-            ref_id=ref_id,
-            role=role,
-            source_class="corpus" if corpus else None,
-            copy=copy,
-            occurred_at=occurred_at,
-        )
+        if ws is not None:
+            rid = ws.add(
+                files,
+                ref_id=ref_id,
+                role=role,
+                source_class="corpus" if corpus else None,
+                copy=copy,
+                occurred_at=occurred_at,
+            )
+        else:
+            rid = add_global_ref(
+                _serve_root(root),
+                files,
+                ref_id=ref_id,
+                role=role,
+                source_class="corpus" if corpus else None,
+                copy=copy,
+                occurred_at=occurred_at,
+            )
     except AddError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
@@ -399,8 +420,9 @@ def timeline(
     from_day: str = typer.Option(None, "--from", help="区间起(发生日)"),
     to_day: str = typer.Option(None, "--to", help="区间止(发生日)"),
     as_json: bool = typer.Option(False, "--json", help="JSON 输出"),
+    tags: list[str] = typer.Option(None, "--tag", help="按 Tag 筛选,可重复;多 Tag 为 AND"),
 ) -> None:
-    """跨 workspace 按发生日列出 fold 观测;--recent 按录入时间。"""
+    """跨 Topic 按发生日列出全部可访问 Ref;--recent 按录入时间。"""
     if day and recent:
         typer.secho("--day 与 --recent 互斥", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -430,6 +452,10 @@ def timeline(
         typer.secho(f"目录不存在:{serve}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     items = scan_timeline(serve)
+    from kairo.timeline import filter_by_tags
+
+    if tags:
+        items = filter_by_tags(items, list(tags))
     if start is not None and end is not None:
         items = filter_range(items, start, end)
     if as_json:
@@ -1060,6 +1086,126 @@ def _dump(as_json: bool, payload) -> None:
 
 def _cli_root(root: Path | None) -> Path:
     return _serve_root(root)
+
+
+@tag_app.command("add")
+def tag_add_cmd(
+    ref_id: str = typer.Argument(...),
+    tag: str = typer.Argument(...),
+    home: str = typer.Option("", "--home", help="Topic slug;省略表示全局 Ref"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import RefError, add_tag
+
+    try:
+        tags = add_tag(_cli_root(root), home=home, ref_id=ref_id, tag=tag)
+    except RefError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    if as_json:
+        typer.echo(json.dumps({"ok": True, "tags": tags}, ensure_ascii=False))
+        return
+    typer.echo(f"tagged {ref_id} +{tag}")
+
+
+@tag_app.command("rm")
+def tag_rm_cmd(
+    ref_id: str = typer.Argument(...),
+    tag: str = typer.Argument(...),
+    home: str = typer.Option("", "--home", help="Topic slug;省略表示全局 Ref"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import RefError, remove_tag
+
+    try:
+        tags = remove_tag(_cli_root(root), home=home, ref_id=ref_id, tag=tag)
+    except RefError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    if as_json:
+        typer.echo(json.dumps({"ok": True, "tags": tags}, ensure_ascii=False))
+        return
+    typer.echo(f"untagged {ref_id} -{tag}")
+
+
+@tag_app.command("list")
+def tag_list_cmd(
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import list_tags
+
+    tags = list_tags(_cli_root(root))
+    if as_json:
+        typer.echo(json.dumps({"ok": True, "tags": tags}, ensure_ascii=False))
+        return
+    typer.echo("\n".join(tags) if tags else "(no tags)")
+
+
+@include_app.command("set")
+def include_set_cmd(
+    tags: list[str] = typer.Argument(..., help="包含的 Tag,命中任一即进入"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import RefError, set_include_tags
+
+    ws = _open_ws()
+    serve = ws.root.parent
+    try:
+        saved = set_include_tags(serve, ws.root.name, list(tags))
+    except RefError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    if as_json:
+        typer.echo(json.dumps({"ok": True, "include_tags": saved}, ensure_ascii=False))
+        return
+    typer.echo("include " + " ".join(saved or []))
+
+
+@include_app.command("clear")
+def include_clear_cmd(
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import RefError, set_include_tags
+
+    ws = _open_ws()
+    try:
+        saved = set_include_tags(ws.root.parent, ws.root.name, [])
+    except RefError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    if as_json:
+        typer.echo(json.dumps({"ok": True, "include_tags": saved}, ensure_ascii=False))
+        return
+    typer.echo("include cleared")
+
+
+@include_app.command("show")
+def include_show_cmd(as_json: bool = typer.Option(False, "--json")) -> None:
+    from kairo.refs import include_tags_of, topic_members
+
+    ws = _open_ws()
+    rules = include_tags_of(ws)
+    members = topic_members(ws.root.parent, ws.root.name)
+    payload = {
+        "include_tags": rules,
+        "members": [{"home": m.home, "id": m.id, "title": m.title} for m in members],
+    }
+    if as_json:
+        typer.echo(json.dumps(payload, ensure_ascii=False))
+        return
+    if rules is None:
+        typer.echo("include (compat home)")
+    elif not rules:
+        typer.echo("include (empty)")
+    else:
+        typer.echo("include " + " ".join(rules))
+    for m in members:
+        typer.echo(f"  {m.home or 'global'}  {m.id}")
 
 
 @project_app.command("list")

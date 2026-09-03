@@ -189,6 +189,7 @@ class Constitution(BaseModel):
     targets: list[Target] = Field(default_factory=_default_targets)
     review_input: bool = True  # 材料是否进时段回顾原料
     glossary: list[GlossaryEntry] = Field(default_factory=list)  # 领域真名册(#20)
+    include_tags: list[str] | None = None  # None=兼容 home 成员;[]=无成员;非空=任一 Tag 命中
 
     def live_targets(self) -> list[Target]:
         """活 target:跳过判断层(#153)。journal（含现网「总结」）不 fold。"""
