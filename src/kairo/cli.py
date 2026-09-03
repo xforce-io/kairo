@@ -1287,6 +1287,40 @@ def task_edit_cmd(
     _dump(as_json, task.model_dump())
 
 
+@task_app.command("enable")
+def task_enable_cmd(
+    project_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, edit_task
+
+    try:
+        task = edit_task(_cli_root(root), project_id, task_id, enabled=True)
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, task.model_dump())
+
+
+@task_app.command("disable")
+def task_disable_cmd(
+    project_id: str = typer.Argument(...),
+    task_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.projects import ProjectError, edit_task
+
+    try:
+        task = edit_task(_cli_root(root), project_id, task_id, enabled=False)
+    except ProjectError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, task.model_dump())
+
+
 @task_app.command("run")
 def task_run_cmd(
     project_id: str = typer.Argument(...),

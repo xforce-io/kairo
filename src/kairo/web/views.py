@@ -2639,11 +2639,14 @@ def project_link_form(request: Request, project_id: str, slug: str = Form(...)) 
 
 
 @router.post("/projects/{project_id}/workspaces/{slug}/unlink")
-def project_unlink_form(request: Request, project_id: str, slug: str) -> RedirectResponse:
+def project_unlink_form(request: Request, project_id: str, slug: str) -> HTMLResponse:
     _console_only(request)
-    from kairo.projects import unlink_workspace
+    from kairo.projects import ProjectError, unlink_workspace
 
-    unlink_workspace(_serve(request), project_id, slug)
+    try:
+        unlink_workspace(_serve(request), project_id, slug)
+    except ProjectError as e:
+        return project_page(request, project_id, error=str(e))
     return RedirectResponse(f"/projects/{project_id}", status_code=303)
 
 
@@ -2680,11 +2683,14 @@ def project_ds_read_form(request: Request, project_id: str, ds_id: str) -> HTMLR
 
 
 @router.post("/projects/{project_id}/datasources/{ds_id}/delete")
-def project_ds_rm_form(request: Request, project_id: str, ds_id: str) -> RedirectResponse:
+def project_ds_rm_form(request: Request, project_id: str, ds_id: str) -> HTMLResponse:
     _console_only(request)
-    from kairo.projects import remove_datasource
+    from kairo.projects import ProjectError, remove_datasource
 
-    remove_datasource(_serve(request), project_id, ds_id)
+    try:
+        remove_datasource(_serve(request), project_id, ds_id)
+    except ProjectError as e:
+        return project_page(request, project_id, error=str(e))
     return RedirectResponse(f"/projects/{project_id}", status_code=303)
 
 
@@ -2707,11 +2713,14 @@ def project_task_create_form(
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/run")
-def project_task_run_form(request: Request, project_id: str, task_id: str) -> RedirectResponse:
+def project_task_run_form(request: Request, project_id: str, task_id: str) -> HTMLResponse:
     _console_only(request)
-    from kairo.projects import run_task
+    from kairo.projects import ProjectError, run_task
 
-    record = run_task(_serve(request), project_id, task_id)
+    try:
+        record = run_task(_serve(request), project_id, task_id)
+    except ProjectError as e:
+        return project_page(request, project_id, error=str(e))
     if record.status == "succeeded":
         return RedirectResponse(f"/projects/{project_id}/runs/{record.id}", status_code=303)
     return project_page(request, project_id, error=record.reason or "failed")

@@ -277,3 +277,38 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert "Task version:" in got["artifact"]
     assert "https://docs.qq.com/smartsheet/Senergy" in got["artifact"]
     assert run_api["run"]["id"] in got["artifact"]
+
+    enabled = _load(_cli(["task", "disable", pid, task_api["task"]["id"]], serve, monkeypatch))
+    assert enabled["enabled"] is False
+    enabled = _load(_cli(["task", "enable", pid, task_api["task"]["id"]], serve, monkeypatch))
+    assert enabled["enabled"] is True
+
+    noisy = TestClient(create_app(serve), raise_server_exceptions=False)
+    assert noisy.post(f"/projects/{pid}/datasources/ds-missing/delete").status_code == 200
+    assert "数据源不存在" in noisy.post(f"/projects/{pid}/datasources/ds-missing/delete").text
+    assert noisy.post(f"/projects/{pid}/tasks/tsk-missing/run").status_code == 200
+    assert noisy.post("/projects/prj-missing/workspaces/alpha-ws/unlink").status_code == 404
+    assert noisy.get("/api/settings").status_code == 200
+    pub = TestClient(create_app(serve, mode="public-read"), raise_server_exceptions=False)
+    assert pub.get("/api/settings").status_code == 404
+    assert pub.get(f"/projects/{pid}/runs/{run1['id']}").status_code == 404
+
+
+def test_reader_classifies_generic_cmd_errors_as_read_failed(tmp_path, monkeypatch):
+    from kairo.readers import READ_FAILED, ReadError, read_tencent_docs
+    from kairo.settings import Connection
+
+    monkeypatch.chdir(tmp_path)
+    url = "https://docs.qq.com/sheet/Denergy"
+    cases = (
+        "import sys\nsys.stderr.write('Error: invalid response from upstream')\nsys.exit(1)\n",
+        "import sys\nsys.stderr.write('config file not found')\nsys.exit(1)\n",
+    )
+    for i, src in enumerate(cases):
+        cmd = _stub_cmd(tmp_path / f"generic{i}.py", src)
+        conn = Connection(authorized=True, cmd=cmd)
+        try:
+            read_tencent_docs(url, "spreadsheet", conn)
+            raise AssertionError("expected ReadError")
+        except ReadError as exc:
+            assert exc.code == READ_FAILED, (src, exc.code, str(exc))

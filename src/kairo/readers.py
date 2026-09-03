@@ -12,8 +12,8 @@ PERMISSION = "permission"
 INVALID_LINK = "invalid_link"
 READ_FAILED = "read_failed"
 
-_PERMISSION_MARKERS = ("401", "403", "permission", "unauthorized", "forbidden", "权限")
-_INVALID_MARKERS = ("404", "not found", "invalid", "无效", "unknown url")
+_PERMISSION_MARKERS = ("401", "403", "unauthorized", "forbidden", "permission denied", "权限失效", "未授权")
+_INVALID_MARKERS = ("404", "invalid_link", "无效链接", "unknown url", "不是腾讯文档")
 
 
 class ReadError(Exception):
