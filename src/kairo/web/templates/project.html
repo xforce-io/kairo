@@ -74,7 +74,7 @@
     <input name="name" placeholder="{{ t('proj.name_ph') }}" required>
     <select name="datasource_id">{% for ds in project.datasources %}<option value="{{ ds.id }}">{{ ds.kind }}</option>{% endfor %}</select>
     <select name="schedule"><option value="once">once</option><option value="interval">interval</option></select>
-    <button class="btn btn-step">{{ t('proj.create') }}</button>
+    <button class="btn btn-step">{{ t('proj.create_task') }}</button>
   </form>
   {% endif %}
 </section>
