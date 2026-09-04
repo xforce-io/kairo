@@ -9,6 +9,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from kairo.knowledge_review import KnowledgeReview
+from kairo.refs import add_tag, create_tag, set_include_tags
 from kairo.web.public import PUBLIC_STATE_FILENAME
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -38,8 +39,8 @@ def test_s1_console_lists_unpublished_public_read_does_not(tmp_path):
 
     chome = console.get("/")
     assert chome.status_code == 200
-    assert "/w/ws" in chome.text
-    assert "/w/secret" in chome.text
+    assert "/topics/ws" in chome.text
+    assert "/topics/secret" in chome.text
     assert "secret-private" in chome.text
     cws = console.get("/w/secret")
     assert cws.status_code == 200
@@ -56,8 +57,8 @@ def test_s1_console_lists_unpublished_public_read_does_not(tmp_path):
     assert "/static/app.css" in home.text
     assert "kairo" in home.text.lower()
     assert 'href="/knowledge"' not in home.text
-    assert "/w/ws" in home.text
-    assert "/w/secret" not in home.text
+    assert "/topics/ws" in home.text
+    assert "/topics/secret" not in home.text
     assert "secret-private" not in home.text
     assert 'hx-post="/workspaces"' not in home.text
     assert "card-trash" not in home.text
@@ -67,6 +68,15 @@ def test_s1_console_lists_unpublished_public_read_does_not(tmp_path):
     assert "run-btn" not in ws.text
     assert "btn-add-ref" not in ws.text
     assert _PRIV_REF not in ws.text
+    hidden = Workspace.init(root / "hidden-topic", topic="Hidden Topic")
+    create_tag(root, "shared")
+    add_tag(root, home=slug, ref_id=rid, tag="shared")
+    set_include_tags(root, hidden.root.name, ["shared"])
+    public_timeline_ref = pub.get(f"/refs/{rid}", params={"home": slug})
+    assert public_timeline_ref.status_code == 200
+    assert "Related topics" in public_timeline_ref.text
+    assert "Hidden Topic" not in public_timeline_ref.text
+    assert "/topics/hidden-topic" not in public_timeline_ref.text
     doc = pub.get("/w/ws/doc", params={"path": "understanding.md"})
     assert doc.status_code == 200
     assert "alpha-secret-token" in doc.text
@@ -301,8 +311,8 @@ def test_console_mode_still_lists_all_and_allows_write_chrome(tmp_path):
     c = TestClient(create_app(root, mode="console"))
     home = c.get("/")
     assert home.status_code == 200
-    assert "/w/ws" in home.text
-    assert "/w/secret" in home.text
+    assert "/topics/ws" in home.text
+    assert "/topics/secret" in home.text
     assert 'hx-post="/workspaces"' in home.text
     meta = c.get(f"/w/{slug}/ref/{rid}")
     assert meta.status_code == 200

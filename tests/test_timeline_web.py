@@ -67,6 +67,7 @@ def test_timeline_recent_lists_by_added(tmp_path):
     assert r.status_code == 200
     assert "2026-08-25-weekly" in r.text
     assert "notes-candidate" in r.text
+    assert "back=/timeline%3Fmode%3Drecent" in r.text
 
 
 def test_timeline_tag_form_keeps_recent_and_unknown_queries_valid(tmp_path):
@@ -110,9 +111,9 @@ def test_timeline_range_lists_inclusive_and_hides_unknown(tmp_path):
     r = c.get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
     assert r.status_code == 200
     assert "候选人沟通" in r.text
-    assert "能源梳理" in r.text
+    assert "能源梳理" not in r.text
     assert "2026-08-24" in r.text
-    assert 'href="/w/alpha?ref=2026-08-25-weekly"' in r.text
+    assert 'href="/refs/2026-08-25-weekly?home=alpha&back=/timeline%3Ffrom%3D2026-08-24%26to%3D2026-08-25"' in r.text
     assert "2026-08-25-weekly" not in _meta_cells(r.text)
     assert "notes-candidate" not in r.text
     assert "from=2026-08-24" in r.text
@@ -123,7 +124,7 @@ def test_timeline_range_lists_inclusive_and_hides_unknown(tmp_path):
     assert 'id="rev-topic"' not in r.text
     day = c.get("/timeline", params={"day": "2026-08-24"})
     assert day.status_code == 200
-    assert "08-24" in _meta_cells(day.text)
+    assert any("08-24" in cell for cell in _meta_cells(day.text))
 
 
 def test_timeline_empty_range_has_no_write_button(tmp_path):

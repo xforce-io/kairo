@@ -64,6 +64,9 @@ class Project(BaseModel):
     workspace_slugs: list[str] = Field(default_factory=list)
     datasources: list[DataSource] = Field(default_factory=list)
     tasks: list[TaskDef] = Field(default_factory=list)
+    # 早期调度版本已写入该字段。当前实现不解释其内容，但在读取及后续
+    # Project 编辑时原样保留，避免升级后既有 Project 不可访问或丢失状态。
+    schedule_states: dict[str, Any] = Field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
 

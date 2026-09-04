@@ -4,6 +4,7 @@ import pytest
 from typer.testing import CliRunner
 
 from kairo.cli import app
+from kairo.refs import create_tag
 
 runner = CliRunner()
 
@@ -313,6 +314,8 @@ def test_cli_serve_missing_web_dep_friendly(monkeypatch):
 def test_cli_list_scans_serve_root(tmp_path, monkeypatch):
     """#95:kairo list 扫 root 下一层 workspace,与 discovery 同源。"""
     monkeypatch.chdir(tmp_path)
+    create_tag(tmp_path, "alpha")
+    create_tag(tmp_path, "beta")
     runner.invoke(app, ["new", "alpha"])
     runner.invoke(app, ["new", "beta"])
     (tmp_path / "noise").mkdir()
@@ -343,6 +346,7 @@ def test_cli_list_uses_kairo_serve_root_env(tmp_path, monkeypatch):
     elsewhere = tmp_path / "cwd"
     elsewhere.mkdir()
     monkeypatch.chdir(elsewhere)
+    create_tag(tmp_path, "env-ws")
     runner.invoke(app, ["new", "env-ws", "--root", str(tmp_path)])
     result = runner.invoke(app, ["list"])
     assert result.exit_code == 0
@@ -353,6 +357,7 @@ def test_cli_new_and_rm_ws(tmp_path, monkeypatch):
     """#95:new 建目录+init;rm-ws --yes 删除且保留 root glossary。"""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "glossary.yaml").write_text("entries: []\n")
+    create_tag(tmp_path, "能源业务")
     created = runner.invoke(app, ["new", "能源业务", "--root", str(tmp_path)])
     assert created.exit_code == 0
     assert (tmp_path / "能源业务" / "constitution.yaml").is_file()
@@ -408,6 +413,7 @@ def test_cli_glossary_workspace_and_shared(tmp_path, monkeypatch):
     root = tmp_path / "serve"
     root.mkdir()
     monkeypatch.chdir(root)
+    create_tag(root, "ws")
     runner.invoke(app, ["new", "ws", "--root", str(root)])
     monkeypatch.chdir(root / "ws")
 

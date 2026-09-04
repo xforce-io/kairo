@@ -200,7 +200,19 @@ def new(
     if dest.exists():
         typer.secho(f"已存在:{dest}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
-    Workspace.init(dest, topic=topic)
+    from kairo.refs import list_tags
+
+    if topic not in list_tags(serve):
+        typer.secho(
+            f"请先在 Settings 创建同名 Tag:{topic}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+    ws = Workspace.init(dest, topic=topic)
+    constitution = ws.constitution
+    constitution.include_tags = []
+    ws.write_constitution(constitution)
     typer.echo(f"created {dest}")
 
 
@@ -1144,6 +1156,55 @@ def tag_list_cmd(
     typer.echo("\n".join(tags) if tags else "(no tags)")
 
 
+@tag_app.command("create")
+def tag_create_cmd(
+    tag: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import RefError, create_tag
+
+    try:
+        name = create_tag(_cli_root(root), tag)
+    except RefError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, {"ok": True, "tag": name}) if as_json else typer.echo(f"created {name}")
+
+
+@tag_app.command("delete")
+def tag_delete_cmd(
+    tag: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import RefError, delete_tag
+
+    try:
+        delete_tag(_cli_root(root), tag)
+    except RefError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, {"ok": True, "tag": tag}) if as_json else typer.echo(f"deleted {tag}")
+
+
+@tag_app.command("migrate")
+def tag_migrate_cmd(
+    backup_evidence: Path = typer.Option(..., "--backup-evidence", help="已验证的恢复证据 JSON"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    from kairo.refs import RefError, migrate_tag_rules
+
+    try:
+        report = migrate_tag_rules(_cli_root(root), backup_evidence, dry_run=dry_run)
+    except RefError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, report)
+
+
 @include_app.command("set")
 def include_set_cmd(
     tags: list[str] = typer.Argument(..., help="包含的 Tag,命中任一即进入"),
@@ -1505,4 +1566,3 @@ def artifact_show(
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     _dump(as_json, {"run": run.model_dump(), "artifact": body})
-

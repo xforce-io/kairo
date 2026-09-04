@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ t('ref.global_kicker') }}{% endblock %}
+{% block body %}
+<main class="ref-page">
+  <a class="ref-back" href="{{ back_url }}">← {{ t('ref.back_timeline') }}</a>
+  <header class="ref-head">
+    <p class="obj-kicker">{{ t('ref.global_kicker') }}</p>
+    <h1>{{ title }}</h1>
+    <p class="ref-id">{{ ref_id }}</p>
+  </header>
+
+  <section class="ref-section">
+    <h2>{{ t('ref.tags') }}</h2>
+    {% if tags %}
+    <ul class="tag-row" aria-label="{{ t('ref.tags') }}">
+      {% for tag in tags %}
+      <li>{{ tag }}{% if not public_read %}
+        <form method="post" action="/refs/{{ ref_id | urlencode }}/tags/{{ tag | urlencode }}/delete" style="display:inline">
+          <input type="hidden" name="home" value="{{ home or 'global' }}">
+          <input type="hidden" name="back" value="{{ back_url }}">
+          <button class="btn btn-ghost btn-inline" type="submit" aria-label="移除 {{ tag }}">移除</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('ref.tags_empty') }}</p>
+    {% endif %}
+    {% if not public_read %}{% set available_tags = tag_catalog | reject('in', tags) | list %}
+    {% if available_tags %}
+    <form class="obj-add" method="post" action="/refs/{{ ref_id | urlencode }}/tags">
+      <input type="hidden" name="home" value="{{ home or 'global' }}">
+      <input type="hidden" name="back" value="{{ back_url }}">
+      <label class="dlg-label" for="ref-tag">引用已有 Tag</label>
+      <select id="ref-tag" name="tag" required>{% for tag in available_tags %}<option value="{{ tag }}">{{ tag }}</option>{% endfor %}</select>
+      <button class="btn btn-step btn-inline" type="submit">添加</button>
+    </form>
+    {% else %}
+    <p class="panel-hint">没有可引用的 Tag。请先在 Settings 创建 Tag。</p>
+    {% endif %}
+    {% endif %}
+  </section>
+
+  <section class="ref-section">
+    <h2>{{ t('ref.related_topics') }}</h2>
+    {% if related_topics %}
+    <ul class="ref-topic-list">
+      {% for topic in related_topics %}<li><a href="/topics/{{ topic.slug | urlencode }}">{{ topic.title }}</a></li>{% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('ref.related_topics_empty') }}</p>
+    {% endif %}
+  </section>
+
+  <section class="ref-section">
+    <h2>{{ t('ref.digest') }}</h2>
+    {% if digest %}<article class="ref-digest">{{ digest }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}
+  </section>
+
+  <section class="ref-section">
+    <h2>{{ t('ref.forms') }}</h2>
+    <ul class="ref-form-list">
+      {% for form in forms %}<li><span>{{ form.role }}</span><span>{{ form.location }}</span></li>{% endfor %}
+    </ul>
+  </section>
+</main>
+{% endblock %}

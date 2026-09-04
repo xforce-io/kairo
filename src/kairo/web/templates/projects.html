@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block subtitle %}{{ root }}{% endblock %}
 {% block body %}
-<div class="dash-head">
+<div class="projects-head">
+  <div>
+    <p class="obj-kicker">{{ t('nav.projects') }}</p>
+    <h1 class="obj-title">{{ t('nav.projects') }}</h1>
+    <p class="panel-hint">{{ t('proj.index_hint') }}</p>
+  </div>
   <form class="new-ws" method="post" action="/projects">
     <input name="name" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
     <button type="submit">{{ t('proj.create') }}</button>
@@ -10,14 +15,15 @@
 {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
 <div class="grid">
   {% if projects %}
-    {% for p in projects %}
+    {% for card in projects %}
+    {% set p = card.project %}
     <div class="card">
       <a class="card-main" href="/projects/{{ p.id }}">
         <h3>{{ p.name }}</h3>
-        <div class="meta"><span class="slug">{{ p.id }}</span></div>
         <div class="badges">
           <span class="badge stream">{{ p.workspace_slugs|length }} {{ t('proj.workspaces') }}</span>
-          <span class="badge corpus">{{ p.datasources|length }} {{ t('proj.datasources') }}</span>
+          <span class="badge corpus">{{ t('proj.ref_count').format(n=card.member_ref_count) }}</span>
+          {% if card.latest_run %}<span class="badge {% if card.latest_run.status == 'failed' %}blocked{% else %}stream{% endif %}">{{ t('proj.latest_run').format(status=t('proj.run_' ~ card.latest_run.status)) }}</span>{% else %}<span class="badge">{{ t('proj.no_run') }}</span>{% endif %}
         </div>
       </a>
     </div>

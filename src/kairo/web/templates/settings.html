@@ -48,6 +48,34 @@
       <button class="btn btn-step btn-inline">{{ t('set.save') }}</button>
     </form>
   </section>
+  <section class="obj-block" id="tags">
+    <h2 class="obj-label">Tag 词表</h2>
+    <p class="panel-hint">在此创建和删除 Tag。资料与 Topic 只能引用已有 Tag；被引用或作为 Topic 名称的 Tag 不可删除。</p>
+    <form class="obj-add" method="post" action="/settings/tags">
+      <label class="dlg-label" for="tag-name">新增 Tag</label>
+      <input id="tag-name" name="name" required placeholder="例如：能源">
+      <button class="btn btn-step btn-inline">新增</button>
+    </form>
+    {% if tags %}
+    <table class="meta-forms"><tbody>
+      {% for tag in tags %}
+      <tr>
+        <td><strong>{{ tag.name }}</strong></td>
+        <td class="chooser-id">Ref {{ tag.ref_count }} · 规则 {{ tag.rule_count }}{% if tag.protected_by %} · Topic 名称{% endif %}</td>
+        <td class="mf-actions">
+          {% if tag.ref_count or tag.rule_count or tag.protected_by %}
+          <button class="btn btn-ghost btn-inline" disabled title="仍被引用，不能删除">受保护</button>
+          {% else %}
+          <form method="post" action="/settings/tags/{{ tag.name | urlencode }}/delete"><button class="btn btn-ghost btn-inline">删除</button></form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody></table>
+    {% else %}
+    <p class="panel-hint">还没有 Tag。先新增一个 Tag，再给 Ref 打标或配置 Topic 包含规则。</p>
+    {% endif %}
+  </section>
   <section class="obj-block" id="projects">
     <h2 class="obj-label">{{ t('set.projects') }}</h2>
     <p class="panel-hint">{{ t('set.partition_empty') }}</p>
