@@ -70,10 +70,13 @@ def _knowledge_context(ws, text: str) -> tuple[str, str | None, KnowledgeDiagnos
         from kairo.knowledge import current_hash, effective_entries, load_global, load_workspace
         from kairo.knowledge_matcher import format_knowledge_context, matcher_for
 
-        entries = effective_entries(ws.root.parent, ws.root)
+        from kairo.refs import serve_root_of
+
+        serve = serve_root_of(ws)
+        entries = effective_entries(serve, ws.root)
         result = matcher_for(entries).match(text)
         # legacy 读取也会转为 KnowledgeEntry；绝不再把全量 glossary 注入 Prompt。
-        _ = load_global(ws.root.parent), load_workspace(ws.root)
+        _ = load_global(serve), load_workspace(ws.root)
         return (
             format_knowledge_context(result),
             current_hash(ws.root.parent, ws.root),
@@ -205,6 +208,23 @@ class WorkItem:
     is_stale: Callable[[State], bool]
 
 
+def _bind_home_state(home_ws, topic_ws, item: WorkItem) -> WorkItem:
+    """跨 home 的 transform/digest 读写该 Ref 的 home state，不写进当前 Topic。"""
+    if home_ws.root.resolve() == topic_ws.root.resolve():
+        return item
+    orig_run, orig_stale = item.run, item.is_stale
+
+    def run(_state: State) -> None:
+        st = home_ws.read_state()
+        orig_run(st)
+        home_ws.write_state(st)
+
+    def is_stale(_state: State) -> bool:
+        return orig_stale(home_ws.read_state())
+
+    return WorkItem(f"{home_ws.root.name}:{item.key}", item.input_hash, run, is_stale)
+
+
 class TransformRule:
     """声明驱动的资源转换:有 consumes role、无 produces role → 用 backend 产 produces。
 
@@ -236,32 +256,45 @@ class TransformRule:
 
     def discover(self, state: State | None = None) -> list[WorkItem]:
         items: list[WorkItem] = []
-        from kairo.refs import run_ref_ids
+        from kairo.refs import member_sources
 
-        for ref_id in run_ref_ids(self.ws):
-            man = self.ws.read_manifest(ref_id)
-            sc = self.ws.constitution.source_classes.get(man.source_class)
-            if sc is not None and not sc.fold:
-                continue  # 基线=路径引用,不派生
-            srcs = [f for f in man.forms if f.role in self.consumes]
-            if not srcs:
-                continue
-            roles = {f.role for f in man.forms}
-            produced_locs = {f.location for f in man.forms if f.role == self.produces}
-            legacy = f"references/{ref_id}/{self.produces}.md"
-            if len(srcs) == 1:
-                # 单源:与原逻辑一致——produces role 已存在(不论来源)则跳过
-                if self.produces not in roles:
-                    items.append(self._make(ref_id, srcs[0], legacy))
-            else:
-                # 多源:每源独立派生,用 keyed 格式
-                for i, src in enumerate(srcs):
-                    keyed = f"references/{ref_id}/{_keyed_transform_filename(self.produces, src, srcs)}"
-                    done = keyed in produced_locs
-                    if not done and i == 0 and legacy in produced_locs:
-                        done = True  # 迁移:legacy {produces}.md 归属第一个源
-                    if not done:
-                        items.append(self._make(ref_id, src, keyed))
+        for source_ws, ref_id, _rec in member_sources(self.ws):
+            rule = (
+                self
+                if source_ws.root.resolve() == self.ws.root.resolve()
+                else TransformRule(
+                    source_ws, self.consumes, self.produces, self.backend
+                )
+            )
+            for item in rule._items_for_ref(ref_id):
+                items.append(_bind_home_state(source_ws, self.ws, item))
+        return items
+
+    def _items_for_ref(self, ref_id: str) -> list[WorkItem]:
+        man = self.ws.read_manifest(ref_id)
+        sc = self.ws.constitution.source_classes.get(man.source_class)
+        if sc is not None and not sc.fold:
+            return []  # 基线=路径引用,不派生
+        srcs = [f for f in man.forms if f.role in self.consumes]
+        if not srcs:
+            return []
+        items: list[WorkItem] = []
+        roles = {f.role for f in man.forms}
+        produced_locs = {f.location for f in man.forms if f.role == self.produces}
+        legacy = f"references/{ref_id}/{self.produces}.md"
+        if len(srcs) == 1:
+            # 单源:与原逻辑一致——produces role 已存在(不论来源)则跳过
+            if self.produces not in roles:
+                items.append(self._make(ref_id, srcs[0], legacy))
+        else:
+            # 多源:每源独立派生,用 keyed 格式
+            for i, src in enumerate(srcs):
+                keyed = f"references/{ref_id}/{_keyed_transform_filename(self.produces, src, srcs)}"
+                done = keyed in produced_locs
+                if not done and i == 0 and legacy in produced_locs:
+                    done = True  # 迁移:legacy {produces}.md 归属第一个源
+                if not done:
+                    items.append(self._make(ref_id, src, keyed))
         return items
 
     def _make(self, ref_id: str, src: Form, key: str) -> WorkItem:
@@ -395,30 +428,42 @@ class NormalizeRule:
         if not self.enabled:  # 默认关:不产 prose(可选档案)
             return []
         items: list[WorkItem] = []
-        from kairo.refs import run_ref_ids
+        from kairo.refs import member_sources
 
-        for ref_id in run_ref_ids(self.ws):
-            man = self.ws.read_manifest(ref_id)
-            # 源分层:corpus(fold=False)是只读参考层,不规范化(与不 digest 一致)。
-            sc = self.ws.constitution.source_classes.get(man.source_class)
-            if sc is not None and not sc.fold:
-                continue
-            roles = {f.role for f in man.forms}
-            if "prose" in roles:
-                continue
-            # 只规范化机器派生的誊录;origin=added 是人给的原文(权威),不碰。
-            tf = next(
-                (f for f in man.forms if f.role == "transcript" and f.origin != "added"),
-                None,
+        for source_ws, ref_id, _rec in member_sources(self.ws):
+            rule = (
+                self
+                if source_ws.root.resolve() == self.ws.root.resolve()
+                else NormalizeRule(
+                    source_ws, self.provider, force_enabled=self.enabled
+                )
             )
-            if tf is None:
-                continue
-            loc = Path(tf.location)
-            p = loc if loc.is_absolute() else self.ws.root / loc
-            key = f"references/{ref_id}/prose.md"
-            if not (self.ws.root / key).exists():
-                items.append(self._make(ref_id, key, p.read_text()))
+            for item in rule._items_for_ref(ref_id):
+                items.append(_bind_home_state(source_ws, self.ws, item))
         return items
+
+    def _items_for_ref(self, ref_id: str) -> list[WorkItem]:
+        man = self.ws.read_manifest(ref_id)
+        # 源分层:corpus(fold=False)是只读参考层,不规范化(与不 digest 一致)。
+        sc = self.ws.constitution.source_classes.get(man.source_class)
+        if sc is not None and not sc.fold:
+            return []
+        roles = {f.role for f in man.forms}
+        if "prose" in roles:
+            return []
+        # 只规范化机器派生的誊录;origin=added 是人给的原文(权威),不碰。
+        tf = next(
+            (f for f in man.forms if f.role == "transcript" and f.origin != "added"),
+            None,
+        )
+        if tf is None:
+            return []
+        loc = Path(tf.location)
+        p = loc if loc.is_absolute() else self.ws.root / loc
+        key = f"references/{ref_id}/prose.md"
+        if (self.ws.root / key).exists():
+            return []
+        return [self._make(ref_id, key, p.read_text())]
 
     def _make(self, ref_id: str, key: str, body: str) -> WorkItem:
         input_hash = _hash(f"{self.prompt}\n\n---誊录---\n{body}")
@@ -553,42 +598,27 @@ class DigestRule:
         if not stage_enabled(self.ws, "digest"):
             return []
         items: list[WorkItem] = []
-        from kairo.refs import load_catalog, resolve_open, run_ref_ids, topic_members
+        from kairo.refs import member_sources
 
-        serve = self.ws.root.parent
-        strict = load_catalog(serve).get("strict_membership", False)
-        if strict:
-            try:
-                records = topic_members(serve, self.ws.root.name)
-            except Exception:
-                records = []
-            entries = []
-            for rec in records:
-                try:
-                    source_ws, ref_id = resolve_open(serve, rec.home, rec.id)
-                except Exception:
-                    continue
-                entries.append((source_ws, ref_id, rec.key))
-        else:
-            entries = [(self.ws, ref_id, f"references/{ref_id}/digest.md") for ref_id in run_ref_ids(self.ws)]
-
-        for source_ws, ref_id, ledger_key in entries:
+        for source_ws, ref_id, _rec in member_sources(self.ws):
             man = source_ws.read_manifest(ref_id)
             # 源分层(#13 v2):fold=False 的类(corpus)是只读参考层,不 digest。
             sc = source_ws.constitution.source_classes.get(man.source_class)
             if sc is not None and not sc.fold:
                 continue
-            source_rule = self if source_ws.root == self.ws.root else DigestRule(source_ws, self.provider)
+            source_rule = (
+                self
+                if source_ws.root.resolve() == self.ws.root.resolve()
+                else DigestRule(source_ws, self.provider)
+            )
             catalog = source_rule._catalog_items(man)
             if any(it.required for it in catalog):
-                items.append(
-                    source_rule._make(
-                        f"references/{ref_id}/digest.md",
-                        man,
-                        catalog,
-                        ledger_key=ledger_key,
-                    )
+                item = source_rule._make(
+                    f"references/{ref_id}/digest.md",
+                    man,
+                    catalog,
                 )
+                items.append(_bind_home_state(source_ws, self.ws, item))
         return items
 
     def _make(
@@ -667,9 +697,11 @@ class DigestRule:
             )
             ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
             if ref_id:
+                from kairo.refs import serve_root_of
+
                 extract_after_success(
                     self.ws.root,
-                    self.ws.root.parent,
+                    serve_root_of(self.ws),
                     source_kind="digest",
                     path=product_key,
                     text=content,
@@ -839,7 +871,9 @@ class ComposeRule:
             records = topic_members(self.ws.root.parent, self.ws.root.name)
         except Exception:
             records = []
-        if not records and not load_catalog(self.ws.root.parent).get("strict_membership", False):
+        if not records and not load_catalog(self.ws.root.parent).get(
+            "strict_membership", False
+        ):
             records = []
             for ref_id in run_ref_ids(self.ws):
                 man = self.ws.read_manifest(ref_id)
@@ -858,14 +892,12 @@ class ComposeRule:
             if rec.source_class == "corpus" or not self._is_fold_class(rec.source_class):
                 continue
             if rec.digest_path is not None and rec.digest_path.is_file():
-                # 迁移后的账本一律用 Ref 身份键。旧数据仍保留本 Topic
-                # 相对路径，直到 `kairo tag migrate` 完成确定性改写。
+                # 跨 home 一律用 Ref 身份键。本 Topic home 在未迁移前保留相对路径。
                 key = (
                     rec.key
-                    if load_catalog(self.ws.root.parent).get("strict_membership", False)
+                    if rec.home != self.ws.root.name
+                    or load_catalog(self.ws.root.parent).get("strict_membership", False)
                     else f"references/{rec.id}/digest.md"
-                    if rec.home == self.ws.root.name
-                    else rec.key
                 )
                 out[key] = _hash(rec.digest_path.read_text())
                 self._member_digests[key] = rec

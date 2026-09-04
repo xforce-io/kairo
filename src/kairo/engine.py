@@ -335,14 +335,19 @@ def workspace_run_plan(ws) -> dict:
     """#75/#161:主按钮状态机输入,区分总 blocked 与 Run 可重试 blocked。"""
     pending_n = len(pending(ws))
     blocked_refs: list[dict] = []
-    from kairo.refs import run_ref_ids
+    from kairo.refs import member_sources
 
-    for ref_id in run_ref_ids(ws):
-        blocks = ref_product_blocks(ws, ref_id)
+    for source_ws, ref_id, rec in member_sources(ws):
+        blocks = ref_product_blocks(source_ws, ref_id)
         if blocks:
             retryable = all(_product_block_retryable(b["reason"]) for b in blocks)
             blocked_refs.append(
-                {"ref_id": ref_id, "blocks": blocks, "retryable": retryable}
+                {
+                    "ref_id": ref_id,
+                    "home": rec.home,
+                    "blocks": blocks,
+                    "retryable": retryable,
+                }
             )
     blocked_targets: list[dict] = []
     live_paths = {t.path for t in ws.constitution.live_targets()}
@@ -391,9 +396,18 @@ def run_workspace(ws, provider, *, retry_blocked: bool | None = None) -> bool:
     if retry_blocked is None:
         retry_blocked = plan["retryable_blocked_count"] > 0
     if retry_blocked:
+        from kairo.refs import resolve_open
+
+        serve = ws.root.parent
         for item in plan["blocked_refs"]:
             if item.get("retryable", True):
-                clear_reference_products(ws, item["ref_id"])
+                if "home" not in item:
+                    source_ws, rid = ws, item["ref_id"]
+                else:
+                    source_ws, rid = resolve_open(
+                        serve, item.get("home") or "", item["ref_id"]
+                    )
+                clear_reference_products(source_ws, rid)
         clear_provider_failed_targets(ws)
     return step(ws, provider)
 

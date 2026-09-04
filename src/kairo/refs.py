@@ -127,6 +127,14 @@ def global_home_path(serve: Path) -> Path:
     return Path(serve) / GLOBAL_HOME_REL
 
 
+def serve_root_of(ws: Workspace) -> Path:
+    """Topic 目录的父级，或全局库 `.kairo/global-home` 再上两级。"""
+    root = Path(ws.root).resolve()
+    if root.name == "global-home" and root.parent.name == ".kairo":
+        return root.parent.parent
+    return root.parent
+
+
 def global_home(serve: Path) -> Workspace:
     path = global_home_path(serve)
     state = path / ".kairo" / "state.json"
@@ -648,17 +656,37 @@ def resolve_open(serve: Path, home: str, ref_id: str) -> tuple[Workspace, str]:
     return ws, ref_id
 
 
-def run_ref_ids(ws: Workspace) -> list[str]:
-    """本 Topic 知识 Run 要处理的本地成员 Ref；home 不再隐式成为成员。"""
-    local = list(ws.list_reference_ids())
-    rules = include_tags_of(ws)
-    if rules is None and not load_catalog(ws.root.parent).get("strict_membership", False):
-        return local
-    if not rules:
+def run_members(ws: Workspace) -> list[RefRecord]:
+    """本 Topic 知识 Run 的成员（含跨 home）。home 只定位源与唯一 digest。"""
+    serve = ws.root.parent
+    if ws.root.name.startswith(".") or not is_topic_dir(ws.root):
         return []
     try:
-        members = topic_members(ws.root.parent, ws.root.name)
+        return topic_members(serve, ws.root.name)
     except RefError:
+        return []
+
+
+def member_sources(ws: Workspace) -> list[tuple[Workspace, str, RefRecord]]:
+    """解析成员的 home workspace；打不开的来源跳过，不回退为目录内文件。"""
+    serve = ws.root.parent
+    out: list[tuple[Workspace, str, RefRecord]] = []
+    for rec in run_members(ws):
+        try:
+            source_ws, ref_id = resolve_open(serve, rec.home, rec.id)
+        except RefError:
+            continue
+        out.append((source_ws, ref_id, rec))
+    return out
+
+
+def run_ref_ids(ws: Workspace) -> list[str]:
+    """本 Topic 目录内、且已是成员的 Ref id（不含跨 home）。"""
+    local = list(ws.list_reference_ids())
+    members = run_members(ws)
+    if not members and include_tags_of(ws) is None and not load_catalog(
+        ws.root.parent
+    ).get("strict_membership", False):
         return local
     allowed = {m.id for m in members if m.home == ws.root.name}
     return [rid for rid in local if rid in allowed]
