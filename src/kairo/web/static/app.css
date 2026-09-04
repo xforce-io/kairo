@@ -288,6 +288,17 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .pane-nav   { background: var(--paper-2); border-right: 1px solid var(--line); padding: 20px 16px; }
 .pane-read  { padding: 0; }
 .pane-panel { background: var(--paper-2); border-left: 1px solid var(--line); padding: 20px 16px; }
+.include-rules { margin-top: 24px; padding-top: 14px; border-top: 1px solid var(--line); }
+.include-rules > summary {
+  cursor: pointer; list-style: none; color: var(--ink-soft);
+  font-size: 12px; font-weight: 600; letter-spacing: .04em;
+}
+.include-rules > summary::before { content: "▸ "; color: var(--muted); }
+.include-rules[open] > summary::before { content: "▾ "; }
+.include-rules > summary::-webkit-details-marker { display: none; }
+.include-rules[open] > summary { margin-bottom: 10px; }
+.include-rules .dlg-form { margin-top: 4px; }
+.include-rules select { width: 100%; }
 
 /* 侧栏分节 */
 .nav-section { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); margin: 4px 4px 8px; }
