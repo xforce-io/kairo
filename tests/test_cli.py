@@ -28,7 +28,7 @@ def test_cli_friendly_error_outside_workspace(tmp_path, monkeypatch, cmd):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(app, cmd)
     assert result.exit_code != 0
-    assert "不是 kairo 工作区" in result.output
+    assert "不是 kairo" in result.output  # 接受「工作区」或「Topic」
     assert "Traceback" not in result.output
     assert result.exception is None or isinstance(result.exception, SystemExit)
 

@@ -31,14 +31,22 @@ Audio transcription depends on a local whisper — see "Local ASR configuration"
 ## Quick start
 
 ```bash
-kairo init "My research topic"   # initialize the current directory as a Topic + default constitution
-kairo add recording.m4a          # register a path pointer (stream/observation by default)
-kairo add recording.m4a --copy   # copy into Topic first, then register
-kairo add ./meeting-folder       # directory → one multi-form reference (audio/docs/images inside)
-kairo add report.docx            # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
-kairo add whitepaper.md --corpus # register as corpus/baseline (authoritative reference material)
-kairo step                       # reconcile to convergence: ASR/doc2text → Digest → Compose (prose alongside when normalize is on)
-kairo status                     # see the fold status of each reference / document
+kairo init "My research topic"            # initialize the current directory as a Topic + default constitution
+kairo add recording.m4a                   # register a path pointer (stream/observation by default)
+kairo add recording.m4a --copy            # copy into Topic first, then register
+kairo add ./meeting-folder                # directory → one multi-form reference (audio/docs/images inside)
+kairo add report.docx                     # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
+kairo add whitepaper.md --corpus          # register as corpus/baseline (authoritative reference material)
+kairo step                                # reconcile to convergence: ASR/doc2text → Digest → Compose (prose alongside when normalize is on)
+kairo status                              # see the fold status of each reference / document
+
+# Register global Ref into Topic (Tag must exist first)
+kairo tag create alpha                    # create Tag (same as Topic name)
+kairo add meeting-audio.m4a --topic alpha --copy  # register as global Ref and add to Topic
+cd alpha && kairo step                    # step in Topic directory
+
+# Attach form to existing Ref
+kairo add screenshot.png --to <ref_id> --copy    # append form to existing Ref
 ```
 
 Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk, if any, is frozen and no longer folded.
@@ -49,14 +57,16 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 | --- | --- |
 | `init` | Initialize the **current directory** as a Topic + default constitution |
 | `list` | List Topics under a serve root (`--json`; root defaults to `KAIRO_SERVE_ROOT` or cwd) [#95](https://github.com/xforce-io/kairo/issues/95) |
-| `new` | Create a Topic directory under the serve root and `init` it (Web create parity) |
-| `rm-ws` | Delete a Topic under the serve root (`--yes` skips confirm; root glossary kept) — **deprecated, use `rm`** |
+| `new` | Create a Topic directory under the serve root and `init` it (Web create parity; Tag must exist first) |
 | `rm` | Delete a Topic under the serve root (`--yes` skips confirm; root glossary kept) |
-| `add` | Register a reference (path pointer by default; `--copy` materializes; `--corpus` marks baseline; `--to <id>` attaches; `--occurred YYYY-MM-DD` sets occurred date) |
+| `add` | Register Ref: new Ref (optional `--topic <slug>` to join Topic) or `--to <id>` attach form (path pointer by default; `--copy` materializes; `--corpus` marks baseline; `--occurred YYYY-MM-DD` sets occurred date) |
+| `tag create` | Create Tag (must create Tag before new Topic) |
+| `tag add` | Add Tag to Ref (Topic includes Refs via include_tags) |
+| `include set` | Set Topic's include rules (Ref becomes member if it matches any Tag) |
 | `title` | Rename a reference's display title (id / directory unchanged) |
 | `occurred` | Set or clear a reference's occurred date (`--clear`; does not change id or run step) |
-| `timeline` | List fold observations across workspaces by occurred date (`--day` / `--recent` / `--json`) |
-| `step` | Run the reconciliation loop to convergence (material-capable auto provider; selection details below) |
+| `timeline` | List fold observations across Topics by occurred date (`--day` / `--recent` / `--json`) |
+| `step` | Run the reconciliation loop to convergence (in Topic directory; material-capable auto provider; selection details below) |
 | `run` | Clear terminal blocked then step (same as Web primary button) |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
 | `retry-ref` | Clear derived products for one reference and re-run |
@@ -65,7 +75,7 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 | `accept` | Accept manual edits, pin as the new baseline, clear `blocked: manual-edit` |
 | `status` | List references / fold status of each document |
 | `knowledge` | Knowledge `list` / `add` / `rm` (`--scope workspace\|global`) |
-| `glossary` | Compatibility alias for `knowledge` (`--scope workspace\|shared`) |
+| `glossary` | Compatibility alias for `knowledge` |
 | `index` | Regenerate the `references/MEETINGS.md` navigation index |
 | `history` | List version snapshots |
 | `rollback` | Roll a document back to a version |

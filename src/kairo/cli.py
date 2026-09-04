@@ -52,10 +52,10 @@ from kairo.timeline import (
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound, delete_workspace
 
 _EPILOG = (
-    "三条路径:\n\n"
-    "1. Ref/Timeline 发现: kairo add <file> [--topic TOPIC] → kairo timeline [--tag TAG]\n"
-    "2. Topic 处理: cd <topic-dir> → kairo step / run / status\n"
-    "3. Project 执行: kairo project create / link / task run\n\n"
+    '快速上手:kairo init "<topic>" → kairo add <file>'
+    "(--corpus 标基线,默认 stream 观测)→ kairo step(调和到收敛)。\n\n"
+    "音频→Topic Ref:kairo add <audio> --topic <slug> --copy,再 kairo step --topic <slug>。\n\n"
+    "附加 form:kairo add <file> --to <ref_id> --copy。\n\n"
     "产出 understanding.md(中立事实)。心智与协议定义在 constitution.yaml。"
 )
 
@@ -348,7 +348,7 @@ def add(
         None,
         "--id",
         "--to",
-        help="指定 ref id;指向已有 id 时追加形态(attach)",
+        help="追加 form 到现有 Ref(不创建新 Ref);对标 Web attach",
     ),
     role: str = typer.Option(None, "--role", help="覆盖按扩展名猜测的 role"),
     corpus: bool = typer.Option(
@@ -369,7 +369,7 @@ def add(
         None, "--root", "-r", help="serve root;非 Topic 目录时写入全局库"
     ),
 ) -> None:
-    """登记 Ref。cwd 为 Topic 则 home 在该 Topic;否则写入全局库。--topic 显式标记入 Topic。"""
+    """登记 Ref:新 Ref(可选 --topic)或 --to 追加 form。cwd 为 Topic 则 home 在该 Topic;否则写入全局库。"""
     from kairo.refs import add_global_ref, add_tag, list_tags
 
     try:
@@ -407,7 +407,7 @@ def add(
         if topic:
             if topic not in list_tags(serve):
                 typer.secho(
-                    f"Topic 名称 Tag 不在词表中:{topic}。请先在 Settings / `kairo tag create {topic}` 创建。",
+                    f"Topic-name Tag '{topic}' 不存在。下一步: kairo tag create {topic}",
                     fg=typer.colors.RED,
                     err=True,
                 )
@@ -534,7 +534,7 @@ def review(
     from_day: str = typer.Option(..., "--from", help="区间起"),
     to_day: str = typer.Option(..., "--to", help="区间止"),
     topic: str = typer.Option(None, "--topic", "-t", help="可选落点 slug;缺省写入「总结」"),
-    workspace: str = typer.Option(None, "--workspace", help=typer.Typer.hidden, hidden=True),
+    workspace: str = typer.Option(None, "--workspace", hidden=True),
     root: Path = typer.Option(
         None,
         "--root",

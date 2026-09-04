@@ -71,6 +71,10 @@ def test_skill_covers_discovery_status_and_understanding():
         "constitution.yaml",
         "kairo status",
         "understanding.md",
+        "kairo list",
+        "Topic",
+        "Ref",
+        "Tag",
     ):
         assert needle in text, f"skill must mention {needle!r}"
     assert "事实" in text
@@ -99,6 +103,10 @@ def test_skill_write_commands_require_confirmation():
     # 推进默认 step，勿与更重的 run 混写
     assert "默认" in text and "kairo step" in text
     assert "勿把口语" in text or "不要" in text or "勿" in text
+    # add --topic and --to form stories
+    assert "--topic" in text
+    assert "--to" in text
+    assert "附加" in text or "追加" in text or "attach" in text.lower()
 
 
 def test_skill_blocked_closed_set():
@@ -144,6 +152,10 @@ def test_skill_common_mistakes_and_no_auto_accept():
     assert "不代批" in text and "accept" in text.lower()
     # pure-read must not auto-step
     assert "step" in text and ("绝不" in text or "不得" in text or "零写" in text)
+    # Topic terminology over workspace
+    assert "Topic" in text
+    # --topic mistake
+    assert "--topic" in text and "在 Topic 内" in text
 
 
 @pytest.mark.parametrize(
