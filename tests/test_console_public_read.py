@@ -9,7 +9,7 @@ import yaml
 from fastapi.testclient import TestClient
 
 from kairo.knowledge_review import KnowledgeReview
-from kairo.refs import add_tag, set_include_tags
+from kairo.refs import add_tag, create_tag, set_include_tags
 from kairo.web.public import PUBLIC_STATE_FILENAME
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -69,6 +69,7 @@ def test_s1_console_lists_unpublished_public_read_does_not(tmp_path):
     assert "btn-add-ref" not in ws.text
     assert _PRIV_REF not in ws.text
     hidden = Workspace.init(root / "hidden-topic", topic="Hidden Topic")
+    create_tag(root, "shared")
     add_tag(root, home=slug, ref_id=rid, tag="shared")
     set_include_tags(root, hidden.root.name, ["shared"])
     public_timeline_ref = pub.get(f"/refs/{rid}", params={"home": slug})

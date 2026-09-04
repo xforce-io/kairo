@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from kairo.cli import app
+from kairo.engine import step
+from kairo.models import State, TargetState
+from kairo.provider import StubProvider
 from kairo.refs import (
     add_global_ref,
     add_tag,
@@ -20,6 +23,7 @@ from kairo.refs import (
     timeline_digest_path,
     topic_members,
 )
+from kairo.rules import ComposeRule
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 
@@ -224,21 +228,91 @@ def test_tag_vocabulary_delete_protection_and_strict_migration(tmp_path):
     with __import__("pytest").raises(Exception):
         delete_tag(serve, "政策")
 
-    evidence = tmp_path / "evidence.json"
-    evidence.write_text(
-        json.dumps(
-            {
-                "remote": "jms-115",
-                "backup_id": "b-20260903T143304Z-5a68d1308a8d",
-                "verified_at": "2026-09-04T00:00:00+08:00",
-                "restored": True,
-            }
-        ),
-        encoding="utf-8",
+    evidence = _backup_evidence(tmp_path)
+    legacy_state = ws.read_state()
+    legacy_state.targets["understanding.md"] = TargetState(
+        folded={f"references/{rid}/digest.md": "digest-hash"},
+        last_major_folded={f"references/{rid}/digest.md": "digest-hash"},
     )
+    ws.write_state(legacy_state)
     report = migrate_tag_rules(serve, evidence, dry_run=True)
     assert report["dry_run"] is True
     migrated = migrate_tag_rules(serve, evidence)
     assert migrated["dry_run"] is False
     assert {item.id for item in topic_members(serve, "energy")} == {rid}
     assert Workspace.open(serve / "energy").constitution.include_tags == ["政策"]
+    migrated_state = Workspace.open(serve / "energy").read_state()
+    assert migrated_state.targets["understanding.md"].folded == {"energy/local": "digest-hash"}
+    assert migrated_state.targets["understanding.md"].last_major_folded == {"energy/local": "digest-hash"}
+
+
+def _backup_evidence(tmp_path: Path) -> Path:
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "remote": "jms-115",
+                "snapshot_path": "generations/b-20260903T143304Z-5a68d1308a8d",
+                "backup_id": "b-20260903T143304Z-5a68d1308a8d",
+                "created_at": "2026-09-03T22:33:04+08:00",
+                "manifest_sha256": "f7f9b55c8e32a910e0eb07b7c86f3c53c3989026d3d9cdcf550c8434b8c7a4a4",
+                "verified_at": "2026-09-04T00:00:00+08:00",
+                "restored": True,
+                "restored_root": "/srv/kairo/restore-check-252-b-20260903T143304Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+    return evidence
+
+
+def test_strict_topic_folds_cross_home_digest_by_ref_identity(tmp_path):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    target = Workspace.init(serve / "target", topic="目标")
+    source = Workspace.init(serve / "source", topic="来源")
+    for tag in ("目标", "来源", "政策"):
+        create_tag(serve, tag)
+    source_file = tmp_path / "source.txt"
+    source_file.write_text("原始材料", encoding="utf-8")
+    ref_id = source.add([source_file], ref_id="shared")
+    digest = source.references_dir() / ref_id / "digest.md"
+    digest.write_text("跨来源唯一纪要", encoding="utf-8")
+    add_tag(serve, home="source", ref_id=ref_id, tag="政策")
+    set_include_tags(serve, "target", ["政策"])
+    migrate_tag_rules(serve, _backup_evidence(tmp_path))
+
+    state = State()
+    items = ComposeRule(target, StubProvider()).discover(state)
+    assert [item.key for item in items] == ["understanding.md"]
+    items[0].run(state)
+
+    understanding = (target.root / "understanding.md").read_text(encoding="utf-8")
+    assert "跨来源唯一纪要" in understanding
+    assert "source/shared" in state.targets["understanding.md"].folded
+    assert not (target.references_dir() / ref_id).exists()
+    assert digest.read_text(encoding="utf-8") == "跨来源唯一纪要"
+
+
+def test_strict_topic_generates_missing_cross_home_digest_before_fold(tmp_path):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    target = Workspace.init(serve / "target", topic="目标")
+    source = Workspace.init(serve / "source", topic="来源")
+    for tag in ("目标", "来源", "政策"):
+        create_tag(serve, tag)
+    source_file = tmp_path / "source.txt"
+    source_file.write_text("跨来源原始正文", encoding="utf-8")
+    ref_id = source.add([source_file], ref_id="missing-digest")
+    add_tag(serve, home="source", ref_id=ref_id, tag="政策")
+    set_include_tags(serve, "target", ["政策"])
+    migrate_tag_rules(serve, _backup_evidence(tmp_path))
+
+    assert step(target, StubProvider()) is True
+    digest = source.references_dir() / ref_id / "digest.md"
+    assert digest.is_file()
+    assert "跨来源原始正文" in digest.read_text(encoding="utf-8")
+    state = target.read_state()
+    assert "source/missing-digest" in state.products
+    assert "source/missing-digest" in state.targets["understanding.md"].folded
+    assert not (target.references_dir() / ref_id).exists()

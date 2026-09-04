@@ -709,6 +709,13 @@ def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
         raise HTTPException(status_code=400, detail=t("err.topic_invalid"))
     if dest.exists():
         raise HTTPException(status_code=400, detail=t("err.topic_exists").format(topic=topic))
+    from kairo.refs import list_tags
+
+    if topic not in list_tags(root):
+        raise HTTPException(
+            status_code=409,
+            detail="请先在 Settings 创建同名 Tag，再新建 Topic。",
+        )
     Workspace.init(dest, topic=topic)
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
@@ -866,6 +873,7 @@ def global_ref_view(
             "ref_id": rid,
             "tags": rec.tags if rec is not None else [],
             "tag_catalog": list_tags(serve),
+            "home": home,
             "related_topics": related_topics,
             "digest": digest.read_text(encoding="utf-8") if digest.is_file() else "",
             "forms": man.forms,
@@ -882,6 +890,8 @@ def workspace_view(
     task_id: str | None = None,
 ) -> HTMLResponse:
     ws = _open(request, slug)
+    from kairo.refs import include_tags_of, list_tags
+
     streams, corpus = _split_refs(ws, Path(request.app.state.root))
     targets = _target_states(ws)
     if _is_public_read(request):
@@ -906,6 +916,8 @@ def workspace_view(
         {
             "slug": slug,
             "topic": ws.constitution.topic,
+            "tag_catalog": list_tags(_serve(request)),
+            "include_tags": include_tags_of(ws) or [],
             "targets": targets,
             "streams": streams,
             "corpus": corpus,
@@ -920,6 +932,67 @@ def workspace_view(
             "glossary_todo_n": _glossary_todo_n(ws, Path(request.app.state.root)),
         },
     )
+
+
+@router.post("/w/{slug}/include-tags", response_class=HTMLResponse)
+def workspace_include_tags(
+    request: Request,
+    slug: str,
+    tag: list[str] = Form([]),
+) -> HTMLResponse:
+    """Topic 只保存对 Settings 词表的引用；成员在展示与加工时重算。"""
+    _console_only(request)
+    from kairo.refs import RefError, set_include_tags
+
+    try:
+        set_include_tags(_serve(request), slug, tag)
+    except RefError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(slug)})
+
+
+@router.post("/refs/{ref_id}/tags", response_class=RedirectResponse)
+def global_ref_tag_add_view(
+    request: Request,
+    ref_id: str,
+    tag: str = Form(""),
+    home: str = Form(""),
+    back: str = Form(""),
+) -> RedirectResponse:
+    _console_only(request)
+    from kairo.refs import RefError, add_tag
+
+    home = "" if home == "global" else home
+    try:
+        add_tag(_serve(request), home=home, ref_id=ref_id, tag=tag)
+    except RefError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    suffix = f"?home={quote(home)}" if home else ""
+    if back.startswith("/timeline"):
+        suffix += ("&" if suffix else "?") + "back=" + quote(back, safe="/")
+    return RedirectResponse(f"/refs/{quote(ref_id)}{suffix}", status_code=303)
+
+
+@router.post("/refs/{ref_id}/tags/{tag}/delete", response_class=RedirectResponse)
+def global_ref_tag_delete_view(
+    request: Request,
+    ref_id: str,
+    tag: str,
+    home: str = Form(""),
+    back: str = Form(""),
+) -> RedirectResponse:
+    _console_only(request)
+    from kairo.refs import RefError, remove_tag
+
+    home = "" if home == "global" else home
+    try:
+        remove_tag(_serve(request), home=home, ref_id=ref_id, tag=tag)
+    except RefError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    suffix = f"?home={quote(home)}" if home else ""
+    if back.startswith("/timeline"):
+        suffix += ("&" if suffix else "?") + "back=" + quote(back, safe="/")
+    return RedirectResponse(f"/refs/{quote(ref_id)}{suffix}", status_code=303)
 
 
 

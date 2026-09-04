@@ -553,24 +553,53 @@ class DigestRule:
         if not stage_enabled(self.ws, "digest"):
             return []
         items: list[WorkItem] = []
-        from kairo.refs import run_ref_ids
+        from kairo.refs import load_catalog, resolve_open, run_ref_ids, topic_members
 
-        for ref_id in run_ref_ids(self.ws):
-            man = self.ws.read_manifest(ref_id)
+        serve = self.ws.root.parent
+        strict = load_catalog(serve).get("strict_membership", False)
+        if strict:
+            try:
+                records = topic_members(serve, self.ws.root.name)
+            except Exception:
+                records = []
+            entries = []
+            for rec in records:
+                try:
+                    source_ws, ref_id = resolve_open(serve, rec.home, rec.id)
+                except Exception:
+                    continue
+                entries.append((source_ws, ref_id, rec.key))
+        else:
+            entries = [(self.ws, ref_id, f"references/{ref_id}/digest.md") for ref_id in run_ref_ids(self.ws)]
+
+        for source_ws, ref_id, ledger_key in entries:
+            man = source_ws.read_manifest(ref_id)
             # 源分层(#13 v2):fold=False 的类(corpus)是只读参考层,不 digest。
-            sc = self.ws.constitution.source_classes.get(man.source_class)
+            sc = source_ws.constitution.source_classes.get(man.source_class)
             if sc is not None and not sc.fold:
                 continue
-            catalog = self._catalog_items(man)
+            source_rule = self if source_ws.root == self.ws.root else DigestRule(source_ws, self.provider)
+            catalog = source_rule._catalog_items(man)
             if any(it.required for it in catalog):
                 items.append(
-                    self._make(f"references/{ref_id}/digest.md", man, catalog)
+                    source_rule._make(
+                        f"references/{ref_id}/digest.md",
+                        man,
+                        catalog,
+                        ledger_key=ledger_key,
+                    )
                 )
         return items
 
     def _make(
-        self, key: str, man: Manifest, catalog: list[CatalogItem]
+        self,
+        key: str,
+        man: Manifest,
+        catalog: list[CatalogItem],
+        *,
+        ledger_key: str | None = None,
     ) -> WorkItem:
+        product_key = ledger_key or key
         atts = sorted(
             (f for f in man.forms if f.role == "attachment"),
             key=lambda f: f.location,
@@ -605,7 +634,7 @@ class DigestRule:
                     file=sys.stderr,
                     flush=True,
                 )
-                state.products[key] = ProductState(
+                state.products[product_key] = ProductState(
                     input_hash=input_hash,
                     status="blocked",
                     reason=REASON_PROVIDER_FAILED,
@@ -616,7 +645,7 @@ class DigestRule:
             prior = dest.read_text() if dest.is_file() else ""
             if is_catastrophic_shrink(prior, content):
                 # 与 compose #28 同谓词:拒绝覆盖,input_hash 对齐使 step 收敛。
-                state.products[key] = ProductState(
+                state.products[product_key] = ProductState(
                     input_hash=input_hash,
                     status="blocked",
                     reason=REASON_DIGEST_DEGRADED,
@@ -625,7 +654,7 @@ class DigestRule:
             dest.write_text(content)
             from kairo.knowledge_review import extract_after_success
 
-            state.products[key] = ProductState(
+            state.products[product_key] = ProductState(
                 input_hash=input_hash,
                 produced_by={
                     "provider": self.provider.name,
@@ -642,7 +671,7 @@ class DigestRule:
                     self.ws.root,
                     self.ws.root.parent,
                     source_kind="digest",
-                    path=key,
+                    path=product_key,
                     text=content,
                     provider=self.provider,
                 )
@@ -650,10 +679,10 @@ class DigestRule:
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 provider-failed / digest-degraded 终态);hash 变才重试
-            ps = state.products.get(key)
+            ps = state.products.get(product_key)
             return ps is None or ps.input_hash != input_hash
 
-        return WorkItem(key, input_hash, run, is_stale)
+        return WorkItem(product_key, input_hash, run, is_stale)
 
 
 _REVIEW_FOLD_PERSONA = (
@@ -794,6 +823,7 @@ class ComposeRule:
     def __init__(self, ws, provider) -> None:
         self.ws = ws
         self.provider = provider
+        self._member_digests = {}
 
     def _is_fold_class(self, source_class: str) -> bool:
         """该类源是否折叠进 target(fold=True);fold=False 为只读参考层(corpus)。"""
@@ -802,15 +832,43 @@ class ComposeRule:
 
     def _all_digests(self) -> dict[str, str]:
         out: dict[str, str] = {}
-        from kairo.refs import run_ref_ids
+        from kairo.refs import RefRecord, load_catalog, run_ref_ids, topic_members
 
-        for ref_id in run_ref_ids(self.ws):
-            # 源分层(#13 v2):只折叠 fold=True 的源;corpus(参考层)的 digest 不计入。
-            if not self._is_fold_class(self.ws.read_manifest(ref_id).source_class):
+        self._member_digests = {}
+        try:
+            records = topic_members(self.ws.root.parent, self.ws.root.name)
+        except Exception:
+            records = []
+        if not records and not load_catalog(self.ws.root.parent).get("strict_membership", False):
+            records = []
+            for ref_id in run_ref_ids(self.ws):
+                man = self.ws.read_manifest(ref_id)
+                digest = self.ws.references_dir() / ref_id / "digest.md"
+                records.append(
+                    RefRecord(
+                        home=self.ws.root.name,
+                        id=ref_id,
+                        title=man.title or ref_id,
+                        source_class=man.source_class,
+                        digest_path=digest if digest.is_file() else None,
+                    )
+                )
+        for rec in records:
+            # corpus 是只读参考层；其他 source class 沿用 Topic 的 fold 配置。
+            if rec.source_class == "corpus" or not self._is_fold_class(rec.source_class):
                 continue
-            d = self.ws.root / f"references/{ref_id}/digest.md"
-            if d.exists():
-                out[f"references/{ref_id}/digest.md"] = _hash(d.read_text())
+            if rec.digest_path is not None and rec.digest_path.is_file():
+                # 迁移后的账本一律用 Ref 身份键。旧数据仍保留本 Topic
+                # 相对路径，直到 `kairo tag migrate` 完成确定性改写。
+                key = (
+                    rec.key
+                    if load_catalog(self.ws.root.parent).get("strict_membership", False)
+                    else f"references/{rec.id}/digest.md"
+                    if rec.home == self.ws.root.name
+                    else rec.key
+                )
+                out[key] = _hash(rec.digest_path.read_text())
+                self._member_digests[key] = rec
         return out
 
     def corpus_drifted(self, target_path: str, state: State) -> bool:
@@ -938,10 +996,16 @@ class ComposeRule:
                         )
                     )
             for p in sorted(use_delta):
-                abs_p = self.ws.root / p
+                rec = self._member_digests[p]
+                abs_p = rec.digest_path
+                assert abs_p is not None
                 materials.append(
                     CatalogItem(
-                        rel_path=p,
+                        rel_path=(
+                            f"references/{rec.id}/digest.md"
+                            if rec.home == self.ws.root.name
+                            else f"references/{rec.id}@{rec.home or 'global'}/digest.md"
+                        ),
                         abs_path=abs_p,
                         role="digest",
                         origin="digest",
@@ -966,7 +1030,28 @@ class ComposeRule:
                     )
                 )
             # #99:来源目录(全量 all_digests)——短 ID 稳定;context 中标注 S-…
-            catalog = build_source_catalog(self.ws, all_digests)
+            from kairo.provenance import SourceEntry, source_id_for
+
+            used_source_ids: set[str] = set()
+            catalog = []
+            for ref_key in sorted(all_digests):
+                rec = self._member_digests[ref_key]
+                catalog.append(
+                    SourceEntry(
+                        source_id=source_id_for(
+                            rec.id if rec.home == self.ws.root.name else ref_key,
+                            used_source_ids,
+                        ),
+                        ref_id=rec.id if rec.home == self.ws.root.name else ref_key,
+                        title=rec.title,
+                        digest_path=(
+                            f"references/{rec.id}/digest.md"
+                            if rec.home == self.ws.root.name
+                            else f"references/{rec.id}@{rec.home or 'global'}/digest.md"
+                        ),
+                        digest_hash=all_digests[ref_key],
+                    )
+                )
             reference_section = (
                 corpus.reference_section(self.ws, corpus_refs) if has_corpus else ""
             )
@@ -977,9 +1062,9 @@ class ComposeRule:
             )
             # 显式 re-step/full compose 必须用本次实际必读 digest；普通运行才是 delta。
             knowledge_text = "\n\n".join(
-                (self.ws.root / path).read_text()
+                self._member_digests[path].digest_path.read_text()
                 for path in sorted(use_delta)
-                if (self.ws.root / path).is_file()
+                if self._member_digests[path].digest_path is not None
             )
             knowledge_context, knowledge_hash, knowledge_diagnostic = _knowledge_context(self.ws, knowledge_text)
             layer = getattr(target, "layer", None) or "fact"
@@ -1095,7 +1180,7 @@ class ComposeRule:
 
             # 每个 delta digest 独立保留可定位出处；成功 target 也可提出跨材料变化。
             for digest_path in sorted(use_delta):
-                digest_file = self.ws.root / digest_path
+                digest_file = self._member_digests[digest_path].digest_path
                 if digest_file.is_file():
                     extract_after_success(
                         self.ws.root,

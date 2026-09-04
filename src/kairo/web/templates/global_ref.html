@@ -13,10 +13,32 @@
     <h2>{{ t('ref.tags') }}</h2>
     {% if tags %}
     <ul class="tag-row" aria-label="{{ t('ref.tags') }}">
-      {% for tag in tags %}<li>{{ tag }}</li>{% endfor %}
+      {% for tag in tags %}
+      <li>{{ tag }}{% if not public_read %}
+        <form method="post" action="/refs/{{ ref_id | urlencode }}/tags/{{ tag | urlencode }}/delete" style="display:inline">
+          <input type="hidden" name="home" value="{{ home or 'global' }}">
+          <input type="hidden" name="back" value="{{ back_url }}">
+          <button class="btn btn-ghost btn-inline" type="submit" aria-label="移除 {{ tag }}">移除</button>
+        </form>
+        {% endif %}
+      </li>
+      {% endfor %}
     </ul>
     {% else %}
     <p class="panel-hint">{{ t('ref.tags_empty') }}</p>
+    {% endif %}
+    {% if not public_read %}{% set available_tags = tag_catalog | reject('in', tags) | list %}
+    {% if available_tags %}
+    <form class="obj-add" method="post" action="/refs/{{ ref_id | urlencode }}/tags">
+      <input type="hidden" name="home" value="{{ home or 'global' }}">
+      <input type="hidden" name="back" value="{{ back_url }}">
+      <label class="dlg-label" for="ref-tag">引用已有 Tag</label>
+      <select id="ref-tag" name="tag" required>{% for tag in available_tags %}<option value="{{ tag }}">{{ tag }}</option>{% endfor %}</select>
+      <button class="btn btn-step btn-inline" type="submit">添加</button>
+    </form>
+    {% else %}
+    <p class="panel-hint">没有可引用的 Tag。请先在 Settings 创建 Tag。</p>
+    {% endif %}
     {% endif %}
   </section>
 

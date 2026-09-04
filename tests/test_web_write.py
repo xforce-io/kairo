@@ -144,6 +144,9 @@ def test_workspace_view_has_add_corpus_path_input(tmp_path):
 
 def test_create_workspace(tmp_path):
     from urllib.parse import quote
+    from kairo.refs import create_tag
+
+    create_tag(tmp_path, "产品规划")
 
     r = _client(tmp_path).post(
         "/workspaces", data={"topic": "产品规划"}, follow_redirects=False
@@ -152,6 +155,12 @@ def test_create_workspace(tmp_path):
     assert r.headers.get("HX-Redirect") == "/w/" + quote("产品规划")
     ws = Workspace.open(tmp_path / "产品规划")
     assert ws.constitution.topic == "产品规划"
+
+
+def test_create_workspace_requires_same_named_tag(tmp_path):
+    r = _client(tmp_path).post("/workspaces", data={"topic": "产品规划"})
+    assert r.status_code == 409
+    assert not (tmp_path / "产品规划").exists()
 
 
 def test_create_workspace_rejects_bad_topic(tmp_path):

@@ -279,12 +279,28 @@ def migrate_tag_rules(
         proof = json.loads(evidence.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RefError("迁移前备份证据不可读") from exc
-    required = ("remote", "backup_id", "verified_at", "restored")
-    if any(not proof.get(key) for key in required) or proof.get("restored") is not True:
+    required = (
+        "remote",
+        "snapshot_path",
+        "backup_id",
+        "created_at",
+        "manifest_sha256",
+        "verified_at",
+        "restored",
+        "restored_root",
+    )
+    if (
+        any(not proof.get(key) for key in required)
+        or proof.get("remote") != "jms-115"
+        or proof.get("restored") is not True
+    ):
         raise RefError("迁移前备份证据不完整")
 
     serve = Path(serve)
     catalog = load_catalog(serve)
+    raw_tags = [str(tag).strip() for tag in catalog.get("tags") or [] if str(tag).strip()]
+    if len(raw_tags) != len(set(raw_tags)):
+        raise RefError("迁移前 Tag 词表存在规范化冲突")
     tags = set(catalog["tags"])
     for values in (catalog.get("assignments") or {}).values():
         tags.update(_normalize_tag(value) for value in values)
@@ -298,33 +314,71 @@ def migrate_tag_rules(
             legacy_none.append(slug)
         else:
             tags.update(_normalize_tag(value) for value in ws.constitution.include_tags)
+    names = [ws.constitution.topic.strip() for ws in topics]
+    if len(names) != len(set(names)):
+        raise RefError("迁移前 Topic 名称存在规范化冲突")
+    known_ref_keys = {rec.key for rec in list_all_refs(serve)}
+    unknown_assignments = sorted(
+        key for key in (catalog.get("assignments") or {}) if key not in known_ref_keys
+    )
+    if unknown_assignments:
+        raise RefError("迁移前存在无法解析的 Ref Tag 引用")
     report = {
         "ok": True,
         "dry_run": dry_run,
         "topics": [ws.root.name for ws in topics],
         "legacy_home_topics": legacy_none,
         "tags": sorted(tags),
+        "ledger_conversion": True,
         "backup_id": proof["backup_id"],
     }
     if dry_run:
         return report
 
-    original: list[tuple[Workspace, Any]] = []
+    # 所有候选在写入前先保留内存快照；任一写入失败时还原，不能留下
+    # "strict catalog 已写、部分 Topic 仍是 legacy" 的半迁移状态。
+    original: list[tuple[Workspace, Any, Any]] = []
+    original_catalog = json.loads(json.dumps(catalog))
     try:
         for ws in topics:
-            original.append((ws, ws.constitution.model_copy(deep=True)))
+            state = ws.read_state()
+            original.append((ws, ws.constitution.model_copy(deep=True), state.model_copy(deep=True)))
             if ws.constitution.include_tags is None:
                 ws.constitution.include_tags = []
                 ws.write_constitution(ws.constitution)
+            # 旧账本只能指向本 Topic 自己的 digest；把它们转换成稳定的
+            # Ref 身份键，不复制 digest，也不改 target 正文。
+            local_ids = set(ws.list_reference_ids())
+            changed = False
+            for target in state.targets.values():
+                for attr in ("folded", "last_major_folded"):
+                    ledger = getattr(target, attr)
+                    converted: dict[str, str] = {}
+                    for key, digest_hash in ledger.items():
+                        prefix, suffix = "references/", "/digest.md"
+                        if key.startswith(prefix) and key.endswith(suffix):
+                            ref_id = key[len(prefix) : -len(suffix)]
+                            if ref_id in local_ids and "/" not in ref_id:
+                                key = ref_key(ws.root.name, ref_id)
+                                changed = True
+                        converted[key] = digest_hash
+                    setattr(target, attr, converted)
+            if changed:
+                ws.write_state(state)
         catalog["tags"] = sorted(tags)
         catalog["strict_membership"] = True
         save_catalog(serve, catalog)
     except Exception as exc:
-        for ws, constitution in original:
+        for ws, constitution, state in original:
             try:
                 ws.write_constitution(constitution)
+                ws.write_state(state)
             except Exception:
                 pass
+        try:
+            save_catalog(serve, original_catalog)
+        except Exception:
+            pass
         raise RefError(f"迁移失败:{exc}") from exc
     return report
 

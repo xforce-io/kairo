@@ -200,6 +200,15 @@ def new(
     if dest.exists():
         typer.secho(f"已存在:{dest}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
+    from kairo.refs import list_tags
+
+    if topic not in list_tags(serve):
+        typer.secho(
+            f"请先在 Settings 创建同名 Tag:{topic}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
     Workspace.init(dest, topic=topic)
     typer.echo(f"created {dest}")
 

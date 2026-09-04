@@ -145,9 +145,12 @@ def test_web_alias_conflict_not_saved(tmp_path):
 
 
 def test_cli_effective_hash_stable_with_machine(tmp_path, monkeypatch):
+    from kairo.refs import create_tag
+
     root = tmp_path / "serve"
     root.mkdir()
     monkeypatch.chdir(root)
+    create_tag(root, "ws")
     runner.invoke(app, ["new", "ws", "--root", str(root)])
     monkeypatch.chdir(root / "ws")
     runner.invoke(app, ["glossary", "add", "公共锚", "--scope", "shared"])
