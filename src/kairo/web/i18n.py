@@ -858,10 +858,20 @@ CATALOG: dict[str, dict[str, str]] = {
 
 
 def resolve_lang(request) -> str:
-    """cookie 'lang'(若 ∈ SUPPORTED) → Accept-Language(zh*→zh, en*→en) → DEFAULT_LANG。"""
+    """cookie → 已保存的 General locale → Accept-Language → 默认语言。"""
     cookie = request.cookies.get("lang")
     if cookie in SUPPORTED:
         return cookie
+    try:
+        from kairo.settings import load_settings, settings_path
+
+        if settings_path().is_file():
+            configured = load_settings().general.get("locale")
+            if configured in SUPPORTED:
+                return configured
+    except (OSError, ValueError):
+        # 语言切换不能因本机 Settings 损坏而让页面不可访问。
+        pass
     accept = request.headers.get("accept-language", "") or ""
     for part in accept.split(","):
         code = part.split(";")[0].strip().lower()

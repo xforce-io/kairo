@@ -21,7 +21,7 @@
       <a class="card-main" href="/projects/{{ p.id }}">
         <h3>{{ p.name }}</h3>
         <div class="badges">
-          <span class="badge stream">{{ p.workspace_slugs|length }} {{ t('proj.workspaces') }}</span>
+          <span class="badge stream">{{ p.topics|length }} {{ t('proj.workspaces') }}</span>
           <span class="badge corpus">{{ t('proj.ref_count').format(n=card.member_ref_count) }}</span>
           {% if card.latest_run %}<span class="badge {% if card.latest_run.status == 'failed' %}blocked{% else %}stream{% endif %}">{{ t('proj.latest_run').format(status=t('proj.run_' ~ card.latest_run.status)) }}</span>{% else %}<span class="badge">{{ t('proj.no_run') }}</span>{% endif %}
         </div>

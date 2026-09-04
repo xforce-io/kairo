@@ -1,9 +1,15 @@
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from kairo.web.i18n import CATALOG, DEFAULT_LANG, SUPPORTED, resolve_lang, translator
 from kairo.web.server import create_app
+
+
+@pytest.fixture(autouse=True)
+def _isolate_settings(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
 def _req(cookies=None, accept=None):
@@ -65,6 +71,16 @@ def test_html_lang_defaults_to_en(tmp_path):
 def test_html_lang_follows_accept_language(tmp_path):
     r = _client(tmp_path).get("/", headers={"Accept-Language": "zh-CN,zh;q=0.9"})
     assert '<html lang="zh">' in r.text
+
+
+def test_html_lang_uses_saved_general_locale_before_accept_language(tmp_path):
+    from kairo.settings import set_dotted
+
+    set_dotted("general.locale", "zh")
+    client = _client(tmp_path)
+    assert '<html lang="zh">' in client.get("/", headers={"Accept-Language": "en-US"}).text
+    client.cookies.set("lang", "en")
+    assert '<html lang="en">' in client.get("/").text
 
 
 def test_set_lang_sets_cookie_and_redirects(tmp_path):

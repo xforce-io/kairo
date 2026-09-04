@@ -20,6 +20,7 @@ READER_NOTION = "notion"
 
 _NOTION_HOSTS = ("notion.so", "notion.site")
 _WECOM_HOSTS = ("work.weixin.qq.com", "doc.weixin.qq.com")
+_TENCENT_DOCS_HOST = "docs.qq.com"
 
 
 @dataclass(frozen=True)
@@ -48,14 +49,15 @@ def infer_source(url: str) -> InferredSource:
     if not text:
         raise ReadError(INVALID_LINK, "链接为空")
     parsed = urlparse(text)
+    _reject_url_credentials(parsed)
     host = (parsed.hostname or "").lower()
     path = parsed.path.lower()
     if parsed.scheme not in ("http", "https") or not host:
         raise ReadError(INVALID_LINK, "不是有效链接")
-    if host == "docs.qq.com" or host.endswith(".docs.qq.com"):
-        if "/smartsheet" in path:
+    if host == _TENCENT_DOCS_HOST:
+        if path.startswith("/smartsheet/"):
             return InferredSource(READER_TENCENT, READER_TENCENT, "smartsheet", "腾讯文档", True)
-        if "/sheet" in path:
+        if path.startswith("/sheet/"):
             return InferredSource(READER_TENCENT, READER_TENCENT, "spreadsheet", "腾讯文档", True)
         raise ReadError(INVALID_LINK, "不是腾讯文档表格或智能表格链接")
     if host == "notion.so" or host.endswith(".notion.so") or host == "notion.site" or host.endswith(".notion.site"):
@@ -65,20 +67,24 @@ def infer_source(url: str) -> InferredSource:
     raise ReadError(INVALID_LINK, "无法识别的资料平台")
 
 
+def _reject_url_credentials(parsed) -> None:
+    if parsed.username or parsed.password:
+        raise ReadError(INVALID_LINK, "链接不得包含凭据")
+
+
 def validate_tencent_url(url: str, kind: str) -> None:
     text = (url or "").strip()
     if not text:
         raise ReadError(INVALID_LINK, "链接为空")
     parsed = urlparse(text)
+    _reject_url_credentials(parsed)
     host = (parsed.hostname or "").lower()
-    if parsed.scheme not in ("http", "https") or not (
-        host == "docs.qq.com" or host.endswith(".docs.qq.com")
-    ):
+    if parsed.scheme not in ("http", "https") or host != _TENCENT_DOCS_HOST:
         raise ReadError(INVALID_LINK, "不是腾讯文档链接")
     path = parsed.path.lower()
-    if kind == "spreadsheet" and "/sheet" not in path:
+    if kind == "spreadsheet" and not path.startswith("/sheet/"):
         raise ReadError(INVALID_LINK, "不是腾讯文档表格链接")
-    if kind == "smartsheet" and "/smartsheet" not in path:
+    if kind == "smartsheet" and not path.startswith("/smartsheet/"):
         raise ReadError(INVALID_LINK, "不是腾讯文档智能表格链接")
     if kind not in ("spreadsheet", "smartsheet"):
         raise ReadError(INVALID_LINK, f"不支持的类型:{kind}")
@@ -93,12 +99,16 @@ def _classify_failure(blob: str) -> str:
     return READ_FAILED
 
 
+READER_TIMEOUT_SECONDS = 30.0
+
+
 def read_tencent_docs(
     url: str,
     kind: str,
     connection: Connection,
     *,
     runner=subprocess.run,
+    timeout: float = READER_TIMEOUT_SECONDS,
 ) -> str:
     """真实 Reader 入口：先查连接与链接，再跑外部 cmd，映射三类失败。"""
     if connection.authorized is False:
@@ -112,7 +122,9 @@ def read_tencent_docs(
     except (ValueError, KeyError, IndexError) as exc:
         raise ReadError(READ_FAILED, f"命令无法解析:{exc}") from exc
     try:
-        proc = runner(argv, capture_output=True, text=True, check=False)
+        proc = runner(argv, capture_output=True, text=True, check=False, timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        raise ReadError(READ_FAILED, "读取超时") from exc
     except OSError as exc:
         raise ReadError(READ_FAILED, f"无法启动读取命令:{exc}") from exc
     stdout = proc.stdout or ""

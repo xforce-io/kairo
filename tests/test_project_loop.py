@@ -427,6 +427,135 @@ def test_infer_source_classifies_platforms():
         raise AssertionError("expected unsupported")
     except ReadError as exc:
         assert exc.code == UNSUPPORTED
+    for invalid in (
+        "https://untrusted.docs.qq.com/sheet/Denergy",
+        "https://docs.qq.com/sheetish/Denergy",
+        "https://docs.qq.com/smartsheetish/Senergy",
+    ):
+        try:
+            infer_source(invalid)
+            raise AssertionError(f"expected invalid: {invalid}")
+        except ReadError as exc:
+            assert exc.code == INVALID_LINK
+
+
+def test_datasource_kind_and_reader_follow_url_inference(tmp_path):
+    from kairo.projects import ProjectError, add_datasource, create_project, get_project
+
+    project = create_project(tmp_path, "P")
+    inferred = add_datasource(
+        tmp_path,
+        project.id,
+        url="https://docs.qq.com/smartsheet/Senergy",
+        kind="smartsheet",
+        connection_id="tencent-docs",
+        reader="tencent-docs",
+    )
+    assert inferred.kind == "smartsheet"
+    assert inferred.reader == "tencent-docs"
+    for kwargs in (
+        {"kind": "spreadsheet"},
+        {"connection_id": "wecom"},
+        {"reader": "wecom"},
+    ):
+        try:
+            add_datasource(
+                tmp_path,
+                project.id,
+                url="https://docs.qq.com/smartsheet/Senergy",
+                **kwargs,
+            )
+            raise AssertionError(f"expected mismatch: {kwargs}")
+        except ProjectError as exc:
+            assert exc.code == "invalid_link"
+    saved = get_project(tmp_path, project.id)
+    assert all(ds.kind == "smartsheet" for ds in saved.datasources)
+    assert all(ds.reader == "tencent-docs" for ds in saved.datasources)
+    assert all(ds.connection_id == "tencent-docs" for ds in saved.datasources)
+
+
+def test_datasource_rejects_url_userinfo_and_does_not_store_secret(tmp_path):
+    from kairo.projects import ProjectError, add_datasource, create_project, get_project
+
+    project = create_project(tmp_path, "P")
+    secret = "leaked-pass-232"
+    try:
+        add_datasource(
+            tmp_path,
+            project.id,
+            url=f"https://user:{secret}@docs.qq.com/sheet/Denergy",
+        )
+        raise AssertionError("expected invalid_link")
+    except ProjectError as exc:
+        assert exc.code == "invalid_link"
+    disk = (tmp_path / ".kairo" / "projects" / project.id / "project.json").read_text(
+        encoding="utf-8"
+    )
+    assert secret not in disk
+    assert get_project(tmp_path, project.id).datasources == []
+    ok = add_datasource(tmp_path, project.id, url="https://docs.qq.com/sheet/Denergy")
+    assert ok.url == "https://docs.qq.com/sheet/Denergy"
+    smart = add_datasource(
+        tmp_path, project.id, url="https://docs.qq.com/smartsheet/Senergy"
+    )
+    assert smart.url == "https://docs.qq.com/smartsheet/Senergy"
+
+
+def test_list_projects_skips_corrupt_record_and_keeps_valid(tmp_path):
+    from kairo.projects import create_project, list_projects
+
+    good = create_project(tmp_path, "合法项目")
+    broken = tmp_path / ".kairo" / "projects" / "prj-broken"
+    broken.mkdir(parents=True)
+    (broken / "project.json").write_text("{not-json", encoding="utf-8")
+    extra = tmp_path / ".kairo" / "projects" / "prj-extra"
+    extra.mkdir(parents=True)
+    (extra / "project.json").write_text(
+        json.dumps(
+            {
+                "id": "prj-extra",
+                "name": "坏字段项目",
+                "workspace_slugs": [],
+                "datasources": [],
+                "tasks": [],
+                "not_a_field": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    listed = list_projects(tmp_path)
+    assert [p.id for p in listed] == [good.id]
+    client = TestClient(create_app(tmp_path), raise_server_exceptions=False)
+    api = client.get("/api/projects")
+    assert api.status_code == 200
+    names = {p["name"] for p in api.json()["projects"]}
+    assert names == {"合法项目"}
+    html = client.get("/projects")
+    assert html.status_code == 200
+    assert "合法项目" in html.text
+    assert "坏字段项目" not in html.text
+
+
+def test_reader_timeout_is_read_failed(tmp_path):
+    from kairo.readers import READ_FAILED, ReadError, read_tencent_docs
+    from kairo.settings import Connection
+
+    hang = tmp_path / "hang.py"
+    hang.write_text("import time\ntime.sleep(30)\nprint('late')\n", encoding="utf-8")
+    conn = Connection(
+        authorized=True,
+        cmd=f"{shlex.quote(sys.executable)} {shlex.quote(str(hang))} {{url}}",
+    )
+    try:
+        read_tencent_docs(
+            "https://docs.qq.com/sheet/Denergy",
+            "spreadsheet",
+            conn,
+            timeout=0.2,
+        )
+        raise AssertionError("expected timeout")
+    except ReadError as exc:
+        assert exc.code == READ_FAILED
 
 
 def test_reader_rejects_lookalike_hosts_and_bad_cmd_placeholders(tmp_path):

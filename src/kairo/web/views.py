@@ -2902,7 +2902,7 @@ def projects_page(request: Request, error: str | None = None) -> HTMLResponse:
         project_cards.append(
             {
                 "project": project,
-                "member_ref_count": len(project_member_refs(serve, project.workspace_slugs)),
+                "member_ref_count": len(project_member_refs(serve, project.topics)),
                 "latest_run": runs[0] if runs else None,
             }
         )
@@ -2945,7 +2945,7 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
     serve = _serve(request)
     available_topics = scan_workspaces(serve)
     by_slug = {item.slug: item for item in available_topics}
-    linked_topics = [by_slug[slug] for slug in project.workspace_slugs if slug in by_slug]
+    linked_topics = [by_slug[slug] for slug in project.topics if slug in by_slug]
     return _render(
         request,
         "project.html",
@@ -2954,7 +2954,7 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
             "project": project,
             "available_workspaces": available_topics,
             "linked_topics": linked_topics,
-            "member_refs": project_member_refs(serve, project.workspace_slugs),
+            "member_refs": project_member_refs(serve, project.topics),
             "runs": list_runs(serve, project_id),
             "error": error,
             "notice": notice,
