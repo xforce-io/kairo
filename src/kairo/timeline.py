@@ -263,7 +263,7 @@ def resolve_timeline_query(
             view="calendar", month=dt.date(d.year, d.month, 1), day=d
         )
     m = _month_start(today)
-    return TimelineQuery(view="calendar", month=m, day=today)
+    return TimelineQuery(view="recent", month=m, day=today)
 
 
 def _month_start(d: dt.date) -> dt.date:

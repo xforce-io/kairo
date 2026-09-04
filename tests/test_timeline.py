@@ -206,7 +206,7 @@ def test_custom_fold_class_eligibility(tmp_path):
 def test_resolve_timeline_query_mutex():
     today = dt.date(2026, 8, 25)
     q = resolve_timeline_query(today=today)
-    assert q.view == "calendar" and q.day == today
+    assert q.view == "recent" and q.day == today
     q = resolve_timeline_query(day="2026-08-24", today=today)
     assert q.month == dt.date(2026, 8, 1) and q.day == dt.date(2026, 8, 24)
     with pytest.raises(TimelineQueryError):
