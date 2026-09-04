@@ -31,14 +31,22 @@ kairo connect    # 把 operator skill 挂到本机 Claude / Cursor / Codex / Pi
 ## 快速上手
 
 ```bash
-kairo init "我的调研主题"      # 当前目录初始化为 Topic + 默认宪法
-kairo add 录音.m4a            # 登记路径指针（默认 stream/观测）
-kairo add 录音.m4a --copy     # 先复制进 Topic 再登记（源删除仍可用）
-kairo add ./会议夹            # 目录→一条多形态参考(夹内音频/文档/图)
-kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
-kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
-kairo step                    # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)
-kairo status                  # 看各 reference / 文档的融入状态
+kairo init "我的调研主题"            # 当前目录初始化为 Topic + 默认宪法
+kairo add 录音.m4a                  # 登记路径指针（默认 stream/观测）
+kairo add 录音.m4a --copy           # 先复制进 Topic 再登记（源删除仍可用）
+kairo add ./会议夹                  # 目录→一条多形态参考(夹内音频/文档/图)
+kairo add 调研报告.docx             # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
+kairo add 白皮书.md --corpus        # 登记为 corpus/基线（权威参考资料）
+kairo step                         # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)
+kairo status                       # 看各 reference / 文档的融入状态
+
+# 全局 Ref 注册到 Topic（须先创建 Tag）
+kairo tag create alpha              # 创建 Tag（与 Topic name 一致）
+kairo add 会议录音.m4a --topic alpha --copy  # 注册为全局 Ref 并加入 Topic
+cd alpha && kairo step              # 在 Topic 目录内 step
+
+# 附加 form 到现有 Ref
+kairo add 截图.png --to <ref_id> --copy    # 向既有 Ref 追加形态
 ```
 
 产出 `understanding.md`（中立事实）。旧 workspace 里的 `assessment.md` 若仍在磁盘上则停更，不再 fold。
@@ -49,14 +57,16 @@ kairo status                  # 看各 reference / 文档的融入状态
 | --- | --- |
 | `init` | 初始化**当前目录**为 Topic + 默认宪法 |
 | `list` | 列出 serve root 下各 Topic 摘要（`--json`；root 默认 `KAIRO_SERVE_ROOT` 或 cwd）[#95](https://github.com/xforce-io/kairo/issues/95) |
-| `new` | 在 serve root 下新建 Topic 目录并 init（对标 Web 新建） |
-| `rm-ws` | 删除 serve root 下某个 Topic（`--yes` 跳过确认；不碰 root glossary）— **已废弃，请使用 `rm`** |
+| `new` | 在 serve root 下新建 Topic 目录并 init（对标 Web 新建；须先创建同名 Tag） |
 | `rm` | 删除 serve root 下某个 Topic（`--yes` 跳过确认；不碰 root glossary） |
-| `add` | 登记一条 reference（默认路径指针；`--copy` 物化；`--corpus` 标基线；`--to <id>` 追加；`--occurred YYYY-MM-DD` 钉发生日） |
+| `add` | 登记 Ref：新 Ref（可选 `--topic <slug>` 加入 Topic）或 `--to <id>` 追加 form（默认路径指针；`--copy` 物化；`--corpus` 标基线；`--occurred YYYY-MM-DD` 钉发生日） |
+| `tag create` | 创建 Tag（新建 Topic 前须先创建同名 Tag） |
+| `tag add` | 为 Ref 添加 Tag（Topic 通过 include_tags 包含 Ref） |
+| `include set` | 设置 Topic 的包含规则（命中任一 Tag 即成为成员） |
 | `title` | 重命名参考展示名（不动 id / 目录） |
 | `occurred` | 修正或清空参考发生时间（`--clear`；不改 id、不 step） |
-| `timeline` | 跨 workspace 按发生日列出观测（`--day` / `--recent` / `--json`） |
-| `step` | 跑调和循环到收敛（自动选择可读取材料的 provider，顺序见下文） |
+| `timeline` | 跨 Topic 按发生日列出观测（`--day` / `--recent` / `--json`） |
+| `step` | 跑调和循环到收敛（在 Topic 目录内；自动选择可读取材料的 provider，顺序见下文） |
 | `run` | 有终态 blocked 则先清再 step（与 Web 主按钮一致） |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |
 | `retry-ref` | 单条参考清派生产物后重跑 |
@@ -64,7 +74,8 @@ kairo status                  # 看各 reference / 文档的融入状态
 | `prose` | 为单条参考生成可读文稿 `prose.md` |
 | `accept` | 接受手改、钉为新基线，解除 `blocked: manual-edit` |
 | `status` | 列 references / 各文档融入状态 |
-| `glossary` | 真名册 `list` / `add` / `rm`（`--scope workspace\|shared`） |
+| `knowledge` | 知识 `list` / `add` / `rm`（`--scope workspace\|global`） |
+| `glossary` | 兼容别名，等同 `knowledge` |
 | `index` | 重生成 `references/MEETINGS.md` 导航索引 |
 | `history` | 列版本快照 |
 | `rollback` | 回退文档到某版本 |
