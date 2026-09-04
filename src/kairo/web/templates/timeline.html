@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block subtitle %}{% if range_on %}{{ range_label }}{% else %}{{ month_label }}{% endif %}{% endblock %}
 {% block body %}
+{% macro home_label(it) %}{% if it.workspace == 'global' %}{{ t('tl.home_global') }}{% else %}{{ it.topic }}{% endif %}{% endmacro %}
 <div class="timeline cal-page">
   <div class="tl-toolbar">
     <div class="tl-modes">
@@ -12,9 +13,9 @@
       {% if view == 'recent' %}<input type="hidden" name="mode" value="recent">{% endif %}
       {% if view == 'unknown' %}<input type="hidden" name="unknown" value="1"><input type="hidden" name="month" value="{{ month_iso }}">{% endif %}
       <label class="sr-only" for="tl-tag">{{ t('tl.filter_tag') }}</label>
-      <input id="tl-tag" name="tag" list="tl-tag-options" value="{{ tag_filters | join(' ') }}" placeholder="输入已有 Tag" aria-label="{{ t('tl.filter_tag') }}">
+      <input id="tl-tag" name="tag" list="tl-tag-options" value="{{ tag_filters | join(' ') }}" placeholder="{{ t('tl.filter_ph') }}">
       <datalist id="tl-tag-options">{% for tag in tag_catalog %}<option value="{{ tag }}">{% endfor %}</datalist>
-      <button type="submit" class="btn btn-ghost btn-inline">筛选</button>
+      <button type="submit" class="btn btn-ghost btn-inline">{{ t('tl.filter_go') }}</button>
       {% if tag_filters %}
       <a class="btn btn-ghost btn-inline" href="/timeline?day={{ day_iso }}">{{ t('tl.clear_tags') }}</a>
       {% endif %}
@@ -34,7 +35,7 @@
       <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
         <span class="tl-title">{{ it.title }}</span>
         <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
-        <span class="tl-meta">{{ it.workspace or 'global' }} · {{ it.id }} · {{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {% if it.occurred_at %}{{ t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) }}{% else %}{{ t('tl.occurred_unknown') }}{% endif %}</span>
+        <span class="tl-meta">{{ home_label(it) }} · {{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {% if it.occurred_at %}{{ t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) }}{% else %}{{ t('tl.occurred_unknown') }}{% endif %}</span>
       </a>
       {% endfor %}
     </section>
@@ -75,7 +76,7 @@
         <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
           <span class="tl-title">{{ it.title }}</span>
           <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
-          <span class="tl-meta">{{ it.workspace or 'global' }} · {{ it.id }}</span>
+          <span class="tl-meta">{{ home_label(it) }}</span>
         </a>
         {% endfor %}
       </section>
@@ -120,7 +121,7 @@
           {% for it in g.entries %}
           <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
             <span class="tl-title">{{ it.title }}</span>
-            <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span><span class="tl-meta">{{ it.workspace or 'global' }} · {{ it.id }}</span>
+            <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span><span class="tl-meta">{{ home_label(it) }}</span>
           </a>
           {% endfor %}
           {% else %}
@@ -131,7 +132,7 @@
           <a class="tl-row" href="/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}">
             <span class="tl-title">{{ it.title }}</span>
             <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
-            <span class="tl-meta">{{ it.workspace or 'global' }} · {{ it.id }} · {% if it.occurred_at %}{{ it.occurred_at.strftime('%m-%d') }}{% else %}{{ t('tl.occurred_unknown') }}{% endif %}</span>
+            <span class="tl-meta">{{ home_label(it) }} · {% if it.occurred_at %}{{ it.occurred_at.strftime('%m-%d') }}{% else %}{{ t('tl.occurred_unknown') }}{% endif %}</span>
           </a>
           {% else %}
           <p class="tl-empty">{{ t('tl.empty_day') }}</p>

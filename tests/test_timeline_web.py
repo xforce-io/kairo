@@ -70,6 +70,39 @@ def test_timeline_recent_lists_by_added(tmp_path):
     assert "back=/timeline%3Fmode%3Drecent" in r.text
 
 
+def test_timeline_tag_filter_has_one_visible_intent(tmp_path):
+    """#250: 可见层只有一份筛选意图 + 一个提交；读屏文案不重复占位。"""
+    root, _, _ = _two_ws(tmp_path)
+    html = _client(root).get("/timeline", params={"mode": "recent"}).text
+    assert html.count('id="tl-tag"') == 1
+    assert re.search(r'<label class="sr-only"[^>]*for="tl-tag">', html)
+    assert "aria-label=" not in html.split('id="tl-tag"', 1)[1].split(">", 1)[0]
+    form = html.split('<form class="tl-tags"', 1)[1].split("</form>", 1)[0]
+    assert form.count('type="submit"') == 1
+    visible = form.split("</label>", 1)[-1]
+    assert "按 Tag 筛选" not in visible
+    assert "Filter by tag" not in visible
+    assert 'placeholder="Existing tags"' in form or 'placeholder="已有 Tag"' in form
+
+
+def test_timeline_same_title_uses_topic_not_id(tmp_path):
+    """#251: 同名 Ref 用 Topic 名区分，tl-meta 不暴露 slug/id。"""
+    root, wa, wb = _two_ws(tmp_path)
+    (tmp_path / "a.txt").write_text("甲")
+    (tmp_path / "b.txt").write_text("乙")
+    wa.add([tmp_path / "a.txt"], ref_id="20260903-16-a", title="20260903-16")
+    wb.add([tmp_path / "b.txt"], ref_id="20260903-16-b", title="20260903-16")
+    html = _client(root).get("/timeline", params={"mode": "recent"}).text
+    assert html.count("20260903-16") >= 2
+    assert "能源梳理" in html
+    assert "招聘" in html
+    meta = _meta_cells(html)
+    assert any("能源梳理" in cell for cell in meta)
+    assert any("招聘" in cell for cell in meta)
+    assert all("20260903-16-a" not in cell and "20260903-16-b" not in cell for cell in meta)
+    assert all("alpha" not in cell and "beta" not in cell for cell in meta)
+
+
 def test_timeline_tag_form_keeps_recent_and_unknown_queries_valid(tmp_path):
     root, _, _ = _two_ws(tmp_path)
     client = _client(root)
@@ -111,7 +144,7 @@ def test_timeline_range_lists_inclusive_and_hides_unknown(tmp_path):
     r = c.get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
     assert r.status_code == 200
     assert "候选人沟通" in r.text
-    assert "能源梳理" not in r.text
+    assert any("能源梳理" in cell for cell in _meta_cells(r.text))
     assert "2026-08-24" in r.text
     assert 'href="/refs/2026-08-25-weekly?home=alpha&back=/timeline%3Ffrom%3D2026-08-24%26to%3D2026-08-25"' in r.text
     assert "2026-08-25-weekly" not in _meta_cells(r.text)
