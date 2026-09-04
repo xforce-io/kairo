@@ -124,7 +124,7 @@ def test_timeline_range_lists_inclusive_and_hides_unknown(tmp_path):
     assert 'id="rev-topic"' not in r.text
     day = c.get("/timeline", params={"day": "2026-08-24"})
     assert day.status_code == 200
-    assert "08-24" in _meta_cells(day.text)
+    assert any("08-24" in cell for cell in _meta_cells(day.text))
 
 
 def test_timeline_empty_range_has_no_write_button(tmp_path):

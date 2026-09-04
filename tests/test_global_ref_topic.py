@@ -12,7 +12,9 @@ from kairo.cli import app
 from kairo.refs import (
     add_global_ref,
     add_tag,
+    create_tag,
     list_all_refs,
+    migrate_tag_rules,
     run_ref_ids,
     set_include_tags,
     timeline_digest_path,
@@ -68,6 +70,8 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
     assert loose["home"] == ""
     assert loose["tags"] == []
 
+    create_tag(serve, "energy")
+    create_tag(serve, "policy")
     tagged = _load(
         _cli(["tag", "add", "loose-note", "energy", "--json"], serve, monkeypatch)
     )
@@ -178,6 +182,7 @@ def test_untagged_global_ref_not_in_topic(tmp_path):
     serve = tmp_path / "root"
     serve.mkdir()
     Workspace.init(serve / "t1", topic="T")
+    create_tag(serve, "energy")
     src = tmp_path / "x.txt"
     src.write_text("x")
     add_global_ref(serve, [src], ref_id="orphan")
@@ -199,3 +204,41 @@ def test_untagged_global_ref_not_in_topic(tmp_path):
     assert digest.is_file()
     ws = Workspace.open(serve / "t1")
     assert run_ref_ids(ws) == []
+
+
+def test_tag_vocabulary_delete_protection_and_strict_migration(tmp_path):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    ws = Workspace.init(serve / "energy", topic="能源")
+    source = tmp_path / "note.txt"
+    source.write_text("note", encoding="utf-8")
+    rid = ws.add([source], ref_id="local")
+    create_tag(serve, "能源")
+    create_tag(serve, "政策")
+    add_tag(serve, home="energy", ref_id=rid, tag="政策")
+    set_include_tags(serve, "energy", ["政策"])
+    from kairo.refs import delete_tag, topic_members
+
+    with __import__("pytest").raises(Exception):
+        delete_tag(serve, "能源")
+    with __import__("pytest").raises(Exception):
+        delete_tag(serve, "政策")
+
+    evidence = tmp_path / "evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "remote": "jms-115",
+                "backup_id": "b-20260903T143304Z-5a68d1308a8d",
+                "verified_at": "2026-09-04T00:00:00+08:00",
+                "restored": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+    report = migrate_tag_rules(serve, evidence, dry_run=True)
+    assert report["dry_run"] is True
+    migrated = migrate_tag_rules(serve, evidence)
+    assert migrated["dry_run"] is False
+    assert {item.id for item in topic_members(serve, "energy")} == {rid}
+    assert Workspace.open(serve / "energy").constitution.include_tags == ["政策"]

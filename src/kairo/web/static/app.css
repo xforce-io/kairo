@@ -1011,6 +1011,7 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .tl-day-head h2 { margin: 0; font-family: var(--serif); font-size: 20px; font-weight: 600; }
 .tl-day-head .count { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .tl-day.unknown .tl-day-head h2 { color: var(--amber); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .tl-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: baseline; padding: 10px 8px; border-radius: 8px; text-decoration: none; color: inherit; }
 .tl-row:hover { background: #ece5d6; }
 .tl-title { font-family: var(--serif); font-size: 16.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

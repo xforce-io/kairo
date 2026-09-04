@@ -510,6 +510,7 @@ def timeline_view(
     except TimelineQueryError:
         raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
     items = scan_timeline(request.app.state.root)
+    from kairo.refs import list_tags
     tag_filters = []
     for raw in tag or []:
         tag_filters.extend(part for part in str(raw).split() if part)
@@ -633,6 +634,7 @@ def timeline_view(
             "too_long": too_long,
             "max_range_days": MAX_RANGE_DAYS,
             "tag_filters": tag_filters,
+            "tag_catalog": list_tags(_serve(request)),
             "timeline_back": timeline_back,
         },
     )
@@ -818,6 +820,7 @@ def global_ref_view(
     from kairo.refs import (
         RefError,
         list_all_refs,
+        list_tags,
         list_topic_slugs,
         open_topic,
         resolve_open,
@@ -862,6 +865,7 @@ def global_ref_view(
             "title": man.title or rid,
             "ref_id": rid,
             "tags": rec.tags if rec is not None else [],
+            "tag_catalog": list_tags(serve),
             "related_topics": related_topics,
             "digest": digest.read_text(encoding="utf-8") if digest.is_file() else "",
             "forms": man.forms,
@@ -2892,6 +2896,7 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
 @router.get("/settings", response_class=HTMLResponse)
 def settings_page(request: Request, error: str = "", notice: str = "") -> HTMLResponse:
     _console_only(request)
+    from kairo.refs import list_tag_records
     from kairo.settings import as_public_dict
 
     return _render(
@@ -2900,6 +2905,7 @@ def settings_page(request: Request, error: str = "", notice: str = "") -> HTMLRe
         {
             "nav_active": "settings",
             "settings": as_public_dict(),
+            "tags": list_tag_records(_serve(request)),
             "error": error,
             "notice": notice,
         },
@@ -2916,6 +2922,30 @@ def settings_set_form(request: Request, path: str = Form(...), value: str = Form
     except SettingsError as e:
         return settings_page(request, error=str(e))
     return RedirectResponse("/settings", status_code=303)
+
+
+@router.post("/settings/tags")
+def settings_tag_create(request: Request, name: str = Form(...)) -> HTMLResponse:
+    _console_only(request)
+    from kairo.refs import RefError, create_tag
+
+    try:
+        create_tag(_serve(request), name)
+    except RefError as exc:
+        return settings_page(request, error=str(exc))
+    return RedirectResponse("/settings#tags", status_code=303)
+
+
+@router.post("/settings/tags/{tag}/delete")
+def settings_tag_delete(request: Request, tag: str) -> HTMLResponse:
+    _console_only(request)
+    from kairo.refs import RefError, delete_tag
+
+    try:
+        delete_tag(_serve(request), tag)
+    except RefError as exc:
+        return settings_page(request, error=str(exc))
+    return RedirectResponse("/settings#tags", status_code=303)
 
 
 @router.get("/api/refs")
@@ -2936,6 +2966,40 @@ def api_refs_list(request: Request) -> JSONResponse:
         for r in list_all_refs(_serve(request))
     ]
     return JSONResponse({"ok": True, "refs": refs})
+
+
+@router.get("/api/tags")
+def api_tags_list(request: Request) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import list_tag_records
+
+    return JSONResponse({"ok": True, "tags": list_tag_records(_serve(request))})
+
+
+@router.post("/api/tags")
+async def api_tags_create(request: Request) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import RefError, create_tag, tag_usages
+
+    body = await request.json()
+    try:
+        name = create_tag(_serve(request), body.get("name") or "")
+        record = tag_usages(_serve(request), name)
+    except RefError as exc:
+        return _api_error(exc)
+    return JSONResponse({"ok": True, "tag": record}, status_code=201)
+
+
+@router.delete("/api/tags/{tag}")
+def api_tags_delete(request: Request, tag: str) -> JSONResponse:
+    _console_only(request)
+    from kairo.refs import RefError, delete_tag
+
+    try:
+        delete_tag(_serve(request), tag)
+    except RefError as exc:
+        return _api_error(exc, 409)
+    return JSONResponse({"ok": True})
 
 
 @router.post("/api/refs")

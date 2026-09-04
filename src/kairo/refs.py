@@ -36,7 +36,7 @@ def catalog_path(serve: Path) -> Path:
 def load_catalog(serve: Path) -> dict[str, Any]:
     path = catalog_path(serve)
     if not path.is_file():
-        return {"tags": [], "assignments": {}}
+        return {"tags": [], "assignments": {}, "strict_membership": False}
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -46,7 +46,11 @@ def load_catalog(serve: Path) -> dict[str, Any]:
         str(k): [str(t) for t in (v or []) if str(t).strip()]
         for k, v in (raw.get("assignments") or {}).items()
     }
-    return {"tags": tags, "assignments": assignments}
+    return {
+        "tags": tags,
+        "assignments": assignments,
+        "strict_membership": bool(raw.get("strict_membership", False)),
+    }
 
 
 def save_catalog(serve: Path, catalog: dict[str, Any]) -> None:
@@ -59,7 +63,14 @@ def save_catalog(serve: Path, catalog: dict[str, Any]) -> None:
             if name and name not in cleaned:
                 cleaned.append(name)
         assignments[str(key)] = cleaned
-    _atomic_json(catalog_path(serve), {"tags": tags, "assignments": assignments})
+    _atomic_json(
+        catalog_path(serve),
+        {
+            "tags": tags,
+            "assignments": assignments,
+            "strict_membership": bool(catalog.get("strict_membership", False)),
+        },
+    )
 
 
 def global_home_path(serve: Path) -> Path:
@@ -204,6 +215,120 @@ def _normalize_tag(tag: str) -> str:
     return name
 
 
+def create_tag(serve: Path, tag: str) -> str:
+    """在全局词表中创建 Tag；Ref/Topic 只能引用已存在项。"""
+    name = _normalize_tag(tag)
+    catalog = load_catalog(serve)
+    if name in catalog["tags"]:
+        raise RefError(f"Tag 已存在:{name}")
+    catalog["tags"].append(name)
+    save_catalog(serve, catalog)
+    return name
+
+
+def tag_usages(serve: Path, tag: str) -> dict[str, Any]:
+    """返回删除判定所需的引用计数；不暴露 Ref 正文。"""
+    name = _normalize_tag(tag)
+    catalog = load_catalog(serve)
+    ref_count = sum(name in vals for vals in (catalog.get("assignments") or {}).values())
+    rule_count = 0
+    protected_by: list[str] = []
+    for slug in list_topic_slugs(serve):
+        ws = open_topic(serve, slug)
+        if name in (ws.constitution.include_tags or []):
+            rule_count += 1
+        if ws.constitution.topic == name:
+            protected_by.append(slug)
+    return {
+        "name": name,
+        "ref_count": ref_count,
+        "rule_count": rule_count,
+        "protected_by": protected_by,
+    }
+
+
+def list_tag_records(serve: Path) -> list[dict[str, Any]]:
+    return [tag_usages(serve, tag) for tag in list_tags(serve)]
+
+
+def delete_tag(serve: Path, tag: str) -> None:
+    name = _normalize_tag(tag)
+    catalog = load_catalog(serve)
+    if name not in catalog["tags"]:
+        raise RefError(f"Tag 不存在:{name}")
+    usage = tag_usages(serve, name)
+    if usage["ref_count"] or usage["rule_count"] or usage["protected_by"]:
+        raise RefError(
+            "Tag 仍被引用:"
+            f"Ref {usage['ref_count']}、Topic 规则 {usage['rule_count']}、"
+            f"Topic 名称 {len(usage['protected_by'])}"
+        )
+    catalog["tags"] = [item for item in catalog["tags"] if item != name]
+    save_catalog(serve, catalog)
+
+
+def migrate_tag_rules(
+    serve: Path, evidence_path: Path | str, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """将历史 home 成员语义切换为严格 Tag 规则。
+
+    证据由运维流程产生；本函数只校验其恢复已验证的最小契约，不访问 remote。
+    """
+    evidence = Path(evidence_path)
+    try:
+        proof = json.loads(evidence.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RefError("迁移前备份证据不可读") from exc
+    required = ("remote", "backup_id", "verified_at", "restored")
+    if any(not proof.get(key) for key in required) or proof.get("restored") is not True:
+        raise RefError("迁移前备份证据不完整")
+
+    serve = Path(serve)
+    catalog = load_catalog(serve)
+    tags = set(catalog["tags"])
+    for values in (catalog.get("assignments") or {}).values():
+        tags.update(_normalize_tag(value) for value in values)
+    topics: list[Workspace] = []
+    legacy_none: list[str] = []
+    for slug in list_topic_slugs(serve):
+        ws = open_topic(serve, slug)
+        topics.append(ws)
+        tags.add(_normalize_tag(ws.constitution.topic))
+        if ws.constitution.include_tags is None:
+            legacy_none.append(slug)
+        else:
+            tags.update(_normalize_tag(value) for value in ws.constitution.include_tags)
+    report = {
+        "ok": True,
+        "dry_run": dry_run,
+        "topics": [ws.root.name for ws in topics],
+        "legacy_home_topics": legacy_none,
+        "tags": sorted(tags),
+        "backup_id": proof["backup_id"],
+    }
+    if dry_run:
+        return report
+
+    original: list[tuple[Workspace, Any]] = []
+    try:
+        for ws in topics:
+            original.append((ws, ws.constitution.model_copy(deep=True)))
+            if ws.constitution.include_tags is None:
+                ws.constitution.include_tags = []
+                ws.write_constitution(ws.constitution)
+        catalog["tags"] = sorted(tags)
+        catalog["strict_membership"] = True
+        save_catalog(serve, catalog)
+    except Exception as exc:
+        for ws, constitution in original:
+            try:
+                ws.write_constitution(constitution)
+            except Exception:
+                pass
+        raise RefError(f"迁移失败:{exc}") from exc
+    return report
+
+
 def add_tag(serve: Path, *, home: str, ref_id: str, tag: str) -> list[str]:
     tag = _normalize_tag(tag)
     recs = {r.key: r for r in list_all_refs(serve)}
@@ -212,7 +337,7 @@ def add_tag(serve: Path, *, home: str, ref_id: str, tag: str) -> list[str]:
         raise RefError(f"Ref 不存在:{key}")
     catalog = load_catalog(serve)
     if tag not in catalog["tags"]:
-        catalog["tags"].append(tag)
+        raise RefError(f"Tag 不在词表中:{tag}")
     current = list(catalog["assignments"].get(key, []))
     if tag not in current:
         current.append(tag)
@@ -239,18 +364,18 @@ def include_tags_of(ws: Workspace) -> list[str] | None:
     return ws.constitution.include_tags
 
 
-def set_include_tags(serve: Path, slug: str, tags: list[str] | None) -> list[str] | None:
+def set_include_tags(serve: Path, slug: str, tags: list[str] | None) -> list[str]:
     ws = open_topic(serve, slug)
     con = ws.constitution
-    if tags is None:
-        con.include_tags = None
-    else:
-        cleaned: list[str] = []
-        for raw in tags:
-            name = _normalize_tag(raw)
-            if name not in cleaned:
-                cleaned.append(name)
-        con.include_tags = cleaned
+    catalog = load_catalog(serve)
+    cleaned: list[str] = []
+    for raw in tags or []:
+        name = _normalize_tag(raw)
+        if name not in catalog["tags"]:
+            raise RefError(f"Tag 不在词表中:{name}")
+        if name not in cleaned:
+            cleaned.append(name)
+    con.include_tags = cleaned
     ws.write_constitution(con)
     return con.include_tags
 
@@ -259,7 +384,7 @@ def topic_members(serve: Path, slug: str) -> list[RefRecord]:
     ws = open_topic(serve, slug)
     rules = include_tags_of(ws)
     all_refs = list_all_refs(serve)
-    if rules is None:
+    if rules is None and not load_catalog(serve).get("strict_membership", False):
         return [r for r in all_refs if r.home == slug]
     if not rules:
         return []
@@ -298,13 +423,10 @@ def resolve_open(serve: Path, home: str, ref_id: str) -> tuple[Workspace, str]:
 
 
 def run_ref_ids(ws: Workspace) -> list[str]:
-    """本 Topic 知识 Run 要处理的本地 home Ref。
-
-    include_tags 缺省：全部本地 id。显式 []：无。非空：仅当前成员且 home 为本 Topic。
-    """
+    """本 Topic 知识 Run 要处理的本地成员 Ref；home 不再隐式成为成员。"""
     local = list(ws.list_reference_ids())
     rules = include_tags_of(ws)
-    if rules is None:
+    if rules is None and not load_catalog(ws.root.parent).get("strict_membership", False):
         return local
     if not rules:
         return []
