@@ -770,9 +770,14 @@ header.top .root-gl.on { color: var(--pine-deep); }
     order: 3;
     flex: 1 1 100%;
     flex-wrap: nowrap;
-    overflow-x: auto;
+    justify-content: space-between;
+    overflow-x: hidden;
     padding-bottom: 2px;
     min-width: 0;
+  }
+  header.top .console-nav a {
+    padding-inline: 6px;
+    font-size: 12px;
   }
   header.top .crumb {
     order: 4;
@@ -890,6 +895,15 @@ header.top .root-gl.on { color: var(--pine-deep); }
   .knowledge-responsive .ref-blocks button { width: 100%; margin: 0; }
   .knowledge-responsive .knowledge-drift-list li { display: flex; }
   .knowledge-responsive .knowledge-drift-list button { width: auto; }
+}
+
+@media (max-width: 360px) {
+  header.top .console-nav {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 2px 4px;
+    overflow-x: visible;
+  }
 }
 
 /* 导出 PDF:打印时只保留阅读区正文,裁掉外壳与按钮 */
