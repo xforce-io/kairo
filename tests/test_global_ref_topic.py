@@ -21,6 +21,7 @@ from kairo.refs import (
     migrate_home_membership,
     migrate_tag_rules,
     migration_journal_path,
+    run_members,
     run_ref_ids,
     set_include_tags,
     timeline_digest_path,
@@ -211,6 +212,82 @@ def test_untagged_global_ref_not_in_topic(tmp_path):
     assert digest.is_file()
     ws = Workspace.open(serve / "t1")
     assert run_ref_ids(ws) == []
+    assert {m.id for m in run_members(ws)} == {"orphan", "g-corpus"}
+
+
+def test_cross_home_stream_member_is_digested_and_folded(tmp_path, monkeypatch):
+    """#252：全局 stream 成员在 home 产唯一 digest，折进当前 Topic。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    serve = tmp_path / "root"
+    serve.mkdir()
+    topic = Workspace.init(serve / "energy", topic="能源")
+    create_tag(serve, "能源")
+    set_include_tags(serve, "energy", ["能源"])
+    src = tmp_path / "note.txt"
+    src.write_text("全局笔记：负荷曲线", encoding="utf-8")
+    add_global_ref(serve, [src], ref_id="loose-note")
+    add_tag(serve, home="", ref_id="loose-note", tag="能源")
+    ws = Workspace.open(serve / "energy")
+    assert {m.id for m in run_members(ws)} == {"loose-note"}
+    assert run_ref_ids(ws) == []
+    step(ws, StubProvider())
+    gdigest = (
+        serve / ".kairo" / "global-home" / "references" / "loose-note" / "digest.md"
+    )
+    assert gdigest.is_file()
+    assert not (topic.references_dir() / "loose-note").exists()
+    understanding = serve / "energy" / "understanding.md"
+    assert understanding.is_file()
+    assert understanding.read_text(encoding="utf-8").strip()
+    folded = ws.read_state().targets["understanding.md"].folded
+    assert "global/loose-note" in folded
+    assert "references/loose-note/digest.md" not in folded
+
+
+def test_cross_home_corpus_member_is_not_digested_or_folded(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    serve = tmp_path / "root"
+    serve.mkdir()
+    Workspace.init(serve / "energy", topic="能源")
+    create_tag(serve, "能源")
+    set_include_tags(serve, "energy", ["能源"])
+    src = tmp_path / "base.txt"
+    src.write_text("基线口径", encoding="utf-8")
+    add_global_ref(serve, [src], ref_id="g-corpus", source_class="corpus")
+    add_tag(serve, home="", ref_id="g-corpus", tag="能源")
+    ws = Workspace.open(serve / "energy")
+    step(ws, StubProvider())
+    gdigest = (
+        serve / ".kairo" / "global-home" / "references" / "g-corpus" / "digest.md"
+    )
+    assert not gdigest.is_file()
+    understanding = serve / "energy" / "understanding.md"
+    assert not understanding.is_file() or "g-corpus" not in (
+        ws.read_state().targets.get("understanding.md").folded
+        if ws.read_state().targets.get("understanding.md")
+        else {}
+    )
+
+
+def test_cross_home_audio_transform_lives_in_home(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    serve = tmp_path / "root"
+    serve.mkdir()
+    Workspace.init(serve / "energy", topic="能源")
+    create_tag(serve, "能源")
+    set_include_tags(serve, "energy", ["能源"])
+    audio = tmp_path / "rec.m4a"
+    audio.write_bytes(b"fake-audio")
+    add_global_ref(serve, [audio], ref_id="meet")
+    add_tag(serve, home="", ref_id="meet", tag="能源")
+    ws = Workspace.open(serve / "energy")
+    step(ws, StubProvider())
+    home = serve / ".kairo" / "global-home" / "references" / "meet"
+    assert (home / "transcript.md").is_file()
+    assert (home / "digest.md").is_file()
+    assert not (serve / "energy" / "references" / "meet").exists()
+    folded = ws.read_state().targets["understanding.md"].folded
+    assert "global/meet" in folded
 
 
 def test_tag_vocabulary_delete_protection_and_strict_migration(tmp_path):
@@ -421,8 +498,10 @@ def test_strict_topic_generates_missing_cross_home_digest_before_fold(tmp_path):
     digest = source.references_dir() / ref_id / "digest.md"
     assert digest.is_file()
     assert "跨来源原始正文" in digest.read_text(encoding="utf-8")
+    home_state = source.read_state()
+    assert "references/missing-digest/digest.md" in home_state.products
     state = target.read_state()
-    assert "source/missing-digest" in state.products
+    assert "source/missing-digest" not in state.products
     assert "source/missing-digest" in state.targets["understanding.md"].folded
     assert not (target.references_dir() / ref_id).exists()
 

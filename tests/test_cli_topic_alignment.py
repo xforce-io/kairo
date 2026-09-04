@@ -7,7 +7,7 @@ import pytest
 from typer.testing import CliRunner
 
 from kairo.cli import app
-from kairo.refs import create_tag, list_all_refs, topic_members
+from kairo.refs import add_tag, create_tag, list_all_refs, set_include_tags, topic_members
 from kairo.workspace import Workspace
 
 runner = CliRunner()
@@ -144,15 +144,14 @@ def test_step_with_topic_option(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
     monkeypatch.setenv("KAIRO_STUB", "1")
     
-    # Create Tag and Topic
     create_tag(serve, "research")
     runner.invoke(app, ["new", "research"])
-    
-    # Add Ref to Topic
+    set_include_tags(serve, "research", ["research"])
     ws = Workspace.open(serve / "research")
     note = tmp_path / "note.txt"
     note.write_text("Research note")
-    ws.add([note])
+    rid = ws.add([note])
+    add_tag(serve, home="research", ref_id=rid, tag="research")
     
     # Run step from different directory
     monkeypatch.chdir(tmp_path)
@@ -194,10 +193,10 @@ def test_processing_commands_cwd_fallback(tmp_path, monkeypatch):
     ws.constitution.include_tags = ["research"]
     ws.write_constitution(ws.constitution)
     
-    # Add Ref
     note = tmp_path / "note.txt"
     note.write_text("Note")
-    ws.add([note])
+    rid = ws.add([note])
+    add_tag(serve, home="research", ref_id=rid, tag="research")
     
     # Run from Topic directory
     monkeypatch.chdir(topic_dir)
