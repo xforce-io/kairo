@@ -351,6 +351,25 @@ def test_restore_remote_requires_explicit_id_for_multiple_stages(tmp_path, monke
     assert exc.value.code == 2
 
 
+def test_restore_remote_rejects_symlink_in_existing_stage_before_resume(tmp_path, monkeypatch):
+    spec = RemoteSpec(name="reader", ssh="reader", path="/remote")
+    dest = tmp_path / "restored"
+    backup_id = "b-20260903T143304Z-5a68d1308a8d"
+    stage = backup._prepare_restore_stage(spec, dest, backup_id)
+    generation = stage / backup_id
+    generation.mkdir()
+    (generation / "backup.json").symlink_to(stage / "restore.json")
+    monkeypatch.setattr(
+        backup,
+        "_rsync",
+        lambda *args, **kwargs: pytest.fail("unsafe stage must not resume transfer"),
+    )
+
+    with pytest.raises(BackupError, match="恢复暂存含符号链接或特殊文件") as exc:
+        restore_remote(spec, dest, backup_id)
+    assert exc.value.code == 2
+
+
 def test_cli_push_corrupt_current_backup_json_is_contract_error(tmp_path, monkeypatch):
     serve = _serve_with_pointers(tmp_path)
     remote = tmp_path / "remote"

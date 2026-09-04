@@ -500,6 +500,7 @@ def restore_remote(
     generation = stage / bid
     remote_gen = spec.path.rstrip("/") + f"/generations/{bid}"
     _rsync(generation, spec.ssh, remote_gen, reverse=True, resumable=True)
+    _validate_restore_stage_tree(stage, bid)
     listing = validate_generation(generation)
     _promote_restored_data(stage, dest)
     shutil.rmtree(stage)
@@ -624,10 +625,31 @@ def _prepare_restore_stage(spec: RemoteSpec, dest: Path, backup_id: str) -> Path
     else:
         stage.mkdir(parents=True)
         _write_restore_stage_metadata(stage, expected)
-    generation = stage / backup_id
-    if generation.exists() and not _ordinary_dir(generation):
-        raise BackupError("restore", "恢复暂存 generation 非法", code=2)
+    _validate_restore_stage_tree(stage, backup_id)
     return stage
+
+
+def _validate_restore_stage_tree(stage: Path, backup_id: str) -> None:
+    """恢复前后均拒绝暂存里的符号链接或特殊文件。"""
+    if not _ordinary_dir(stage):
+        raise BackupError("restore", "恢复暂存目录非法", code=2)
+    try:
+        children = {child.name for child in stage.iterdir()}
+    except OSError as exc:
+        raise BackupError("restore", "恢复暂存目录不可读", code=2) from exc
+    if children - {"restore.json", backup_id}:
+        raise BackupError("restore", "恢复暂存内容非法", code=2)
+    if not _ordinary_file(stage / "restore.json"):
+        raise BackupError("restore", "恢复暂存元数据损坏", code=2)
+    generation = stage / backup_id
+    if not generation.exists():
+        return
+    if not _ordinary_dir(generation):
+        raise BackupError("restore", "恢复暂存 generation 非法", code=2)
+    try:
+        walk_ordinary(generation)
+    except BackupError as exc:
+        raise BackupError("restore", "恢复暂存含符号链接或特殊文件", code=2) from exc
 
 
 def _promote_restored_data(stage: Path, dest: Path) -> None:
