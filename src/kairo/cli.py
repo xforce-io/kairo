@@ -54,7 +54,7 @@ from kairo.workspace import AddError, Workspace, WorkspaceNotFound, delete_works
 _EPILOG = (
     '快速上手:kairo init "<topic>" → kairo add <file>'
     "(--corpus 标基线,默认 stream 观测)→ kairo step(调和到收敛)。\n\n"
-    "多 workspace:kairo list [root] / kairo new \"topic\" / kairo serve [root]。\n\n"
+    "多 Topic:kairo list [root] / kairo new \"topic\" / kairo serve [root]。\n\n"
     "产出 understanding.md(中立事实)。\n\n"
     "心智与协议(stream/corpus、fold)定义在 constitution.yaml。"
 )
@@ -83,12 +83,12 @@ app.add_typer(artifact_app, name="artifact")
 
 
 def _open_ws() -> Workspace:
-    """打开当前目录的工作区;非工作区给友好提示并非零退出(不吐 traceback)。"""
+    """打开当前目录的 Topic;非 Topic 给友好提示并非零退出(不吐 traceback)。"""
     try:
         return Workspace.open(Path.cwd())
     except WorkspaceNotFound:
         typer.secho(
-            '当前目录不是 kairo 工作区,先运行 kairo init "<topic>"',
+            '当前目录不是 kairo Topic,先运行 kairo init "<topic>"',
             fg=typer.colors.RED,
             err=True,
         )
@@ -123,21 +123,21 @@ def _validate_topic_name(topic: str) -> str:
 
 
 @app.command()
-def init(topic: str = typer.Argument("main", help="本 workspace 的 topic")) -> None:
-    """把当前目录初始化为 topic-workspace + 默认宪法。"""
+def init(topic: str = typer.Argument("main", help="本 Topic 的 topic")) -> None:
+    """把当前目录初始化为 Topic + 默认宪法。"""
     Workspace.init(Path.cwd(), topic=topic)
-    typer.echo(f"initialized workspace (topic={topic})")
+    typer.echo(f"initialized Topic (topic={topic})")
 
 
 @app.command(name="list")
 def list_cmd(
     root: Path = typer.Argument(
         None,
-        help="含多个 workspace 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd",
+        help="含多个 Topic 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd",
     ),
     as_json: bool = typer.Option(False, "--json", help="JSON 输出(agent 友好)"),
 ) -> None:
-    """#95:列出 serve root 下各 workspace 摘要(与 Web dashboard 同源 discovery)。"""
+    """#95:列出 serve root 下各 Topic 摘要(与 Web dashboard 同源 discovery)。"""
     from kairo.web.discovery import scan_workspaces
 
     serve = _serve_root(root)
@@ -166,7 +166,7 @@ def list_cmd(
         )
         return
     if not items:
-        typer.echo(f"(no workspaces under {serve})")
+        typer.echo(f"(no Topics under {serve})")
         return
     typer.echo(f"root={serve}")
     hdr = f"{'SLUG':<24} {'STREAM':>6} {'CORPUS':>6} {'STALE':>5} {'BLOCK':>5}  TOPIC"
@@ -180,12 +180,12 @@ def list_cmd(
 
 @app.command()
 def new(
-    topic: str = typer.Argument(..., help="新 workspace 的 topic(亦作目录名)"),
+    topic: str = typer.Argument(..., help="新 Topic 的 topic(亦作目录名)"),
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
     ),
 ) -> None:
-    """#95:在 serve root 下新建 workspace 目录并 init(对标 Web 新建)。"""
+    """#95:在 serve root 下新建 Topic 目录并 init(对标 Web 新建)。"""
     try:
         topic = _validate_topic_name(topic)
     except ValueError as e:
@@ -218,20 +218,46 @@ def new(
 
 @app.command(name="rm-ws")
 def rm_ws(
-    slug: str = typer.Argument(..., help="要删除的 workspace 目录名(slug)"),
+    slug: str = typer.Argument(..., help="要删除的 Topic 目录名(slug)"),
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="跳过确认"),
 ) -> None:
-    """#95:删除 serve root 下某个 workspace(不碰 root glossary 与其它 ws)。"""
+    """#95:删除 serve root 下某个 Topic(不碰 root glossary 与其它 Topic)。
+    
+    已废弃: 请使用 `kairo rm` 代替。
+    """
     serve = _serve_root(root)
     if not yes:
-        typer.confirm(f"永久删除 workspace {slug!r} under {serve}?", abort=True)
+        typer.confirm(f"永久删除 Topic {slug!r} under {serve}?", abort=True)
     try:
         delete_workspace(serve, slug)
     except WorkspaceNotFound:
-        typer.secho(f"workspace 不存在:{slug}", fg=typer.colors.RED, err=True)
+        typer.secho(f"Topic 不存在:{slug}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    except ValueError as e:
+        typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    typer.echo(f"deleted {slug}")
+
+
+@app.command(name="rm")
+def rm(
+    slug: str = typer.Argument(..., help="要删除的 Topic 目录名(slug)"),
+    root: Path = typer.Option(
+        None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="跳过确认"),
+) -> None:
+    """删除 serve root 下某个 Topic(不碰 root glossary 与其它 Topic)。"""
+    serve = _serve_root(root)
+    if not yes:
+        typer.confirm(f"永久删除 Topic {slug!r} under {serve}?", abort=True)
+    try:
+        delete_workspace(serve, slug)
+    except WorkspaceNotFound:
+        typer.secho(f"Topic 不存在:{slug}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     except ValueError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
@@ -246,16 +272,16 @@ def archive(
         None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
     ),
     workspace: str = typer.Option(
-        None, "--workspace", help="目标 workspace slug;续接时可省略,取回执中的值"
+        None, "--workspace", help="目标 Topic slug;续接时可省略,取回执中的值"
     ),
     create: bool = typer.Option(False, "--create", help="在 --workspace 下新建归档"),
     bind: str = typer.Option(
-        None, "--bind", help="覆盖该 workspace 中已有归档 reference"
+        None, "--bind", help="覆盖该 Topic 中已有归档 reference"
     ),
     title: str = typer.Option(None, "--title", help="仅新建时的展示名"),
     as_json: bool = typer.Option(False, "--json", help="成功时 stdout 为 JSON 对象"),
 ) -> None:
-    """把 coding agent 会话 Markdown 归档到指定 workspace(#136)。"""
+    """把 coding agent 会话 Markdown 归档到指定 Topic(#136)。"""
     serve = _serve_root(root)
     if str(session) == "-":
         text = sys.stdin.read()
@@ -492,7 +518,7 @@ def review(
         help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd",
     ),
 ) -> None:
-    """按发生日闭区间生成回顾,默认写入「总结」workspace 的一条 stream reference。"""
+    """按发生日闭区间生成回顾,默认写入「总结」Topic 的一条 stream reference。"""
     start = parse_calendar_date(from_day)
     end = parse_calendar_date(to_day)
     if start is None or end is None:
@@ -511,7 +537,7 @@ def review(
         occ = occupied_span([it for it, _ in with_d]) or (start, end)
         rid = write_review_reference(ws, occ[0], occ[1], body, occurred=end)
     except WorkspaceNotFound:
-        typer.secho(f"workspace 不存在:{workspace}", fg=typer.colors.RED, err=True)
+        typer.secho(f"Topic 不存在:{workspace}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     except ReviewError as e:
         msg = {
@@ -687,7 +713,7 @@ def status() -> None:
     state = ws.read_state()
     plan = workspace_run_plan(ws)
     typer.echo(
-        f"workspace {ws.root.name}  topic={ws.constitution.topic}  "
+        f"Topic {ws.root.name}  topic={ws.constitution.topic}  "
         f"plan={plan['mode']}  stale={plan['pending_count']}  blocked={plan['blocked_count']}"
     )
     compose = ComposeRule(ws, None)  # 仅用于 corpus 漂移检测(不调 provider)
@@ -759,7 +785,7 @@ def diff(seq: str = typer.Argument(None, help="对比的快照;省略=最近")) 
 
 @app.command()
 def serve(
-    root: Path = typer.Argument(None, help="包含多个 workspace 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd"),
+    root: Path = typer.Argument(None, help="包含多个 Topic 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd"),
     port: int = typer.Option(8787, "--port", "-p", help="监听端口(默认 8787,避开常见 8000/alfred 8765)"),
     mode: str = typer.Option(
         "console",
@@ -1348,7 +1374,7 @@ def project_edit_cmd(
 @project_app.command("link")
 def project_link(
     project_id: str = typer.Argument(...),
-    slugs: list[str] = typer.Argument(..., help="一个或多个已有 workspace slug"),
+    slugs: list[str] = typer.Argument(..., help="一个或多个已有 Topic slug"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:

@@ -2,7 +2,7 @@
 
 | 规范名 | 一句话定义 | 禁止别称 |
 |---|---|---|
-| Topic | 知识加工对象：研究问题、constitution、结论与 agent 上下文；资料成员由包含规则计算，不独占文件。 | Workspace（用户词）、课题、保存的筛选器 |
+| Topic | 知识加工对象：研究问题、constitution、结论与 agent 上下文；资料成员由包含规则计算，不独占文件。 | 课题、保存的筛选器 |
 | workspace | Topic 的磁盘目录实现名，内含 constitution、home 参考与产物。仅代码与兼容字段使用。 | 课题仓、空间 |
 | Ref | 一份资料的全局身份：稳定 id、来源、发生时间与至多一份 digest。 | 资料副本 |
 | Ref 身份键 | Ref 在 serve root 内由 home 与 id 组成的稳定键，用于跨来源解析和加工记账。 | digest 路径、资料路径 |
@@ -24,8 +24,10 @@
 | stream | 观测型参考，digest 后 fold 进产物。 | 流水、观测流 |
 | corpus | 基线型参考，只读参考层，不 digest、不 fold。 | 语料库 |
 | digest | 一条 reference 的高密度记忆纪要，compose / 时段回顾的输入。 | 摘要、纪要原文 |
-| kind | constitution 建仓时选用的填法名；运行时读 digest.enabled / targets / review_input。 | 工作区类型枚举 |
-| journal | kind 预设：空 targets、开 digest（不计回顾自身 source_text）、关 compose、材料不进时段回顾原料。现网「总结」仓。 | 回顾仓、总结仓 |
+| preset | constitution 建仓时选用的填法名；运行时读 digest.enabled / targets / review_input。 | 工作区类型枚举 |
+| standard | preset 默认值：开 digest、有 targets、材料进时段回顾原料。替代旧 kind: topic。 | topic preset、默认预设 |
+| journal | preset 预设：空 targets、开 digest（不计回顾自身 source_text）、关 compose、材料不进时段回顾原料。现网「总结」仓。 | 回顾仓、总结仓 |
+| kind | 已废弃字段，读取时向后兼容映射到 preset。新建 Topic 不再写入 kind。 | — |
 | fold | 把 stream digest 调和进 constitution 声明的活 target（默认 `understanding.md`）。 | 融合、合并文档 |
 | 回顾折入 | 把一条回顾上后附材料的 digest 写进该条回顾正文。 | — |
 | 活 target | constitution 中运行时参与 fold 的 target；当前排除判断层 target。 | 活文档、活动目标 |
