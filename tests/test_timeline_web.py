@@ -107,10 +107,11 @@ def test_timeline_tag_form_keeps_recent_and_unknown_queries_valid(tmp_path):
     root, _, _ = _two_ws(tmp_path)
     client = _client(root)
 
-    recent = client.get("/timeline", params={"mode": "recent"})
+    recent = client.get("/timeline", params={"mode": "recent", "tag": "能源"})
     assert recent.status_code == 200
     assert 'name="mode" value="recent"' in recent.text
     assert 'name="day"' not in recent.text
+    assert 'href="/timeline?mode=recent"' in recent.text
 
     unknown = client.get("/timeline", params={"unknown": "1", "month": "2026-08"})
     assert unknown.status_code == 200
