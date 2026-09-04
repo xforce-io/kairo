@@ -249,6 +249,8 @@ def test_listen_read_search_lists_hits_for_each_unit(tmp_path):
     assert r.text.count("shared") >= 1
     assert 'data-start="10"' in r.text
     assert 'data-start="20"' in r.text
+    assert 'data-lr-hits' in r.text
+    assert "0 results" in r.text or "data-empty=" in r.text
 
 
 def test_audio_only_ref_view_does_not_use_empty_primary(tmp_path):
@@ -296,6 +298,8 @@ def test_untimed_transcript_still_readable(tmp_path):
     assert "is-untimed" in r.text
     assert "data-start=" not in r.text
     assert "-->" not in r.text
+    assert 'class="lr-search"' in r.text
+    assert 'data-lr-q' in r.text
 
 
 def test_duplicate_origin_does_not_link(tmp_path):
@@ -321,6 +325,49 @@ def test_duplicate_origin_does_not_link(tmp_path):
     r = _client(tmp_path).get("/w/ws/ref/dup/form/0")
     assert "first claim" not in r.text
     assert "second claim" not in r.text
+
+
+def test_js_search_counts_highlights_zero_and_untimed():
+    import subprocess
+    from pathlib import Path
+
+    js = Path("src/kairo/web/static/listen_read.js").read_text()
+    script = (
+        js
+        + r"""
+const units = [
+  {start: 10, text: 'foo alpha'},
+  {start: 20, text: 'bar alpha'},
+  {start: 30, text: 'other'},
+  {start: null, text: 'plain project people'},
+];
+const two = kairoSearchUnits(units, 'alpha');
+if (two.length !== 2 || two[0].start !== 10 || two[1].start !== 20) {
+  throw new Error('timed hits ' + JSON.stringify(two));
+}
+const none = kairoSearchUnits(units, 'zzzz-nope');
+if (none.length !== 0) throw new Error('expected 0 hits');
+const view0 = kairoSearchView(none, {empty: '0 results'});
+if (view0.count !== 0 || view0.status !== '0 results' || view0.hidden !== false) {
+  throw new Error('zero view ' + JSON.stringify(view0));
+}
+const untimed = kairoSearchUnits(units, 'project');
+if (untimed.length !== 1 || untimed[0].start !== null || untimed[0].index !== 3) {
+  throw new Error('untimed ' + JSON.stringify(untimed));
+}
+const marked = kairoHitIndexes(two);
+if (JSON.stringify(marked) !== JSON.stringify([0, 1])) {
+  throw new Error('indexes ' + JSON.stringify(marked));
+}
+const emptyQ = kairoSearchUnits(units, '  ');
+if (emptyQ.length !== 0) throw new Error('blank query should be empty');
+const blankView = kairoSearchView([], {empty: '0 results', query: ''});
+if (blankView.hidden !== true) throw new Error('blank query should hide hits');
+console.log('ok');
+"""
+    )
+    r = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr + r.stdout
 
 
 def test_js_helpers_filter_duration_and_stop_audio():

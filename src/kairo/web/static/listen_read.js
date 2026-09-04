@@ -38,6 +38,39 @@
     });
   }
 
+  function kairoSearchUnits(units, query) {
+    var needle = String(query || "").trim().toLowerCase();
+    if (!needle) return [];
+    var hits = [];
+    units.forEach(function (u, i) {
+      var text = u.text || "";
+      if (text.toLowerCase().indexOf(needle) === -1) return;
+      var start = u.start;
+      if (start === "" || start == null) start = null;
+      else {
+        start = Number(start);
+        if (!isFinite(start)) start = null;
+      }
+      hits.push({ text: text, start: start, index: i });
+    });
+    return hits;
+  }
+
+  function kairoSearchView(hits, opts) {
+    opts = opts || {};
+    var query = opts.query;
+    var empty = opts.empty || "0 results";
+    if (query !== undefined && !String(query).trim()) {
+      return { count: 0, status: "", hidden: true };
+    }
+    var count = hits.length;
+    return { count: count, status: count === 0 ? empty : String(count), hidden: false };
+  }
+
+  function kairoHitIndexes(hits) {
+    return hits.map(function (h) { return h.index; });
+  }
+
   function readUnits(box) {
     return Array.prototype.slice.call(box.querySelectorAll(".lr-unit")).map(function (el) {
       var start = el.getAttribute("data-start");
@@ -94,6 +127,10 @@
       return Array.prototype.slice.call(box.querySelectorAll(".lr-unit[data-start]"));
     }
 
+    function unitEls() {
+      return Array.prototype.slice.call(box.querySelectorAll(".lr-unit"));
+    }
+
     function highlight(t) {
       units().forEach(function (el) {
         var start = parseFloat(el.getAttribute("data-start"));
@@ -139,6 +176,14 @@
     }
 
     box.addEventListener("click", function (e) {
+      var hit = e.target.closest(".lr-hit");
+      if (hit && box.contains(hit)) {
+        var idx = hit.getAttribute("data-unit");
+        if (idx != null && idx !== "") {
+          var el = unitEls()[Number(idx)];
+          if (el) el.scrollIntoView({ block: "nearest" });
+        }
+      }
       var unit = e.target.closest(".lr-unit[data-start], .lr-hit[data-start]");
       if (!unit || !box.contains(unit)) return;
       var start = parseFloat(unit.getAttribute("data-start"));
@@ -148,26 +193,49 @@
       sync();
     });
 
-    if (q && hitsEl) {
-      q.addEventListener("input", function () {
-        var needle = q.value.trim().toLowerCase();
-        hitsEl.innerHTML = "";
-        if (!needle) {
-          hitsEl.hidden = true;
-          return;
-        }
-        units().forEach(function (el) {
-          var text = (el.querySelector(".lr-unit-text") || el).textContent || "";
-          if (text.toLowerCase().indexOf(needle) === -1) return;
-          var b = document.createElement("button");
-          b.type = "button";
-          b.className = "lr-hit";
-          b.setAttribute("data-start", el.getAttribute("data-start"));
-          b.textContent = text.trim();
-          hitsEl.appendChild(b);
-        });
-        hitsEl.hidden = hitsEl.childElementCount === 0;
+    function runSearch() {
+      if (!q || !hitsEl) return;
+      var needle = q.value;
+      var els = unitEls();
+      var found = kairoSearchUnits(
+        els.map(function (el) {
+          return {
+            text: ((el.querySelector(".lr-unit-text") || el).textContent || ""),
+            start: el.getAttribute("data-start"),
+          };
+        }),
+        needle
+      );
+      var view = kairoSearchView(found, {
+        empty: hitsEl.getAttribute("data-empty") || "0 results",
+        query: needle,
       });
+      var hitIdx = {};
+      found.forEach(function (h) { hitIdx[h.index] = true; });
+      els.forEach(function (el, i) {
+        el.classList.toggle("is-hit", !!hitIdx[i]);
+      });
+      hitsEl.innerHTML = "";
+      hitsEl.hidden = view.hidden;
+      if (view.hidden) return;
+      var status = document.createElement("div");
+      status.className = "lr-search-status";
+      status.setAttribute("data-lr-status", "");
+      status.textContent = view.status;
+      hitsEl.appendChild(status);
+      found.forEach(function (h) {
+        var b = document.createElement("button");
+        b.type = "button";
+        b.className = "lr-hit";
+        if (h.start != null) b.setAttribute("data-start", String(h.start));
+        b.setAttribute("data-unit", String(h.index));
+        b.textContent = String(h.text || "").trim();
+        hitsEl.appendChild(b);
+      });
+    }
+
+    if (q && hitsEl) {
+      q.addEventListener("input", runSearch);
     }
   }
 
@@ -192,5 +260,8 @@
 
   root.kairoFilterUnits = kairoFilterUnits;
   root.kairoStopListenRead = kairoStopListenRead;
+  root.kairoSearchUnits = kairoSearchUnits;
+  root.kairoSearchView = kairoSearchView;
+  root.kairoHitIndexes = kairoHitIndexes;
   root.kairoListenRead = bind;
 })(typeof window !== "undefined" ? window : globalThis);

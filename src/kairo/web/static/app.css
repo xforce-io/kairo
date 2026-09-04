@@ -956,6 +956,7 @@ header.top .root-gl.on { color: var(--pine-deep); }
   border-radius: 8px; background: var(--paper-2); color: var(--ink);
 }
 .lr-hits { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
+.lr-search-status { font-size: 12px; color: var(--muted); }
 .lr-hit, .lr-unit {
   display: block; width: 100%; text-align: left; border: 1px solid transparent;
   background: transparent; cursor: pointer; border-radius: 8px; color: inherit;
@@ -965,6 +966,7 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .lr-unit { padding: 8px 10px; }
 .lr-unit.is-untimed { cursor: default; }
 .lr-unit.on { background: var(--pine-soft); }
+.lr-unit.is-hit { box-shadow: inset 3px 0 0 var(--pine); background: var(--pine-soft); }
 .lr-unit-time { display: block; font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .lr-unit-text { display: block; font-family: var(--serif); font-size: 16px; line-height: 1.7; white-space: pre-wrap; }
 .lr-dock {
