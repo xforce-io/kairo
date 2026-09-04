@@ -782,16 +782,23 @@ def _split_refs(ws: Workspace, serve: Path | None = None):
         from kairo.refs import RefError, topic_members
 
         try:
-            from kairo.refs import ref_nav
+            from kairo.refs import ref_nav, resolve_open
 
             for rec in topic_members(serve, ws.root.name):
                 nav = ref_nav(rec.home, rec.id)
+                try:
+                    ref_ws, ref_id = resolve_open(serve, rec.home, rec.id)
+                    man = ref_ws.read_manifest(ref_id)
+                    occurred_at, _ = effective_occurred(ref_id, man.occurred_at)
+                except (RefError, OSError, ValueError):
+                    occurred_at = None
                 item = {
                     "id": rec.id,
                     "title": rec.title,
                     "home": rec.home,
                     "href": nav["href"],
                     "hx": nav["hx"],
+                    "occurred_at": occurred_at,
                 }
                 (corpus if rec.source_class == "corpus" else streams).append(item)
             return streams, corpus
@@ -802,15 +809,32 @@ def _split_refs(ws: Workspace, serve: Path | None = None):
     for ref_id in ws.list_reference_ids():
         man = ws.read_manifest(ref_id)
         nav = ref_nav(ws.root.name, ref_id)
+        occurred_at, _ = effective_occurred(ref_id, man.occurred_at)
         item = {
             "id": ref_id,
             "title": man.title,
             "home": ws.root.name,
             "href": nav["href"],
             "hx": nav["hx"],
+            "occurred_at": occurred_at,
         }
         (corpus if man.source_class == "corpus" else streams).append(item)
     return streams, corpus
+
+
+def _occurred_ref_groups(refs: list[dict]) -> tuple[list[dict], list[dict]]:
+    """把 References 内的 Ref 按有效发生日分组；同日沿用既有稳定顺序。"""
+    known = [ref for ref in refs if ref["occurred_at"] is not None]
+    unknown = [ref for ref in refs if ref["occurred_at"] is None]
+    known.sort(key=lambda ref: ref["occurred_at"], reverse=True)
+
+    groups: list[dict] = []
+    for ref in known:
+        day = ref["occurred_at"]
+        if not groups or groups[-1]["day"] != day:
+            groups.append({"day": day, "refs": []})
+        groups[-1]["refs"].append(ref)
+    return groups, unknown
 
 
 def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
@@ -978,6 +1002,7 @@ def workspace_view(
         streams = [r for r in streams if (slug, r["id"]) in pub_refs]
         corpus = [r for r in corpus if (slug, r["id"]) in pub_refs]
         targets = [t for t in targets if (slug, t["path"]) in pub_targets]
+    stream_groups, unknown_streams = _occurred_ref_groups(streams)
     registry = request.app.state.registry
     running = registry.current(slug)
     requested_task = registry.get(task_id) if task_id else None
@@ -996,6 +1021,8 @@ def workspace_view(
             "include_tags": include_tags_of(ws) or [],
             "targets": targets,
             "streams": streams,
+            "stream_groups": stream_groups,
+            "unknown_streams": unknown_streams,
             "corpus": corpus,
             "select_ref": select_ref,
             "run_task_id": shown_task.task_id if shown_task else None,
@@ -1436,7 +1463,17 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
 def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
     # 仅 stream:该片段唯一的注入点是参考组的上传表单;corpus 自成一组,不混入
     streams, _ = _split_refs(ws, Path(request.app.state.root))
-    return _render(request, "_refs_list.html", {"slug": slug, "refs": streams})
+    stream_groups, unknown_streams = _occurred_ref_groups(streams)
+    return _render(
+        request,
+        "_refs_list.html",
+        {
+            "slug": slug,
+            "stream_groups": stream_groups,
+            "unknown_streams": unknown_streams,
+            "select_ref": None,
+        },
+    )
 
 
 def _save_upload_to(dest_dir: Path, upload: UploadFile) -> Path:
@@ -2785,10 +2822,7 @@ def delete_ref(
         step = _render(
             request, "_step.html", _step_template_vars(request, ws, slug, task)
         ).body.decode()
-        streams, _corpus = _split_refs(ws, Path(request.app.state.root))
-        refs = _render(
-            request, "_refs_list.html", {"slug": slug, "refs": streams}
-        ).body.decode()
+        refs = _refs_fragment(request, ws, slug).body.decode()
         t = _t(request)
         btn = _run_button_ctx(request, ws, slug)
         oob = (
