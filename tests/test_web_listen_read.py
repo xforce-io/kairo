@@ -72,6 +72,73 @@ def test_select_audio_shows_listen_read_zones_and_own_media(tmp_path):
     assert fb.content.startswith(b"RIFF")
 
 
+def _speaker_ref(root: Path, transcript: str) -> str:
+    ws = Workspace.init(root / "ws", topic="listen")
+    rdir = ws.references_dir() / "talk"
+    rdir.mkdir(parents=True)
+    wav = rdir / "a.wav"
+    _write_wav(wav)
+    (rdir / "t.md").write_text(transcript)
+    ws.write_manifest(
+        "talk",
+        Manifest(
+            id="talk",
+            title="talk",
+            forms=[
+                Form(role="audio", location=str(wav), hash="h"),
+                Form(
+                    role="transcript",
+                    location="references/talk/t.md",
+                    hash="t",
+                    origin="asr-from:h",
+                ),
+            ],
+        ),
+    )
+    return "talk"
+
+
+def test_listen_read_folds_same_speaker_cues_into_one_turn(tmp_path):
+    body = "[0:00:01] SPEAKER_00 hello\n[0:00:03] SPEAKER_00 world\n[0:00:05] SPEAKER_01 later\n"
+    rid = _speaker_ref(tmp_path, body)
+    stored = tmp_path / "ws" / "references" / "talk" / "t.md"
+    before = stored.read_text()
+    audio = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/0")
+    preview = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/1")
+    assert stored.read_text() == before == body
+    assert audio.status_code == preview.status_code == 200
+    assert "hello" in audio.text and "world" in audio.text
+    assert audio.text.count('data-start="1"') == 1
+    assert 'data-start="3"' not in audio.text
+    assert 'data-start="5"' in audio.text
+    assert "hello" in preview.text and "world" in preview.text
+    assert preview.text.count("<time>0:01</time>") == 1
+    assert "<time>0:03</time>" not in preview.text
+
+
+def test_listen_read_keeps_speaker_change_at_zero_gap(tmp_path):
+    rid = _speaker_ref(
+        tmp_path,
+        "[0:00:01] SPEAKER_00 yes\n[0:00:01] SPEAKER_01 right\n",
+    )
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/0")
+    assert r.status_code == 200
+    assert "yes" in r.text and "right" in r.text
+    assert r.text.count('data-start="1"') == 2
+
+
+def test_listen_read_does_not_merge_unlabeled_cues(tmp_path):
+    rid = _speaker_ref(
+        tmp_path,
+        "[0:00:01] hello\n[0:00:01] world\n[0:00:03] next\n",
+    )
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/0")
+    assert r.status_code == 200
+    assert 'data-start="1"' in r.text
+    assert 'data-start="3"' in r.text
+    assert r.text.count('class="lr-unit"') >= 3
+
+
 def test_select_transcript_groups_timestamped_asr_for_reading(tmp_path):
     rid = _paired_ref(tmp_path)
     r = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/2")
