@@ -17,7 +17,7 @@
       <datalist id="tl-tag-options">{% for tag in tag_catalog %}<option value="{{ tag }}">{% endfor %}</datalist>
       <button type="submit" class="btn btn-ghost btn-inline">{{ t('tl.filter_go') }}</button>
       {% if tag_filters %}
-      <a class="btn btn-ghost btn-inline" href="/timeline?day={{ day_iso }}">{{ t('tl.clear_tags') }}</a>
+      <a class="btn btn-ghost btn-inline" href="{% if view == 'recent' %}/timeline?mode=recent{% elif view == 'unknown' %}/timeline?unknown=1&month={{ month_iso }}{% else %}/timeline?day={{ day_iso }}{% endif %}">{{ t('tl.clear_tags') }}</a>
       {% endif %}
     </form>
     {% if unknown_n %}
