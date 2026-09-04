@@ -37,6 +37,47 @@ def _two_ws(tmp_path):
     return root, wa, wb
 
 
+def _write_project_artifact(root, *, day="2026-08-24"):
+    import json
+
+    from kairo.projects import create_project
+
+    project = create_project(root, "能源项目")
+    proj_path = root / ".kairo" / "projects" / project.id / "project.json"
+    data = json.loads(proj_path.read_text(encoding="utf-8"))
+    data["created_at"] = f"{day}T10:00:00+00:00"
+    proj_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    run_id = "run-art-1"
+    rel = f".kairo/projects/{project.id}/artifacts/{run_id}.md"
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text("# 周报\n", encoding="utf-8")
+    run_path = root / ".kairo" / "projects" / project.id / "runs" / f"{run_id}.json"
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    run_path.write_text(
+        json.dumps(
+            {
+                "id": run_id,
+                "project_id": project.id,
+                "task_id": "tsk-1",
+                "task_name": "周报",
+                "task_version": 1,
+                "datasource_id": "ds-1",
+                "datasource_url": "https://example.com/doc",
+                "datasource_kind": "doc",
+                "status": "succeeded",
+                "reason": None,
+                "artifact_path": rel,
+                "created_at": f"{day}T12:00:00+00:00",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return project.id, run_id
+
+
 def test_timeline_calendar_shows_day_and_unknown(tmp_path):
     root, _, _ = _two_ws(tmp_path)
     c = _client(root)
@@ -49,6 +90,44 @@ def test_timeline_calendar_shows_day_and_unknown(tmp_path):
     assert r2.status_code == 200
     assert "notes-candidate" in r2.text
     assert "2026-08-25-weekly" not in r2.text
+
+
+def test_timeline_day_lists_ref_project_artifact_and_tag_keeps_ref(tmp_path):
+    from kairo.refs import add_tag, create_tag, list_all_refs
+
+    root, wa, _ = _two_ws(tmp_path)
+    pid, rid = _write_project_artifact(root)
+    recs = [r for r in list_all_refs(root) if r.id == "2026-08-25-weekly"]
+    assert recs, [r.key for r in list_all_refs(root)]
+    create_tag(root, "能源")
+    add_tag(root, home=recs[0].home, ref_id=recs[0].id, tag="能源")
+    html = _client(root).get("/timeline", params={"day": "2026-08-24"}).text
+    assert "tl-kind-ref" in html
+    assert "tl-kind-project" in html
+    assert "tl-kind-artifact" in html
+    assert f'href="/refs/2026-08-25-weekly?home=alpha' in html
+    assert f'href="/projects/{pid}"' in html
+    assert f'href="/projects/{pid}/runs/{rid}"' in html
+    c = _client(root)
+    assert c.get(f"/refs/2026-08-25-weekly?home=alpha").status_code == 200
+    assert c.get(f"/projects/{pid}").status_code == 200
+    assert c.get(f"/projects/{pid}/runs/{rid}").status_code == 200
+    assert "候选人沟通" in html
+    assert "能源项目" in html
+    filtered = _client(root).get(
+        "/timeline", params={"day": "2026-08-24", "tag": "能源"}
+    ).text
+    assert "候选人沟通" in filtered
+    assert f'href="/refs/2026-08-25-weekly?home=alpha' in filtered
+    assert f'href="/projects/{pid}"' not in filtered
+    assert f'href="/projects/{pid}/runs/{rid}"' not in filtered
+    digest = wa.references_dir() / "2026-08-25-weekly" / "digest.md"
+    digest.write_text("# digest\n", encoding="utf-8")
+    rng = _client(root).get(
+        "/timeline", params={"from": "2026-08-23", "to": "2026-08-24"}
+    ).text
+    assert "1 with digest · 0 without" in rng
+    assert "2 without" not in rng
 
 
 def test_timeline_query_mutex_400(tmp_path):

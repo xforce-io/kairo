@@ -602,9 +602,10 @@ def timeline_view(
         range_groups = [{"key": k, "entries": buckets[k]} for k in order]
     from kairo.refs import timeline_digest_path
 
+    ref_items = [it for it in day_items if it.kind == "ref"]
     digest_n = sum(
         1
-        for it in day_items
+        for it in ref_items
         if timeline_digest_path(Path(request.app.state.root), it.workspace, it.id).is_file()
     )
     span = range_day_count(r0, r1) if range_on else 1
@@ -656,7 +657,7 @@ def timeline_view(
             "range_label": format_range_label(r0, r1, zh=(lang == "zh")),
             "range_groups": range_groups,
             "digest_n": digest_n,
-            "no_digest_n": len(day_items) - digest_n,
+            "no_digest_n": len(ref_items) - digest_n,
             "too_long": too_long,
             "max_range_days": MAX_RANGE_DAYS,
             "tag_filters": tag_filters,

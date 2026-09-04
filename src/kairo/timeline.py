@@ -81,6 +81,8 @@ class TimelineItem:
     occurred_source: str
     added_at: dt.datetime
     tags: tuple[str, ...] = ()
+    kind: str = "ref"
+    href: str = ""
 
 
 def scan_timeline(root: Path | str) -> list[TimelineItem]:
@@ -111,9 +113,10 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
                 topic_name = rec.home
         else:
             topic_name = "global"
+        home = rec.home or "global"
         items.append(
             TimelineItem(
-                workspace=rec.home or "global",
+                workspace=home,
                 topic=topic_name,
                 id=ref_id,
                 title=man.title or ref_id,
@@ -121,9 +124,76 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
                 occurred_source=src,
                 added_at=added,
                 tags=tuple(rec.tags),
+                kind="ref",
+                href=f"/refs/{ref_id}?home={home}",
             )
         )
+    items.extend(_scan_project_events(root))
     return items
+
+
+def _dt_and_day(text: str) -> tuple[dt.datetime | None, dt.date | None]:
+    parsed = parse_added_at(text)
+    if parsed is None:
+        day = parse_calendar_date((text or "")[:10])
+        return None, day
+    if parsed.tzinfo is None:
+        parsed = parsed.astimezone()
+    return parsed, parsed.date()
+
+
+def _scan_project_events(root: Path) -> list[TimelineItem]:
+    """从已有 Project / Run 文件派生 Timeline 行；不写新存数。"""
+    from kairo.projects import ProjectError, list_projects, list_runs
+
+    out: list[TimelineItem] = []
+    try:
+        projects = list_projects(root)
+    except Exception:
+        return out
+    for project in projects:
+        added, day = _dt_and_day(project.created_at)
+        if added is None:
+            added = dt.datetime.now().astimezone()
+        out.append(
+            TimelineItem(
+                workspace="",
+                topic=project.name,
+                id=project.id,
+                title=project.name,
+                occurred_at=day,
+                occurred_source="user" if day else "unknown",
+                added_at=added,
+                tags=(),
+                kind="project",
+                href=f"/projects/{project.id}",
+            )
+        )
+        try:
+            runs = list_runs(root, project.id)
+        except ProjectError:
+            continue
+        for run in runs:
+            if run.status != "succeeded" or not run.artifact_path:
+                continue
+            r_added, r_day = _dt_and_day(run.created_at)
+            if r_added is None:
+                r_added = added
+            out.append(
+                TimelineItem(
+                    workspace="",
+                    topic=project.name,
+                    id=run.id,
+                    title=run.task_name or run.id,
+                    occurred_at=r_day,
+                    occurred_source="user" if r_day else "unknown",
+                    added_at=r_added,
+                    tags=(),
+                    kind="artifact",
+                    href=f"/projects/{project.id}/runs/{run.id}",
+                )
+            )
+    return out
 
 
 def filter_by_tags(items: list[TimelineItem], tags: list[str]) -> list[TimelineItem]:
@@ -146,6 +216,8 @@ def item_as_json(it: TimelineItem) -> dict:
         "added_at": it.added_at.isoformat(),
         "tags": list(it.tags),
         "home": "" if it.workspace in ("", "global") else it.workspace,
+        "kind": it.kind,
+        "href": it.href,
     }
 
 
