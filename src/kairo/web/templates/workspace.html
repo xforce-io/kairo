@@ -4,23 +4,6 @@
 {% block body %}
 <div class="layout">
   <aside class="pane-nav">
-    {% if not public_read %}
-    <div class="nav-group">
-      <div class="nav-section">包含规则</div>
-      <form class="dlg-form" method="post" action="/w/{{ slug | urlencode }}/include-tags">
-        <label class="dlg-label" for="include-tags">命中任一 Tag 的 Ref 会进入本 Topic</label>
-        {% if tag_catalog %}
-        <select id="include-tags" name="tag" multiple size="{{ [tag_catalog|length, 5]|min }}" aria-label="包含 Tag">
-          {% for tag in tag_catalog %}<option value="{{ tag }}"{% if tag in include_tags %} selected{% endif %}>{{ tag }}</option>{% endfor %}
-        </select>
-        <button class="btn btn-step btn-inline" type="submit">保存规则</button>
-        {% else %}
-        <p class="nav-empty">尚无 Tag。请先到 Settings 创建词表。</p>
-        <a class="btn btn-ghost btn-inline" href="/settings#tags">前往 Settings</a>
-        {% endif %}
-      </form>
-    </div>
-    {% endif %}
     <div class="nav-group">
       <div class="nav-section">{{ t('nav.targets') }}</div>
       <div id="targets-list">{% include "_targets_list.html" %}</div>
@@ -165,6 +148,23 @@
     {% endif %}
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
     <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}><p class="panel-hint">{{ t('panel.hint') }}</p></div>
+    {% if not public_read %}
+    <details class="include-rules">
+      <summary>{% if include_tags %}包含规则 · {{ include_tags|length }} 个 Tag{% else %}包含规则{% endif %}</summary>
+      <form class="dlg-form" method="post" action="/w/{{ slug | urlencode }}/include-tags">
+        <label class="dlg-label" for="include-tags">命中任一 Tag 的 Ref 会进入本 Topic</label>
+        {% if tag_catalog %}
+        <select id="include-tags" name="tag" multiple size="{{ [tag_catalog|length, 5]|min }}" aria-label="包含 Tag">
+          {% for tag in tag_catalog %}<option value="{{ tag }}"{% if tag in include_tags %} selected{% endif %}>{{ tag }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-step btn-inline" type="submit">保存规则</button>
+        {% else %}
+        <p class="nav-empty">尚无 Tag。请先到 Settings 创建词表。</p>
+        <a class="btn btn-ghost btn-inline" href="/settings#tags">前往 Settings</a>
+        {% endif %}
+      </form>
+    </details>
+    {% endif %}
   </aside>
 </div>
 <script>
