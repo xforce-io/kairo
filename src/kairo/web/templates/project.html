@@ -43,7 +43,7 @@
           {% for ws in available_workspaces %}
           <label class="chooser-item" data-label="{{ (ws.topic ~ ' ' ~ ws.slug) | lower }}">
             <input type="checkbox" name="workspaces" value="{{ ws.slug }}"
-                   {% if ws.slug in project.workspace_slugs %}checked{% endif %}>
+                   {% if ws.slug in project.topics %}checked{% endif %}>
             <span class="chooser-name">{{ ws.topic }}</span>
           </label>
           {% endfor %}

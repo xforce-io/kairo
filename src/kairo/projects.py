@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from kairo.readers import ReadError, read_datasource
 from kairo.settings import CONNECTION_TENCENT, get_connection
@@ -152,7 +152,10 @@ def list_projects(serve: Path) -> list[Project]:
     for child in sorted(root.iterdir()):
         path = child / "project.json"
         if path.is_file():
-            items.append(_load_file(path))
+            try:
+                items.append(_load_file(path))
+            except ProjectError:
+                continue
     return items
 
 
@@ -161,7 +164,10 @@ def _load_file(path: Path) -> Project:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise ProjectError(f"无法解析 {path}: {exc}") from exc
-    return Project.model_validate(raw)
+    try:
+        return Project.model_validate(raw)
+    except ValidationError as exc:
+        raise ProjectError(f"无法解析 {path}: {exc}") from exc
 
 
 def get_project(serve: Path, project_id: str) -> Project:
@@ -260,15 +266,18 @@ def add_datasource(
         raise ProjectError(str(exc), code=exc.code) from exc
     if not inferred.live:
         raise ProjectError(str(f"{inferred.label} Reader 尚未接入"), code="unsupported_reader")
-    internal_kind = inferred.kind
-    if kind in ("spreadsheet", "smartsheet"):
-        internal_kind = kind
+    if kind and kind != inferred.kind:
+        raise ProjectError("数据源类型必须与链接推断结果一致", code="invalid_link")
+    if connection_id and connection_id != inferred.connection_id:
+        raise ProjectError("数据源连接必须由链接推断", code="invalid_link")
+    if reader and reader != inferred.reader:
+        raise ProjectError("数据源 Reader 必须由链接推断", code="invalid_link")
     project = get_project(serve, project_id)
     ds = DataSource(
         id=_new_id("ds"),
         connection_id=connection_id or inferred.connection_id,
         url=url.strip(),
-        kind=internal_kind,
+        kind=inferred.kind,
         purpose=purpose.strip(),
         reader=reader or inferred.reader,
     )
