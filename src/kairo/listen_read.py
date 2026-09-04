@@ -27,6 +27,7 @@ class Unit:
     end: float | None
     text: str
     zero: bool = False
+    speaker: str | None = None
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,41 @@ def _line_body(line: str) -> str | None:
     return m.group("body").lstrip(" ") if m else None
 
 
+_SPEAKER = re.compile(r"^\s*\[?(SPEAKER_\d+)\]?\s*:?\s*", re.IGNORECASE)
+
+
+def _speaker_of(text: str) -> str | None:
+    first = (text or "").split("\n", 1)[0]
+    m = _SPEAKER.match(first)
+    return m.group(1).upper() if m else None
+
+
+def fold_turns(units: Iterable[Unit]) -> list[Unit]:
+    """连续同一语者标签折成一轮；无标签或换人不合并。不改磁盘誊录。"""
+    out: list[Unit] = []
+    for u in units:
+        spk = u.speaker if u.speaker is not None else _speaker_of(u.text)
+        prev = out[-1] if out else None
+        if (
+            prev is not None
+            and spk is not None
+            and prev.speaker is not None
+            and spk == prev.speaker
+            and u.start is not None
+            and prev.start is not None
+        ):
+            out[-1] = Unit(
+                start=prev.start,
+                end=u.end,
+                text=f"{prev.text}\n{u.text}",
+                zero=u.end is not None and u.end == prev.start,
+                speaker=spk,
+            )
+        else:
+            out.append(Unit(u.start, u.end, u.text, u.zero, spk))
+    return out
+
+
 def parse_units(text: str, duration: float | None = None) -> list[Unit]:
     """把 transcript 收成单元。duration 为 None 时不过滤超时长前缀。"""
     # 已存原始 SRT（含空 cue）先走与 ASR 入仓同一套归一，再认行级时间前缀。
@@ -98,14 +134,17 @@ def parse_units(text: str, duration: float | None = None) -> list[Unit]:
         units.append(Unit(start=None, end=None, text="\n".join(leading)))
     for i, (start, lines) in enumerate(accepted):
         end = accepted[i + 1][0] if i + 1 < len(accepted) else duration
+        body = "\n".join(lines)
         units.append(
             Unit(
                 start=start,
                 end=end,
-                text="\n".join(lines),
+                text=body,
                 zero=end is not None and end == start,
+                speaker=_speaker_of(body),
             )
         )
+    units = fold_turns(units)
     if duration is not None:
         return apply_duration(units, duration)
     return units
@@ -121,9 +160,15 @@ def apply_duration(units: Iterable[Unit], duration: float) -> list[Unit]:
         if u.start >= duration:
             if out:
                 prev = out[-1]
-                out[-1] = Unit(prev.start, prev.end, f"{prev.text}\n{u.text}", prev.zero)
+                out[-1] = Unit(
+                    prev.start,
+                    prev.end,
+                    f"{prev.text}\n{u.text}",
+                    prev.zero,
+                    prev.speaker,
+                )
             else:
-                out.append(Unit(None, None, u.text))
+                out.append(Unit(None, None, u.text, speaker=u.speaker))
             continue
         out.append(u)
 
@@ -131,7 +176,7 @@ def apply_duration(units: Iterable[Unit], duration: float) -> list[Unit]:
     for n, i in enumerate(timed_idx):
         u = out[i]
         end = out[timed_idx[n + 1]].start if n + 1 < len(timed_idx) else duration
-        out[i] = Unit(u.start, end, u.text, end == u.start)
+        out[i] = Unit(u.start, end, u.text, end == u.start, u.speaker)
     return out
 
 

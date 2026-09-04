@@ -32,6 +32,47 @@ def test_parse_inline_timestamps_as_separate_units():
     assert [(u.start, u.text) for u in units] == [(0, "first"), (4.92, "second")]
 
 
+def test_parse_units_folds_consecutive_same_speaker_into_one_turn():
+    text = "\n".join(
+        [
+            "[0:00:01] SPEAKER_00 hello",
+            "[0:00:03] SPEAKER_00 world",
+            "[0:00:05] SPEAKER_01 later",
+        ]
+    )
+    units = parse_units(text, duration=None)
+    timed = [(u.start, u.text) for u in units if u.start is not None]
+    assert len(timed) == 2
+    assert timed[0][0] == 1
+    assert "hello" in timed[0][1] and "world" in timed[0][1]
+    assert timed[1] == (5, "SPEAKER_01 later")
+
+
+def test_parse_units_keeps_speaker_change_at_zero_gap():
+    text = "\n".join(
+        [
+            "[0:00:01] SPEAKER_00 yes",
+            "[0:00:01] SPEAKER_01 right",
+        ]
+    )
+    units = parse_units(text, duration=None)
+    timed = [(u.start, u.text) for u in units if u.start is not None]
+    assert timed == [(1, "SPEAKER_00 yes"), (1, "SPEAKER_01 right")]
+
+
+def test_parse_units_does_not_merge_unlabeled_cues_by_gap():
+    text = "\n".join(
+        [
+            "[0:00:01] hello",
+            "[0:00:01] world",
+            "[0:00:03] next",
+        ]
+    )
+    units = parse_units(text, duration=None)
+    timed = [(u.start, u.text) for u in units if u.start is not None]
+    assert timed == [(1, "hello"), (1, "world"), (3, "next")]
+
+
 def test_parse_rejects_invalid_prefixes():
     text = "\n".join(
         [
