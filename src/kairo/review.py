@@ -41,6 +41,8 @@ def collect_digests(
     with_d: list[tuple[TimelineItem, str]] = []
     without: list[TimelineItem] = []
     for it in items:
+        if it.kind != "ref":
+            continue
         path = digest_path(root, it)
         if path.is_file():
             with_d.append((it, path.read_text(encoding="utf-8")))
@@ -258,7 +260,7 @@ def prepare_range(
     found = [
         it
         for it in filter_range(items, start, end)
-        if not is_journal_item(it, root)
+        if it.kind == "ref" and not is_journal_item(it, root)
     ]
     if not found:
         raise ReviewError("empty-range")

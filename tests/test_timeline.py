@@ -163,6 +163,68 @@ def test_add_occurred_rejects_illegal_and_corpus(tmp_path):
         ws.add([src], occurred_at="2026-08-24", source_class="corpus")
 
 
+def _write_project_artifact(root: Path, *, day: str = "2026-08-24"):
+    import json
+
+    from kairo.projects import create_project
+
+    project = create_project(root, "能源项目")
+    proj_path = root / ".kairo" / "projects" / project.id / "project.json"
+    data = json.loads(proj_path.read_text(encoding="utf-8"))
+    data["created_at"] = f"{day}T10:00:00+00:00"
+    proj_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    run_id = "run-art-1"
+    rel = f".kairo/projects/{project.id}/artifacts/{run_id}.md"
+    art = root / rel
+    art.parent.mkdir(parents=True, exist_ok=True)
+    art.write_text("# 周报\n正文\n", encoding="utf-8")
+    run = {
+        "id": run_id,
+        "project_id": project.id,
+        "task_id": "tsk-1",
+        "task_name": "周报",
+        "task_version": 1,
+        "datasource_id": "ds-1",
+        "datasource_url": "https://example.com/doc",
+        "datasource_kind": "doc",
+        "status": "succeeded",
+        "reason": None,
+        "artifact_path": rel,
+        "created_at": f"{day}T12:00:00+00:00",
+    }
+    run_path = root / ".kairo" / "projects" / project.id / "runs" / f"{run_id}.json"
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    run_path.write_text(json.dumps(run, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return project.id, run_id
+
+
+def test_scan_includes_project_and_artifact_without_owning_them(tmp_path):
+    root = tmp_path / "root"
+    ws_dir = root / "alpha"
+    ws_dir.mkdir(parents=True)
+    ws = Workspace.init(ws_dir, topic="能源梳理")
+    (tmp_path / "m.txt").write_text("会议")
+    ws.add(
+        [tmp_path / "m.txt"],
+        ref_id="2026-08-24-weekly",
+        title="候选人沟通",
+        occurred_at="2026-08-24",
+    )
+    pid, rid = _write_project_artifact(root)
+    items = scan_timeline(root)
+    kinds = {it.kind: it for it in items}
+    assert kinds["ref"].id == "2026-08-24-weekly"
+    assert kinds["ref"].occurred_at == dt.date(2026, 8, 24)
+    assert kinds["project"].id == pid
+    assert kinds["project"].title == "能源项目"
+    assert kinds["project"].occurred_at == dt.date(2026, 8, 24)
+    assert kinds["project"].href == f"/projects/{pid}"
+    assert kinds["artifact"].id == rid
+    assert kinds["artifact"].occurred_at == dt.date(2026, 8, 24)
+    assert kinds["artifact"].href == f"/projects/{pid}/runs/{rid}"
+    assert not (root / ".kairo" / "timeline").exists()
+
+
 def test_scan_skips_corpus_and_broken(tmp_path):
     root = tmp_path / "root"
     a = root / "alpha"

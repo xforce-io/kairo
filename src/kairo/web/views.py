@@ -605,7 +605,8 @@ def timeline_view(
     digest_n = sum(
         1
         for it in day_items
-        if timeline_digest_path(Path(request.app.state.root), it.workspace, it.id).is_file()
+        if it.kind == "ref"
+        and timeline_digest_path(Path(request.app.state.root), it.workspace, it.id).is_file()
     )
     span = range_day_count(r0, r1) if range_on else 1
     too_long = span > MAX_RANGE_DAYS
