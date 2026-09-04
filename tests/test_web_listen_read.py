@@ -249,6 +249,8 @@ def test_listen_read_search_lists_hits_for_each_unit(tmp_path):
     assert r.text.count("shared") >= 1
     assert 'data-start="10"' in r.text
     assert 'data-start="20"' in r.text
+    assert 'data-lr-hits' in r.text
+    assert "0 results" in r.text or "data-empty=" in r.text
 
 
 def test_audio_only_ref_view_does_not_use_empty_primary(tmp_path):
@@ -296,6 +298,8 @@ def test_untimed_transcript_still_readable(tmp_path):
     assert "is-untimed" in r.text
     assert "data-start=" not in r.text
     assert "-->" not in r.text
+    assert 'class="lr-search"' in r.text
+    assert 'data-lr-q' in r.text
 
 
 def test_duplicate_origin_does_not_link(tmp_path):
@@ -321,6 +325,113 @@ def test_duplicate_origin_does_not_link(tmp_path):
     r = _client(tmp_path).get("/w/ws/ref/dup/form/0")
     assert "first claim" not in r.text
     assert "second claim" not in r.text
+
+
+def test_js_search_counts_highlights_zero_and_untimed():
+    import subprocess
+    from pathlib import Path
+
+    js = Path("src/kairo/web/static/listen_read.js").read_text()
+    script = (
+        js
+        + r"""
+function fakeClassList() {
+  const s = new Set();
+  return {
+    toggle(name, on) { if (on) s.add(name); else s.delete(name); },
+    contains(name) { return s.has(name); },
+  };
+}
+function fakeUnit(text, start) {
+  const textEl = { textContent: text };
+  return {
+    classList: fakeClassList(),
+    textContent: text,
+    querySelector(sel) { return sel === '.lr-unit-text' ? textEl : null; },
+    getAttribute(n) { return n === 'data-start' ? start : null; },
+    scrollIntoView() { this.scrolled = true; },
+  };
+}
+function fakeEl() {
+  const attrs = {};
+  const nodes = [];
+  return {
+    className: '',
+    type: '',
+    textContent: '',
+    attributes: attrs,
+    nodes,
+    setAttribute(k, v) { attrs[k] = String(v); },
+    getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+    appendChild(n) { nodes.push(n); },
+  };
+}
+globalThis.document = { createElement() { return fakeEl(); } };
+
+const q = { value: '' };
+const hitsEl = {
+  hidden: true,
+  nodes: [],
+  set innerHTML(v) { if (v === '') this.nodes = []; },
+  get innerHTML() { return ''; },
+  getAttribute(n) { return n === 'data-empty' ? '0 results' : null; },
+  appendChild(n) { this.nodes.push(n); },
+};
+const units = [
+  fakeUnit('foo alpha', '10'),
+  fakeUnit('bar alpha', '20'),
+  fakeUnit('other', '30'),
+  fakeUnit('plain project people', null),
+];
+const box = {
+  querySelector(sel) {
+    if (sel === '[data-lr-q]') return q;
+    if (sel === '[data-lr-hits]') return hitsEl;
+    return null;
+  },
+  querySelectorAll(sel) { return sel === '.lr-unit' ? units : []; },
+};
+
+q.value = 'alpha';
+const view = kairoApplySearch(box);
+if (!view || view.count !== 2 || view.status !== '2' || hitsEl.hidden) {
+  throw new Error('apply timed ' + JSON.stringify(view));
+}
+if (!units[0].classList.contains('is-hit') || !units[1].classList.contains('is-hit') || units[2].classList.contains('is-hit') || units[3].classList.contains('is-hit')) {
+  throw new Error('is-hit mismatch');
+}
+const status = hitsEl.nodes[0];
+if (!status || status.getAttribute('data-lr-status') !== '' || status.textContent !== '2') {
+  throw new Error('status ' + JSON.stringify(status && status.textContent));
+}
+if (hitsEl.nodes.length !== 3 || hitsEl.nodes[1].className !== 'lr-hit' || hitsEl.nodes[1].getAttribute('data-start') !== '10') {
+  throw new Error('hit buttons');
+}
+
+q.value = 'zzzz-nope';
+const zero = kairoApplySearch(box);
+if (zero.count !== 0 || zero.status !== '0 results' || hitsEl.hidden || hitsEl.nodes[0].textContent !== '0 results') {
+  throw new Error('zero ' + JSON.stringify(zero));
+}
+if (units.some(u => u.classList.contains('is-hit'))) throw new Error('zero should clear is-hit');
+
+q.value = 'project';
+const untimed = kairoApplySearch(box);
+if (untimed.count !== 1 || !units[3].classList.contains('is-hit') || hitsEl.nodes[1].getAttribute('data-start') != null) {
+  throw new Error('untimed apply');
+}
+const audio = { currentTime: 0, play() { this.played = true; } };
+kairoLocateHit(audio, hitsEl.nodes[1], units);
+if (!units[3].scrolled) throw new Error('untimed should scroll');
+if (audio.played) throw new Error('untimed should not seek');
+
+kairoLocateHit(audio, { getAttribute(n) { return n === 'data-start' ? '10' : n === 'data-unit' ? '0' : null; } }, units);
+if (audio.currentTime !== 10 || !audio.played || !units[0].scrolled) throw new Error('timed locate ' + audio.currentTime);
+console.log('ok');
+"""
+    )
+    r = subprocess.run(["node", "-e", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr + r.stdout
 
 
 def test_js_helpers_filter_duration_and_stop_audio():

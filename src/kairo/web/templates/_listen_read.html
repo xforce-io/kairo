@@ -15,7 +15,7 @@
   </div>
   <div class="lr-search">
     <input type="search" data-lr-q placeholder="{{ t('listen.search') }}" autocomplete="off">
-    <div class="lr-hits" data-lr-hits hidden></div>
+    <div class="lr-hits" data-lr-hits data-empty="{{ t('listen.search_empty') }}" hidden></div>
   </div>
   <div class="lr-units" data-lr-units>
     {% for u in units %}

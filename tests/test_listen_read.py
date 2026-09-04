@@ -97,6 +97,16 @@ def test_search_hits_map_to_own_unit_starts():
     ]
 
 
+def test_search_hits_untimed_and_zero_results():
+    units = parse_units("plain line\nproject people here", duration=60)
+    hits = search_hits(units, "project")
+    assert len(hits) == 1
+    assert hits[0].start is None
+    assert "project people here" in hits[0].text
+    assert search_hits(units, "zzzz-nope") == []
+    assert search_hits(units, "") == []
+
+
 def test_pair_origin_then_unique_fallback():
     a1 = Form(role="audio", location="a1.wav", hash="h1", origin="added")
     a2 = Form(role="audio", location="a2.wav", hash="h2", origin="added")
