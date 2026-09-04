@@ -305,6 +305,38 @@ def test_nav_has_no_source_class_tag(tmp_path):
     assert 'class="tag' not in r.text
 
 
+def test_references_group_by_occurred_day_descending_and_keep_links(tmp_path):
+    """#281 S1：日期是 References 的下级，组间分隔，Ref 仍可打开。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("内容")
+    ws.add([src], ref_id="old", title="较早资料", occurred_at="2026-08-20")
+    ws.add([src], ref_id="new-a", title="最新资料 A", occurred_at="2026-08-22")
+    ws.add([src], ref_id="new-b", title="最新资料 B", occurred_at="2026-08-22")
+
+    r = _client(tmp_path).get("/w/ws")
+    assert r.status_code == 200
+    assert r.text.index('datetime="2026-08-22"') < r.text.index('datetime="2026-08-20"')
+    assert r.text.index("最新资料 A") < r.text.index("最新资料 B")
+    assert 'class="ref-day-group is-separated"' in r.text
+    assert 'href="/w/ws?ref=new-a"' in r.text
+
+
+def test_references_put_unknown_occurred_day_in_one_tail_group(tmp_path):
+    """#281 S2：未知发生时间不混入日期组，且只显示一次。"""
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("内容")
+    ws.add([src], ref_id="dated", title="已有日期", occurred_at="2026-08-22")
+    ws.add([src], ref_id="unknown", title="未知日期")
+
+    r = _client(tmp_path).get("/w/ws", headers={"accept-language": "zh"})
+    assert r.status_code == 200
+    assert r.text.index('datetime="2026-08-22"') < r.text.index("发生时间未知")
+    assert r.text.count("发生时间未知") == 1
+    assert r.text.count("未知日期") == 1
+
+
 def test_refs_fragment_has_no_source_class_tag(tmp_path):
     # 上传后刷新的列表片段同样不再渲染 source_class 标签
     Workspace.init(tmp_path / "ws", topic="t")

@@ -319,6 +319,10 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .nav-doc .name { overflow: hidden; text-overflow: ellipsis; }
 .nav-doc.is-ref .name { font-weight: 500; }
 .nav-empty { color: var(--muted); font-size: 12.5px; font-style: italic; padding: 2px 9px; }
+.ref-day-group { margin: 0; padding: 0; }
+.ref-day-group.is-separated { margin-top: 14px; padding-top: 13px; border-top: 1px solid var(--line); }
+.ref-day-heading { margin: 0 9px 5px; color: var(--muted); font-family: var(--mono); font-size: 10px; font-weight: 600; letter-spacing: .12em; line-height: 1.4; }
+.ref-day-unknown .ref-day-heading { letter-spacing: .06em; text-transform: none; }
 /* 参考组底部的添加入口:step 同款按钮 → 弹框 */
 .btn-add-ref { margin-top: 12px; }
 /* 产物「重新生成」:破坏性次级操作,克制描边,hover 透出警示红 */

@@ -131,6 +131,23 @@ def test_web_delete_ref_redirects_and_clears(tmp_path, monkeypatch):
     assert rid not in Workspace.open(tmp_path / "ws").list_reference_ids()
 
 
+def test_web_delete_ref_recompose_keeps_remaining_reference_nav(tmp_path, monkeypatch):
+    """#281：立即重综合的 OOB 刷新沿用发生日分组的 References 契约。"""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    src = tmp_path / "note.txt"
+    src.write_text("内容")
+    removed = ws.add([src], ref_id="removed", title="删除资料", occurred_at="2026-08-20")
+    ws.add([src], ref_id="kept", title="保留资料", occurred_at="2026-08-22")
+    app = create_app(tmp_path)
+
+    r = TestClient(app).post(f"/w/ws/ref/{removed}/delete", data={"recompose": "1"})
+    assert r.status_code == 200
+    assert 'id="refs-list" hx-swap-oob="true"' in r.text
+    assert "保留资料" in r.text
+    assert 'datetime="2026-08-22"' in r.text
+
+
 def test_web_delete_ref_cancel_is_client_side_only(tmp_path, monkeypatch):
     """确认取消不发请求:服务端未调用时 ref 仍在(无副作用)。"""
     ws, rid = _ws_with_folded_stream(tmp_path, monkeypatch)
