@@ -52,11 +52,11 @@ from kairo.timeline import (
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound, delete_workspace
 
 _EPILOG = (
-    '快速上手:kairo init "<topic>" → kairo add <file>'
-    "(--corpus 标基线,默认 stream 观测)→ kairo step(调和到收敛)。\n\n"
-    "多 Topic:kairo list [root] / kairo new \"topic\" / kairo serve [root]。\n\n"
-    "产出 understanding.md(中立事实)。\n\n"
-    "心智与协议(stream/corpus、fold)定义在 constitution.yaml。"
+    "三条路径:\n\n"
+    "1. Ref/Timeline 发现: kairo add <file> [--topic TOPIC] → kairo timeline [--tag TAG]\n"
+    "2. Topic 处理: cd <topic-dir> → kairo step / run / status\n"
+    "3. Project 执行: kairo project create / link / task run\n\n"
+    "产出 understanding.md(中立事实)。心智与协议定义在 constitution.yaml。"
 )
 
 app = typer.Typer(help="step 驱动的增量知识构建引擎", epilog=_EPILOG)
@@ -82,13 +82,17 @@ artifact_app = typer.Typer(help="阅读 Artifact")
 app.add_typer(artifact_app, name="artifact")
 
 
-def _open_ws() -> Workspace:
-    """打开当前目录的 Topic;非 Topic 给友好提示并非零退出(不吐 traceback)。"""
+def _open_ws(topic: str | None = None) -> Workspace:
+    """打开工作区:显式 topic 或当前目录;非工作区给友好提示并非零退出(不吐 traceback)。"""
     try:
+        if topic:
+            serve = _serve_root(None)
+            dest = serve / topic
+            return Workspace.open(dest)
         return Workspace.open(Path.cwd())
     except WorkspaceNotFound:
         typer.secho(
-            '当前目录不是 kairo Topic,先运行 kairo init "<topic>"',
+            '不是 kairo Topic 或找不到指定 Topic,请检查路径或先运行 kairo init "<topic>"',
             fg=typer.colors.RED,
             err=True,
         )
@@ -123,10 +127,24 @@ def _validate_topic_name(topic: str) -> str:
 
 
 @app.command()
-def init(topic: str = typer.Argument("main", help="本 Topic 的 topic")) -> None:
-    """把当前目录初始化为 Topic + 默认宪法。"""
-    Workspace.init(Path.cwd(), topic=topic)
-    typer.echo(f"initialized Topic (topic={topic})")
+def init(topic: str = typer.Argument("main", help="本 Topic 的名称")) -> None:
+    """把当前目录初始化为 Topic + 默认 constitution。"""
+    from kairo.refs import create_tag, list_tags
+    
+    serve = Path.cwd().parent
+    if topic not in list_tags(serve):
+        typer.secho(
+            f"请先在 Settings 创建同名 Tag:{topic}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+    
+    ws = Workspace.init(Path.cwd(), topic=topic)
+    constitution = ws.constitution
+    constitution.include_tags = [topic]
+    ws.write_constitution(constitution)
+    typer.echo(f"initialized topic (topic={topic}, include_tags=[{topic}])")
 
 
 @app.command(name="list")
@@ -137,8 +155,9 @@ def list_cmd(
     ),
     as_json: bool = typer.Option(False, "--json", help="JSON 输出(agent 友好)"),
 ) -> None:
-    """#95:列出 serve root 下各 Topic 摘要(与 Web dashboard 同源 discovery)。"""
+    """列出 serve root 下各 Topic 摘要(与 Web dashboard 同源 discovery)。"""
     from kairo.web.discovery import scan_workspaces
+    from kairo.refs import include_tags_of, topic_members
 
     serve = _serve_root(root)
     if not serve.is_dir():
@@ -146,27 +165,31 @@ def list_cmd(
         raise typer.Exit(1)
     items = scan_workspaces(serve)
     if as_json:
-        typer.echo(
-            json.dumps(
-                [
-                    {
-                        "slug": s.slug,
-                        "topic": s.topic,
-                        "path": s.path,
-                        "stream": s.stream_count,
-                        "corpus": s.corpus_count,
-                        "stale": s.stale_count,
-                        "blocked": s.blocked_count,
-                    }
-                    for s in items
-                ],
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
+        result = []
+        for s in items:
+            try:
+                ws = Workspace.open(Path(s.path))
+                include_tags = include_tags_of(ws) or []
+                members = topic_members(serve, s.slug)
+                member_count = len(members)
+            except Exception:
+                include_tags = []
+                member_count = 0
+            result.append({
+                "slug": s.slug,
+                "topic": s.topic,
+                "path": s.path,
+                "stream": s.stream_count,
+                "corpus": s.corpus_count,
+                "stale": s.stale_count,
+                "blocked": s.blocked_count,
+                "include_tags": include_tags,
+                "member_count": member_count,
+            })
+        typer.echo(json.dumps(result, ensure_ascii=False, indent=2))
         return
     if not items:
-        typer.echo(f"(no Topics under {serve})")
+        typer.echo(f"(no topics under {serve})")
         return
     typer.echo(f"root={serve}")
     hdr = f"{'SLUG':<24} {'STREAM':>6} {'CORPUS':>6} {'STALE':>5} {'BLOCK':>5}  TOPIC"
@@ -180,12 +203,12 @@ def list_cmd(
 
 @app.command()
 def new(
-    topic: str = typer.Argument(..., help="新 Topic 的 topic(亦作目录名)"),
+    topic: str = typer.Argument(..., help="新 Topic 的名称(亦作目录名)"),
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
     ),
 ) -> None:
-    """#95:在 serve root 下新建 Topic 目录并 init(对标 Web 新建)。"""
+    """在 serve root 下新建 Topic 目录并 init(对标 Web 新建)。"""
     try:
         topic = _validate_topic_name(topic)
     except ValueError as e:
@@ -211,39 +234,13 @@ def new(
         raise typer.Exit(1)
     ws = Workspace.init(dest, topic=topic)
     constitution = ws.constitution
-    constitution.include_tags = []
+    constitution.include_tags = [topic]
     ws.write_constitution(constitution)
-    typer.echo(f"created {dest}")
+    typer.echo(f"created {dest} (include_tags=[{topic}])")
 
 
 @app.command(name="rm-ws")
 def rm_ws(
-    slug: str = typer.Argument(..., help="要删除的 Topic 目录名(slug)"),
-    root: Path = typer.Option(
-        None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
-    ),
-    yes: bool = typer.Option(False, "--yes", "-y", help="跳过确认"),
-) -> None:
-    """#95:删除 serve root 下某个 Topic(不碰 root glossary 与其它 Topic)。
-    
-    已废弃: 请使用 `kairo rm` 代替。
-    """
-    serve = _serve_root(root)
-    if not yes:
-        typer.confirm(f"永久删除 Topic {slug!r} under {serve}?", abort=True)
-    try:
-        delete_workspace(serve, slug)
-    except WorkspaceNotFound:
-        typer.secho(f"Topic 不存在:{slug}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-    except ValueError as e:
-        typer.secho(str(e), fg=typer.colors.RED, err=True)
-        raise typer.Exit(1) from None
-    typer.echo(f"deleted {slug}")
-
-
-@app.command(name="rm")
-def rm(
     slug: str = typer.Argument(..., help="要删除的 Topic 目录名(slug)"),
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
@@ -271,10 +268,13 @@ def archive(
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"
     ),
-    workspace: str = typer.Option(
-        None, "--workspace", help="目标 Topic slug;续接时可省略,取回执中的值"
+    topic: str = typer.Option(
+        None, "--topic", help="目标 Topic slug;续接时可省略,取回执中的值"
     ),
-    create: bool = typer.Option(False, "--create", help="在 --workspace 下新建归档"),
+    workspace: str = typer.Option(
+        None, "--workspace", hidden=True
+    ),
+    create: bool = typer.Option(False, "--create", help="在 --topic 下新建归档"),
     bind: str = typer.Option(
         None, "--bind", help="覆盖该 Topic 中已有归档 reference"
     ),
@@ -282,6 +282,8 @@ def archive(
     as_json: bool = typer.Option(False, "--json", help="成功时 stdout 为 JSON 对象"),
 ) -> None:
     """把 coding agent 会话 Markdown 归档到指定 Topic(#136)。"""
+    # Support deprecated --workspace for one release
+    target_topic = topic or workspace
     serve = _serve_root(root)
     if str(session) == "-":
         text = sys.stdin.read()
@@ -295,7 +297,7 @@ def archive(
         rec = archive_markdown(
             text,
             serve_root=serve,
-            workspace=workspace,
+            workspace=target_topic,
             create=create,
             bind=bind,
             title=title,
@@ -346,32 +348,37 @@ def add(
         None,
         "--id",
         "--to",
-        help="指定 ref id;指向已有 id 时追加形态(attach,对标 Web)",
+        help="指定 ref id;指向已有 id 时追加形态(attach)",
     ),
     role: str = typer.Option(None, "--role", help="覆盖按扩展名猜测的 role"),
     corpus: bool = typer.Option(
-        False, "--corpus", help="标为基线参考资料(corpus);默认会议流(stream)"
+        False, "--corpus", help="标为基线参考资料(corpus);默认观测(stream)"
     ),
     copy: bool = typer.Option(
         False,
         "--copy",
-        help="先复制进工作区(.kairo/uploads 或既有 ref 目录)再登记;默认只记路径指针",
+        help="先复制进目录再登记;默认只记路径指针",
     ),
     occurred_at: str = typer.Option(
         None, "--occurred", help="发生日 YYYY-MM-DD;不改 id"
+    ),
+    topic: str = typer.Option(
+        None, "--topic", help="将 Ref 加入指定 Topic(用 Topic 名称 Tag 标记)"
     ),
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;非 Topic 目录时写入全局库"
     ),
 ) -> None:
-    """登记 Ref。cwd 为 Topic 则 home 在该 Topic;否则写入全局库。"""
-    from kairo.refs import add_global_ref
-    from kairo.workspace import AddError, Workspace, WorkspaceNotFound
+    """登记 Ref。cwd 为 Topic 则 home 在该 Topic;否则写入全局库。--topic 显式标记入 Topic。"""
+    from kairo.refs import add_global_ref, add_tag, list_tags
 
     try:
         ws = Workspace.open(Path.cwd())
     except WorkspaceNotFound:
         ws = None
+    
+    serve = _serve_root(root) if root else (ws.root.parent if ws else Path.cwd())
+    
     try:
         if occurred_at and corpus:
             raise AddError("fold=false 不能设发生时间")
@@ -384,9 +391,10 @@ def add(
                 copy=copy,
                 occurred_at=occurred_at,
             )
+            home_slug = ws.root.name
         else:
             rid = add_global_ref(
-                _serve_root(root),
+                serve,
                 files,
                 ref_id=ref_id,
                 role=role,
@@ -394,19 +402,33 @@ def add(
                 copy=copy,
                 occurred_at=occurred_at,
             )
+            home_slug = ""
+        
+        if topic:
+            if topic not in list_tags(serve):
+                typer.secho(
+                    f"Topic 名称 Tag 不在词表中:{topic}。请先在 Settings / `kairo tag create {topic}` 创建。",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+                raise typer.Exit(1)
+            add_tag(serve, home=home_slug, ref_id=rid, tag=topic)
+            typer.echo(f"added {rid}, tagged with {topic}")
+        else:
+            typer.echo(f"added {rid}")
     except AddError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    typer.echo(f"added {rid}")
 
 
 @app.command()
 def title(
     ref_id: str = typer.Argument(..., help="reference id"),
     name: str = typer.Argument(..., help="新展示名(仅人读,不动 id/目录)"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
 ) -> None:
     """重命名一条参考的 title(对标 Web 改名;不改 ref_id / 产物溯源)。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     if ref_id not in ws.list_reference_ids():
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -423,9 +445,10 @@ def occurred(
     ref_id: str = typer.Argument(..., help="reference id"),
     day: str = typer.Argument(None, help="发生日 YYYY-MM-DD"),
     clear: bool = typer.Option(False, "--clear", help="清空手改发生时间"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
 ) -> None:
     """修正或清空一条参考的发生时间(不改 id,不 step)。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     if ref_id not in ws.list_reference_ids():
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -510,7 +533,8 @@ def timeline(
 def review(
     from_day: str = typer.Option(..., "--from", help="区间起"),
     to_day: str = typer.Option(..., "--to", help="区间止"),
-    workspace: str = typer.Option(None, "--workspace", "-w", help="可选落点 slug;缺省写入「总结」"),
+    topic: str = typer.Option(None, "--topic", "-t", help="可选落点 slug;缺省写入「总结」"),
+    workspace: str = typer.Option(None, "--workspace", help=typer.Typer.hidden, hidden=True),
     root: Path = typer.Option(
         None,
         "--root",
@@ -519,6 +543,8 @@ def review(
     ),
 ) -> None:
     """按发生日闭区间生成回顾,默认写入「总结」Topic 的一条 stream reference。"""
+    # Support deprecated --workspace for one release
+    target_topic = topic or workspace
     start = parse_calendar_date(from_day)
     end = parse_calendar_date(to_day)
     if start is None or end is None:
@@ -533,11 +559,11 @@ def review(
         body = generate_review_body(
             with_d, without, artifact_dir=serve / ".kairo" / "review-work"
         )
-        ws = resolve_review_workspace(serve, workspace or "")
+        ws = resolve_review_workspace(serve, target_topic or "")
         occ = occupied_span([it for it, _ in with_d]) or (start, end)
         rid = write_review_reference(ws, occ[0], occ[1], body, occurred=end)
     except WorkspaceNotFound:
-        typer.secho(f"Topic 不存在:{workspace}", fg=typer.colors.RED, err=True)
+        typer.secho(f"Topic 不存在:{target_topic}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     except ReviewError as e:
         msg = {
@@ -593,22 +619,22 @@ def _exit_if_run_failed(ws: Workspace) -> None:
 
 
 @app.command()
-def step() -> None:
+def step(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
     """跑调和循环到收敛(provider auto:codex→grok→claude→endpoint→stub;材料路径跳过不兼容者)。
 
     注意:不自动重试 asr-failed 等终态 blocked;需要时用 run / retry-ref。
     provider-failed 时非零退出(#105),便于 Web Run 显示失败而非 Running/假成功。
     """
-    ws = _open_ws()
+    ws = _open_ws(topic)
     progressed = engine_step(ws, select_provider(require_read_dirs=True))
     typer.echo("stepped" if progressed else "no change")
     _exit_if_run_failed(ws)
 
 
 @app.command(name="run")
-def run_cmd() -> None:
-    """#75 推进工作区:有 blocked 则先清终态再 step(与 Web 主按钮一致)。"""
-    ws = _open_ws()
+def run_cmd(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
+    """推进 Topic:有 blocked 则先清终态再 step(与 Web 主按钮一致)。"""
+    ws = _open_ws(topic)
     plan = workspace_run_plan(ws)
     if plan["mode"] == "clean":
         typer.echo("up to date")
@@ -625,18 +651,22 @@ def run_cmd() -> None:
 @app.command(name="re-step")
 def re_step(
     target: str = typer.Argument(None, help="文档 / reference id;省略=全量"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
 ) -> None:
     """强制重算(文档级=整篇重综合;reference=清派生产物含 blocked 后重跑)。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     engine_re_step(ws, select_provider(require_read_dirs=True), target)
     _exit_if_run_failed(ws)
     typer.echo(f"re-stepped {target or '(all)'}")
 
 
 @app.command(name="retry-ref")
-def retry_ref(ref_id: str = typer.Argument(..., help="reference id")) -> None:
+def retry_ref(
+    ref_id: str = typer.Argument(..., help="reference id"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+) -> None:
     """重新处理一条参考:清除 transcript/digest 等派生产物(含 asr-failed)后 step。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     if ref_id not in ws.list_reference_ids():
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -652,9 +682,10 @@ def rm_ref(
     recompose: bool = typer.Option(
         False, "--recompose", help="删除后立即用剩余参考整篇重综合产物"
     ),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
 ) -> None:
-    """#77:永久删除一条参考(摘 folded;默认不改写产物正文)。"""
-    ws = _open_ws()
+    """永久删除一条参考(摘 folded;默认不改写产物正文)。"""
+    ws = _open_ws(topic)
     if ref_id not in ws.list_reference_ids():
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -672,9 +703,12 @@ def rm_ref(
 
 
 @app.command()
-def prose(ref_id: str = typer.Argument(..., help="reference id")) -> None:
+def prose(
+    ref_id: str = typer.Argument(..., help="reference id"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+) -> None:
     """为单条参考生成可读文稿 prose.md(旁路 normalize 开关,不改 constitution)。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     try:
         key = engine_generate_prose(ws, select_provider(), ref_id)
     except ProseError as e:
@@ -684,9 +718,12 @@ def prose(ref_id: str = typer.Argument(..., help="reference id")) -> None:
 
 
 @app.command()
-def accept(doc: str = typer.Argument(..., help="要接受手改的文档")) -> None:
+def accept(
+    doc: str = typer.Argument(..., help="要接受手改的文档"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+) -> None:
     """接受手改、钉为新基线,解除 blocked: manual-edit。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     engine_accept(ws, doc)
     typer.echo(f"accepted {doc}")
 
@@ -707,13 +744,13 @@ def _format_block_diag(reason: str | None, diagnostic) -> str:
 
 
 @app.command()
-def status() -> None:
+def status(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
     """列 references / 各文档融入状态;顶部摘要 topic 与 run plan(stale/blocked)。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     state = ws.read_state()
     plan = workspace_run_plan(ws)
     typer.echo(
-        f"Topic {ws.root.name}  topic={ws.constitution.topic}  "
+        f"topic {ws.root.name}  name={ws.constitution.topic}  "
         f"plan={plan['mode']}  stale={plan['pending_count']}  blocked={plan['blocked_count']}"
     )
     compose = ComposeRule(ws, None)  # 仅用于 corpus 漂移检测(不调 provider)
@@ -753,33 +790,39 @@ def status() -> None:
 
 
 @app.command()
-def index() -> None:
+def index(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
     """(重)生成 references/MEETINGS.md —— 按 class 列出 stream(观测)导航索引。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     path = write_stream_index(ws)
     typer.echo(f"wrote {path.relative_to(ws.root)}")
 
 
 @app.command()
-def history() -> None:
+def history(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
     """列版本快照。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     for seq in list_snapshots(ws):
         typer.echo(seq)
 
 
 @app.command()
-def rollback(seq: str = typer.Argument(..., help="要回退到的快照 seq")) -> None:
+def rollback(
+    seq: str = typer.Argument(..., help="要回退到的快照 seq"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+) -> None:
     """回退文档 + targets 段到某版本(references/ 不动,下次 step 重融更晚 digest)。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     history_rollback(ws, seq)
     typer.echo(f"rolled back to {seq}")
 
 
 @app.command()
-def diff(seq: str = typer.Argument(None, help="对比的快照;省略=最近")) -> None:
+def diff(
+    seq: str = typer.Argument(None, help="对比的快照;省略=最近"),
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+) -> None:
     """工作态 vs 版本文档差异(自带,不依赖 git)。"""
-    ws = _open_ws()
+    ws = _open_ws(topic)
     typer.echo(diff_worktree(ws, seq) or "(no changes)")
 
 
