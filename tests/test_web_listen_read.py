@@ -335,34 +335,98 @@ def test_js_search_counts_highlights_zero_and_untimed():
     script = (
         js
         + r"""
+function fakeClassList() {
+  const s = new Set();
+  return {
+    toggle(name, on) { if (on) s.add(name); else s.delete(name); },
+    contains(name) { return s.has(name); },
+  };
+}
+function fakeUnit(text, start) {
+  const textEl = { textContent: text };
+  return {
+    classList: fakeClassList(),
+    textContent: text,
+    querySelector(sel) { return sel === '.lr-unit-text' ? textEl : null; },
+    getAttribute(n) { return n === 'data-start' ? start : null; },
+    scrollIntoView() { this.scrolled = true; },
+  };
+}
+function fakeEl() {
+  const attrs = {};
+  const nodes = [];
+  return {
+    className: '',
+    type: '',
+    textContent: '',
+    attributes: attrs,
+    nodes,
+    setAttribute(k, v) { attrs[k] = String(v); },
+    getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+    appendChild(n) { nodes.push(n); },
+  };
+}
+globalThis.document = { createElement() { return fakeEl(); } };
+
+const q = { value: '' };
+const hitsEl = {
+  hidden: true,
+  nodes: [],
+  set innerHTML(v) { if (v === '') this.nodes = []; },
+  get innerHTML() { return ''; },
+  getAttribute(n) { return n === 'data-empty' ? '0 results' : null; },
+  appendChild(n) { this.nodes.push(n); },
+};
 const units = [
-  {start: 10, text: 'foo alpha'},
-  {start: 20, text: 'bar alpha'},
-  {start: 30, text: 'other'},
-  {start: null, text: 'plain project people'},
+  fakeUnit('foo alpha', '10'),
+  fakeUnit('bar alpha', '20'),
+  fakeUnit('other', '30'),
+  fakeUnit('plain project people', null),
 ];
-const two = kairoSearchUnits(units, 'alpha');
-if (two.length !== 2 || two[0].start !== 10 || two[1].start !== 20) {
-  throw new Error('timed hits ' + JSON.stringify(two));
+const box = {
+  querySelector(sel) {
+    if (sel === '[data-lr-q]') return q;
+    if (sel === '[data-lr-hits]') return hitsEl;
+    return null;
+  },
+  querySelectorAll(sel) { return sel === '.lr-unit' ? units : []; },
+};
+
+q.value = 'alpha';
+const view = kairoApplySearch(box);
+if (!view || view.count !== 2 || view.status !== '2' || hitsEl.hidden) {
+  throw new Error('apply timed ' + JSON.stringify(view));
 }
-const none = kairoSearchUnits(units, 'zzzz-nope');
-if (none.length !== 0) throw new Error('expected 0 hits');
-const view0 = kairoSearchView(none, {empty: '0 results'});
-if (view0.count !== 0 || view0.status !== '0 results' || view0.hidden !== false) {
-  throw new Error('zero view ' + JSON.stringify(view0));
+if (!units[0].classList.contains('is-hit') || !units[1].classList.contains('is-hit') || units[2].classList.contains('is-hit') || units[3].classList.contains('is-hit')) {
+  throw new Error('is-hit mismatch');
 }
-const untimed = kairoSearchUnits(units, 'project');
-if (untimed.length !== 1 || untimed[0].start !== null || untimed[0].index !== 3) {
-  throw new Error('untimed ' + JSON.stringify(untimed));
+const status = hitsEl.nodes[0];
+if (!status || status.getAttribute('data-lr-status') !== '' || status.textContent !== '2') {
+  throw new Error('status ' + JSON.stringify(status && status.textContent));
 }
-const marked = kairoHitIndexes(two);
-if (JSON.stringify(marked) !== JSON.stringify([0, 1])) {
-  throw new Error('indexes ' + JSON.stringify(marked));
+if (hitsEl.nodes.length !== 3 || hitsEl.nodes[1].className !== 'lr-hit' || hitsEl.nodes[1].getAttribute('data-start') !== '10') {
+  throw new Error('hit buttons');
 }
-const emptyQ = kairoSearchUnits(units, '  ');
-if (emptyQ.length !== 0) throw new Error('blank query should be empty');
-const blankView = kairoSearchView([], {empty: '0 results', query: ''});
-if (blankView.hidden !== true) throw new Error('blank query should hide hits');
+
+q.value = 'zzzz-nope';
+const zero = kairoApplySearch(box);
+if (zero.count !== 0 || zero.status !== '0 results' || hitsEl.hidden || hitsEl.nodes[0].textContent !== '0 results') {
+  throw new Error('zero ' + JSON.stringify(zero));
+}
+if (units.some(u => u.classList.contains('is-hit'))) throw new Error('zero should clear is-hit');
+
+q.value = 'project';
+const untimed = kairoApplySearch(box);
+if (untimed.count !== 1 || !units[3].classList.contains('is-hit') || hitsEl.nodes[1].getAttribute('data-start') != null) {
+  throw new Error('untimed apply');
+}
+const audio = { currentTime: 0, play() { this.played = true; } };
+kairoLocateHit(audio, hitsEl.nodes[1], units);
+if (!units[3].scrolled) throw new Error('untimed should scroll');
+if (audio.played) throw new Error('untimed should not seek');
+
+kairoLocateHit(audio, { getAttribute(n) { return n === 'data-start' ? '10' : n === 'data-unit' ? '0' : null; } }, units);
+if (audio.currentTime !== 10 || !audio.played || !units[0].scrolled) throw new Error('timed locate ' + audio.currentTime);
 console.log('ok');
 """
     )
