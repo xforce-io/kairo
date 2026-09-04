@@ -1131,10 +1131,34 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .tag-row li { border: 1px solid #cfe0d6; border-radius: 999px; background: var(--pine-soft); color: var(--pine-deep); padding: 3px 9px; font-family: var(--mono); font-size: 12px; }
 .ref-topic-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .ref-topic-list li { padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
-.ref-digest { max-height: 360px; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); white-space: pre-wrap; }
+.ref-page .doc { padding: 8px 0 4px; }
 .ref-form-list { display: grid; gap: 7px; }
 .ref-form-list li { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-soft); font-size: 13px; }
 .ref-form-list li span:first-child { color: var(--ink); font-family: var(--mono); }
+.ref-form-preview {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  width: 100%; margin: 0; padding: 0; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+.ref-form-preview:hover span:first-child { color: var(--pine-deep); }
+.form-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 40;
+  display: flex; flex-direction: column;
+  width: min(520px, 92vw); background: var(--card);
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 40px -28px rgba(20,16,10,.45);
+}
+.form-drawer[hidden], .form-drawer-backdrop[hidden] { display: none; }
+.form-drawer-backdrop {
+  position: fixed; inset: 0; z-index: 35; background: rgba(20,16,10,.38);
+}
+.form-drawer-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 18px; border-bottom: 1px solid var(--line);
+}
+.form-drawer-head h2 { margin: 0; font-family: var(--serif); font-size: 18px; }
+.form-drawer-body { overflow: auto; flex: 1; padding: 16px 20px 48px; }
+.form-drawer-body .doc { padding: 0; max-width: none; }
 @media (max-width: 720px) {
   .projects-head { align-items: stretch; padding: 20px 16px 0; }
   .projects-head .new-ws { width: 100%; }
@@ -1144,4 +1168,5 @@ header.top .root-gl.on { color: var(--pine-deep); }
   .ref-page { padding: 20px 16px 56px; }
   .ref-head h1 { font-size: 26px; }
   .ref-form-list li { align-items: start; flex-direction: column; gap: 2px; }
+  .form-drawer { width: 100%; }
 }

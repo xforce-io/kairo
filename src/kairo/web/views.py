@@ -866,6 +866,13 @@ def global_ref_view(
             except RefError:
                 continue
     digest = ws.references_dir() / rid / "digest.md"
+    t = _t(request)
+    forms = [f for f in _ref_forms(ws, rid, man, t) if f["role"] != "digest"]
+    digest_html = (
+        render_markdown(digest.read_text(encoding="utf-8"), slug=ws.root.name)
+        if digest.is_file()
+        else ""
+    )
     return _render(
         request,
         "global_ref.html",
@@ -874,15 +881,53 @@ def global_ref_view(
             "ref": rec,
             "title": man.title or rid,
             "ref_id": rid,
+            "home": home or "global",
             "tags": rec.tags if rec is not None else [],
             "tag_catalog": list_tags(serve),
             "home": home,
             "related_topics": related_topics,
-            "digest": digest.read_text(encoding="utf-8") if digest.is_file() else "",
-            "forms": man.forms,
+            "digest_html": digest_html,
+            "forms": forms,
             "back_url": back if back.startswith("/timeline") else "/timeline",
         },
     )
+
+
+def _named_ref(request: Request, ref_id: str, home: str) -> tuple[Workspace, str, str]:
+    from kairo.refs import RefError, resolve_open
+
+    home = "" if home == "global" else home
+    try:
+        ws, rid = resolve_open(_serve(request), home, ref_id)
+    except RefError:
+        raise HTTPException(status_code=404, detail="reference not found") from None
+    _require_public_ref(request, home, rid)
+    return ws, rid, home
+
+
+@router.get("/refs/{ref_id}/form/{key}", response_class=HTMLResponse)
+def global_ref_form_view(
+    request: Request, ref_id: str, key: str, home: str = ""
+) -> HTMLResponse:
+    """Ref 页来源形态预览。渲染与 workspace `/w/.../form/{key}` 同一管线。"""
+    ws, rid, home = _named_ref(request, ref_id, home)
+    qhome = quote(home or "global", safe="")
+    file_src = f"/refs/{quote(rid, safe='')}/file/{quote(key, safe='')}?home={qhome}"
+    return _form_preview_response(
+        request,
+        ws,
+        rid,
+        key,
+        file_src=file_src,
+        render_slug=ws.root.name,
+        listen_slug=None,
+    )
+
+
+@router.get("/refs/{ref_id}/file/{key}")
+def global_ref_file(request: Request, ref_id: str, key: str, home: str = "") -> FileResponse:
+    ws, rid, _home = _named_ref(request, ref_id, home)
+    return _form_file_response(ws, rid, key)
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)
@@ -1181,39 +1226,45 @@ def ref_occurred_view(
     return ref_view(request, slug, ref_id)
 
 
-@router.get("/w/{slug}/ref/{ref_id}/form/{key}", response_class=HTMLResponse)
-def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLResponse:
-    """预览某 form 正文。路径由服务端从 manifest 解析(可信),客户端只给受校验的 ref_id + key。"""
-    ws = _open(request, slug)
-    if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
-    _require_public_ref(request, slug, ref_id)
+def _resolve_ref_form(ws: Workspace, ref_id: str, key: str):
     man = ws.read_manifest(ref_id)
     if key == "digest":
-        path, role = ws.references_dir() / ref_id / "digest.md", "digest"
-        form = None
-    else:
-        try:
-            idx = int(key)
-        except ValueError:
-            raise HTTPException(status_code=404, detail="form not found")
-        if not 0 <= idx < len(man.forms):
-            raise HTTPException(status_code=404, detail="form not found")
-        form = man.forms[idx]
-        path, role = _form_path(ws, form.location), form.role
+        return man, ws.references_dir() / ref_id / "digest.md", "digest", None
+    try:
+        idx = int(key)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="form not found") from None
+    if not 0 <= idx < len(man.forms):
+        raise HTTPException(status_code=404, detail="form not found")
+    form = man.forms[idx]
+    return man, _form_path(ws, form.location), form.role, form
+
+
+def _form_preview_response(
+    request: Request,
+    ws: Workspace,
+    ref_id: str,
+    key: str,
+    *,
+    file_src: str,
+    render_slug: str,
+    listen_slug: str | None = None,
+) -> HTMLResponse:
+    """workspace 与全局 Ref 页共用的形态预览 HTML。"""
+    man, path, role, form = _resolve_ref_form(ws, ref_id, key)
     t = _t(request)
     title = f"{man.title} · {_role_label(role, t)}"
-    if role == "audio" and form is not None and path.is_file():
+    if role == "audio" and form is not None and path.is_file() and listen_slug:
         return _render(
             request,
             "_doc.html",
-            {"title": title, "html": _listen_read_html(request, ws, slug, ref_id, man, form)},
+            {
+                "title": title,
+                "html": _listen_read_html(request, ws, listen_slug, ref_id, man, form),
+            },
         )
     if _is_image_file(path):
-        img = (
-            f'<img class="doc-img" src="/w/{quote(slug)}/ref/{ref_id}/file/{quote(key)}"'
-            f' alt="{escape(path.name)}">'
-        )
+        img = f'<img class="doc-img" src="{file_src}" alt="{escape(path.name)}">'
         return _render(request, "_doc.html", {"title": title, "html": img})
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
@@ -1222,11 +1273,47 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
         "_doc.html",
         {
             "title": title,
-            "html": _render_transcript(path, slug=slug) if role == "transcript" else _render_doc(path, slug=slug),
+            "html": (
+                _render_transcript(path, slug=render_slug)
+                if role == "transcript"
+                else _render_doc(path, slug=render_slug)
+            ),
             "exportable": key == "digest",
         },
     )
 
+
+def _form_file_response(ws: Workspace, ref_id: str, key: str) -> FileResponse:
+    man = ws.read_manifest(ref_id)
+    try:
+        idx = int(key)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="form not found") from None
+    if not 0 <= idx < len(man.forms):
+        raise HTTPException(status_code=404, detail="form not found")
+    path = _form_path(ws, man.forms[idx].location).resolve()
+    if ws.root.resolve() not in path.parents or not path.is_file():
+        raise HTTPException(status_code=404, detail="file not found")
+    return FileResponse(path)
+
+
+@router.get("/w/{slug}/ref/{ref_id}/form/{key}", response_class=HTMLResponse)
+def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLResponse:
+    """预览某 form 正文。路径由服务端从 manifest 解析(可信),客户端只给受校验的 ref_id + key。"""
+    ws = _open(request, slug)
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    _require_public_ref(request, slug, ref_id)
+    file_src = f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(key)}"
+    return _form_preview_response(
+        request,
+        ws,
+        ref_id,
+        key,
+        file_src=file_src,
+        render_slug=slug,
+        listen_slug=slug,
+    )
 
 
 @router.get("/w/{slug}/ref/{ref_id}/file/{key}")
@@ -1237,17 +1324,7 @@ def ref_form_file(request: Request, slug: str, ref_id: str, key: str) -> FileRes
     if ref_id not in ws.list_reference_ids():
         raise HTTPException(status_code=404, detail="reference not found")
     _require_public_ref(request, slug, ref_id)
-    man = ws.read_manifest(ref_id)
-    try:
-        idx = int(key)
-    except ValueError:
-        raise HTTPException(status_code=404, detail="form not found")
-    if not 0 <= idx < len(man.forms):
-        raise HTTPException(status_code=404, detail="form not found")
-    path = _form_path(ws, man.forms[idx].location).resolve()
-    if ws.root.resolve() not in path.parents or not path.is_file():
-        raise HTTPException(status_code=404, detail="file not found")
-    return FileResponse(path)
+    return _form_file_response(ws, ref_id, key)
 
 
 @router.post("/w/{slug}/ref/{ref_id}/form/{key}/open")

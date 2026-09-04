@@ -55,14 +55,60 @@
 
   <section class="ref-section">
     <h2>{{ t('ref.digest') }}</h2>
-    {% if digest %}<article class="ref-digest">{{ digest }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}
+    {% if digest_html %}<article class="doc">{{ digest_html|safe }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}
   </section>
 
   <section class="ref-section">
     <h2>{{ t('ref.forms') }}</h2>
+    {% if forms %}
     <ul class="ref-form-list">
-      {% for form in forms %}<li><span>{{ form.role }}</span><span>{{ form.location }}</span></li>{% endfor %}
+      {% for form in forms %}
+      <li>
+        {% if form.previewable %}
+        <button type="button" class="ref-form-preview"
+                hx-get="/refs/{{ ref_id | urlencode }}/form/{{ form.key }}?home={{ home | urlencode }}"
+                hx-target="#form-preview"
+                hx-swap="innerHTML"
+                hx-on::after-request="if(event.detail.successful)kairoOpenFormDrawer()">
+          <span>{{ form.role_label }}</span>
+          <span>{{ form.filename or form.location }}</span>
+          <span class="mf-prev">{{ t('forms.preview') }}</span>
+        </button>
+        {% else %}
+        <span>{{ form.role_label }}</span>
+        <span>{{ form.filename or form.location }}</span>
+        {% endif %}
+      </li>
+      {% endfor %}
     </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('ref.forms_empty') }}</p>
+    {% endif %}
   </section>
 </main>
+<aside id="form-drawer" class="form-drawer" hidden>
+  <div class="form-drawer-head">
+    <h2>{{ t('forms.preview') }}</h2>
+    <button type="button" class="dlg-x" onclick="kairoCloseFormDrawer()" aria-label="{{ t('ref.close_preview') }}">×</button>
+  </div>
+  <div id="form-preview" class="form-drawer-body"></div>
+</aside>
+<div id="form-drawer-backdrop" class="form-drawer-backdrop" hidden onclick="kairoCloseFormDrawer()"></div>
+<script>
+function kairoOpenFormDrawer() {
+  var d = document.getElementById('form-drawer');
+  var b = document.getElementById('form-drawer-backdrop');
+  if (d) d.hidden = false;
+  if (b) b.hidden = false;
+}
+function kairoCloseFormDrawer() {
+  var d = document.getElementById('form-drawer');
+  var b = document.getElementById('form-drawer-backdrop');
+  if (d) d.hidden = true;
+  if (b) b.hidden = true;
+}
+document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape') kairoCloseFormDrawer();
+});
+</script>
 {% endblock %}
