@@ -91,6 +91,15 @@ def test_switch_audio_swaps_transcript_and_src(tmp_path):
     assert f'/w/ws/ref/{rid}/file/0"' not in r.text
 
 
+def _empty_cue_srt(first: str, second: str) -> str:
+    return (
+        f"1\n00:00:01,500 --> 00:00:03,000\n{first}\n\n"
+        f"2\n00:00:04,000 --> 00:00:04,000\n\n"
+        f"3\n00:00:05,200 --> 00:00:07,000\n\n"
+        f"4\n00:00:08,000 --> 00:00:10,000\n{second}\n"
+    )
+
+
 def test_real_transform_outputs_pair_and_render_timed_units(tmp_path, monkeypatch):
     ws = Workspace.init(tmp_path / "ws", topic="listen")
     a1, a2 = tmp_path / "a1.wav", tmp_path / "a2.wav"
@@ -123,6 +132,68 @@ def test_real_transform_outputs_pair_and_render_timed_units(tmp_path, monkeypatc
     assert 'data-start="1.5"' in first.text
     assert f"/w/ws/ref/{rid}/file/0" in first.text
     assert f"/w/ws/ref/{rid}/file/1" in second.text
+
+
+def test_transform_empty_cue_srt_renders_remaining_timed_units(tmp_path, monkeypatch):
+    ws = Workspace.init(tmp_path / "ws", topic="listen")
+    wav = tmp_path / "talk.wav"
+    _write_wav(wav)
+    rid = ws.add([wav], role="audio")
+    fake = tmp_path / "fake_asr.py"
+    fake.write_text(
+        "import pathlib, sys\n"
+        "pathlib.Path(sys.argv[2], 'transcript.srt').write_text("
+        "'1\\n00:00:01,500 --> 00:00:03,000\\nhello first\\n\\n'"
+        "'2\\n00:00:04,000 --> 00:00:04,000\\n\\n'"
+        "'3\\n00:00:05,200 --> 00:00:07,000\\n\\n'"
+        "'4\\n00:00:08,000 --> 00:00:10,000\\nhello second\\n')\n"
+    )
+    monkeypatch.setenv("KAIRO_ASR_CMD", f"{sys.executable} {fake} {{input}} {{outdir}}")
+    monkeypatch.setenv("KAIRO_ASR_ORIGIN", "whisper:test")
+    state = State()
+    for item in TransformRule(ws, backend="whisper").discover():
+        item.run(state)
+
+    r = _client(tmp_path).get(f"/w/ws/ref/{rid}/form/0")
+    assert r.status_code == 200
+    assert "hello first" in r.text
+    assert "hello second" in r.text
+    assert 'data-start="1.5"' in r.text
+    assert 'data-start="8"' in r.text
+    assert "-->" not in r.text
+    assert "is-untimed" not in r.text
+
+
+def test_stored_raw_srt_with_empty_cue_times_remaining_units(tmp_path):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    rdir = ws.references_dir() / "raw"
+    rdir.mkdir(parents=True)
+    wav = rdir / "a.wav"
+    _write_wav(wav)
+    (rdir / "transcript.srt").write_text(_empty_cue_srt("stored first", "stored second"))
+    ws.write_manifest(
+        "raw",
+        Manifest(
+            id="raw",
+            title="raw",
+            forms=[
+                Form(role="audio", location=str(wav), hash="h"),
+                Form(
+                    role="transcript",
+                    location="references/raw/transcript.srt",
+                    hash="t",
+                ),
+            ],
+        ),
+    )
+    r = _client(tmp_path).get("/w/ws/ref/raw/form/0")
+    assert r.status_code == 200
+    assert "stored first" in r.text
+    assert "stored second" in r.text
+    assert 'data-start="1.5"' in r.text
+    assert 'data-start="8"' in r.text
+    assert "-->" not in r.text
+    assert "is-untimed" not in r.text
 
 
 def test_unpaired_audio_plays_without_fake_transcript(tmp_path):
@@ -223,6 +294,8 @@ def test_untimed_transcript_still_readable(tmp_path):
     assert "no clocks here" in r.text
     assert "just prose" in r.text
     assert "is-untimed" in r.text
+    assert "data-start=" not in r.text
+    assert "-->" not in r.text
 
 
 def test_duplicate_origin_does_not_link(tmp_path):

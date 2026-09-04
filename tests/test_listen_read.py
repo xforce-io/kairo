@@ -127,8 +127,25 @@ def test_untimed_transcript_is_readable():
     units = parse_units("plain line\nsecond line", duration=60)
     assert len(units) == 1
     assert units[0].start is None
-    assert "plain line" in units[0].text
+    assert units[0].end is None
+    assert units[0].text == "plain line\nsecond line"
+    assert "-->" not in units[0].text
     assert unit_at(units, 0) is None
+    assert unit_at(units, 30) is None
+
+
+def test_parse_units_times_body_cues_in_raw_srt_with_empty_cue():
+    """听读读盘路径：已存原始 SRT（含空 cue）仍打出有效 cue 的起点。"""
+    text = (
+        "1\n00:00:01,500 --> 00:00:03,000\n第一句\n\n"
+        "2\n00:00:04,000 --> 00:00:04,000\n\n"
+        "3\n00:00:05,200 --> 00:00:07,000\n\n"
+        "4\n00:00:08,000 --> 00:00:10,000\n第二句\n"
+    )
+    units = parse_units(text, duration=None)
+    timed = [(u.start, u.text) for u in units if u.start is not None]
+    assert timed == [(1.5, "第一句"), (8.0, "第二句")]
+    assert all("-->" not in u.text and not u.text.strip().isdigit() for u in units)
 
 
 def test_leading_untimed_visible_not_highlighted():
