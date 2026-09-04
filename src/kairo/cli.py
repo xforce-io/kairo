@@ -209,7 +209,10 @@ def new(
             err=True,
         )
         raise typer.Exit(1)
-    Workspace.init(dest, topic=topic)
+    ws = Workspace.init(dest, topic=topic)
+    constitution = ws.constitution
+    constitution.include_tags = []
+    ws.write_constitution(constitution)
     typer.echo(f"created {dest}")
 
 

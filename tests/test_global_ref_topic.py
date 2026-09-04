@@ -17,7 +17,9 @@ from kairo.refs import (
     add_tag,
     create_tag,
     list_all_refs,
+    load_catalog,
     migrate_tag_rules,
+    migration_journal_path,
     run_ref_ids,
     set_include_tags,
     timeline_digest_path,
@@ -316,3 +318,24 @@ def test_strict_topic_generates_missing_cross_home_digest_before_fold(tmp_path):
     assert "source/missing-digest" in state.products
     assert "source/missing-digest" in state.targets["understanding.md"].folded
     assert not (target.references_dir() / ref_id).exists()
+
+
+def test_interrupted_tag_migration_recovers_before_catalog_read(tmp_path, monkeypatch):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    ws = Workspace.init(serve / "energy", topic="能源")
+    create_tag(serve, "能源")
+    original_write = Workspace.write_constitution
+
+    def interrupted_write(self, constitution):
+        original_write(self, constitution)
+        raise KeyboardInterrupt("simulated interruption")
+
+    monkeypatch.setattr(Workspace, "write_constitution", interrupted_write)
+    with __import__("pytest").raises(KeyboardInterrupt):
+        migrate_tag_rules(serve, _backup_evidence(tmp_path))
+
+    # 任一成员读取先恢复 prepared journal，不向用户暴露半迁移语义。
+    assert load_catalog(serve)["strict_membership"] is False
+    assert Workspace.open(ws.root).constitution.include_tags is None
+    assert not migration_journal_path(serve).exists()

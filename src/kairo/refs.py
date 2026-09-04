@@ -12,6 +12,7 @@ from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
 GLOBAL_HOME_REL = Path(".kairo") / "global-home"
 CATALOG_REL = Path(".kairo") / "ref-catalog.json"
+MIGRATION_JOURNAL_REL = Path(".kairo") / "tag-rule-migration.json"
 
 
 class RefError(ValueError):
@@ -29,11 +30,60 @@ def _atomic_json(path: Path, payload: dict) -> None:
         raise RefError(f"保存失败:{exc}") from exc
 
 
+def _atomic_text(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(path.name + ".tmp")
+    try:
+        temp.write_text(content, encoding="utf-8")
+        os.replace(temp, path)
+    except Exception as exc:
+        temp.unlink(missing_ok=True)
+        raise RefError(f"保存失败:{exc}") from exc
+
+
 def catalog_path(serve: Path) -> Path:
     return Path(serve) / CATALOG_REL
 
 
+def migration_journal_path(serve: Path) -> Path:
+    return Path(serve) / MIGRATION_JOURNAL_REL
+
+
+def recover_tag_rule_migration(serve: Path) -> None:
+    """恢复被中断的 Tag 规则迁移，或清理已提交但未清理的 journal。"""
+    serve = Path(serve)
+    journal_path = migration_journal_path(serve)
+    if not journal_path.is_file():
+        return
+    try:
+        journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RefError("Tag 规则迁移 journal 不可读") from exc
+    if journal.get("phase") == "committed":
+        journal_path.unlink()
+        return
+    files = journal.get("files")
+    if not isinstance(files, dict):
+        raise RefError("Tag 规则迁移 journal 不完整")
+    for rel, content in files.items():
+        path = (serve / str(rel)).resolve()
+        if path != serve.resolve() and serve.resolve() not in path.parents:
+            raise RefError("Tag 规则迁移 journal 路径非法")
+        if not isinstance(content, str):
+            raise RefError("Tag 规则迁移 journal 内容非法")
+        _atomic_text(path, content)
+    catalog_before = journal.get("catalog_before")
+    if catalog_before is None:
+        catalog_path(serve).unlink(missing_ok=True)
+    elif isinstance(catalog_before, str):
+        _atomic_text(catalog_path(serve), catalog_before)
+    else:
+        raise RefError("Tag 规则迁移 catalog 快照非法")
+    journal_path.unlink()
+
+
 def load_catalog(serve: Path) -> dict[str, Any]:
+    recover_tag_rule_migration(serve)
     path = catalog_path(serve)
     if not path.is_file():
         return {"tags": [], "assignments": {}, "strict_membership": False}
@@ -274,6 +324,8 @@ def migrate_tag_rules(
 
     证据由运维流程产生；本函数只校验其恢复已验证的最小契约，不访问 remote。
     """
+    serve = Path(serve)
+    recover_tag_rule_migration(serve)
     evidence = Path(evidence_path)
     try:
         proof = json.loads(evidence.read_text(encoding="utf-8"))
@@ -296,7 +348,6 @@ def migrate_tag_rules(
     ):
         raise RefError("迁移前备份证据不完整")
 
-    serve = Path(serve)
     catalog = load_catalog(serve)
     raw_tags = [str(tag).strip() for tag in catalog.get("tags") or [] if str(tag).strip()]
     if len(raw_tags) != len(set(raw_tags)):
@@ -335,14 +386,26 @@ def migrate_tag_rules(
     if dry_run:
         return report
 
-    # 所有候选在写入前先保留内存快照；任一写入失败时还原，不能留下
-    # "strict catalog 已写、部分 Topic 仍是 legacy" 的半迁移状态。
-    original: list[tuple[Workspace, Any, Any]] = []
-    original_catalog = json.loads(json.dumps(catalog))
+    # 先把将被替换的所有文件写入 journal，再写 live root。进程被杀时，
+    # 下次任一 catalog 读取会先恢复这个快照；成功则 journal 标记 committed。
+    files = {
+        str(path.relative_to(serve)): path.read_text(encoding="utf-8")
+        for ws in topics
+        for path in (ws.root / "constitution.yaml", ws.state_path)
+    }
+    catalog_file = catalog_path(serve)
+    journal_path = migration_journal_path(serve)
+    journal = {
+        "phase": "prepared",
+        "files": files,
+        "catalog_before": (
+            catalog_file.read_text(encoding="utf-8") if catalog_file.is_file() else None
+        ),
+    }
+    _atomic_json(journal_path, journal)
     try:
         for ws in topics:
             state = ws.read_state()
-            original.append((ws, ws.constitution.model_copy(deep=True), state.model_copy(deep=True)))
             if ws.constitution.include_tags is None:
                 ws.constitution.include_tags = []
                 ws.write_constitution(ws.constitution)
@@ -368,17 +431,14 @@ def migrate_tag_rules(
         catalog["tags"] = sorted(tags)
         catalog["strict_membership"] = True
         save_catalog(serve, catalog)
+        journal["phase"] = "committed"
+        _atomic_json(journal_path, journal)
+        journal_path.unlink()
     except Exception as exc:
-        for ws, constitution, state in original:
-            try:
-                ws.write_constitution(constitution)
-                ws.write_state(state)
-            except Exception:
-                pass
         try:
-            save_catalog(serve, original_catalog)
-        except Exception:
-            pass
+            recover_tag_rule_migration(serve)
+        except Exception as recovery_exc:
+            raise RefError(f"迁移失败，且恢复失败:{recovery_exc}") from exc
         raise RefError(f"迁移失败:{exc}") from exc
     return report
 

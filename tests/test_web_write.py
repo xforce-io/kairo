@@ -155,6 +155,7 @@ def test_create_workspace(tmp_path):
     assert r.headers.get("HX-Redirect") == "/w/" + quote("产品规划")
     ws = Workspace.open(tmp_path / "产品规划")
     assert ws.constitution.topic == "产品规划"
+    assert ws.constitution.include_tags == []
 
 
 def test_create_workspace_requires_same_named_tag(tmp_path):

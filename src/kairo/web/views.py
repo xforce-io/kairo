@@ -716,7 +716,10 @@ def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
             status_code=409,
             detail="请先在 Settings 创建同名 Tag，再新建 Topic。",
         )
-    Workspace.init(dest, topic=topic)
+    ws = Workspace.init(dest, topic=topic)
+    constitution = ws.constitution
+    constitution.include_tags = []
+    ws.write_constitution(constitution)
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
 
