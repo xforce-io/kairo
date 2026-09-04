@@ -173,7 +173,8 @@ class GlossaryEntry(BaseModel):
 
 class Constitution(BaseModel):
     topic: str = "main"
-    kind: str = "topic"  # 建仓填法名;运行时读 digest.enabled / targets / review_input
+    kind: str | None = None  # deprecated; use preset
+    preset: str = "standard"  # standard | journal; runtime reads digest.enabled / targets / review_input
     pipeline: Pipeline = Field(default_factory=Pipeline)
     roles_by_ext: dict[str, str] = Field(default_factory=_default_roles_by_ext)
     default_role: str = "transcript"  # 无匹配扩展名时兜底
@@ -193,9 +194,9 @@ class Constitution(BaseModel):
 
     def live_targets(self) -> list[Target]:
         """活 target:跳过判断层(#153)。journal（含现网「总结」）不 fold。"""
-        from kairo.kind import KIND_JOURNAL, resolve_kind
+        from kairo.kind import PRESET_JOURNAL, resolve_preset
 
-        if resolve_kind(self.kind, self.topic) == KIND_JOURNAL:
+        if resolve_preset(self.preset, self.kind, self.topic) == PRESET_JOURNAL:
             return []
         return [t for t in self.targets if t.layer != "judgment"]
 

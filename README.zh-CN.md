@@ -31,9 +31,9 @@ kairo connect    # 把 operator skill 挂到本机 Claude / Cursor / Codex / Pi
 ## 快速上手
 
 ```bash
-kairo init "我的调研主题"      # 当前目录初始化为 topic-workspace + 默认宪法
+kairo init "我的调研主题"      # 当前目录初始化为 Topic + 默认宪法
 kairo add 录音.m4a            # 登记路径指针（默认 stream/观测）
-kairo add 录音.m4a --copy     # 先复制进工作区再登记（源删除仍可用）
+kairo add 录音.m4a --copy     # 先复制进 Topic 再登记（源删除仍可用）
 kairo add ./会议夹            # 目录→一条多形态参考(夹内音频/文档/图)
 kairo add 调研报告.docx       # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
 kairo add 白皮书.md --corpus  # 登记为 corpus/基线（权威参考资料）
@@ -47,10 +47,11 @@ kairo status                  # 看各 reference / 文档的融入状态
 
 | 命令 | 作用 |
 | --- | --- |
-| `init` | 初始化**当前目录**为 topic-workspace + 默认宪法 |
-| `list` | 列出 serve root 下各 workspace 摘要（`--json`；root 默认 `KAIRO_SERVE_ROOT` 或 cwd）[#95](https://github.com/xforce-io/kairo/issues/95) |
-| `new` | 在 serve root 下新建 workspace 目录并 init（对标 Web 新建） |
-| `rm-ws` | 删除 serve root 下某个 workspace（`--yes` 跳过确认；不碰 root glossary） |
+| `init` | 初始化**当前目录**为 Topic + 默认宪法 |
+| `list` | 列出 serve root 下各 Topic 摘要（`--json`；root 默认 `KAIRO_SERVE_ROOT` 或 cwd）[#95](https://github.com/xforce-io/kairo/issues/95) |
+| `new` | 在 serve root 下新建 Topic 目录并 init（对标 Web 新建） |
+| `rm-ws` | 删除 serve root 下某个 Topic（`--yes` 跳过确认；不碰 root glossary）— **已废弃，请使用 `rm`** |
+| `rm` | 删除 serve root 下某个 Topic（`--yes` 跳过确认；不碰 root glossary） |
 | `add` | 登记一条 reference（默认路径指针；`--copy` 物化；`--corpus` 标基线；`--to <id>` 追加；`--occurred YYYY-MM-DD` 钉发生日） |
 | `title` | 重命名参考展示名（不动 id / 目录） |
 | `occurred` | 修正或清空参考发生时间（`--clear`；不改 id、不 step） |
@@ -74,7 +75,7 @@ kairo status                  # 看各 reference / 文档的融入状态
 
 ## 核心概念
 
-- **constitution.yaml**：本 workspace 的宪法——心智与协议（stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
+- **constitution.yaml**：本 Topic 的宪法——心智与协议（stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
 - **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进 `understanding.md`；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
 - **综合产出**：`understanding.md`（事实层，中立、可标来源），完整文件不超过 20,000 Unicode 字符。Digest / Compose 用材料目录授读，不把原文倾倒进 prompt；超长旧文档先阻塞，确认“全量重综合会压缩历史正文，失败保留旧版”后用 `kairo re-step understanding.md` 迁移。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
@@ -154,11 +155,11 @@ Python + uv；`AgentProvider` 缝（`run(config)→artifacts`，backend：stub /
 ## Web Console（可选）
 
     uv tool install 'git+https://github.com/xforce-io/kairo.git[web]'
-    kairo serve <包含多个 workspace 的根目录> [--port 8787]
+    kairo serve <包含多个 Topic 的根目录> [--port 8787]
 
-浏览器（默认 `http://127.0.0.1:8787`，仅本机）统管 root 下的多个 workspace：
+浏览器（默认 `http://127.0.0.1:8787`，仅本机）统管 root 下的多个 Topic：
 
-- **总览（dashboard）**：列出各 workspace（观测/基线计数、待 step / blocked 状态）；支持**单字段新建 workspace**——填 topic 即在 root 下建目录并 `init`。
+- **总览（dashboard）**：列出各 Topic（观测/基线计数、待 step / blocked 状态）；支持**单字段新建 Topic**——填 topic 即在 root 下建目录并 `init`。
 - **详情页**：左栏分 `产物 / 参考(观测) / 基线`；选中条目 → 右栏常驻元信息（各形态可选预览、一键复制路径），中间为预览画布。transcript / digest 等形态即点即看（含 workspace 外的 `.txt` 转写，`.md` 渲染、纯文本保留换行），顶部可返回总览。
 - **运行**：界面触发 `step`，实时看进度日志。
 

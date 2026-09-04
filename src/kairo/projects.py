@@ -61,7 +61,8 @@ class Project(BaseModel):
 
     id: str
     name: str
-    workspace_slugs: list[str] = Field(default_factory=list)
+    topics: list[str] = Field(default_factory=list)  # renamed from workspace_slugs
+    workspace_slugs: list[str] | None = None  # deprecated, for backward compat on read
     datasources: list[DataSource] = Field(default_factory=list)
     tasks: list[TaskDef] = Field(default_factory=list)
     # 早期调度版本已写入该字段。当前实现不解释其内容，但在读取及后续
@@ -69,6 +70,14 @@ class Project(BaseModel):
     schedule_states: dict[str, Any] = Field(default_factory=dict)
     created_at: str = ""
     updated_at: str = ""
+    
+    def model_post_init(self, __context) -> None:
+        """Migrate workspace_slugs to topics on read."""
+        if self.workspace_slugs and not self.topics:
+            self.topics = list(self.workspace_slugs)
+        # Don't keep both fields populated
+        if self.workspace_slugs == self.topics:
+            self.workspace_slugs = None
 
 
 class RunRecord(BaseModel):
@@ -197,39 +206,39 @@ def link_workspaces(serve: Path, project_id: str, slugs: list[str]) -> Project:
     for raw in slugs:
         slug = (raw or "").strip()
         if not slug:
-            raise ProjectError("workspace slug 不能为空")
+            raise ProjectError("Topic slug 不能为空")
         if not workspace_exists(serve, slug):
-            raise ProjectError(f"workspace 不存在:{slug}")
+            raise ProjectError(f"Topic 不存在:{slug}")
         if slug not in cleaned:
             cleaned.append(slug)
     if not cleaned:
-        raise ProjectError("至少指定一个 workspace")
+        raise ProjectError("至少指定一个 Topic")
     project = get_project(serve, project_id)
     for slug in cleaned:
-        if slug not in project.workspace_slugs:
-            project.workspace_slugs.append(slug)
+        if slug not in project.topics:
+            project.topics.append(slug)
     return save_project(serve, project)
 
 
 def unlink_workspace(serve: Path, project_id: str, slug: str) -> Project:
     project = get_project(serve, project_id)
-    project.workspace_slugs = [s for s in project.workspace_slugs if s != slug]
+    project.topics = [s for s in project.topics if s != slug]
     return save_project(serve, project)
 
 
 def set_workspaces(serve: Path, project_id: str, slugs: list[str]) -> Project:
-    """一次提交替换关联集合；只接受已存在的 workspace。"""
+    """一次提交替换关联集合；只接受已存在的 Topic。"""
     seen: list[str] = []
     for raw in slugs:
         slug = (raw or "").strip()
         if not slug:
             continue
         if not workspace_exists(serve, slug):
-            raise ProjectError(f"workspace 不存在:{slug}")
+            raise ProjectError(f"Topic 不存在:{slug}")
         if slug not in seen:
             seen.append(slug)
     project = get_project(serve, project_id)
-    project.workspace_slugs = seen
+    project.topics = seen
     return save_project(serve, project)
 
 
@@ -454,6 +463,8 @@ def run_task(serve: Path, project_id: str, task_id: str) -> RunRecord:
 
 def project_to_dict(project: Project) -> dict[str, Any]:
     data = project.model_dump()
-    data["topic_slugs"] = list(data.get("workspace_slugs") or [])
+    # Keep backward compat field
+    data["topic_slugs"] = list(data.get("topics") or [])
+    data["workspace_slugs"] = data.get("topics") or []
     _assert_no_secrets(data)
     return data

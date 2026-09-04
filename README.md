@@ -31,9 +31,9 @@ Audio transcription depends on a local whisper — see "Local ASR configuration"
 ## Quick start
 
 ```bash
-kairo init "My research topic"   # initialize the current directory as a topic-workspace + default constitution
+kairo init "My research topic"   # initialize the current directory as a Topic + default constitution
 kairo add recording.m4a          # register a path pointer (stream/observation by default)
-kairo add recording.m4a --copy   # copy into workspace first, then register
+kairo add recording.m4a --copy   # copy into Topic first, then register
 kairo add ./meeting-folder       # directory → one multi-form reference (audio/docs/images inside)
 kairo add report.docx            # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
 kairo add whitepaper.md --corpus # register as corpus/baseline (authoritative reference material)
@@ -47,10 +47,11 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 
 | Command | Purpose |
 | --- | --- |
-| `init` | Initialize the **current directory** as a topic-workspace + default constitution |
-| `list` | List workspaces under a serve root (`--json`; root defaults to `KAIRO_SERVE_ROOT` or cwd) [#95](https://github.com/xforce-io/kairo/issues/95) |
-| `new` | Create a workspace directory under the serve root and `init` it (Web create parity) |
-| `rm-ws` | Delete a workspace under the serve root (`--yes` skips confirm; root glossary kept) |
+| `init` | Initialize the **current directory** as a Topic + default constitution |
+| `list` | List Topics under a serve root (`--json`; root defaults to `KAIRO_SERVE_ROOT` or cwd) [#95](https://github.com/xforce-io/kairo/issues/95) |
+| `new` | Create a Topic directory under the serve root and `init` it (Web create parity) |
+| `rm-ws` | Delete a Topic under the serve root (`--yes` skips confirm; root glossary kept) — **deprecated, use `rm`** |
+| `rm` | Delete a Topic under the serve root (`--yes` skips confirm; root glossary kept) |
 | `add` | Register a reference (path pointer by default; `--copy` materializes; `--corpus` marks baseline; `--to <id>` attaches; `--occurred YYYY-MM-DD` sets occurred date) |
 | `title` | Rename a reference's display title (id / directory unchanged) |
 | `occurred` | Set or clear a reference's occurred date (`--clear`; does not change id or run step) |
@@ -75,7 +76,7 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 
 ## Core concepts
 
-- **constitution.yaml**: this workspace's constitution — the mental model and protocol (stream/corpus, fold, extension→role, conversion declarations) are all declared here; the engine hardcodes none of it.
+- **constitution.yaml**: this Topic's constitution — the mental model and protocol (stream/corpus, fold, extension→role, conversion declarations) are all declared here; the engine hardcodes none of it.
 - **stream (observation) / corpus (baseline)**: the epistemic classification of a reference. A stream is folded into `understanding.md` one by one; a corpus is a read-only reference layer for the agent — not digested, not in the fold loop — and corrects proper nouns/terminology against the baseline when it conflicts with observations.
 - **Synthesis output**: `understanding.md` (fact layer), capped at 20,000 Unicode characters for the complete file. Digest/Compose feed the agent a materials catalog with granted reads instead of dumping source text into the prompt. Oversized legacy documents block before provider work; after confirming that full re-synthesis compresses history and failures keep the old version, migrate with `kairo re-step understanding.md`.
 - **Convergence**: `step` is like `make` — it reconciles toward the state declared in the constitution, judging staleness by content hash, running until no further progress is made.
@@ -142,11 +143,11 @@ Python + uv; an `AgentProvider` seam (`run(config)→artifacts`, backends: stub 
 ## Web Console (optional)
 
     uv tool install 'git+https://github.com/xforce-io/kairo.git[web]'
-    kairo serve <root directory containing multiple workspaces> [--port 8787]
+    kairo serve <root directory containing multiple Topics> [--port 8787]
 
-In the browser (default `http://127.0.0.1:8787`, local only), manage the multiple workspaces under `root`. The UI is bilingual (English by default; switch to Chinese with the `EN | 中` toggle in the top bar, or via your browser's `Accept-Language`):
+In the browser (default `http://127.0.0.1:8787`, local only), manage the multiple Topics under `root`. The UI is bilingual (English by default; switch to Chinese with the `EN | 中` toggle in the top bar, or via your browser's `Accept-Language`):
 
-- **Dashboard**: lists each workspace (observation/baseline counts, to-step / blocked status); supports **single-field workspace creation** — type a topic to create a directory under `root` and `init` it.
+- **Dashboard**: lists each Topic (observation/baseline counts, to-step / blocked status); supports **single-field Topic creation** — type a topic to create a directory under `root` and `init` it.
 - **Detail page**: the left column splits into `Targets / References (observations) / Corpus`; selecting an item → a persistent metadata column on the right (per-form optional preview, one-click path copy), with a preview canvas in the middle. Forms like transcript / digest preview on click (including `.txt` transcriptions outside the workspace — `.md` is rendered, plain text keeps line breaks); the top bar returns to the dashboard.
 - **Run**: trigger `step` from the UI and watch the progress log live.
 
