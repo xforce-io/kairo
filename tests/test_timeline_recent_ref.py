@@ -138,6 +138,84 @@ def test_global_ref_audio_with_transcript_shows_timed_units(tmp_path):
     assert "/w/" not in preview.text, "global ref must not use /w/ workspace URLs"
 
 
+def test_global_ref_multi_track_switcher_uses_form_preview_target(tmp_path):
+    """#265: Global Ref multi-track switcher must target #form-preview with correct URLs."""
+    from kairo.models import Form, Manifest
+    from kairo.refs import global_home
+
+    serve = tmp_path / "root"
+    serve.mkdir()
+    ws = global_home(serve)
+    rid = "multi-audio"
+    rdir = ws.references_dir() / rid
+    rdir.mkdir(parents=True)
+    a1, a2 = rdir / "a1.wav", rdir / "a2.wav"
+    _write_wav(a1)
+    _write_wav(a2)
+    (rdir / "t1.md").write_text("[00:10] track one\n", encoding="utf-8")
+    (rdir / "t2.md").write_text("[00:15] track two\n", encoding="utf-8")
+    ws.write_manifest(
+        rid,
+        Manifest(
+            id=rid,
+            title="Multi Audio",
+            forms=[
+                Form(role="audio", location=str(a1), hash="h1"),
+                Form(role="audio", location=str(a2), hash="h2"),
+                Form(role="transcript", location=f"references/{rid}/t1.md", hash="t1", origin="asr-from:h1"),
+                Form(role="transcript", location=f"references/{rid}/t2.md", hash="t2", origin="asr-from:h2"),
+            ],
+        ),
+    )
+    client = _client(serve)
+    preview = client.get(f"/refs/{rid}/form/0")
+    assert preview.status_code == 200
+    assert 'class="lr-switch"' in preview.text, "switcher must render for multi-track"
+    assert 'hx-target="#form-preview"' in preview.text, "switcher must target #form-preview"
+    assert f"/refs/{rid}/form/1" in preview.text, "switcher must use global ref form URL"
+    assert "/w/" not in preview.text, "global ref must not use /w/ workspace URLs"
+    assert "track one" in preview.text
+
+
+def test_global_ref_with_topic_home_switcher_urls_include_query(tmp_path):
+    """#265: Topic-homed ref switcher URLs must have query AFTER key: /refs/{id}/form/{key}?home=slug."""
+    from kairo.models import Form, Manifest
+    from kairo.workspace import Workspace
+
+    serve = tmp_path / "root"
+    serve.mkdir()
+    ws = Workspace.init(serve / "my-topic", topic="my-topic")
+    rid = "topic-multi"
+    rdir = ws.references_dir() / rid
+    rdir.mkdir(parents=True)
+    a1, a2 = rdir / "a1.wav", rdir / "a2.wav"
+    _write_wav(a1)
+    _write_wav(a2)
+    (rdir / "t1.md").write_text("[00:10] topic track one\n", encoding="utf-8")
+    (rdir / "t2.md").write_text("[00:15] topic track two\n", encoding="utf-8")
+    ws.write_manifest(
+        rid,
+        Manifest(
+            id=rid,
+            title="Topic Multi",
+            forms=[
+                Form(role="audio", location=str(a1), hash="h1"),
+                Form(role="audio", location=str(a2), hash="h2"),
+                Form(role="transcript", location=f"references/{rid}/t1.md", hash="t1", origin="asr-from:h1"),
+                Form(role="transcript", location=f"references/{rid}/t2.md", hash="t2", origin="asr-from:h2"),
+            ],
+        ),
+    )
+    client = _client(serve)
+    preview = client.get(f"/refs/{rid}/form/0?home=my-topic")
+    assert preview.status_code == 200
+    assert 'class="lr-switch"' in preview.text
+    expected_url = "/refs/topic-multi/form/1?home=my-topic"
+    assert expected_url in preview.text, f"switcher URL must be {expected_url}"
+    assert "?home=my-topic/1" not in preview.text, "query must come AFTER key, not before"
+    assert 'hx-target="#form-preview"' in preview.text
+
+
 def test_global_ref_image_form_preview_still_works(tmp_path):
     """Ensure image preview not regressed by audio fix."""
     serve = tmp_path / "root"
