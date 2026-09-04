@@ -121,6 +121,13 @@ def test_timeline_day_lists_ref_project_artifact_and_tag_keeps_ref(tmp_path):
     assert f'href="/refs/2026-08-25-weekly?home=alpha' in filtered
     assert f'href="/projects/{pid}"' not in filtered
     assert f'href="/projects/{pid}/runs/{rid}"' not in filtered
+    digest = wa.references_dir() / "2026-08-25-weekly" / "digest.md"
+    digest.write_text("# digest\n", encoding="utf-8")
+    rng = _client(root).get(
+        "/timeline", params={"from": "2026-08-23", "to": "2026-08-24"}
+    ).text
+    assert "1 with digest · 0 without" in rng
+    assert "2 without" not in rng
 
 
 def test_timeline_query_mutex_400(tmp_path):
