@@ -79,3 +79,74 @@ def test_global_ref_source_form_preview_drawer_reuses_form_render(tmp_path):
     assert "原料标题" in preview.text
     assert "源形态" in preview.text
     assert "<strong>" in preview.text or "<b>" in preview.text
+
+
+def _write_wav(path):
+    path.write_bytes(b"RIFF\x24\x00\x00\x00WAVEfmt ")
+
+
+def test_global_ref_audio_form_preview_returns_listen_read(tmp_path):
+    """#265: Global Ref audio preview must return listen-read UI, not 404 'not previewable'."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    audio = tmp_path / "talk.wav"
+    _write_wav(audio)
+    transcript = tmp_path / "talk.md"
+    transcript.write_text("[00:10] test content\n[00:20] more content\n", encoding="utf-8")
+    rid = add_global_ref(
+        serve, [audio, transcript], ref_id="audio-ref", title="Audio Reference", copy=True
+    )
+    client = _client(serve)
+    page = client.get(f"/refs/{rid}")
+    assert page.status_code == 200
+    match = re.search(rf'hx-get="(/refs/{rid}/form/0(?:\?[^"]*)?)"', page.text)
+    assert match is not None, "audio form preview link must exist"
+    preview = client.get(match.group(1))
+    assert preview.status_code == 200, "audio preview must return 200, not 404"
+    assert 'class="listen-read"' in preview.text, "audio preview must render listen-read UI"
+    assert 'class="lr-audio"' in preview.text
+    assert 'class="lr-units"' in preview.text
+    assert "test content" in preview.text
+    assert f"/refs/{rid}/file/0" in preview.text, "audio src must use global ref file URL"
+
+
+def test_global_ref_audio_with_transcript_shows_timed_units(tmp_path):
+    """#265: Global Ref audio with transcript should show timed units and use correct URLs/targets."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    audio = tmp_path / "talk.wav"
+    _write_wav(audio)
+    transcript = tmp_path / "talk.md"
+    transcript.write_text("[00:10] first unit\n[00:20] second unit\n", encoding="utf-8")
+    from kairo.refs import global_home
+
+    rid = "paired-audio"
+    add_global_ref(serve, [audio, transcript], ref_id=rid, title="Paired Audio", copy=True)
+    ws = global_home(serve)
+    man = ws.read_manifest(rid)
+    audio_idx = next(i for i, f in enumerate(man.forms) if f.role == "audio")
+    transcript_idx = next(i for i, f in enumerate(man.forms) if f.role == "transcript")
+    man.forms[transcript_idx].origin = "asr-from:" + man.forms[audio_idx].hash
+    ws.write_manifest(rid, man)
+    client = _client(serve)
+    preview = client.get(f"/refs/{rid}/form/{audio_idx}")
+    assert preview.status_code == 200
+    assert 'class="listen-read"' in preview.text
+    assert "first unit" in preview.text, "transcript units must be rendered"
+    assert "second unit" in preview.text
+    assert f"/refs/{rid}/file/{audio_idx}" in preview.text, "audio src must use global ref file URL"
+    assert "/w/" not in preview.text, "global ref must not use /w/ workspace URLs"
+
+
+def test_global_ref_image_form_preview_still_works(tmp_path):
+    """Ensure image preview not regressed by audio fix."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    rid = add_global_ref(serve, [img], ref_id="img-ref", title="Image Reference", copy=True)
+    client = _client(serve)
+    preview = client.get(f"/refs/{rid}/form/0")
+    assert preview.status_code == 200
+    assert 'class="doc-img"' in preview.text
+    assert f"/refs/{rid}/file/0" in preview.text

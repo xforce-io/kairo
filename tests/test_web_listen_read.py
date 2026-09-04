@@ -66,6 +66,7 @@ def test_select_audio_shows_listen_read_zones_and_own_media(tmp_path):
     assert f'/w/ws/ref/{rid}/file/0' in r.text
     assert "alpha one" in r.text
     assert "alpha two" not in r.text
+    assert 'hx-target="#reader"' in r.text, "workspace audio must use #reader target"
     fb = _client(tmp_path).get(f"/w/ws/ref/{rid}/file/0")
     assert fb.status_code == 200
     assert fb.content.startswith(b"RIFF")

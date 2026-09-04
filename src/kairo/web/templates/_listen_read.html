@@ -5,9 +5,9 @@
     <div class="lr-switch">
       {% for item in switcher %}
       <a class="lr-switch-item{% if item.key == audio_key %} on{% endif %}"
-         href="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ item.key }}"
-         hx-get="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ item.key }}"
-         hx-target="#reader">{{ item.label }}</a>
+         href="{{ form_url_base }}/{{ item.key }}"
+         hx-get="{{ form_url_base }}/{{ item.key }}"
+         hx-target="{{ hx_target }}">{{ item.label }}</a>
       {% endfor %}
     </div>
     {% endif %}

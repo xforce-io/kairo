@@ -300,12 +300,33 @@ def _form_index(man, form) -> str:
     raise HTTPException(status_code=404, detail="form not found")
 
 
-def _listen_read_html(request: Request, ws, slug: str, ref_id: str, man, audio_form) -> str:
+def _listen_read_html(
+    request: Request,
+    ws,
+    slug: str,
+    ref_id: str,
+    man,
+    audio_form,
+    *,
+    audio_src: str | None = None,
+    form_url_base: str | None = None,
+    hx_target: str = "#reader",
+) -> str:
+    """Render listen-read UI for audio form.
+    
+    Args:
+        audio_src: explicit audio file URL (if None, builds /w/{slug}/ref/.../file/{key})
+        form_url_base: base URL for switcher links (if None, uses /w/{slug}/ref/{ref_id}/form)
+        hx_target: HTMX target selector for switcher links (default: #reader)
+    """
     t = _t(request)
     pairs = pair_audio_transcripts(man.forms)
     pair = next((p for p in pairs if p.audio is audio_form), None)
     audio_key = _form_index(man, audio_form)
-    audio_src = f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(audio_key)}"
+    if audio_src is None:
+        audio_src = f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(audio_key)}"
+    if form_url_base is None:
+        form_url_base = f"/w/{quote(slug)}/ref/{quote(ref_id)}/form"
     units = []
     if pair and pair.linked and pair.transcript:
         path = _form_path(ws, pair.transcript.location)
@@ -338,6 +359,8 @@ def _listen_read_html(request: Request, ws, slug: str, ref_id: str, man, audio_f
             "ref_id": ref_id,
             "audio_key": audio_key,
             "audio_src": audio_src,
+            "form_url_base": form_url_base,
+            "hx_target": hx_target,
             "units": units,
             "switcher": switcher,
             "t": t,
@@ -921,6 +944,7 @@ def global_ref_form_view(
         file_src=file_src,
         render_slug=ws.root.name,
         listen_slug=None,
+        home=home,
     )
 
 
@@ -1249,18 +1273,43 @@ def _form_preview_response(
     file_src: str,
     render_slug: str,
     listen_slug: str | None = None,
+    home: str = "",
 ) -> HTMLResponse:
-    """workspace 与全局 Ref 页共用的形态预览 HTML。"""
+    """workspace 与全局 Ref 页共用的形态预览 HTML。
+    
+    Args:
+        listen_slug: workspace slug for /w/{slug}/... URLs (None for global refs)
+        home: home parameter for global ref URLs (empty for workspace refs)
+    """
     man, path, role, form = _resolve_ref_form(ws, ref_id, key)
     t = _t(request)
     title = f"{man.title} · {_role_label(role, t)}"
-    if role == "audio" and form is not None and path.is_file() and listen_slug:
+    if role == "audio" and form is not None and path.is_file():
+        if listen_slug:
+            html = _listen_read_html(request, ws, listen_slug, ref_id, man, form)
+        else:
+            qhome = quote(home or "global", safe="")
+            qref = quote(ref_id, safe="")
+            form_url_base = f"/refs/{qref}/form"
+            if home:
+                form_url_base += f"?home={qhome}"
+            html = _listen_read_html(
+                request,
+                ws,
+                render_slug,
+                ref_id,
+                man,
+                form,
+                audio_src=file_src,
+                form_url_base=form_url_base,
+                hx_target="#form-preview",
+            )
         return _render(
             request,
             "_doc.html",
             {
                 "title": title,
-                "html": _listen_read_html(request, ws, listen_slug, ref_id, man, form),
+                "html": html,
             },
         )
     if _is_image_file(path):
