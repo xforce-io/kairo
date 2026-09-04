@@ -475,6 +475,14 @@ def migrate_home_membership(
 
     refs = list_all_refs(serve)
     known_ref_keys = {rec.key for rec in refs}
+    unreadable_refs = sorted(
+        ref_key(ws.root.name, ref_id)
+        for ws in topics
+        for ref_id in ws.list_reference_ids()
+        if ref_key(ws.root.name, ref_id) not in known_ref_keys
+    )
+    if unreadable_refs:
+        raise RefError("存在无法解析的历史 home Ref")
     unknown_assignments = sorted(
         key for key in (catalog.get("assignments") or {}) if key not in known_ref_keys
     )

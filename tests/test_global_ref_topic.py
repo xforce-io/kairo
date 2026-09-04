@@ -335,6 +335,26 @@ def test_interrupted_home_membership_migration_restores_snapshot(tmp_path, monke
     assert not migration_journal_path(serve).exists()
 
 
+def test_home_membership_migration_rejects_unreadable_home_ref(tmp_path):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    ws = Workspace.init(serve / "energy", topic="能源")
+    source = tmp_path / "note.txt"
+    source.write_text("note", encoding="utf-8")
+    ref_id = ws.add([source], ref_id="local")
+    create_tag(serve, "能源")
+    evidence = _backup_evidence(tmp_path)
+    migrate_tag_rules(serve, evidence)
+    manifest = ws.references_dir() / ref_id / "manifest.yaml"
+    manifest.write_text("not: [valid", encoding="utf-8")
+
+    with __import__("pytest").raises(Exception, match="无法解析的历史 home Ref"):
+        migrate_home_membership(serve, evidence)
+
+    assert Workspace.open(ws.root).constitution.include_tags is None
+    assert load_catalog(serve)["assignments"] == {}
+
+
 def _backup_evidence(tmp_path: Path) -> Path:
     evidence = tmp_path / "evidence.json"
     evidence.write_text(
