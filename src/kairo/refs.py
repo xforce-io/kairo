@@ -317,15 +317,8 @@ def delete_tag(serve: Path, tag: str) -> None:
     save_catalog(serve, catalog)
 
 
-def migrate_tag_rules(
-    serve: Path, evidence_path: Path | str, *, dry_run: bool = False
-) -> dict[str, Any]:
-    """将历史 home 成员语义切换为严格 Tag 规则。
-
-    证据由运维流程产生；本函数只校验其恢复已验证的最小契约，不访问 remote。
-    """
-    serve = Path(serve)
-    recover_tag_rule_migration(serve)
+def _load_tag_migration_evidence(evidence_path: Path | str) -> dict[str, Any]:
+    """校验 Tag 数据迁移共用的已验证恢复证据。"""
     evidence = Path(evidence_path)
     try:
         proof = json.loads(evidence.read_text(encoding="utf-8"))
@@ -347,6 +340,19 @@ def migrate_tag_rules(
         or proof.get("restored") is not True
     ):
         raise RefError("迁移前备份证据不完整")
+    return proof
+
+
+def migrate_tag_rules(
+    serve: Path, evidence_path: Path | str, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """将历史 home 成员语义切换为严格 Tag 规则。
+
+    证据由运维流程产生；本函数只校验其恢复已验证的最小契约，不访问 remote。
+    """
+    serve = Path(serve)
+    recover_tag_rule_migration(serve)
+    proof = _load_tag_migration_evidence(evidence_path)
 
     catalog = load_catalog(serve)
     raw_tags = [str(tag).strip() for tag in catalog.get("tags") or [] if str(tag).strip()]
@@ -440,6 +446,104 @@ def migrate_tag_rules(
         except Exception as recovery_exc:
             raise RefError(f"迁移失败，且恢复失败:{recovery_exc}") from exc
         raise RefError(f"迁移失败:{exc}") from exc
+    return report
+
+
+def migrate_home_membership(
+    serve: Path, evidence_path: Path | str, *, dry_run: bool = False
+) -> dict[str, Any]:
+    """把历史 Topic home 明确回填为同名 Tag 规则和 Ref Tag。"""
+    serve = Path(serve)
+    recover_tag_rule_migration(serve)
+    proof = _load_tag_migration_evidence(evidence_path)
+    catalog = load_catalog(serve)
+    if not catalog.get("strict_membership", False):
+        raise RefError("请先完成 Tag 严格成员迁移")
+
+    topics = [open_topic(serve, slug) for slug in list_topic_slugs(serve)]
+    topic_tags: dict[str, str] = {}
+    for ws in topics:
+        tag = _normalize_tag(ws.constitution.topic)
+        if tag in topic_tags.values():
+            raise RefError("Topic 名称存在规范化冲突")
+        if tag not in catalog["tags"]:
+            raise RefError(f"Topic 名称 Tag 不在词表中:{tag}")
+        existing = ws.constitution.include_tags or []
+        if existing and existing != [tag]:
+            raise RefError(f"Topic 已有不同包含规则:{ws.root.name}")
+        topic_tags[ws.root.name] = tag
+
+    refs = list_all_refs(serve)
+    known_ref_keys = {rec.key for rec in refs}
+    unknown_assignments = sorted(
+        key for key in (catalog.get("assignments") or {}) if key not in known_ref_keys
+    )
+    if unknown_assignments:
+        raise RefError("存在无法解析的 Ref Tag 引用")
+
+    assignments = {
+        key: list(values) for key, values in (catalog.get("assignments") or {}).items()
+    }
+    rule_updates = 0
+    tag_additions = 0
+    for ws in topics:
+        tag = topic_tags[ws.root.name]
+        if ws.constitution.include_tags != [tag]:
+            rule_updates += 1
+    for rec in refs:
+        if rec.home not in topic_tags:
+            continue
+        values = assignments.setdefault(rec.key, [])
+        tag = topic_tags[rec.home]
+        if tag not in values:
+            values.append(tag)
+            tag_additions += 1
+
+    report = {
+        "ok": True,
+        "dry_run": dry_run,
+        "backup_id": proof["backup_id"],
+        "topics": len(topics),
+        "home_refs": sum(1 for rec in refs if rec.home in topic_tags),
+        "rule_updates": rule_updates,
+        "tag_additions": tag_additions,
+        "changed": bool(rule_updates or tag_additions),
+    }
+    if dry_run or not report["changed"]:
+        return report
+
+    files = {
+        str(ws.root.joinpath("constitution.yaml").relative_to(serve)): (
+            ws.root / "constitution.yaml"
+        ).read_text(encoding="utf-8")
+        for ws in topics
+    }
+    catalog_file = catalog_path(serve)
+    journal_path = migration_journal_path(serve)
+    journal = {
+        "phase": "prepared",
+        "files": files,
+        "catalog_before": (
+            catalog_file.read_text(encoding="utf-8") if catalog_file.is_file() else None
+        ),
+    }
+    _atomic_json(journal_path, journal)
+    try:
+        for ws in topics:
+            constitution = ws.constitution
+            constitution.include_tags = [topic_tags[ws.root.name]]
+            ws.write_constitution(constitution)
+        catalog["assignments"] = assignments
+        save_catalog(serve, catalog)
+        journal["phase"] = "committed"
+        _atomic_json(journal_path, journal)
+        journal_path.unlink()
+    except Exception as exc:
+        try:
+            recover_tag_rule_migration(serve)
+        except Exception as recovery_exc:
+            raise RefError(f"历史归属回填失败，且恢复失败:{recovery_exc}") from exc
+        raise RefError(f"历史归属回填失败:{exc}") from exc
     return report
 
 

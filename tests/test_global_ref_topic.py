@@ -18,6 +18,7 @@ from kairo.refs import (
     create_tag,
     list_all_refs,
     load_catalog,
+    migrate_home_membership,
     migrate_tag_rules,
     migration_journal_path,
     run_ref_ids,
@@ -246,6 +247,92 @@ def test_tag_vocabulary_delete_protection_and_strict_migration(tmp_path):
     migrated_state = Workspace.open(serve / "energy").read_state()
     assert migrated_state.targets["understanding.md"].folded == {"energy/local": "digest-hash"}
     assert migrated_state.targets["understanding.md"].last_major_folded == {"energy/local": "digest-hash"}
+
+
+def test_migrate_home_membership_restores_topic_rules_and_home_refs(tmp_path, monkeypatch):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    energy = Workspace.init(serve / "energy", topic="能源")
+    empty = Workspace.init(serve / "empty", topic="空主题")
+    stream_source = tmp_path / "stream.txt"
+    corpus_source = tmp_path / "corpus.txt"
+    stream_source.write_text("stream", encoding="utf-8")
+    corpus_source.write_text("corpus", encoding="utf-8")
+    stream_id = energy.add([stream_source], ref_id="stream")
+    corpus_id = energy.add([corpus_source], ref_id="corpus", source_class="corpus")
+    for tag in ("能源", "空主题", "保留"):
+        create_tag(serve, tag)
+    add_tag(serve, home="energy", ref_id=stream_id, tag="保留")
+    evidence = _backup_evidence(tmp_path)
+    migrate_tag_rules(serve, evidence)
+
+    before = load_catalog(serve)
+    dry = migrate_home_membership(serve, evidence, dry_run=True)
+    assert dry == {
+        "ok": True,
+        "dry_run": True,
+        "backup_id": "b-20260903T143304Z-5a68d1308a8d",
+        "topics": 2,
+        "home_refs": 2,
+        "rule_updates": 2,
+        "tag_additions": 2,
+        "changed": True,
+    }
+    assert load_catalog(serve) == before
+
+    migrated = migrate_home_membership(serve, evidence)
+    assert migrated["changed"] is True
+    assert Workspace.open(energy.root).constitution.include_tags == ["能源"]
+    assert Workspace.open(empty.root).constitution.include_tags == ["空主题"]
+    assert {item.id for item in topic_members(serve, "energy")} == {stream_id, corpus_id}
+    assigned = load_catalog(serve)["assignments"]
+    assert assigned["energy/stream"] == ["保留", "能源"]
+    assert assigned["energy/corpus"] == ["能源"]
+    assert set(run_ref_ids(Workspace.open(energy.root))) == {stream_id, corpus_id}
+    (energy.references_dir() / stream_id / "digest.md").write_text("stream digest", encoding="utf-8")
+    (energy.references_dir() / corpus_id / "digest.md").write_text("corpus digest", encoding="utf-8")
+    assert set(ComposeRule(Workspace.open(energy.root), StubProvider())._all_digests()) == {
+        "energy/stream"
+    }
+
+    result = _cli(
+        [
+            "tag",
+            "migrate-home-membership",
+            "--backup-evidence",
+            str(evidence),
+            "--json",
+        ],
+        serve,
+        monkeypatch,
+    )
+    assert _load(result)["changed"] is False
+
+
+def test_interrupted_home_membership_migration_restores_snapshot(tmp_path, monkeypatch):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    ws = Workspace.init(serve / "energy", topic="能源")
+    source = tmp_path / "note.txt"
+    source.write_text("note", encoding="utf-8")
+    ws.add([source], ref_id="local")
+    create_tag(serve, "能源")
+    evidence = _backup_evidence(tmp_path)
+    migrate_tag_rules(serve, evidence)
+    before_catalog = load_catalog(serve)
+    original_write = Workspace.write_constitution
+
+    def interrupted_write(self, constitution):
+        original_write(self, constitution)
+        raise KeyboardInterrupt("simulated interruption")
+
+    monkeypatch.setattr(Workspace, "write_constitution", interrupted_write)
+    with __import__("pytest").raises(KeyboardInterrupt):
+        migrate_home_membership(serve, evidence)
+
+    assert load_catalog(serve) == before_catalog
+    assert Workspace.open(ws.root).constitution.include_tags is None
+    assert not migration_journal_path(serve).exists()
 
 
 def _backup_evidence(tmp_path: Path) -> Path:

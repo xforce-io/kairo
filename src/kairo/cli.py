@@ -1205,6 +1205,24 @@ def tag_migrate_cmd(
     _dump(as_json, report)
 
 
+@tag_app.command("migrate-home-membership")
+def tag_migrate_home_membership_cmd(
+    backup_evidence: Path = typer.Option(..., "--backup-evidence", help="已验证的恢复证据 JSON"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    dry_run: bool = typer.Option(False, "--dry-run"),
+    as_json: bool = typer.Option(False, "--json"),
+) -> None:
+    """把历史 workspace home 回填为同名 Topic Tag 成员。"""
+    from kairo.refs import RefError, migrate_home_membership
+
+    try:
+        report = migrate_home_membership(_cli_root(root), backup_evidence, dry_run=dry_run)
+    except RefError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
+    _dump(as_json, report)
+
+
 @include_app.command("set")
 def include_set_cmd(
     tags: list[str] = typer.Argument(..., help="包含的 Tag,命中任一即进入"),
