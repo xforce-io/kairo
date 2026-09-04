@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from kairo.backends import _normalize_srt
 from kairo.models import Form
 from kairo.workspace import _keyed_transform_filename
 
@@ -69,6 +70,8 @@ def _line_body(line: str) -> str | None:
 
 def parse_units(text: str, duration: float | None = None) -> list[Unit]:
     """把 transcript 收成单元。duration 为 None 时不过滤超时长前缀。"""
+    # 已存原始 SRT（含空 cue）先走与 ASR 入仓同一套归一，再认行级时间前缀。
+    text = _normalize_srt(text)
     # 部分 ASR 把连续时间戳写在同一行；按时间戳断开后，听读与普通预览共用同一单元。
     text = re.sub(
         r"([^\n])\s*(?=\[(?:(?:\d{1,3}:)?[0-5]\d:[0-5]\d)(?:\.\d{1,3})?\])",

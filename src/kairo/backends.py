@@ -60,15 +60,18 @@ def _run_asr(backend: str, src: Path) -> BackendResult:
 
 
 def _normalize_srt(text: str) -> str:
-    """把标准 SRT cue 归一为听读层已有的行级时间前缀；异常时原样返回。"""
+    """把标准 SRT cue 归一为听读层已有的行级时间前缀。
+
+    空 cue / 零时长无正文 / 无正文 cue 跳过，不放弃其余有效 cue；无法识别为 SRT 时原样返回。
+    """
     cues: list[str] = []
     source = text.lstrip("\ufeff")
     for block in re.split(r"\r?\n\s*\r?\n", source.strip()):
         lines = block.splitlines()
         if lines and lines[0].strip().isdigit():
             lines = lines[1:]
-        if len(lines) < 2:
-            return text
+        if not lines:
+            continue
         match = re.match(r"^(\d{1,3}):([0-5]\d):([0-5]\d),(\d{3})\s+-->\s+", lines[0])
         if not match:
             return text
@@ -77,7 +80,7 @@ def _normalize_srt(text: str) -> str:
         stamp = f"{int(hour)}:{minute}:{second}" + (f".{fraction}" if fraction else "")
         body = "\n".join(lines[1:]).strip()
         if not body:
-            return text
+            continue
         cues.append(f"[{stamp}] {body}")
     return "\n".join(cues) if cues else text
 
