@@ -310,6 +310,7 @@ def _listen_read_html(
     *,
     audio_src: str | None = None,
     form_url_base: str | None = None,
+    form_url_query: str = "",
     hx_target: str = "#reader",
 ) -> str:
     """Render listen-read UI for audio form.
@@ -317,6 +318,7 @@ def _listen_read_html(
     Args:
         audio_src: explicit audio file URL (if None, builds /w/{slug}/ref/.../file/{key})
         form_url_base: base URL for switcher links (if None, uses /w/{slug}/ref/{ref_id}/form)
+        form_url_query: query string for switcher links (e.g. "home=slug"), appended after key
         hx_target: HTMX target selector for switcher links (default: #reader)
     """
     t = _t(request)
@@ -360,6 +362,7 @@ def _listen_read_html(
             "audio_key": audio_key,
             "audio_src": audio_src,
             "form_url_base": form_url_base,
+            "form_url_query": form_url_query,
             "hx_target": hx_target,
             "units": units,
             "switcher": switcher,
@@ -1291,8 +1294,7 @@ def _form_preview_response(
             qhome = quote(home or "global", safe="")
             qref = quote(ref_id, safe="")
             form_url_base = f"/refs/{qref}/form"
-            if home:
-                form_url_base += f"?home={qhome}"
+            form_url_query = f"home={qhome}" if home else ""
             html = _listen_read_html(
                 request,
                 ws,
@@ -1302,6 +1304,7 @@ def _form_preview_response(
                 form,
                 audio_src=file_src,
                 form_url_base=form_url_base,
+                form_url_query=form_url_query,
                 hx_target="#form-preview",
             )
         return _render(
