@@ -6,6 +6,7 @@
 | workspace | Topic 的磁盘目录实现名，内含 constitution、home 参考与产物。仅代码与兼容字段使用。 | 课题仓、空间 |
 | Ref | 一份资料的全局身份：稳定 id、来源、发生时间与至多一份 digest。 | 资料副本 |
 | Ref 身份键 | Ref 在 serve root 内由 home 与 id 组成的稳定键，用于跨来源解析和加工记账。 | digest 路径、资料路径 |
+| 历史归属回填 | 一次性把历史 Ref 的 workspace home 映射为同名 Topic Tag，并为该 Topic 写入同名包含规则的受控迁移。 | home 成员兼容、自动打标 |
 | Tag | 打在 Ref 上的分类标签，可多选，不拥有资料。 | 文件夹、Inbox |
 | Timeline | serve root 上唯一的全局资料时间流，按发生日浏览全部可访问 Ref。 | Inbox、排期 |
 | 包含规则 | Topic 声明的 Tag 列表；Ref 命中其中任一即成为成员。 | 智能合集、AND 规则 |
