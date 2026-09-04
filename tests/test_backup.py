@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import stat
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -12,12 +13,15 @@ from typer.testing import CliRunner
 
 from kairo.backup import (
     BackupError,
+    RemoteSpec,
     load_remote,
     publish,
+    restore_remote,
     restore_generation,
     validate_backup_id,
     verify_generation,
 )
+from kairo import backup
 from kairo.cli import app
 from kairo.workspace import Workspace
 
@@ -257,6 +261,94 @@ def test_restore_rejects_mutated_copy_before_commit(tmp_path, monkeypatch):
     with pytest.raises(BackupError):
         restore_generation(remote, dest)
     assert not dest.exists() or (dest.is_dir() and not any(dest.iterdir()))
+
+
+def test_resumable_rsync_uses_append_verify_and_never_falls_back_to_tar(tmp_path, monkeypatch):
+    captured = []
+    monkeypatch.setattr(backup, "_rsync_bin", lambda: "/fake/rsync")
+
+    def successful(args, **kwargs):
+        captured.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(backup.subprocess, "run", successful)
+    backup._rsync(tmp_path / "local", "reader", "/remote/gen", reverse=True, resumable=True)
+    assert "--partial" in captured[0]
+    assert "--append-verify" in captured[0]
+    assert "--delete" not in captured[0]
+
+    monkeypatch.setattr(
+        backup.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=12, stdout="", stderr=""),
+    )
+    monkeypatch.setattr(
+        backup,
+        "_tar_ssh",
+        lambda *args, **kwargs: pytest.fail("resumable restore must not use tar fallback"),
+    )
+    with pytest.raises(BackupError, match="可续传传输失败"):
+        backup._rsync(tmp_path / "again", "reader", "/remote/gen", reverse=True, resumable=True)
+
+
+def test_restore_remote_reuses_persistent_stage_after_interruption(tmp_path, monkeypatch):
+    serve = _serve_with_pointers(tmp_path)
+    remote = tmp_path / "remote"
+    result = publish(serve, remote)
+    spec = RemoteSpec(name="reader", ssh="reader", path=str(remote))
+    dest = tmp_path / "restored"
+    source = remote / "generations" / result.backup_id
+    monkeypatch.setattr(backup, "_ssh_read_current", lambda _spec: result.backup_id)
+
+    def interrupted(local, host, remote_path, *, reverse=False, resumable=False):
+        assert (host, remote_path, reverse, resumable) == (
+            "reader",
+            str(source),
+            True,
+            True,
+        )
+        local.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source / "backup.json", local / "backup.json")
+        partial = local / "data" / "alpha" / "understanding.md"
+        partial.parent.mkdir(parents=True, exist_ok=True)
+        partial.write_bytes((source / "data" / "alpha" / "understanding.md").read_bytes()[:2])
+        raise BackupError("transfer", "可续传传输失败")
+
+    monkeypatch.setattr(backup, "_rsync", interrupted)
+    with pytest.raises(BackupError, match="可续传传输失败"):
+        restore_remote(spec, dest)
+    assert not dest.exists()
+
+    resumed = []
+
+    def complete(local, host, remote_path, *, reverse=False, resumable=False):
+        assert (local / "backup.json").read_bytes() == (source / "backup.json").read_bytes()
+        assert (local / "data" / "alpha" / "understanding.md").read_bytes() == (
+            source / "data" / "alpha" / "understanding.md"
+        ).read_bytes()[:2]
+        resumed.append(local)
+        shutil.copytree(source / "data", local / "data", dirs_exist_ok=True)
+
+    monkeypatch.setattr(backup, "_rsync", complete)
+    restored = restore_remote(spec, dest)
+    assert restored.status == "restored"
+    assert resumed
+    assert (dest / "alpha" / "understanding.md").read_text(encoding="utf-8") == "fact-a\n"
+    stage_parent = dest.parent / ".kairo-restore"
+    assert not any(stage_parent.iterdir())
+
+
+def test_restore_remote_requires_explicit_id_for_multiple_stages(tmp_path, monkeypatch):
+    spec = RemoteSpec(name="reader", ssh="reader", path="/remote")
+    dest = tmp_path / "restored"
+    first = "b-20260903T143304Z-5a68d1308a8d"
+    second = "b-20260903T143305Z-5a68d1308a8e"
+    backup._prepare_restore_stage(spec, dest, first)
+    backup._prepare_restore_stage(spec, dest, second)
+    monkeypatch.setattr(backup, "_ssh_read_current", lambda _spec: pytest.fail("must not read current"))
+    with pytest.raises(BackupError, match="多个未完成恢复") as exc:
+        restore_remote(spec, dest)
+    assert exc.value.code == 2
 
 
 def test_cli_push_corrupt_current_backup_json_is_contract_error(tmp_path, monkeypatch):

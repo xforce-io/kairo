@@ -43,6 +43,7 @@
 | 备份 generation | remote 上一份不可变、完整且校验通过的恢复版本。 | 备份批次、快照 |
 | current | remote 上唯一指向当前可消费备份 generation 的原子指针。 | 当前版本、线上版本 |
 | 备份清单 | `backup.json` 中完整描述一份备份 generation 的目录、文件、物化对象及其完整性信息。 | 文件清单 |
+| 恢复暂存 | 与一个目标路径、remote 和备份 generation 绑定的同级隐藏目录；只保存未完成恢复，校验通过后才提升到目标。 | 半成恢复目录、下载缓存 |
 | 最近结果 | 源环境为某个 remote 保留的最近一次备份尝试记录，含尝试时间、成功时间、backup_id 与成败。 | 同步日志 |
 | 重叠跳过 | 同一 remote 上一轮仍在运行时，本轮不启动第二次备份并留下可判定记录。 | 取消 |
 | 数据根 | 容器内 public-read 进程打开的 serve root，必须经 current 跟随到该 generation 的 `data/`。 | 挂载点、备份根 |

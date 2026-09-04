@@ -25,6 +25,7 @@ from kairo.machine import config_path
 from kairo.workspace import Workspace, WorkspaceNotFound
 
 SCHEMA_VERSION = 1
+RESTORE_STAGE_SCHEMA = 1
 BACKUP_ID_RE = re.compile(r"^b-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 REMOTE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 SSH_RE = re.compile(r"^[A-Za-z0-9._@:/-]+$")
@@ -344,7 +345,14 @@ def _tar_ssh(local: Path, host: str, remote_path: str, *, reverse: bool = False)
         raise BackupError("transfer", "传输失败")
 
 
-def _rsync(local: Path, host: str, remote_path: str, *, reverse: bool = False) -> None:
+def _rsync(
+    local: Path,
+    host: str,
+    remote_path: str,
+    *,
+    reverse: bool = False,
+    resumable: bool = False,
+) -> None:
     """OpenSSH 上优先 rsync;JumpServer/协议不兼容时改 tar 管道。"""
     local.mkdir(parents=True, exist_ok=True)
     rsync = _rsync_bin()
@@ -352,27 +360,35 @@ def _rsync(local: Path, host: str, remote_path: str, *, reverse: bool = False) -
         spec = f"{host}:{remote_path}/"
         src, dst = (spec, f"{local}/") if reverse else (f"{local}/", spec)
         rsh = " ".join([shutil.which("ssh") or "ssh", *SSH_OPTS])
+        args = [
+            rsync,
+            "--protocol=29",
+            "--old-args",
+            "-a",
+            "-e",
+            rsh,
+        ]
+        if resumable:
+            # generation 不可变；保留 partial 并附加校验，重试可复用已写入字节。
+            args.extend(["--partial", "--append-verify"])
+        else:
+            args.append("--delete")
+        args.extend([src, dst])
         try:
             proc = subprocess.run(
-                [
-                    rsync,
-                    "--protocol=29",
-                    "--old-args",
-                    "-a",
-                    "--delete",
-                    "-e",
-                    rsh,
-                    src,
-                    dst,
-                ],
+                args,
                 capture_output=True,
                 text=True,
-                timeout=8,
+                timeout=3600 if resumable else 8,
             )
         except (OSError, subprocess.TimeoutExpired):
             proc = None
         if proc is not None and proc.returncode == 0:
             return
+        if resumable:
+            raise BackupError("transfer", "可续传传输失败")
+    if resumable:
+        raise BackupError("transfer", "本机 rsync 不可用，无法续传")
     _tar_ssh(local, host, remote_path, reverse=reverse)
 
 
@@ -477,10 +493,157 @@ def verify_remote(spec: RemoteSpec, backup_id: str | None = None) -> PublishResu
 def restore_remote(
     spec: RemoteSpec, dest: Path, backup_id: str | None = None
 ) -> PublishResult:
-    with tempfile.TemporaryDirectory() as raw:
-        root = Path(raw)
-        bid = _hydrate_remote(spec, root, backup_id)
-        return restore_generation(root, dest, bid)
+    dest = Path(dest)
+    _ensure_restore_destination(dest)
+    bid = _resolve_restore_backup_id(spec, dest, backup_id)
+    stage = _prepare_restore_stage(spec, dest, bid)
+    generation = stage / bid
+    remote_gen = spec.path.rstrip("/") + f"/generations/{bid}"
+    _rsync(generation, spec.ssh, remote_gen, reverse=True, resumable=True)
+    listing = validate_generation(generation)
+    _promote_restored_data(stage, dest)
+    shutil.rmtree(stage)
+    return PublishResult(
+        "restored",
+        bid,
+        len(listing["files"]),
+        sum(item["size"] for item in listing["files"]),
+    )
+
+
+def _restore_stage_parent(dest: Path) -> Path:
+    return dest.parent / ".kairo-restore"
+
+
+def _restore_destination_id(dest: Path) -> str:
+    return str(dest.resolve(strict=False))
+
+
+def _restore_stage_key(spec: RemoteSpec, dest: Path, backup_id: str) -> str:
+    raw = "\0".join((_restore_destination_id(dest), spec.name, backup_id)).encode()
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _restore_stage_path(spec: RemoteSpec, dest: Path, backup_id: str) -> Path:
+    return _restore_stage_parent(dest) / _restore_stage_key(spec, dest, backup_id)
+
+
+def _ensure_restore_destination(dest: Path) -> None:
+    if dest.exists():
+        if not _ordinary_dir(dest):
+            raise BackupError("restore", "目标不是空目录", code=2)
+        try:
+            if any(dest.iterdir()):
+                raise BackupError("restore", "目标不是空目录", code=2)
+        except OSError as exc:
+            raise BackupError("restore", "目标不可读", code=2) from exc
+    else:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _restore_stage_metadata(spec: RemoteSpec, dest: Path, backup_id: str) -> dict[str, Any]:
+    return {
+        "schema_version": RESTORE_STAGE_SCHEMA,
+        "remote": spec.name,
+        "destination": _restore_destination_id(dest),
+        "backup_id": backup_id,
+    }
+
+
+def _write_restore_stage_metadata(stage: Path, data: dict[str, Any]) -> None:
+    tmp = stage / ".restore.json.tmp"
+    tmp.write_text(json.dumps(data, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(tmp, stage / "restore.json")
+
+
+def _read_restore_stage_metadata(stage: Path) -> dict[str, Any]:
+    path = stage / "restore.json"
+    if not _ordinary_file(path):
+        raise BackupError("restore", "恢复暂存元数据损坏", code=2)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise BackupError("restore", "恢复暂存元数据损坏", code=2) from exc
+    if (
+        not isinstance(data, dict)
+        or data.get("schema_version") != RESTORE_STAGE_SCHEMA
+        or not isinstance(data.get("remote"), str)
+        or not isinstance(data.get("destination"), str)
+        or not isinstance(data.get("backup_id"), str)
+    ):
+        raise BackupError("restore", "恢复暂存元数据损坏", code=2)
+    validate_backup_id(data["backup_id"])
+    return data
+
+
+def _matching_restore_stages(spec: RemoteSpec, dest: Path) -> list[dict[str, Any]]:
+    parent = _restore_stage_parent(dest)
+    if not parent.exists():
+        return []
+    if not _ordinary_dir(parent):
+        raise BackupError("restore", "恢复暂存目录非法", code=2)
+    matches: list[dict[str, Any]] = []
+    try:
+        children = list(parent.iterdir())
+    except OSError as exc:
+        raise BackupError("restore", "恢复暂存目录不可读", code=2) from exc
+    for child in children:
+        if not _ordinary_dir(child):
+            continue
+        metadata = _read_restore_stage_metadata(child)
+        if (
+            metadata["remote"] == spec.name
+            and metadata["destination"] == _restore_destination_id(dest)
+        ):
+            matches.append({"path": child, **metadata})
+    return matches
+
+
+def _resolve_restore_backup_id(
+    spec: RemoteSpec, dest: Path, backup_id: str | None
+) -> str:
+    if backup_id is not None:
+        return validate_backup_id(backup_id)
+    matches = _matching_restore_stages(spec, dest)
+    if len(matches) == 1:
+        return matches[0]["backup_id"]
+    if len(matches) > 1:
+        raise BackupError("restore", "存在多个未完成恢复，请指定 --backup-id", code=2)
+    current = _ssh_read_current(spec)
+    if current is None:
+        raise BackupError("verify", "没有 current", code=2)
+    return current
+
+
+def _prepare_restore_stage(spec: RemoteSpec, dest: Path, backup_id: str) -> Path:
+    stage = _restore_stage_path(spec, dest, backup_id)
+    expected = _restore_stage_metadata(spec, dest, backup_id)
+    if stage.exists():
+        if not _ordinary_dir(stage) or _read_restore_stage_metadata(stage) != expected:
+            raise BackupError("restore", "恢复暂存与输入不匹配", code=2)
+    else:
+        stage.mkdir(parents=True)
+        _write_restore_stage_metadata(stage, expected)
+    generation = stage / backup_id
+    if generation.exists() and not _ordinary_dir(generation):
+        raise BackupError("restore", "恢复暂存 generation 非法", code=2)
+    return stage
+
+
+def _promote_restored_data(stage: Path, dest: Path) -> None:
+    metadata = _read_restore_stage_metadata(stage)
+    generation = stage / metadata["backup_id"]
+    data = generation / "data"
+    if not _ordinary_dir(data):
+        raise BackupError("verify", "generation 不完整")
+    # 传输期间若目标被写入，宁可保留暂存，也绝不覆盖用户内容。
+    _ensure_restore_destination(dest)
+    if dest.exists():
+        dest.rmdir()
+    try:
+        data.replace(dest)
+    except OSError as exc:
+        raise BackupError("restore", "目标提升失败") from exc
 
 
 def validate_backup_id(backup_id: str) -> str:
