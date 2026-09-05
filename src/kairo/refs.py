@@ -205,24 +205,16 @@ class RefRecord:
 _bound_catalog: ContextVar[list[RefRecord] | None] = ContextVar(
     "kairo_bound_ref_catalog", default=None
 )
-_bound_sources: ContextVar[list[tuple[Workspace, str, RefRecord]] | None] = ContextVar(
-    "kairo_bound_member_sources", default=None
-)
 
 
 @contextmanager
-def lookup_scope(
-    catalog: list[RefRecord] | None,
-    sources: list[tuple[Workspace, str, RefRecord]] | None = None,
-) -> Iterator[None]:
-    """Reuse one Ref catalog / member list for nested discover() calls."""
-    t_cat = _bound_catalog.set(catalog)
-    t_src = _bound_sources.set(sources)
+def lookup_scope(catalog: list[RefRecord] | None) -> Iterator[None]:
+    """Reuse one serve-level Ref catalog for nested topic_members() calls."""
+    token = _bound_catalog.set(catalog)
     try:
         yield
     finally:
-        _bound_sources.reset(t_src)
-        _bound_catalog.reset(t_cat)
+        _bound_catalog.reset(token)
 
 
 def add_global_ref(
@@ -767,7 +759,7 @@ def resolve_open(serve: Path, home: str, ref_id: str) -> tuple[Workspace, str]:
 
 def run_members(ws: Workspace, catalog: list[RefRecord] | None = None) -> list[RefRecord]:
     """本 Topic 知识 Run 的成员（含跨 home）。home 只定位源与唯一 digest。"""
-    serve = ws.root.parent
+    serve = serve_root_of(ws)
     if ws.root.name.startswith(".") or not is_topic_dir(ws.root):
         return []
     try:
@@ -780,10 +772,7 @@ def member_sources(
     ws: Workspace, catalog: list[RefRecord] | None = None
 ) -> list[tuple[Workspace, str, RefRecord]]:
     """解析成员的 home workspace；打不开的来源跳过，不回退为目录内文件。"""
-    bound = _bound_sources.get()
-    if bound is not None:
-        return bound
-    serve = ws.root.parent
+    serve = serve_root_of(ws)
     out: list[tuple[Workspace, str, RefRecord]] = []
     for rec in run_members(ws, catalog=catalog):
         try:

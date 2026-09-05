@@ -104,14 +104,13 @@ def _build_rules(ws, provider) -> list:
 
 def pending(ws, catalog=None) -> list:
     """当前 stale 的 WorkItem(只读:不跑 provider、不写 state)。dashboard 算待办数用。"""
-    from kairo.refs import list_all_refs, lookup_scope, member_sources
+    from kairo.refs import list_all_refs, lookup_scope, serve_root_of
 
     state = ws.read_state()
     if catalog is None:
-        catalog = list_all_refs(ws.root.parent)
-    sources = member_sources(ws, catalog=catalog)
+        catalog = list_all_refs(serve_root_of(ws))
     items = []
-    with lookup_scope(catalog, sources):
+    with lookup_scope(catalog):
         for rule in _build_rules(ws, None):
             items.extend(item for item in rule.discover(state) if item.is_stale(state))
     return items
@@ -339,10 +338,10 @@ def _product_block_retryable(reason: str | None) -> bool:
 
 def workspace_run_plan(ws, catalog=None) -> dict:
     """#75/#161:主按钮状态机输入,区分总 blocked 与 Run 可重试 blocked。"""
-    from kairo.refs import list_all_refs, member_sources
+    from kairo.refs import list_all_refs, member_sources, serve_root_of
 
     if catalog is None:
-        catalog = list_all_refs(ws.root.parent)
+        catalog = list_all_refs(serve_root_of(ws))
     pending_n = len(pending(ws, catalog=catalog))
     blocked_refs: list[dict] = []
 

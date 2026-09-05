@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 
 from kairo.engine import pending as engine_pending
 from kairo.models import ProductState
-from kairo.projects import create_project
-from kairo.refs import add_tag, create_tag, set_include_tags
+from kairo.projects import create_project, set_workspaces
+from kairo.refs import add_tag, create_tag, list_tag_records, list_tags, set_include_tags, tag_usages
 from kairo.web import discovery as discovery_mod
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -43,6 +43,7 @@ def _seed(root: Path) -> dict:
     add_tag(root, home="topic-0", ref_id=ref_id, tag="tag-a")
     set_include_tags(root, "topic-2", ["tag-a"])
     project = create_project(root, "Latency Project")
+    set_workspaces(root, project.id, ["topic-0"])
     return {"ref_id": ref_id, "project_id": project.id}
 
 
@@ -138,21 +139,23 @@ def test_get_pages_bound_full_catalog_scans(tmp_path, monkeypatch):
     assert "1 Ref" in home
     assert "Needs attention" in home
     assert "New or changed materials are ready to be processed." in home
-    assert "asr-failed" not in home or "Needs attention" in home
 
     topic = pages["topic"].text
     assert "▶ Run" in topic
     assert "topic-0" in topic or "Topic 0" in topic
+    assert "Topic 0" in pages["project"].text
 
-    assert per_request["home"] <= MAX_CATALOG_SCANS
-    assert per_request["knowledge"] <= MAX_CATALOG_SCANS
-    assert per_request["project"] <= MAX_CATALOG_SCANS
-    assert per_request["topic"] <= MAX_CATALOG_SCANS
+    assert per_request["home"] == 1, per_request
+    assert per_request["knowledge"] == 0, per_request
+    assert per_request["project"] == 1, per_request
+    assert per_request["topic"] == 1, per_request
 
 
 def test_settings_tag_usage_opens_each_topic_once(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     _seed(tmp_path)
+    batched = list_tag_records(tmp_path)
+    assert batched == [tag_usages(tmp_path, name) for name in list_tags(tmp_path)]
     counts = _install_counters(monkeypatch, tmp_path)
     client = _client(tmp_path)
     response = client.get("/settings")
