@@ -8,7 +8,9 @@
   <p class="doc-kicker"><span class="dk-title">{{ payload.url }}</span></p>
   <p class="meta-hint">
     {% if payload.state == 'fresh' %}{{ t('proj.cache_fresh') }}{% else %}{{ t('proj.cache_expired') }}{% endif %}
-    · {{ payload.fetched_at }} → {{ payload.expires_at }}
+    {% if payload.fetched_label or payload.expires_label %}
+      · {{ payload.fetched_label }}{% if payload.expires_label %} → {{ payload.expires_label }}{% endif %}
+    {% endif %}
     {% if payload.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
   </p>
   <pre class="doc">{{ payload.content }}</pre>

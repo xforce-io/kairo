@@ -546,15 +546,35 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .chooser-name { font-weight: 600; }
 .chooser-id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .obj-list { list-style: none; margin: 0 0 14px; padding: 0; }
-.obj-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); }
-.obj-actions, .obj-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.obj-row { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.obj-copy { min-width: 0; flex: 1; }
+.obj-copy .chooser-id {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  margin-top: 4px; max-width: 100%;
+}
+.obj-actions { display: flex; flex-wrap: nowrap; gap: 8px; flex: none; align-items: center; }
+.obj-actions form { margin: 0; display: flex; }
+.obj-add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .obj-add input, .obj-add select { flex: 1; min-width: 10rem; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; }
+.task-create { display: flex; flex-direction: column; gap: 10px; }
+.task-create-bar { display: flex; flex-wrap: wrap; gap: 8px; }
+.task-create-bar input { flex: 1; min-width: 12rem; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); }
+.task-create-bar select { min-width: 8rem; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); }
+.task-create textarea {
+  width: 100%; min-height: 7.5rem; box-sizing: border-box; resize: vertical;
+  padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 8px;
+  background: var(--card); font-family: var(--sans); font-size: 14px; line-height: 1.45;
+}
+.task-create-submit { display: flex; justify-content: flex-end; }
 .conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; list-style: none; margin: 0; padding: 0; }
 .conn-card { padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
 .conn-name { font-weight: 600; margin-bottom: 6px; }
+.conn-card .obj-actions { flex-wrap: wrap; }
 @media (max-width: 720px) {
   .obj-head { flex-direction: column; }
   .obj-title { font-size: 26px; }
+  .obj-row { flex-direction: column; align-items: stretch; }
+  .obj-actions { flex-wrap: wrap; }
 }
 
 /* step 日志面板 #157 三层:人话进度 / 运行健康 / 折叠原始日志 */

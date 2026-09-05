@@ -2948,6 +2948,18 @@ def _serve(request: Request) -> Path:
     return Path(request.app.state.root)
 
 
+def _clock_label(iso: str | None) -> str:
+    """ISO timestamp → `YYYY-MM-DD HH:MM` for Project cache status."""
+    text = (iso or "").strip()
+    if not text:
+        return ""
+    text = text.replace("Z", "+00:00")
+    if "T" in text:
+        date, rest = text.split("T", 1)
+        return f"{date} {rest[:5]}"
+    return text[:16]
+
+
 @router.get("/projects", response_class=HTMLResponse)
 def projects_page(request: Request, error: str | None = None) -> HTMLResponse:
     _console_only(request)
@@ -3010,6 +3022,8 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
     for ds in project.datasources:
         st = dict(cache_status(serve, project, ds))
         st.pop("content", None)
+        st["fetched_label"] = _clock_label(st.get("fetched_at"))
+        st["expires_label"] = _clock_label(st.get("expires_at"))
         ds_status[ds.id] = st
     return _render(
         request,
@@ -3116,6 +3130,8 @@ def datasource_page(
         project = get_project(_serve(request), project_id)
         try:
             payload = peek_datasource_content(_serve(request), project_id, ds_id)
+            payload["fetched_label"] = _clock_label(payload.get("fetched_at"))
+            payload["expires_label"] = _clock_label(payload.get("expires_at"))
         except ProjectError as e:
             if getattr(e, "code", None) != "cache_missing":
                 raise

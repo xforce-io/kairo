@@ -254,6 +254,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert sheet.status_code == 200
     assert "Tencent Docs" in sheet.text or "腾讯文档" in sheet.text
     assert "Create task" in sheet.text
+    assert 'class="task-create"' in sheet.text
     assert 'name="kind"' not in sheet.text
     smart = client.post(
         f"/projects/{pid}/datasources",
