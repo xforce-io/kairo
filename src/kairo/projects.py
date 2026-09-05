@@ -104,8 +104,8 @@ class RunRecord(BaseModel):
     provider: str | None = None
     model: str | None = None
     skill_hash: str | None = None
-    scope_topics: list[str] = Field(default_factory=list)
-    scope_datasources: list[str] = Field(default_factory=list)
+    scope_topics: list[str] | None = None
+    scope_datasources: list[str] | None = None
     started_at: str = ""
     finished_at: str | None = None
     scratch_dir: str | None = None
@@ -738,12 +738,20 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
         body = artifact_file.read_text(encoding="utf-8")
         if not body.strip():
             raise ProjectError("产物为空", code="empty_artifact")
+        from kairo.project_materials import scratch_dir as _scratch_dir, validate_recorded_inputs
+
         inputs = load_run_inputs(serve, record.project_id, record.id, scratch=True)
         known = {str(item.get("input_id")) for item in inputs}
         cited = {m.group(2) for m in _INPUT_CITE.finditer(body)}
         unknown = cited - known
         if unknown:
             raise ProjectError("引用了未知 input_id", code="invalid_input_ref")
+        scratch_folder = Path(record.scratch_dir) if record.scratch_dir else _scratch_dir(
+            serve, record.project_id, record.id
+        )
+        if not scratch_folder.is_absolute():
+            scratch_folder = Path(serve) / scratch_folder
+        validate_recorded_inputs(serve, record.project_id, record.id, inputs, scratch_folder)
         inputs = finalize_inputs(serve, record.project_id, record.id)
         source_lines = _source_lines(inputs, cited)
         body = body.rstrip() + "\n\n## 来源\n\n" + source_lines + "\n"
