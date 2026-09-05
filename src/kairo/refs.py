@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
@@ -200,6 +202,29 @@ class RefRecord:
         return ref_key(self.home, self.id)
 
 
+_bound_catalog: ContextVar[list[RefRecord] | None] = ContextVar(
+    "kairo_bound_ref_catalog", default=None
+)
+_bound_sources: ContextVar[list[tuple[Workspace, str, RefRecord]] | None] = ContextVar(
+    "kairo_bound_member_sources", default=None
+)
+
+
+@contextmanager
+def lookup_scope(
+    catalog: list[RefRecord] | None,
+    sources: list[tuple[Workspace, str, RefRecord]] | None = None,
+) -> Iterator[None]:
+    """Reuse one Ref catalog / member list for nested discover() calls."""
+    t_cat = _bound_catalog.set(catalog)
+    t_src = _bound_sources.set(sources)
+    try:
+        yield
+    finally:
+        _bound_sources.reset(t_src)
+        _bound_catalog.reset(t_cat)
+
+
 def add_global_ref(
     serve: Path,
     files: list[Path | str],
@@ -306,7 +331,33 @@ def tag_usages(serve: Path, tag: str) -> dict[str, Any]:
 
 
 def list_tag_records(serve: Path) -> list[dict[str, Any]]:
-    return [tag_usages(serve, tag) for tag in list_tags(serve)]
+    """Settings Tag 表：一遍打开 Topic，不按 Tag 重复扫目录。"""
+    tags = list_tags(serve)
+    catalog = load_catalog(serve)
+    ref_counts = {name: 0 for name in tags}
+    for vals in (catalog.get("assignments") or {}).values():
+        for name in vals:
+            if name in ref_counts:
+                ref_counts[name] += 1
+    rule_counts = {name: 0 for name in tags}
+    protected: dict[str, list[str]] = {name: [] for name in tags}
+    for slug in list_topic_slugs(serve):
+        ws = open_topic(serve, slug)
+        for name in (ws.constitution.include_tags or []):
+            if name in rule_counts:
+                rule_counts[name] += 1
+        topic = ws.constitution.topic
+        if topic in protected:
+            protected[topic].append(slug)
+    return [
+        {
+            "name": name,
+            "ref_count": ref_counts[name],
+            "rule_count": rule_counts[name],
+            "protected_by": protected[name],
+        }
+        for name in tags
+    ]
 
 
 def delete_tag(serve: Path, tag: str) -> None:
@@ -669,10 +720,12 @@ def set_include_tags(serve: Path, slug: str, tags: list[str] | None) -> list[str
     return con.include_tags
 
 
-def topic_members(serve: Path, slug: str) -> list[RefRecord]:
+def topic_members(serve: Path, slug: str, catalog: list[RefRecord] | None = None) -> list[RefRecord]:
     ws = open_topic(serve, slug)
     rules = include_tags_of(ws)
-    all_refs = list_all_refs(serve)
+    if catalog is None:
+        catalog = _bound_catalog.get()
+    all_refs = catalog if catalog is not None else list_all_refs(serve)
     if rules is None and not load_catalog(serve).get("strict_membership", False):
         return [r for r in all_refs if r.home == slug]
     if not rules:
@@ -684,11 +737,12 @@ def topic_members(serve: Path, slug: str) -> list[RefRecord]:
 def project_member_refs(serve: Path, slugs: list[str]) -> list[RefRecord]:
     seen: set[str] = set()
     out: list[RefRecord] = []
+    catalog = list_all_refs(serve) if any(slugs) else []
     for slug in slugs:
         if not slug:
             continue
         try:
-            members = topic_members(serve, slug)
+            members = topic_members(serve, slug, catalog=catalog)
         except RefError:
             continue
         for rec in members:
@@ -711,22 +765,27 @@ def resolve_open(serve: Path, home: str, ref_id: str) -> tuple[Workspace, str]:
     return ws, ref_id
 
 
-def run_members(ws: Workspace) -> list[RefRecord]:
+def run_members(ws: Workspace, catalog: list[RefRecord] | None = None) -> list[RefRecord]:
     """本 Topic 知识 Run 的成员（含跨 home）。home 只定位源与唯一 digest。"""
     serve = ws.root.parent
     if ws.root.name.startswith(".") or not is_topic_dir(ws.root):
         return []
     try:
-        return topic_members(serve, ws.root.name)
+        return topic_members(serve, ws.root.name, catalog=catalog)
     except RefError:
         return []
 
 
-def member_sources(ws: Workspace) -> list[tuple[Workspace, str, RefRecord]]:
+def member_sources(
+    ws: Workspace, catalog: list[RefRecord] | None = None
+) -> list[tuple[Workspace, str, RefRecord]]:
     """解析成员的 home workspace；打不开的来源跳过，不回退为目录内文件。"""
+    bound = _bound_sources.get()
+    if bound is not None:
+        return bound
     serve = ws.root.parent
     out: list[tuple[Workspace, str, RefRecord]] = []
-    for rec in run_members(ws):
+    for rec in run_members(ws, catalog=catalog):
         try:
             source_ws, ref_id = resolve_open(serve, rec.home, rec.id)
         except RefError:

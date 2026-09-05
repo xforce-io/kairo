@@ -11,6 +11,14 @@ from kairo.workspace import Workspace, WorkspaceNotFound
 
 
 @dataclass
+class TopicIdentity:
+    """Picker / nav: slug + display name, no pending or activity work."""
+
+    slug: str
+    topic: str
+
+
+@dataclass
 class WorkspaceSummary:
     slug: str
     topic: str
@@ -67,7 +75,7 @@ def activity_label(
     return day.isoformat()
 
 
-def summarize(ws: Workspace) -> WorkspaceSummary:
+def summarize(ws: Workspace, catalog=None) -> WorkspaceSummary:
     con = ws.constitution
     state = ws.read_state()
     stream = corpus = 0
@@ -96,18 +104,42 @@ def summarize(ws: Workspace) -> WorkspaceSummary:
         stream_count=stream,
         corpus_count=corpus,
         blocked_count=blocked,
-        stale_count=len(pending(ws)),
+        stale_count=len(pending(ws, catalog=catalog)),
         last_activity=last_activity(ws),
         journal=journal,
     )
 
 
-def scan_workspaces(root: Path) -> list[WorkspaceSummary]:
+def scan_topic_identities(root: Path) -> list[TopicIdentity]:
+    """扫 root 下一层 Topic 目录，只读 slug 与主题名。"""
+    root = Path(root)
+    out: list[TopicIdentity] = []
+    if not root.is_dir():
+        return out
+    for d in sorted(p for p in root.iterdir() if p.is_dir()):
+        if d.name.startswith("."):
+            continue
+        if not (d / "constitution.yaml").exists():
+            continue
+        try:
+            ws = Workspace.open(d)
+        except WorkspaceNotFound:
+            continue
+        out.append(TopicIdentity(slug=ws.root.name, topic=ws.constitution.topic))
+    return out
+
+
+def scan_workspaces(root: Path, catalog=None) -> list[WorkspaceSummary]:
     """扫 root 下一层子目录,凡含 constitution.yaml 且可打开者即 workspace。
 
     返回 slug 字母序(CLI list 稳定)。last_activity 只供 Web 再排。
+    同一轮扫描共用一份 Ref catalog，避免每个 Topic × 每条规则重扫全库。
     """
     root = Path(root)
+    if catalog is None:
+        from kairo.refs import list_all_refs
+
+        catalog = list_all_refs(root)
     out: list[WorkspaceSummary] = []
     for d in sorted(p for p in root.iterdir() if p.is_dir()):
         if d.name.startswith("."):
@@ -118,5 +150,5 @@ def scan_workspaces(root: Path) -> list[WorkspaceSummary]:
             ws = Workspace.open(d)
         except WorkspaceNotFound:
             continue
-        out.append(summarize(ws))
+        out.append(summarize(ws, catalog=catalog))
     return out
