@@ -219,6 +219,13 @@ def _wecom_payload(runner, parts: list[str], payload: dict, timeout: float):
     return _wecom_json(runner, [*parts, "--json", json.dumps(payload, ensure_ascii=False)], timeout)
 
 
+def _read_saved_file(path: str) -> str:
+    try:
+        return Path(str(path)).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise ReadError(READ_FAILED, f"无法读取落盘内容:{exc}") from exc
+
+
 def _text_from_payload(data) -> str:
     if isinstance(data, str):
         text = data.strip()
@@ -231,11 +238,18 @@ def _text_from_payload(data) -> str:
             return dumped
         raise ReadError(READ_FAILED, "读取结果为空")
     content = data.get("content")
-    if content:
+    if isinstance(content, dict):
+        nested = content.get("markdown_content") or content.get("text")
+        if nested and str(nested).strip():
+            return str(nested).strip()
+    elif content and str(content).strip() and not str(content).startswith("{"):
         return str(content).strip()
-    path = data.get("file_path") or data.get("content_file_inner")
+    inner = data.get("content_file_inner")
+    if inner and str(inner).strip():
+        return str(inner).strip()
+    path = data.get("file_path")
     if path:
-        body = Path(str(path)).read_text(encoding="utf-8").strip()
+        body = _read_saved_file(path)
         if body:
             return body
     records = data.get("records")
@@ -311,28 +325,57 @@ def _read_wecom_smartsheet(url: str, runner, timeout: float) -> str:
     return body
 
 
+def _page_title(page: dict) -> str:
+    return str(page.get("page_title") or page.get("title") or page.get("page_id") or "page")
+
+
+def _page_markdown(page: dict) -> str | None:
+    content = page.get("content")
+    if isinstance(content, dict):
+        nested = content.get("markdown_content") or content.get("text")
+        if nested and str(nested).strip():
+            return str(nested).strip()
+    inner = page.get("content_file_inner")
+    if inner and str(inner).strip():
+        return str(inner).strip()
+    path = page.get("file_path")
+    if path:
+        body = _read_saved_file(path)
+        if body:
+            return body
+    return None
+
+
 def _read_wecom_smartpage(url: str, runner, timeout: float) -> str:
     meta = _wecom_payload(runner, ["smartpage", "pages", "get"], {"docid": url}, timeout)
     pages = meta.get("pages") if isinstance(meta, dict) else None
     if not pages:
-        return _text_from_payload(meta)
+        raise ReadError(READ_FAILED, "读取结果为空")
     parts: list[str] = []
+    doc_title = meta.get("doc_title") if isinstance(meta, dict) else None
+    if doc_title:
+        parts.append(f"# {doc_title}")
     for page in pages:
         page_id = page.get("page_id")
-        title = page.get("title") or page_id or "page"
-        if not page_id:
+        title = _page_title(page)
+        body = _page_markdown(page)
+        if not body and page_id:
+            raw = _wecom_payload(
+                runner,
+                ["smartpage", "pages", "get"],
+                {"docid": url, "page_id": page_id, "content_type": "markdown"},
+                timeout,
+            )
+            if isinstance(raw, dict) and raw.get("pages"):
+                raw = raw["pages"][0]
+            body = _page_markdown(raw) if isinstance(raw, dict) else _text_from_payload(raw)
+        if not body:
             continue
-        raw = _wecom_payload(
-            runner,
-            ["smartpage", "pages", "get"],
-            {"docid": url, "page_id": page_id, "content_type": "markdown"},
-            timeout,
-        )
-        parts.append(f"# {title}\n{_text_from_payload(raw)}")
-    body = "\n\n".join(parts).strip()
-    if not body:
+        parts.append(f"## {title}\n{body}")
+    joined = "\n\n".join(parts).strip()
+    if not joined:
         raise ReadError(READ_FAILED, "读取结果为空")
-    return body
+    return joined
 
 
 def read_datasource(url: str, kind: str, reader: str, connection: Connection, **kwargs) -> str:
