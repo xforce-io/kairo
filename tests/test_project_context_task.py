@@ -205,8 +205,7 @@ def test_s1_s4_cache_ttl_refresh_and_web(tmp_path, monkeypatch):
         assert "task-create-bar" in html_proj.text
         assert "2026-09-05T" not in html_proj.text
         assert "2026-09-05 13:00" in html_proj.text
-        ds_block = html_proj.text.split("Tasks")[0] if "Tasks" in html_proj.text else html_proj.text
-        assert 'class="obj-actions"' in ds_block
+        assert 'class="obj-actions"' in html_proj.text
 
         clock.when = clock.when + CACHE_TTL
         expired = _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
@@ -493,7 +492,6 @@ def test_cache_bundle_mismatch_is_uncached(tmp_path, monkeypatch):
     assert _count(counter) == 2
 
 
-<<<<<<< HEAD
 def test_uncached_cache_status_exposes_content_none(tmp_path, monkeypatch):
     serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
     project = get_project(serve, pid)
@@ -788,3 +786,37 @@ def test_recorded_datasource_survives_unlink_before_publish(tmp_path, monkeypatc
     out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-keep"))
     assert out.status == "succeeded"
     assert out.artifact_path
+
+
+def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    client = TestClient(create_app(serve))
+    page = client.get(f"/projects/{pid}")
+    html = page.text
+    primary = html.find('id="project-primary"')
+    materials = html.find('id="project-materials"')
+    assert primary != -1 and materials != -1
+    assert primary < materials
+    assert 'class="task-create"' in html[primary:materials]
+    assert 'id="material-filter"' in html
+    named = client.post(
+        f"/projects/{pid}/datasources",
+        data={
+            "url": "https://docs.qq.com/sheet/Dnamed",
+            "name": "需求池",
+            "purpose": "周报输入",
+        },
+        follow_redirects=True,
+    )
+    assert named.status_code == 200
+    assert "需求池" in named.text
+    assert named.text.find("需求池") < named.text.find("https://docs.qq.com/sheet/Dnamed")
+    created = client.post(
+        f"/projects/{pid}/tasks",
+        data={"name": "周报", "prompt": "整理风险", "schedule": "once"},
+        follow_redirects=True,
+    )
+    assert created.status_code == 200
+    html = created.text
+    assert html.find('id="project-primary"') < html.find('id="project-materials"')
+    assert "周报" in html[html.find('id="project-primary"'):html.find('id="project-materials"')]

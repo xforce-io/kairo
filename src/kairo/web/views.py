@@ -3014,6 +3014,7 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
 
     serve = _serve(request)
     from kairo.project_materials import cache_status
+    from kairo.projects import datasource_label
 
     available_topics = scan_topic_identities(serve)
     by_slug = {item.slug: item for item in available_topics}
@@ -3036,6 +3037,7 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
             "member_refs": project_member_refs(serve, project.topics),
             "runs": list_runs(serve, project_id),
             "ds_status": ds_status,
+            "ds_labels": {ds.id: datasource_label(ds) for ds in project.datasources},
             "error": error,
             "notice": notice,
         },
@@ -3086,12 +3088,31 @@ def project_ds_add_form(
     project_id: str,
     url: str = Form(...),
     purpose: str = Form(""),
+    name: str = Form(""),
 ) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, add_datasource
 
     try:
-        add_datasource(_serve(request), project_id, url=url, purpose=purpose)
+        add_datasource(_serve(request), project_id, url=url, purpose=purpose, name=name)
+    except ProjectError as e:
+        return project_page(request, project_id, error=str(e))
+    return RedirectResponse(f"/projects/{project_id}", status_code=303)
+
+
+@router.post("/projects/{project_id}/datasources/{ds_id}/edit")
+def project_ds_edit_form(
+    request: Request,
+    project_id: str,
+    ds_id: str,
+    name: str = Form(""),
+    purpose: str = Form(""),
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.projects import ProjectError, edit_datasource
+
+    try:
+        edit_datasource(_serve(request), project_id, ds_id, name=name, purpose=purpose)
     except ProjectError as e:
         return project_page(request, project_id, error=str(e))
     return RedirectResponse(f"/projects/{project_id}", status_code=303)

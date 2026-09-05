@@ -42,6 +42,7 @@ class DataSource(BaseModel):
     url: str
     kind: str  # spreadsheet | smartsheet | document | smartpage
     purpose: str = ""
+    name: str = ""
     reader: str = CONNECTION_TENCENT
 
 
@@ -263,6 +264,14 @@ def set_workspaces(serve: Path, project_id: str, slugs: list[str]) -> Project:
     return save_project(serve, project)
 
 
+def datasource_label(ds: DataSource) -> str:
+    if (ds.name or "").strip():
+        return ds.name.strip()
+    if (ds.purpose or "").strip():
+        return ds.purpose.strip()
+    return ds.reader
+
+
 def add_datasource(
     serve: Path,
     project_id: str,
@@ -270,6 +279,7 @@ def add_datasource(
     url: str,
     kind: str | None = None,
     purpose: str = "",
+    name: str = "",
     connection_id: str | None = None,
     reader: str | None = None,
 ) -> DataSource:
@@ -294,9 +304,28 @@ def add_datasource(
         url=url.strip(),
         kind=inferred.kind,
         purpose=purpose.strip(),
+        name=name.strip(),
         reader=reader or inferred.reader,
     )
     project.datasources.append(ds)
+    save_project(serve, project)
+    return ds
+
+
+def edit_datasource(
+    serve: Path,
+    project_id: str,
+    ds_id: str,
+    *,
+    name: str | None = None,
+    purpose: str | None = None,
+) -> DataSource:
+    project = get_project(serve, project_id)
+    ds = _ds(project, ds_id)
+    if name is not None:
+        ds.name = name.strip()
+    if purpose is not None:
+        ds.purpose = purpose.strip()
     save_project(serve, project)
     return ds
 
