@@ -864,12 +864,34 @@ def topic_alias(slug: str) -> RedirectResponse:
     return RedirectResponse("/w/" + quote(slug), status_code=303)
 
 
+def _global_ref_primary_body(ws: Workspace, rid: str, man, t) -> tuple[str, str]:
+    """全局 Ref 主栏:digest → transcript → source_text。返回 (节名, html)。"""
+    digest = ws.references_dir() / rid / "digest.md"
+    if digest.is_file():
+        return t("ref.digest"), render_markdown(
+            digest.read_text(encoding="utf-8"), slug=ws.root.name
+        )
+    forms = _ref_forms(ws, rid, man, t)
+    for role, heading_key in (
+        ("transcript", "role.transcript"),
+        ("source_text", "role.source_text"),
+    ):
+        form = next((f for f in forms if f["role"] == role and f["previewable"]), None)
+        if not form:
+            continue
+        html = _form_preview_html(ws, ws.root.name, rid, form)
+        if html:
+            return t(heading_key), html
+    return t("ref.digest"), ""
+
+
 @router.get("/refs/{ref_id}", response_class=HTMLResponse)
 def global_ref_view(
     request: Request, ref_id: str, home: str = "", back: str = ""
 ) -> HTMLResponse:
     from kairo.refs import (
         RefError,
+        is_locked_home_tag,
         list_tags,
         ref_tags,
         related_topics_for_ref,
@@ -890,18 +912,14 @@ def global_ref_view(
         bounds = _public_bounds(request)
         public_slugs = bounds[0] if bounds is not None else set()
         related_topics = [topic for topic in related_topics if topic["slug"] in public_slugs]
-    digest = ws.references_dir() / rid / "digest.md"
     t = _t(request)
     occ, _occ_src = effective_occurred(rid, man.occurred_at)
     occurred_display = (
         t("tl.occurred_on").format(d=occ.isoformat()) if occ is not None else t("ref.occurred_unknown")
     )
     forms = [f for f in _ref_forms(ws, rid, man, t) if f["role"] != "digest"]
-    digest_html = (
-        render_markdown(digest.read_text(encoding="utf-8"), slug=ws.root.name)
-        if digest.is_file()
-        else ""
-    )
+    primary_heading, primary_html = _global_ref_primary_body(ws, rid, man, t)
+    locked_tags = [tag for tag in tags if is_locked_home_tag(serve, home, rid, tag)]
     return _render(
         request,
         "global_ref.html",
@@ -910,11 +928,13 @@ def global_ref_view(
             "title": man.title or rid,
             "ref_id": rid,
             "tags": tags,
+            "locked_tags": locked_tags,
             "tag_catalog": list_tags(serve),
             "home": home,
             "related_topics": related_topics,
             "occurred_display": occurred_display,
-            "digest_html": digest_html,
+            "primary_heading": primary_heading,
+            "primary_html": primary_html,
             "forms": forms,
             "back_url": back if back.startswith("/timeline") else "/timeline",
         },

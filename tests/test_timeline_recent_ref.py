@@ -415,3 +415,103 @@ def test_global_ref_non_audio_preview_stays_document_not_listen_read(tmp_path):
     assert 'class="doc-img"' in image_preview.text
     assert 'class="listen-read"' not in image_preview.text
     assert 'class="lr-play"' not in image_preview.text
+
+
+def _journal_week_review(tmp_path, monkeypatch):
+    """内置「总结」周回顾：source_text 正文、无 digest.md。"""
+    from kairo.refs import create_tag, set_include_tags
+    from kairo.review import (
+        JOURNAL_NAME,
+        resolve_review_workspace,
+        write_review_reference,
+    )
+
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    serve = tmp_path / "root"
+    serve.mkdir()
+    journal = resolve_review_workspace(serve)
+    create_tag(serve, JOURNAL_NAME)
+    create_tag(serve, "ai-native")
+    set_include_tags(serve, JOURNAL_NAME, [JOURNAL_NAME])
+    rid = write_review_reference(
+        journal,
+        dt.date(2026, 8, 31),
+        dt.date(2026, 9, 4),
+        "# 8月31日—9月4日跨主题回顾\n\nUNIQUE_WEEK_REVIEW_BODY\n",
+        occurred=dt.date(2026, 9, 5),
+    )
+    return serve, rid, JOURNAL_NAME
+
+
+def test_global_ref_review_shows_source_text_inline_when_no_digest(
+    tmp_path, monkeypatch
+):
+    serve, rid, home = _journal_week_review(tmp_path, monkeypatch)
+    html = _client(serve).get(f"/refs/{rid}", params={"home": home}).text
+    article = re.search(
+        r'<section class="ref-section">\s*<h2>([^<]*)</h2>\s*(<article class="doc">[\s\S]*?</article>)',
+        html,
+    )
+    assert article is not None, "primary section must render an article.doc"
+    assert "UNIQUE_WEEK_REVIEW_BODY" in article.group(2)
+    assert "No digest has been generated for this Ref." not in html
+    assert "这条 Ref 尚未生成 digest。" not in html
+    assert home in html
+    assert f"/refs/{rid}/tags/{home}/delete" not in html
+    assert f'aria-label="移除 {home}"' not in html
+
+
+def test_global_ref_prefers_digest_over_source_text(tmp_path):
+    serve, rid = _serve_with_digest(tmp_path)
+    html = _client(serve).get(f"/refs/{rid}").text
+    article = re.search(
+        r'<section class="ref-section">\s*<h2>[^<]*</h2>\s*(<article class="doc">[\s\S]*?</article>)',
+        html,
+    )
+    assert article is not None
+    assert "<h1>结论标题</h1>" in article.group(1)
+    assert "UNIQUE_WEEK_REVIEW_BODY" not in html
+    assert "源形态" not in article.group(1)
+
+
+def test_journal_review_home_tag_locked_web_and_cli(tmp_path, monkeypatch):
+    from typer.testing import CliRunner
+
+    from kairo.cli import app
+    from kairo.refs import ref_tags
+
+    serve, rid, home = _journal_week_review(tmp_path, monkeypatch)
+    client = _client(serve)
+    locked = client.post(
+        f"/refs/{rid}/tags/{home}/delete",
+        data={"home": home},
+        follow_redirects=False,
+    )
+    assert locked.status_code == 400
+    assert home in ref_tags(serve, home, rid)
+
+    added = client.post(
+        f"/refs/{rid}/tags",
+        data={"home": home, "tag": "ai-native"},
+        follow_redirects=False,
+    )
+    assert added.status_code == 303
+    assert "ai-native" in ref_tags(serve, home, rid)
+    page = client.get(f"/refs/{rid}", params={"home": home})
+    assert f"/refs/{rid}/tags/ai-native/delete" in page.text
+    assert f'aria-label="移除 {home}"' not in page.text
+
+    extra_rm = client.post(
+        f"/refs/{rid}/tags/ai-native/delete",
+        data={"home": home},
+        follow_redirects=False,
+    )
+    assert extra_rm.status_code == 303
+    assert "ai-native" not in ref_tags(serve, home, rid)
+    assert home in ref_tags(serve, home, rid)
+
+    monkeypatch.chdir(serve)
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    cli = CliRunner().invoke(app, ["tag", "rm", rid, home, "--home", home])
+    assert cli.exit_code != 0
+    assert home in ref_tags(serve, home, rid)

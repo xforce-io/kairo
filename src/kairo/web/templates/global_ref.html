@@ -15,7 +15,7 @@
     {% if tags %}
     <ul class="tag-row" aria-label="{{ t('ref.tags') }}">
       {% for tag in tags %}
-      <li>{{ tag }}{% if not public_read %}
+      <li>{{ tag }}{% if not public_read and tag not in locked_tags %}
         <form method="post" action="/refs/{{ ref_id | urlencode }}/tags/{{ tag | urlencode }}/delete" style="display:inline">
           <input type="hidden" name="home" value="{{ home or 'global' }}">
           <input type="hidden" name="back" value="{{ back_url }}">
@@ -55,8 +55,8 @@
   </section>
 
   <section class="ref-section">
-    <h2>{{ t('ref.digest') }}</h2>
-    {% if digest_html %}<article class="doc">{{ digest_html|safe }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}
+    <h2>{{ primary_heading }}</h2>
+    {% if primary_html %}<article class="doc">{{ primary_html|safe }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}
   </section>
 
   <section class="ref-section">

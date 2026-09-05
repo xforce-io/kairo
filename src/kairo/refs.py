@@ -580,8 +580,29 @@ def add_tag(serve: Path, *, home: str, ref_id: str, tag: str) -> list[str]:
     return current
 
 
+def is_locked_home_tag(serve: Path, home: str, ref_id: str, tag: str) -> bool:
+    """内置生成回顾的 home Topic-name Tag 不可摘。"""
+    home = (home or "").strip()
+    if not home:
+        return False
+    tag = _normalize_tag(tag)
+    try:
+        ws = open_topic(serve, home)
+    except RefError:
+        return False
+    from kairo.review import is_review_title
+
+    if tag != topic_name_tag(ws):
+        return False
+    if ref_id not in ws.list_reference_ids():
+        return False
+    return is_review_title(ws.read_manifest(ref_id).title)
+
+
 def remove_tag(serve: Path, *, home: str, ref_id: str, tag: str) -> list[str]:
     tag = _normalize_tag(tag)
+    if is_locked_home_tag(serve, home, ref_id, tag):
+        raise RefError(f"不能移除内置 Topic 归属 Tag:{tag}")
     key = ref_key(home, ref_id)
     catalog = load_catalog(serve)
     current = [t for t in catalog["assignments"].get(key, []) if t != tag]
