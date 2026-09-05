@@ -77,13 +77,14 @@
     <ul class="obj-list">
       {% for ds in project.datasources %}
       <li class="obj-row">
-        <div>
+        <div class="obj-copy">
           <strong>{% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}</strong>
-          <div class="chooser-id">{{ ds.url }}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</div>
+          {% if ds.purpose %}<span class="meta-hint"> · {{ ds.purpose }}</span>{% endif %}
+          <div class="chooser-id" title="{{ ds.url }}">{{ ds.url }}</div>
           {% set st = ds_status.get(ds.id) if ds_status is defined else None %}
           <div class="meta-hint">
-            {% if st and st.state == 'fresh' %}{{ t('proj.cache_fresh') }} · {{ st.fetched_at }} → {{ st.expires_at }}
-            {% elif st and st.state == 'expired' %}{{ t('proj.cache_expired') }} · {{ st.fetched_at }}
+            {% if st and st.state == 'fresh' %}{{ t('proj.cache_fresh') }}{% if st.expires_label %} · {{ st.expires_label }}{% endif %}
+            {% elif st and st.state == 'expired' %}{{ t('proj.cache_expired') }}{% if st.fetched_label %} · {{ st.fetched_label }}{% endif %}
             {% else %}{{ t('proj.cache_none') }}{% endif %}
             {% if st and st.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
           </div>
@@ -128,11 +129,18 @@
     {% else %}
     <p class="panel-hint">{{ t('proj.task_empty') }}</p>
     {% endif %}
-    <form class="obj-add" method="post" action="/projects/{{ project.id }}/tasks">
-      <input name="name" placeholder="{{ t('proj.name_ph') }}" required>
-      <textarea name="prompt" rows="4" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}"></textarea>
-      <select name="schedule"><option value="once">once</option><option value="interval">interval</option></select>
-      <button class="btn btn-step btn-inline">{{ t('proj.create_task') }}</button>
+    <form class="task-create" method="post" action="/projects/{{ project.id }}/tasks">
+      <div class="task-create-bar">
+        <input name="name" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
+        <select name="schedule" aria-label="{{ t('proj.tasks') }}">
+          <option value="once">once</option>
+          <option value="interval">interval</option>
+        </select>
+      </div>
+      <textarea name="prompt" rows="5" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}"></textarea>
+      <div class="task-create-submit">
+        <button type="submit" class="btn btn-step btn-inline">{{ t('proj.create_task') }}</button>
+      </div>
     </form>
   </section>
 

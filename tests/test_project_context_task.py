@@ -122,6 +122,14 @@ class BogusCiteProvider:
         return AgentResult(artifacts=[dest], result_text=dest.read_text())
 
 
+def test_clock_label_strips_iso_noise():
+    from kairo.web.views import _clock_label
+
+    assert _clock_label("2026-09-05T11:51:09+00:00") == "2026-09-05 11:51"
+    assert _clock_label("2026-09-05T12:51:09Z") == "2026-09-05 12:51"
+    assert _clock_label(None) == ""
+
+
 def test_unit_cache_expiry_and_source_id():
     now = datetime(2026, 9, 5, 12, 0, tzinfo=UTC)
     exp = now + CACHE_TTL
@@ -187,6 +195,12 @@ def test_s1_s4_cache_ttl_refresh_and_web(tmp_path, monkeypatch):
         assert "Reusable" in html_proj.text or "可复用" in html_proj.text
         assert "Create task" in html_proj.text or "创建" in html_proj.text
         assert 'name="prompt"' in html_proj.text
+        assert 'class="task-create"' in html_proj.text
+        assert "task-create-bar" in html_proj.text
+        assert "2026-09-05T" not in html_proj.text
+        assert "2026-09-05 13:00" in html_proj.text
+        ds_block = html_proj.text.split("Tasks")[0] if "Tasks" in html_proj.text else html_proj.text
+        assert 'class="obj-actions"' in ds_block
 
         clock.when = clock.when + CACHE_TTL
         expired = _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
@@ -342,9 +356,11 @@ def test_s3_s5_prompt_task_and_legacy(tmp_path, monkeypatch):
     html = client.get(f"/projects/{pid}")
     assert 'name="prompt"' in html.text
     assert "Create task" in html.text or "创建 Task" in html.text or "创建任务" in html.text
+    assert 'class="task-create"' in html.text
     empty_proj = _load(_cli(["project", "create", "无源"], serve, monkeypatch))
     html_empty = client.get(f"/projects/{empty_proj['id']}")
     assert 'name="prompt"' in html_empty.text
+    assert 'class="task-create"' in html_empty.text
     posted = client.post(
         f"/projects/{empty_proj['id']}/tasks",
         data={"name": "网页任务", "prompt": "只写一句话", "schedule": "once"},
