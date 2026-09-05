@@ -351,10 +351,7 @@ def _read_wecom_smartpage(url: str, runner, timeout: float) -> str:
     pages = meta.get("pages") if isinstance(meta, dict) else None
     if not pages:
         raise ReadError(READ_FAILED, "读取结果为空")
-    parts: list[str] = []
-    doc_title = meta.get("doc_title") if isinstance(meta, dict) else None
-    if doc_title:
-        parts.append(f"# {doc_title}")
+    page_parts: list[str] = []
     for page in pages:
         page_id = page.get("page_id")
         title = _page_title(page)
@@ -371,11 +368,13 @@ def _read_wecom_smartpage(url: str, runner, timeout: float) -> str:
             body = _page_markdown(raw) if isinstance(raw, dict) else _text_from_payload(raw)
         if not body:
             continue
-        parts.append(f"## {title}\n{body}")
-    joined = "\n\n".join(parts).strip()
-    if not joined:
+        page_parts.append(f"## {title}\n{body}")
+    if not page_parts:
         raise ReadError(READ_FAILED, "读取结果为空")
-    return joined
+    doc_title = meta.get("doc_title") if isinstance(meta, dict) else None
+    if doc_title:
+        return f"# {doc_title}\n\n" + "\n\n".join(page_parts)
+    return "\n\n".join(page_parts)
 
 
 def read_datasource(url: str, kind: str, reader: str, connection: Connection, **kwargs) -> str:

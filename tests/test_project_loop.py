@@ -868,6 +868,53 @@ def test_wecom_default_adapter_reads_via_injected_runner():
         assert exc.code == READ_FAILED
 
 
+def test_wecom_smartpage_title_only_is_read_failed():
+    from kairo.readers import READ_FAILED, ReadError, read_datasource
+    from kairo.settings import Connection
+
+    class Proc:
+        def __init__(self, stdout="", returncode=0, stderr=""):
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = returncode
+
+    def runner(argv, **_kwargs):
+        if argv[:3] == ["wecom-cli", "auth", "show"]:
+            return Proc("authorized\n")
+        if "smartpage" in argv and "pages" in argv:
+            payload = json.loads(argv[argv.index("--json") + 1])
+            if payload.get("page_id"):
+                return Proc(
+                    json.dumps(
+                        {
+                            "doc_title": "仅标题",
+                            "pages": [{"page_id": payload["page_id"], "page_title": "空页"}],
+                        }
+                    )
+                )
+            return Proc(
+                json.dumps(
+                    {
+                        "doc_title": "仅标题",
+                        "pages": [{"page_id": "p1", "page_title": "空页"}],
+                    }
+                )
+            )
+        return Proc("unexpected", returncode=1, stderr="no")
+
+    try:
+        read_datasource(
+            "https://doc.weixin.qq.com/smartpage/a1_Empty",
+            "smartpage",
+            "wecom",
+            Connection(authorized=True, cmd=None, token_env=""),
+            runner=runner,
+        )
+        raise AssertionError("expected read_failed")
+    except ReadError as exc:
+        assert exc.code == READ_FAILED
+
+
 def test_wecom_saved_file_missing_is_read_failed(tmp_path):
     from kairo.readers import READ_FAILED, ReadError, read_datasource
     from kairo.settings import Connection
