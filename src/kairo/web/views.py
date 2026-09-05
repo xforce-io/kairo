@@ -2960,6 +2960,55 @@ def _clock_label(iso: str | None) -> str:
     return text[:16]
 
 
+_RUN_REASON_KEYS = {
+    "provider_failed": "proj.reason_provider",
+    "provider_unsupported": "proj.reason_unsupported",
+    "interrupted": "proj.reason_interrupted",
+    "evidence_failed": "proj.reason_evidence",
+    "invalid_input_ref": "proj.reason_input_ref",
+    "empty_artifact": "proj.reason_empty",
+    "read_failed": "proj.reason_read",
+}
+
+
+def run_reason_label(t, reason: str | None) -> str:
+    if not reason:
+        return ""
+    key = _RUN_REASON_KEYS.get(reason)
+    return t(key) if key else reason
+
+
+def run_elapsed_label(started_at: str | None, finished_at: str | None = None) -> str:
+    start = (started_at or "").strip()
+    if not start:
+        return ""
+    start = start.replace("Z", "+00:00")
+    try:
+        begin = datetime.datetime.fromisoformat(start)
+    except ValueError:
+        return ""
+    end_text = (finished_at or "").strip().replace("Z", "+00:00")
+    if end_text:
+        try:
+            end = datetime.datetime.fromisoformat(end_text)
+        except ValueError:
+            end = datetime.datetime.now(datetime.timezone.utc)
+    else:
+        end = datetime.datetime.now(datetime.timezone.utc)
+    if begin.tzinfo is None:
+        begin = begin.replace(tzinfo=datetime.timezone.utc)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=datetime.timezone.utc)
+    seconds = max(0, int((end - begin).total_seconds()))
+    hours, rem = divmod(seconds, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}h {minutes}m"
+    if minutes:
+        return f"{minutes}m {secs}s"
+    return f"{secs}s"
+
+
 @router.get("/projects", response_class=HTMLResponse)
 def projects_page(request: Request, error: str | None = None) -> HTMLResponse:
     _console_only(request)
@@ -3002,7 +3051,13 @@ def projects_create(request: Request, name: str = Form(...)) -> HTMLResponse:
 
 
 @router.get("/projects/{project_id}", response_class=HTMLResponse)
-def project_page(request: Request, project_id: str, error: str = "", notice: str = "") -> HTMLResponse:
+def project_page(
+    request: Request,
+    project_id: str,
+    error: str = "",
+    notice: str = "",
+    task_draft: dict | None = None,
+) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, get_project, list_runs
 
@@ -3019,6 +3074,19 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
     available_topics = scan_topic_identities(serve)
     by_slug = {item.slug: item for item in available_topics}
     linked_topics = [by_slug[slug] for slug in project.topics if slug in by_slug]
+    t = _t(request)
+    runs = list_runs(serve, project_id)
+    run_rows = []
+    for run in runs:
+        run_rows.append(
+            {
+                "run": run,
+                "status_label": t(f"proj.run_{run.status}")
+                if run.status in ("running", "succeeded", "failed")
+                else run.status,
+                "reason_label": run_reason_label(t, run.reason),
+            }
+        )
     ds_status = {}
     for ds in project.datasources:
         st = dict(cache_status(serve, project, ds))
@@ -3035,11 +3103,13 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
             "available_workspaces": available_topics,
             "linked_topics": linked_topics,
             "member_refs": project_member_refs(serve, project.topics),
-            "runs": list_runs(serve, project_id),
+            "runs": runs,
+            "run_rows": run_rows,
             "ds_status": ds_status,
             "ds_labels": {ds.id: datasource_label(ds) for ds in project.datasources},
             "error": error,
             "notice": notice,
+            "task_draft": task_draft or {},
         },
     )
 
@@ -3204,8 +3274,82 @@ def project_task_create_form(
             kwargs["prompt"] = prompt
         create_task(_serve(request), project_id, **kwargs)
     except ProjectError as e:
-        return project_page(request, project_id, error=str(e))
+        return project_page(
+            request,
+            project_id,
+            error=str(e),
+            task_draft={"name": name, "prompt": prompt, "schedule": schedule},
+        )
     return RedirectResponse(f"/projects/{project_id}", status_code=303)
+
+
+@router.get("/projects/{project_id}/tasks/{task_id}", response_class=HTMLResponse)
+def task_page(
+    request: Request,
+    project_id: str,
+    task_id: str,
+    error: str = "",
+    draft: dict | None = None,
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.projects import ProjectError, get_project
+
+    try:
+        project = get_project(_serve(request), project_id)
+    except ProjectError:
+        raise HTTPException(status_code=404)
+    task = next((item for item in project.tasks if item.id == task_id), None)
+    if task is None:
+        raise HTTPException(status_code=404)
+    return _render(
+        request,
+        "task.html",
+        {
+            "nav_active": "projects",
+            "project": project,
+            "task": task,
+            "error": error,
+            "draft": draft or {},
+        },
+    )
+
+
+@router.post("/projects/{project_id}/tasks/{task_id}")
+def task_edit_form(
+    request: Request,
+    project_id: str,
+    task_id: str,
+    name: str = Form(""),
+    prompt: str = Form(""),
+    schedule: str = Form(""),
+    datasource_id: str = Form(""),
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.projects import ProjectError, edit_task, get_project
+
+    try:
+        project = get_project(_serve(request), project_id)
+        task = next((item for item in project.tasks if item.id == task_id), None)
+        if task is None:
+            raise HTTPException(status_code=404)
+        kwargs: dict = {"name": name}
+        if task.mode == "agent":
+            kwargs["prompt"] = prompt
+        else:
+            if schedule:
+                kwargs["schedule"] = schedule
+            if datasource_id:
+                kwargs["datasource_id"] = datasource_id
+        edit_task(_serve(request), project_id, task_id, **kwargs)
+    except ProjectError as e:
+        return task_page(
+            request,
+            project_id,
+            task_id,
+            error=str(e),
+            draft={"name": name, "prompt": prompt, "schedule": schedule, "datasource_id": datasource_id},
+        )
+    return RedirectResponse(f"/projects/{project_id}/tasks/{task_id}", status_code=303)
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/run")
@@ -3245,6 +3389,7 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
             inputs = load_run_inputs(_serve(request), project_id, run_id)
     except ProjectError:
         raise HTTPException(status_code=404)
+    t = _t(request)
     return _render(
         request,
         "artifact.html",
@@ -3254,6 +3399,10 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
             "run": run,
             "inputs": inputs,
             "body_html": render_markdown(body) if body else "",
+            "status_label": t(f"proj.run_{run.status}") if run.status in ("running", "succeeded", "failed") else run.status,
+            "reason_label": run_reason_label(t, run.reason),
+            "started_label": _clock_label(run.started_at or run.created_at),
+            "elapsed_label": run_elapsed_label(run.started_at or run.created_at, run.finished_at),
         },
     )
 

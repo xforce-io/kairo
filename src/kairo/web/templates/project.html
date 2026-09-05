@@ -25,6 +25,7 @@
         <div>{{ task.name }} · v{{ task.version }} · {{ task.schedule }}
           {% if task.mode == 'source_snapshot' %} · {{ t('proj.legacy_task') }}{% endif %}
         </div>
+        <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/tasks/{{ task.id }}">{{ t('proj.open_task') }}</a>
         <form method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}/run">
           <button class="btn btn-step btn-inline">{{ t('proj.run') }}</button>
         </form>
@@ -36,13 +37,13 @@
     {% endif %}
     <form class="task-create" method="post" action="/projects/{{ project.id }}/tasks">
       <div class="task-create-bar">
-        <input name="name" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
+        <input name="name" value="{{ task_draft.get('name', '') }}" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
         <select name="schedule" aria-label="{{ t('proj.tasks') }}">
           <option value="once">once</option>
           <option value="interval">interval</option>
         </select>
       </div>
-      <textarea name="prompt" rows="5" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}"></textarea>
+      <textarea name="prompt" rows="5" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}">{{ task_draft.get('prompt', '') }}</textarea>
       <div class="task-create-submit">
         <button type="submit" class="btn btn-step btn-inline">{{ t('proj.create_task') }}</button>
       </div>
@@ -51,14 +52,14 @@
 
   <section class="obj-block">
     <h2 class="obj-label">{{ t('proj.runs') }}</h2>
-    {% if runs %}
+    {% if run_rows %}
     <ul class="obj-list">
-      {% for run in runs %}
+      {% for row in run_rows %}
       <li class="obj-row">
-        <div>{{ run.status }} · {{ run.task_name }} v{{ run.task_version }}
-          {% if run.status != 'succeeded' %} · {{ run.reason }}{% endif %}
+        <div>{{ row.status_label }} · {{ row.run.task_name }} v{{ row.run.task_version }}
+          {% if row.run.status != 'succeeded' and row.reason_label %} · {{ row.reason_label }}{% endif %}
         </div>
-        <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ run.id }}">{% if run.status == 'succeeded' %}Artifact{% else %}{{ t('proj.run') }}{% endif %}</a>
+        <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ row.run.id }}">{% if row.run.status == 'succeeded' %}Artifact{% else %}{{ t('proj.run') }}{% endif %}</a>
       </li>
       {% endfor %}
     </ul>
