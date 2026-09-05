@@ -7,7 +7,7 @@ import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from kairo.settings import CONNECTION_TENCENT, Connection
 
@@ -266,14 +266,13 @@ def _text_from_payload(data) -> str:
     raise ReadError(READ_FAILED, "读取结果为空")
 
 
-def _require_wecom_auth(runner, timeout: float) -> None:
-    status = _wecom_invoke(runner, ["auth", "show", "--status"], timeout).strip().lower()
-    if "authorized" not in status or "unauthorized" in status:
-        raise ReadError(PERMISSION, "连接未授权")
+def _wecom_tab(url: str) -> str | None:
+    values = parse_qs(urlparse(url).query).get("tab") or []
+    tab = (values[0] if values else "").strip()
+    return tab or None
 
 
 def _read_wecom_cli(url: str, kind: str, *, runner, timeout: float) -> str:
-    _require_wecom_auth(runner, timeout)
     if kind == "document":
         data = _wecom_payload(runner, ["doc", "contents", "get"], {"docid": url, "content_type": "markdown"}, timeout)
         return _text_from_payload(data)
@@ -291,6 +290,11 @@ def _read_wecom_sheet(url: str, runner, timeout: float) -> str:
     sheets = meta.get("sheets") if isinstance(meta, dict) else None
     if not sheets:
         raise ReadError(READ_FAILED, "读取结果为空")
+    tab = _wecom_tab(url)
+    if tab:
+        sheets = [s for s in sheets if s.get("sheet_id") == tab or s.get("title") == tab]
+        if not sheets:
+            raise ReadError(INVALID_LINK, "指定的子表不存在")
     parts: list[str] = []
     name = meta.get("name") if isinstance(meta, dict) else None
     if name:
