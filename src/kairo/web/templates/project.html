@@ -15,102 +15,7 @@
   {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
   {% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
 
-  <section class="obj-block">
-    <h2 class="obj-label">{{ t('proj.workspaces') }}</h2>
-    {% if linked_topics %}
-    <ul class="topic-link-list">
-      {% for topic in linked_topics %}
-      <li class="topic-link">
-        <a href="/topics/{{ topic.slug | urlencode }}">{{ topic.topic }}</a>
-        <form method="post" action="/projects/{{ project.id }}/workspaces/{{ topic.slug | urlencode }}/unlink">
-          <button type="submit" class="chip-x" aria-label="{{ t('proj.unlink') }}">×</button>
-        </form>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="panel-hint">{{ t('proj.ws_empty') }}</p>
-    {% endif %}
-    {% if available_workspaces %}
-    <details class="topic-picker"{% if error %} open{% endif %}>
-      <summary>{{ t('proj.associate_topics') }}</summary>
-      <form class="chooser" method="post" action="/projects/{{ project.id }}/workspaces">
-        <p class="panel-hint">{{ t('proj.associate_hint') }}</p>
-        <input type="search" class="chooser-filter" placeholder="{{ t('proj.filter_ws') }}"
-               aria-label="{{ t('proj.filter_ws') }}"
-               oninput="var q=this.value.toLowerCase(); this.form.querySelectorAll('.chooser-item').forEach(function(el){el.hidden=q && el.dataset.label.indexOf(q)<0;});">
-        <div class="chooser-list" role="group" aria-label="{{ t('proj.workspaces') }}">
-          {% for ws in available_workspaces %}
-          <label class="chooser-item" data-label="{{ (ws.topic ~ ' ' ~ ws.slug) | lower }}">
-            <input type="checkbox" name="workspaces" value="{{ ws.slug }}"
-                   {% if ws.slug in project.topics %}checked{% endif %}>
-            <span class="chooser-name">{{ ws.topic }}</span>
-          </label>
-          {% endfor %}
-        </div>
-        <button type="submit" class="btn btn-step btn-inline">{{ t('proj.save_links') }}</button>
-      </form>
-    </details>
-    {% else %}
-    <p class="panel-hint">{{ t('proj.no_ws_yet') }}</p>
-    {% endif %}
-  </section>
-
-  {% if member_refs is defined %}
-  <section class="obj-block">
-    <h2 class="obj-label">{{ t('proj.members') }}</h2>
-    {% if member_refs %}
-    <ul class="obj-list">
-      {% for r in member_refs %}
-      <li class="obj-row"><a href="/refs/{{ r.id | urlencode }}?home={{ (r.home or 'global') | urlencode }}">{{ r.title }}</a></li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="panel-hint">{{ t('proj.members_empty') }}</p>
-    {% endif %}
-  </section>
-  {% endif %}
-
-  <section class="obj-block">
-    <h2 class="obj-label">{{ t('proj.datasources') }}</h2>
-    {% if project.datasources %}
-    <ul class="obj-list">
-      {% for ds in project.datasources %}
-      <li class="obj-row">
-        <div class="obj-copy">
-          <strong>{% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}</strong>
-          {% if ds.purpose %}<span class="meta-hint"> · {{ ds.purpose }}</span>{% endif %}
-          <div class="chooser-id" title="{{ ds.url }}">{{ ds.url }}</div>
-          {% set st = ds_status.get(ds.id) if ds_status is defined else None %}
-          <div class="meta-hint">
-            {% if st and st.state == 'fresh' %}{{ t('proj.cache_fresh') }}{% if st.expires_label %} · {{ st.expires_label }}{% endif %}
-            {% elif st and st.state == 'expired' %}{{ t('proj.cache_expired') }}{% if st.fetched_label %} · {{ st.fetched_label }}{% endif %}
-            {% else %}{{ t('proj.cache_none') }}{% endif %}
-            {% if st and st.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
-          </div>
-        </div>
-        <div class="obj-actions">
-          <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/datasources/{{ ds.id }}">{{ t('proj.open_body') }}</a>
-          <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/read">
-            <button class="btn btn-ghost btn-inline">{{ t('proj.read') }}</button>
-          </form>
-          <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/delete">
-            <button class="btn btn-ghost btn-inline">{{ t('proj.remove') }}</button>
-          </form>
-        </div>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="panel-hint">{{ t('proj.ds_empty') }}</p>
-    {% endif %}
-    <form class="obj-add" method="post" action="/projects/{{ project.id }}/datasources">
-      <input name="url" type="url" required placeholder="{{ t('proj.paste_url') }}" aria-label="{{ t('proj.paste_url') }}">
-      <input name="purpose" placeholder="{{ t('proj.purpose') }}" aria-label="{{ t('proj.purpose') }}">
-      <button type="submit" class="btn btn-step btn-inline">{{ t('proj.add_ds') }}</button>
-    </form>
-  </section>
-
+  <div id="project-primary">
   <section class="obj-block">
     <h2 class="obj-label">{{ t('proj.tasks') }}</h2>
     {% if project.tasks %}
@@ -161,5 +66,127 @@
     <p class="panel-hint">{{ t('proj.run_empty') }}</p>
     {% endif %}
   </section>
+  </div>
+
+  <div id="project-materials">
+  <section class="obj-block">
+    <h2 class="obj-label">{{ t('proj.materials') }}</h2>
+    <p class="panel-hint">{{ linked_topics | length }} {{ t('proj.workspaces') }} · {{ (member_refs or []) | length }} {{ t('proj.members') }} · {{ project.datasources | length }} {{ t('proj.datasources') }}</p>
+  </section>
+
+  <section class="obj-block">
+    <h2 class="obj-label">{{ t('proj.workspaces') }}</h2>
+    {% if linked_topics %}
+    <ul class="topic-link-list">
+      {% for topic in linked_topics %}
+      <li class="topic-link">
+        <a href="/topics/{{ topic.slug | urlencode }}">{{ topic.topic }}</a>
+        <form method="post" action="/projects/{{ project.id }}/workspaces/{{ topic.slug | urlencode }}/unlink">
+          <button type="submit" class="chip-x" aria-label="{{ t('proj.unlink') }}">×</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('proj.ws_empty') }}</p>
+    {% endif %}
+    {% if available_workspaces %}
+    <details class="topic-picker"{% if error %} open{% endif %}>
+      <summary>{{ t('proj.associate_topics') }}</summary>
+      <form class="chooser" method="post" action="/projects/{{ project.id }}/workspaces">
+        <p class="panel-hint">{{ t('proj.associate_hint') }}</p>
+        <input type="search" class="chooser-filter" placeholder="{{ t('proj.filter_ws') }}"
+               aria-label="{{ t('proj.filter_ws') }}"
+               oninput="var q=this.value.toLowerCase(); this.form.querySelectorAll('.chooser-item').forEach(function(el){el.hidden=q && el.dataset.label.indexOf(q)<0;});">
+        <div class="chooser-list" role="group" aria-label="{{ t('proj.workspaces') }}">
+          {% for ws in available_workspaces %}
+          <label class="chooser-item" data-label="{{ (ws.topic ~ ' ' ~ ws.slug) | lower }}">
+            <input type="checkbox" name="workspaces" value="{{ ws.slug }}"
+                   {% if ws.slug in project.topics %}checked{% endif %}>
+            <span class="chooser-name">{{ ws.topic }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <button type="submit" class="btn btn-step btn-inline">{{ t('proj.save_links') }}</button>
+      </form>
+    </details>
+    {% else %}
+    <p class="panel-hint">{{ t('proj.no_ws_yet') }}</p>
+    {% endif %}
+  </section>
+
+  {% if member_refs is defined %}
+  <section class="obj-block">
+    <h2 class="obj-label">{{ t('proj.members') }}</h2>
+    {% if member_refs %}
+    <div class="material-toolbar">
+      <input id="material-filter" type="search" placeholder="{{ t('proj.filter_materials') }}"
+             aria-label="{{ t('proj.filter_materials') }}"
+             oninput="var q=this.value.toLowerCase(); var list=document.getElementById('material-list'); if(!list)return; list.querySelectorAll('.material-item').forEach(function(el){el.hidden=q && (el.dataset.label||'').indexOf(q)<0;});">
+      <select id="material-sort" aria-label="{{ t('proj.sort_title') }}"
+              onchange="var list=document.getElementById('material-list'); if(!list)return; var key=this.value; var items=[].slice.call(list.children); items.sort(function(a,b){var av=(a.dataset[key]||''); var bv=(b.dataset[key]||''); return av<bv?-1:av>bv?1:0;}); items.forEach(function(el){list.appendChild(el);});">
+        <option value="title">{{ t('proj.sort_title') }}</option>
+        <option value="time">{{ t('proj.sort_time') }}</option>
+      </select>
+    </div>
+    <ul class="obj-list" id="material-list">
+      {% for r in member_refs %}
+      <li class="obj-row material-item" data-label="{{ (r.title ~ ' ' ~ r.id) | lower }}" data-title="{{ r.title | lower }}" data-time="{{ r.id }}">
+        <a href="/refs/{{ r.id | urlencode }}?home={{ (r.home or 'global') | urlencode }}">{{ r.title }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('proj.members_empty') }}</p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <section class="obj-block">
+    <h2 class="obj-label">{{ t('proj.datasources') }}</h2>
+    {% if project.datasources %}
+    <ul class="obj-list">
+      {% for ds in project.datasources %}
+      <li class="obj-row">
+        <div class="obj-copy">
+          <strong>{{ ds_labels.get(ds.id, ds.purpose or ds.reader) }}</strong>
+          <span class="meta-hint"> · {% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</span>
+          <div class="chooser-id" title="{{ ds.url }}">{{ ds.url }}</div>
+          {% set st = ds_status.get(ds.id) if ds_status is defined else None %}
+          <div class="meta-hint">
+            {% if st and st.state == 'fresh' %}{{ t('proj.cache_fresh') }}{% if st.expires_label %} · {{ st.expires_label }}{% endif %}
+            {% elif st and st.state == 'expired' %}{{ t('proj.cache_expired') }}{% if st.fetched_label %} · {{ st.fetched_label }}{% endif %}
+            {% else %}{{ t('proj.cache_none') }}{% endif %}
+            {% if st and st.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
+          </div>
+          <form class="obj-add" method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/edit">
+            <input name="name" value="{{ ds.name }}" placeholder="{{ t('proj.ds_name') }}" aria-label="{{ t('proj.ds_name') }}">
+            <input name="purpose" value="{{ ds.purpose }}" placeholder="{{ t('proj.purpose') }}" aria-label="{{ t('proj.purpose') }}">
+            <button type="submit" class="btn btn-ghost btn-inline">{{ t('proj.edit') }}</button>
+          </form>
+        </div>
+        <div class="obj-actions">
+          <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/datasources/{{ ds.id }}">{{ t('proj.open_body') }}</a>
+          <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/read">
+            <button class="btn btn-ghost btn-inline">{{ t('proj.read') }}</button>
+          </form>
+          <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/delete">
+            <button class="btn btn-ghost btn-inline">{{ t('proj.remove') }}</button>
+          </form>
+        </div>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('proj.ds_empty') }}</p>
+    {% endif %}
+    <form class="obj-add" method="post" action="/projects/{{ project.id }}/datasources">
+      <input name="name" placeholder="{{ t('proj.ds_name') }}" aria-label="{{ t('proj.ds_name') }}">
+      <input name="url" type="url" required placeholder="{{ t('proj.paste_url') }}" aria-label="{{ t('proj.paste_url') }}">
+      <input name="purpose" placeholder="{{ t('proj.purpose') }}" aria-label="{{ t('proj.purpose') }}">
+      <button type="submit" class="btn btn-step btn-inline">{{ t('proj.add_ds') }}</button>
+    </form>
+  </section>
+  </div>
 </div>
 {% endblock %}

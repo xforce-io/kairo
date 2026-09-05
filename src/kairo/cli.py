@@ -1482,13 +1482,16 @@ def datasource_add(
     url: str = typer.Option(..., "--url"),
     kind: str = typer.Option(None, "--kind", help="可选；默认由 URL 推断，不必填 spreadsheet"),
     purpose: str = typer.Option("", "--purpose"),
+    name: str = typer.Option("", "--name"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
     from kairo.projects import ProjectError, add_datasource
 
     try:
-        ds = add_datasource(_cli_root(root), project_id, url=url, kind=kind, purpose=purpose)
+        ds = add_datasource(
+            _cli_root(root), project_id, url=url, kind=kind, purpose=purpose, name=name
+        )
     except ProjectError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
