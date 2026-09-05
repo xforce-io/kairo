@@ -820,3 +820,31 @@ def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monke
     html = created.text
     assert html.find('id="project-primary"') < html.find('id="project-materials"')
     assert "周报" in html[html.find('id="project-primary"'):html.find('id="project-materials"')]
+    named_cli = _load(
+        _cli(
+            [
+                "datasource",
+                "add",
+                pid,
+                "--url",
+                "https://docs.qq.com/sheet/Dcli-name",
+                "--name",
+                "CLI名称",
+                "--purpose",
+                "辅助",
+            ],
+            serve,
+            monkeypatch,
+        )
+    )
+    assert named_cli["name"] == "CLI名称"
+    api_ds = client.post(
+        f"/api/projects/{pid}/datasources",
+        json={
+            "url": "https://docs.qq.com/sheet/Dapi-name",
+            "name": "API名称",
+            "purpose": "接口",
+        },
+    ).json()
+    assert api_ds["ok"] is True
+    assert api_ds["datasource"]["name"] == "API名称"

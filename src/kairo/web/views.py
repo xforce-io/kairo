@@ -3605,6 +3605,7 @@ async def api_ds_add(request: Request, project_id: str) -> JSONResponse:
             url=body.get("url") or "",
             kind=body.get("kind") or None,
             purpose=body.get("purpose") or "",
+            name=body.get("name") or "",
         )
     except ProjectError as e:
         return _api_error(e)
