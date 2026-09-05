@@ -20,7 +20,9 @@ from kairo.provider import (
 )
 
 
-def _cfg(artifact_dir, persona="写一份纪要", context="正文", artifact="out.md", model="stub"):
+def _cfg(
+    artifact_dir, persona="写一份纪要", context="正文", artifact="out.md", model="stub"
+):
     return AgentConfig(
         persona=persona,
         context=context,
@@ -172,7 +174,11 @@ def test_claude_code_provider_no_allowed_tools_without_read_dirs(tmp_path):
 
     ClaudeCodeProvider(model="opus", runner=fake_runner).run(
         AgentConfig(
-            persona="P", context="C", artifact_dir=tmp_path, model="opus", artifact="d.md"
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="opus",
+            artifact="d.md",
         )
     )
     assert "--allowedTools" not in calls[0]
@@ -220,6 +226,52 @@ def test_codex_provider_invokes_cli_and_reads_last_message(tmp_path):
 
 def test_codex_provider_identity():
     assert CodexProvider().name == "codex"
+
+
+def test_codex_provider_omits_model_flag_when_unconfigured(tmp_path):
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        idx = args.index("--output-last-message")
+        Path(args[idx + 1]).write_text("ok")
+
+    CodexProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="角色A",
+            context="任务B",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+        )
+    )
+    args = calls[0]
+    assert "-m" not in args
+
+
+def test_codex_provider_passes_reasoning_effort(tmp_path):
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        idx = args.index("--output-last-message")
+        Path(args[idx + 1]).write_text("ok")
+
+    CodexProvider(
+        model="gpt-5.6-terra", reasoning_effort="high", runner=fake_runner
+    ).run(
+        AgentConfig(
+            persona="角色A",
+            context="任务B",
+            artifact_dir=tmp_path,
+            model="gpt-5.6-terra",
+            artifact="out.md",
+        )
+    )
+    args = calls[0]
+    assert args[args.index("-m") + 1] == "gpt-5.6-terra"
+    assert "-c" in args
+    assert 'model_reasoning_effort="high"' in args
 
 
 # ---- GrokProvider(driving `grok -p`,注入 runner)----
@@ -402,7 +454,9 @@ class _FakeOpenAIClient:
         self.chat = _FakeChat(calls)
 
 
-def test_openai_compatible_provider_invokes_chat_completion_and_writes_artifact(tmp_path):
+def test_openai_compatible_provider_invokes_chat_completion_and_writes_artifact(
+    tmp_path,
+):
     calls = []
     p = OpenAICompatibleProvider(
         base_url="https://llm.example/v1",

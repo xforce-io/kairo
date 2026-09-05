@@ -155,7 +155,13 @@ Kairo 可以把本机配置的 OpenAI-compatible Chat Completions endpoint 作�
 base_url_env = "OPENAI_API_BASE"
 model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
+
+[provider.codex]
+model = "gpt-5.6-terra"
+reasoning_effort = "high"
 ```
+
+`[provider.codex] model` 会传给 `codex exec -m`，钉死 kairo run/step 用的模型，不跟随 `~/.codex/config.toml` 的默认模型。未配置则不传 `-m`。
 
 Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → auto 候选 `codex` CLI → `grok` CLI → `claude` CLI → 已配置 `[provider.openai]` → stub。需要读取材料的命令会跳过不支持授读的候选，所以有效 auto 顺序为 Codex → Claude → stub；其它命令保留完整偏好顺序。选中的 provider 失败后不跨 provider 重试。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` 强制指定（见 [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153) / [#160](https://github.com/xforce-io/kairo/issues/160)）。
 

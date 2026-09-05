@@ -82,11 +82,14 @@ def doctor_lines(*, home: Path | None = None) -> list[str]:
     try:
         provider = select_provider()
         name = getattr(provider, "name", type(provider).__name__)
+        model = (getattr(provider, "model", "") or "").strip()
         if name == "stub":
             lines.append(
                 f"provider: {name}  ⚠ step 不会真算。"
                 " 配 grok CLI / [provider.openai] / claude CLI，或设 KAIRO_PROVIDER"
             )
+        elif model:
+            lines.append(f"provider: {name} ({model})")
         else:
             lines.append(f"provider: {name}")
     except Exception as e:
@@ -96,7 +99,11 @@ def doctor_lines(*, home: Path | None = None) -> list[str]:
     if asr:
         lines.append(f"asr.whisper: 已配置 ({asr[1]})")
     else:
-        cfg = Path(os.environ.get("XDG_CONFIG_HOME") or (_home() / ".config")) / "kairo" / "config.toml"
+        cfg = (
+            Path(os.environ.get("XDG_CONFIG_HOME") or (_home() / ".config"))
+            / "kairo"
+            / "config.toml"
+        )
         lines.append("asr.whisper: 未配置  → 音频 step 会 blocked: no-asr")
         lines.append(f"  写入 {cfg} :")
         lines.append("  [asr.whisper]")
@@ -147,7 +154,9 @@ def _link_or_copy(src: Path, dest: Path) -> str:
     elif dest.exists():
         if dest.is_dir() and (dest / _SKILL_MD).is_file():
             try:
-                if (dest / _SKILL_MD).read_text(encoding="utf-8") == (src / _SKILL_MD).read_text(encoding="utf-8"):
+                if (dest / _SKILL_MD).read_text(encoding="utf-8") == (
+                    src / _SKILL_MD
+                ).read_text(encoding="utf-8"):
                     return "ok"
             except OSError:
                 pass
@@ -187,10 +196,14 @@ def connect_skill(*, home: Path | None = None) -> list[str]:
             continue
         how = _link_or_copy(canon, agent.dest)
         if how == "skip-exists":
-            lines.append(f"{agent.name}: skip {agent.dest}（已存在且不是本 skill 链接）")
+            lines.append(
+                f"{agent.name}: skip {agent.dest}（已存在且不是本 skill 链接）"
+            )
         else:
             mounted += 1
             lines.append(f"{agent.name}: {how} → {agent.dest}")
     if mounted == 0:
-        lines.append(f"未探测到 Claude/Cursor/Codex/Pi 家目录；只写了 canonical。也可 {_NPX_HINT}")
+        lines.append(
+            f"未探测到 Claude/Cursor/Codex/Pi 家目录；只写了 canonical。也可 {_NPX_HINT}"
+        )
     return lines

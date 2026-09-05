@@ -46,6 +46,18 @@ def test_skill_source_file_finds_packaged_copy():
     assert "name: kairo" in src.read_text(encoding="utf-8")
 
 
+def test_doctor_shows_configured_codex_model(tmp_path, monkeypatch):
+    from kairo.provider import CodexProvider
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "kairo.install.select_provider",
+        lambda: CodexProvider(model="gpt-5.6-terra"),
+    )
+    text = "\n".join(doctor_lines(home=tmp_path))
+    assert "provider: codex (gpt-5.6-terra)" in text
+
+
 def test_doctor_lines_stub_and_missing_skill(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     monkeypatch.setenv("HOME", str(tmp_path))

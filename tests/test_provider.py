@@ -5,6 +5,7 @@ from kairo.provider import (
     GrokProvider,
     OpenAICompatibleProvider,
     StubProvider,
+    resolve_codex_provider_config,
     resolve_openai_provider_config,
     select_provider,
 )
@@ -32,9 +33,7 @@ def test_select_provider_auto_non_material_prefers_grok_before_claude(monkeypatc
 
 
 def test_select_provider_auto_materials_skip_grok_for_claude(monkeypatch):
-    selected = _auto(
-        monkeypatch, available={"grok", "claude"}, require_read_dirs=True
-    )
+    selected = _auto(monkeypatch, available={"grok", "claude"}, require_read_dirs=True)
     assert isinstance(selected, ClaudeCodeProvider)
 
 
@@ -81,6 +80,9 @@ def test_select_provider_auto_materials_run_to_fold_with_selected_codex(
     class SelectedCodex(StubProvider):
         name = "codex"
         model = "selected-test"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__()
 
     monkeypatch.setattr(provider, "CodexProvider", SelectedCodex)
     selected = _auto(
@@ -190,9 +192,7 @@ def test_select_provider_explicit_openai(monkeypatch):
             "api_key": "test-key",
         },
     )
-    assert isinstance(
-        select_provider(require_read_dirs=True), OpenAICompatibleProvider
-    )
+    assert isinstance(select_provider(require_read_dirs=True), OpenAICompatibleProvider)
 
 
 def test_select_provider_kairo_stub_overrides_explicit_provider(monkeypatch):
@@ -261,3 +261,54 @@ api_key_env = "KAIRO_TEST_LLM_KEY"
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.delenv("KAIRO_TEST_LLM_KEY", raising=False)
     assert resolve_openai_provider_config() is None
+
+
+def test_resolve_codex_provider_config_from_config_toml(tmp_path, monkeypatch):
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text(
+        """
+[provider.codex]
+model = "gpt-5.6-terra"
+reasoning_effort = "high"
+""".strip()
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert resolve_codex_provider_config() == {
+        "model": "gpt-5.6-terra",
+        "reasoning_effort": "high",
+    }
+
+
+def test_resolve_codex_provider_config_missing_file_is_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert resolve_codex_provider_config() == {"model": "", "reasoning_effort": ""}
+
+
+def test_select_provider_codex_uses_configured_model(tmp_path, monkeypatch):
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text('[provider.codex]\nmodel = "gpt-5.6-terra"\n')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    selected = _auto(monkeypatch, available={"codex"})
+    assert isinstance(selected, CodexProvider)
+    assert selected.model == "gpt-5.6-terra"
+
+
+def test_select_provider_explicit_codex_uses_configured_model(tmp_path, monkeypatch):
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text('[provider.codex]\nmodel = "gpt-5.6-terra"\n')
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "codex")
+    selected = select_provider()
+    assert isinstance(selected, CodexProvider)
+    assert selected.model == "gpt-5.6-terra"
+
+
+def test_select_provider_codex_without_model_stays_empty(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    selected = _auto(monkeypatch, available={"codex"})
+    assert isinstance(selected, CodexProvider)
+    assert selected.model == ""

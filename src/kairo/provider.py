@@ -45,7 +45,9 @@ class AgentConfig:
     schema: dict | None = None  # 结构化输出契约(api backend 用;CLI 可忽略)
     artifact: str | None = None  # schema/产物落到哪个文件名
     timeout_s: int | None = None  # None → runner 使用 DEFAULT_CLI_TIMEOUT_S(#105)
-    read_dirs: list[Path] = field(default_factory=list)  # agent 可读目录；provider 不得扩大源目录写权限
+    read_dirs: list[Path] = field(
+        default_factory=list
+    )  # agent 可读目录；provider 不得扩大源目录写权限
 
 
 @dataclass
@@ -82,7 +84,12 @@ def _parse_stub_catalog(context: str) -> list[tuple[str, str, str]]:
         r"\|\s*(S-[0-9a-f]+)\s*\|\s*([^|]+)\s*\|\s*([^|]+)\s*\|\s*(references/[^|]+/digest\.md)\s*\|",
         context,
     ):
-        sid, _ref, title, path = m.group(1), m.group(2).strip(), m.group(3).strip(), m.group(4).strip()
+        sid, _ref, title, path = (
+            m.group(1),
+            m.group(2).strip(),
+            m.group(3).strip(),
+            m.group(4).strip(),
+        )
         rows.append((sid, title, path))
     return rows
 
@@ -132,9 +139,7 @@ def _stub_compose_document(
     glossary_bit = ""
     if "[领域真名册]" in persona:
         glossary_bit = (
-            persona[persona.find("[领域真名册]") :]
-            .split("[阅读纪律]", 1)[0]
-            .strip()
+            persona[persona.find("[领域真名册]") :].split("[阅读纪律]", 1)[0].strip()
         )
     knowledge_bit = ""
     if "[领域知识上下文]" in persona:
@@ -192,7 +197,13 @@ def _stub_compose_document(
         for sid, title, path in catalog:
             core = sid[2:]
             body_bits.append(f"| F-{core}-01 | {sid} · {title} |")
-        body_bits += ["", "## 来源索引", "", "| ID | 材料 | 可核对来源 |", "|---|---|---|"]
+        body_bits += [
+            "",
+            "## 来源索引",
+            "",
+            "| ID | 材料 | 可核对来源 |",
+            "|---|---|---|",
+        ]
         for sid, title, path in catalog:
             body_bits.append(f"| {sid} | {title} | [digest]({path}) |")
     else:
@@ -282,7 +293,9 @@ def resolve_openai_provider_config() -> dict | None:
     path = _config_path()
     if not path.is_file():
         return None
-    section = (tomllib.loads(path.read_text()).get("provider") or {}).get("openai") or {}
+    section = (tomllib.loads(path.read_text()).get("provider") or {}).get(
+        "openai"
+    ) or {}
 
     def _value(key: str, default_env: str | None = None) -> str:
         env_name = str(section.get(f"{key}_env") or default_env or "").strip()
@@ -301,6 +314,37 @@ def resolve_openai_provider_config() -> dict | None:
     return {"base_url": base_url, "model": model, "api_key": api_key}
 
 
+def resolve_codex_provider_config() -> dict[str, str]:
+    """解析 machine-local Codex CLI 约束。未配置则空串,调用时不传 -m。"""
+    path = _config_path()
+    section: dict = {}
+    if path.is_file():
+        section = (tomllib.loads(path.read_text()).get("provider") or {}).get(
+            "codex"
+        ) or {}
+
+    def _value(key: str) -> str:
+        env_name = str(section.get(f"{key}_env") or "").strip()
+        if env_name:
+            env_value = os.environ.get(env_name)
+            if env_value:
+                return env_value.strip()
+        return str(section.get(key) or "").strip()
+
+    return {
+        "model": _value("model"),
+        "reasoning_effort": _value("reasoning_effort"),
+    }
+
+
+def _codex_provider() -> CodexProvider:
+    cfg = resolve_codex_provider_config()
+    return CodexProvider(
+        model=cfg["model"],
+        reasoning_effort=cfg["reasoning_effort"],
+    )
+
+
 def _reject_unsupported_read(config: AgentConfig, name: str) -> None:
     """#153:无授读能力的 provider 不得把全文倾倒回 prompt,直接失败。"""
     if config.read_dirs:
@@ -317,9 +361,7 @@ class OpenAICompatibleProvider:
     name = "openai"
     supports_read_dirs = False
 
-    def __init__(
-        self, *, base_url: str, api_key: str, model: str, client=None
-    ) -> None:
+    def __init__(self, *, base_url: str, api_key: str, model: str, client=None) -> None:
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
@@ -523,7 +565,9 @@ class ClaudeCodeProvider:
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
-        (config.artifact_dir / "_prompt.md").write_text(prompt)  # 内部文件,不计 artifact
+        (config.artifact_dir / "_prompt.md").write_text(
+            prompt
+        )  # 内部文件,不计 artifact
         stdout_file = config.artifact_dir / "_claude_stdout.json"
         add_dir_args = []
         for d in config.read_dirs:  # corpus 只读参考层 → 授 agent 读访问(写仍限 cwd)
@@ -561,8 +605,11 @@ class CodexProvider:
     name = "codex"
     supports_read_dirs = True
 
-    def __init__(self, model: str = "", runner=None) -> None:
+    def __init__(
+        self, model: str = "", reasoning_effort: str = "", runner=None
+    ) -> None:
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self._runner = runner or _default_cli_runner
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
@@ -582,6 +629,8 @@ class CodexProvider:
         ]
         if self.model.strip():
             args += ["-m", self.model]
+        if self.reasoning_effort.strip():
+            args += ["-c", f'model_reasoning_effort="{self.reasoning_effort.strip()}"']
         # Codex sandbox 本就可读绝对路径；--add-dir 会把源目录升级为可写，禁止使用。
         self._runner(
             "codex",
@@ -689,15 +738,19 @@ def select_provider(*, require_read_dirs: bool = False):
         if explicit == "openai":
             provider = _openai_provider_from_config()
             if provider is None:
-                raise RuntimeError("KAIRO_PROVIDER=openai 但缺少 provider.openai 配置或 API key")
+                raise RuntimeError(
+                    "KAIRO_PROVIDER=openai 但缺少 provider.openai 配置或 API key"
+                )
             return provider
+        if explicit == "codex":
+            return _codex_provider()
         return _BACKENDS.get(explicit, StubProvider)()
 
     def eligible(candidate) -> bool:
         return not require_read_dirs or candidate.supports_read_dirs
 
     if _cli_available("codex"):
-        candidate = CodexProvider()
+        candidate = _codex_provider()
         if eligible(candidate):
             return candidate
     if _cli_available("grok"):

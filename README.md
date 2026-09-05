@@ -142,7 +142,13 @@ Kairo can use a machine-local OpenAI-compatible Chat Completions endpoint as the
 base_url_env = "OPENAI_API_BASE"
 model_env = "OPENAI_MODEL"
 api_key_env = "OPENAI_API_KEY"
+
+[provider.codex]
+model = "gpt-5.6-terra"
+reasoning_effort = "high"
 ```
+
+`[provider.codex] model` is passed to `codex exec -m`, so kairo run/step uses that model instead of the default in `~/.codex/config.toml`. Omit it to leave `-m` unset.
 
 Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → auto candidates `codex` CLI → `grok` CLI → `claude` CLI → configured `[provider.openai]` → stub. Material-reading commands skip candidates that cannot read the granted catalog, so their effective auto order is Codex → Claude → stub; other commands keep the full preference order. A selected provider failure does not trigger cross-provider retry. Set `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` to force a backend (see [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153) / [#160](https://github.com/xforce-io/kairo/issues/160)).
 
