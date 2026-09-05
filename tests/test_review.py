@@ -29,8 +29,12 @@ def _range_ws(tmp_path, monkeypatch):
     (tmp_path / "m.txt").write_text("周会")
     (tmp_path / "n.txt").write_text("沟通")
     (tmp_path / "z.txt").write_text("无纪要")
-    rid_a = a.add([tmp_path / "m.txt"], ref_id="2026-08-21-weekly", occurred_at="2026-08-21")
-    rid_b = b.add([tmp_path / "n.txt"], ref_id="2026-08-18-call", occurred_at="2026-08-18")
+    rid_a = a.add(
+        [tmp_path / "m.txt"], ref_id="2026-08-21-weekly", occurred_at="2026-08-21"
+    )
+    rid_b = b.add(
+        [tmp_path / "n.txt"], ref_id="2026-08-18-call", occurred_at="2026-08-18"
+    )
     a.add([tmp_path / "z.txt"], ref_id="2026-08-24-empty", occurred_at="2026-08-24")
     (a.references_dir() / rid_a / "digest.md").write_text("能源周会:推进并网")
     (b.references_dir() / rid_b / "digest.md").write_text("候选人沟通:下周面试")
@@ -57,6 +61,23 @@ def test_prepare_range_and_collect(tmp_path, monkeypatch):
     assert str(too_long.value) == "range-too-long"
 
 
+def test_write_review_reference_joins_builtin_journal_topic(tmp_path, monkeypatch):
+    """#291: 回顾写入内置「总结」后自动成为该 Topic 成员。"""
+    from kairo.refs import create_tag, ref_tags, set_include_tags, topic_members
+
+    root, _ = _range_ws(tmp_path, monkeypatch)
+    journal = resolve_review_workspace(root)
+    create_tag(root, JOURNAL_NAME)
+    set_include_tags(root, JOURNAL_NAME, [JOURNAL_NAME])
+    start, end = dt.date(2026, 8, 18), dt.date(2026, 8, 24)
+    rid = write_review_reference(journal, start, end, "周回顾正文")
+    assert JOURNAL_NAME in ref_tags(root, JOURNAL_NAME, rid)
+    assert rid in {m.id for m in topic_members(root, JOURNAL_NAME)}
+    rid2 = write_review_reference(journal, start, end, "周回顾正文\n第二稿")
+    assert rid2 == rid
+    assert JOURNAL_NAME in ref_tags(root, JOURNAL_NAME, rid)
+
+
 def test_write_review_reference_sets_title_and_occurred(tmp_path, monkeypatch):
     root, dest = _range_ws(tmp_path, monkeypatch)
     items = scan_timeline(root)
@@ -67,28 +88,38 @@ def test_write_review_reference_sets_title_and_occurred(tmp_path, monkeypatch):
         with_d, without, artifact_dir=tmp_path / "art", provider=None
     )
     assert "推进并网" in body or "STUB" in body
-    orig_digest = (root / "alpha" / "references" / "2026-08-21-weekly" / "digest.md").read_text()
+    orig_digest = (
+        root / "alpha" / "references" / "2026-08-21-weekly" / "digest.md"
+    ).read_text()
     rid = write_review_reference(dest, start, end, body)
     man = dest.read_manifest(rid)
     assert man.title == review_title(start, end)
     assert man.occurred_at == "2026-08-24"
     assert (dest.references_dir() / rid).is_dir()
     assert any(f.role == "source_text" for f in man.forms)
-    assert (root / "alpha" / "references" / "2026-08-21-weekly" / "digest.md").read_text() == orig_digest
+    assert (
+        root / "alpha" / "references" / "2026-08-21-weekly" / "digest.md"
+    ).read_text() == orig_digest
     rid2 = write_review_reference(dest, start, end, body + "\n第二稿")
     assert rid2 == rid
     assert dest.list_reference_ids() == [rid]
-    text = (dest.root / dest.read_manifest(rid).forms[0].location).read_text(encoding="utf-8")
+    text = (dest.root / dest.read_manifest(rid).forms[0].location).read_text(
+        encoding="utf-8"
+    )
     assert "第二稿" in text
 
 
 def test_prepare_range_skips_journal_items(tmp_path, monkeypatch):
     root, dest = _range_ws(tmp_path, monkeypatch)
     journal = resolve_review_workspace(root)
-    write_review_reference(journal, dt.date(2026, 8, 18), dt.date(2026, 8, 24), "旧回顾")
+    write_review_reference(
+        journal, dt.date(2026, 8, 18), dt.date(2026, 8, 24), "旧回顾"
+    )
     items = scan_timeline(root)
     found = prepare_range(items, dt.date(2026, 8, 18), dt.date(2026, 8, 24))
-    assert all(it.workspace != JOURNAL_NAME and it.topic != JOURNAL_NAME for it in found)
+    assert all(
+        it.workspace != JOURNAL_NAME and it.topic != JOURNAL_NAME for it in found
+    )
     assert {it.id for it in found} == {
         "2026-08-21-weekly",
         "2026-08-18-call",
@@ -161,4 +192,3 @@ def test_grok_review_uses_prompt_file_not_digest_argv(tmp_path, monkeypatch):
     assert "-p" not in calls[0]
     assert "推进并网" not in joined
     assert "推进并网" in body
-
