@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import re
+from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -228,3 +229,141 @@ def test_global_ref_image_form_preview_still_works(tmp_path):
     assert preview.status_code == 200
     assert 'class="doc-img"' in preview.text
     assert f"/refs/{rid}/file/0" in preview.text
+
+
+def _css_rules(css: str) -> list[tuple[str, str]]:
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+    out = []
+    for m in re.finditer(r"([^{}]+)\{([^{}]+)\}", css):
+        out.append((re.sub(r"\s+", " ", m.group(1)).strip(), m.group(2)))
+    return out
+
+
+def _decl_map(body: str) -> dict[str, str]:
+    decls: dict[str, str] = {}
+    for part in body.split(";"):
+        part = part.strip()
+        if ":" not in part:
+            continue
+        name, value = part.split(":", 1)
+        decls[name.strip()] = re.sub(r"\s+", " ", value).strip()
+    return decls
+
+
+def _merged_decls(css: str, pred) -> dict[str, str]:
+    merged: dict[str, str] = {}
+    for sel, body in _css_rules(css):
+        if pred(sel):
+            merged.update(_decl_map(body))
+    return merged
+
+
+def _selector_token(sel: str, token: str) -> bool:
+    for piece in sel.split(","):
+        piece = piece.strip()
+        if piece == token or piece.startswith(token + " ") or piece.startswith(token + ":") or piece.startswith(token + "["):
+            return True
+    return False
+
+
+def test_global_ref_audio_preview_exposes_listen_read_controls(tmp_path):
+    """#285: Preview 链必须带 Play/seek/搜索，音频 URL 仍走全局 Ref 文件。"""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    audio = tmp_path / "talk.wav"
+    _write_wav(audio)
+    transcript = tmp_path / "talk.md"
+    transcript.write_text("[00:10] test content\n[00:20] more content\n", encoding="utf-8")
+    rid = add_global_ref(
+        serve, [audio, transcript], ref_id="audio-ref", title="Audio Reference", copy=True
+    )
+    client = _client(serve)
+    page = client.get(f"/refs/{rid}")
+    assert page.status_code == 200
+    assert 'id="form-drawer"' in page.text
+    match = re.search(rf'hx-get="(/refs/{rid}/form/0(?:\?[^"]*)?)"', page.text)
+    assert match is not None, "audio form preview link must exist"
+    preview = client.get(match.group(1))
+    assert preview.status_code == 200
+    assert 'class="listen-read"' in preview.text
+    assert 'class="lr-play"' in preview.text
+    assert "data-lr-play" in preview.text
+    assert 'class="lr-seek"' in preview.text
+    assert "data-lr-seek" in preview.text
+    assert 'class="lr-search"' in preview.text
+    assert "data-lr-q" in preview.text
+    assert 'class="lr-units"' in preview.text
+    assert "test content" in preview.text
+    src = re.search(r'<audio[^>]*\ssrc="([^"]+)"', preview.text)
+    assert src is not None, "listen-read audio element must have src"
+    assert src.group(1).startswith(f"/refs/{rid}/file/"), src.group(1)
+    assert "/w/" not in preview.text
+
+
+def test_form_drawer_listen_read_host_css_matches_reader(tmp_path):
+    """#285: 抽屉含听读时必须与 #reader:has(.listen-read) 同类钉住头底栏。"""
+    shipped = Path("src/kairo/web/static/app.css").read_text(encoding="utf-8")
+    root = tmp_path / "root"
+    root.mkdir()
+    served = _client(root).get("/static/app.css")
+    assert served.status_code == 200
+    assert served.text == shipped
+
+    host = _merged_decls(
+        shipped,
+        lambda s: "form-drawer" in s and ":has(.listen-read)" in s,
+    )
+    assert host, "form drawer must declare :has(.listen-read) host rules"
+    assert host.get("overflow") == "hidden"
+    assert host.get("min-height") == "0"
+    assert host.get("flex-direction") == "column" or host.get("display") == "flex"
+
+    doc = _merged_decls(
+        shipped,
+        lambda s: "form-drawer" in s and ":has(.listen-read)" in s and ".doc" in s,
+    )
+    assert doc.get("display") == "flex"
+    assert doc.get("flex-direction") == "column"
+    assert doc.get("min-height") == "0"
+    assert doc.get("overflow") == "hidden"
+
+    units = _merged_decls(shipped, lambda s: _selector_token(s, ".lr-units"))
+    assert units.get("overflow") == "auto"
+    assert units.get("min-height") == "0"
+
+    head = _merged_decls(shipped, lambda s: _selector_token(s, ".lr-head"))
+    assert head.get("flex") == "none"
+
+    dock = _merged_decls(shipped, lambda s: _selector_token(s, ".lr-dock"))
+    assert dock.get("flex") == "none"
+
+    default_body = _merged_decls(
+        shipped,
+        lambda s: ":has(" not in s and ".doc" not in s and _selector_token(s, ".form-drawer-body"),
+    )
+    assert default_body.get("overflow") == "auto"
+
+
+def test_global_ref_non_audio_preview_stays_document_not_listen_read(tmp_path):
+    """#285: 文本/图片 Preview 不套听读三区。"""
+    serve, rid = _serve_with_digest(tmp_path)
+    client = _client(serve)
+    page = client.get(f"/refs/{rid}")
+    assert page.status_code == 200
+    match = re.search(rf'hx-get="(/refs/{rid}/form/\d+(?:\?[^"]*)?)"', page.text)
+    assert match is not None
+    preview = client.get(match.group(1))
+    assert preview.status_code == 200
+    assert 'class="listen-read"' not in preview.text
+    assert 'class="lr-play"' not in preview.text
+    assert "<h1>" in preview.text
+    assert "原料标题" in preview.text
+
+    img = tmp_path / "pic.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
+    img_id = add_global_ref(serve, [img], ref_id="img-ref", title="Image Reference", copy=True)
+    image_preview = client.get(f"/refs/{img_id}/form/0")
+    assert image_preview.status_code == 200
+    assert 'class="doc-img"' in image_preview.text
+    assert 'class="listen-read"' not in image_preview.text
+    assert 'class="lr-play"' not in image_preview.text

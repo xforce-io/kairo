@@ -1177,6 +1177,14 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .form-drawer-head h2 { margin: 0; font-family: var(--serif); font-size: 18px; }
 .form-drawer-body { overflow: auto; flex: 1; padding: 16px 20px 48px; }
 .form-drawer-body .doc { padding: 0; max-width: none; }
+/* #285 抽屉含听读时与 #reader 同款钉住头底栏 */
+.form-drawer-body:has(.listen-read) {
+  overflow: hidden; display: flex; flex-direction: column; min-height: 0;
+  padding-bottom: 16px;
+}
+.form-drawer-body:has(.listen-read) > .doc {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+}
 @media (max-width: 720px) {
   .projects-head { align-items: stretch; padding: 20px 16px 0; }
   .projects-head .new-ws { width: 100%; }
