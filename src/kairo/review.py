@@ -219,6 +219,17 @@ def resolve_review_workspace(root: Path, workspace: str = "") -> Workspace:
     return Workspace.init(root / JOURNAL_NAME, topic=JOURNAL_NAME)
 
 
+def _join_home_topic(ws, ref_id: str) -> None:
+    """回顾落在内置 Topic 目录后，打 Topic-name Tag，与 add --topic 同成员规则。"""
+    from kairo.refs import add_tag, create_tag, list_tags, serve_root_of, topic_name_tag
+
+    serve = serve_root_of(ws)
+    tag = topic_name_tag(ws)
+    if tag not in list_tags(serve):
+        create_tag(serve, tag)
+    add_tag(serve, home=ws.root.name, ref_id=ref_id, tag=tag)
+
+
 def write_review_reference(
     ws, start: dt.date, end: dt.date, body: str, *, occurred: dt.date | None = None
 ) -> str:
@@ -234,12 +245,13 @@ def write_review_reference(
             for f in man.forms
         ]
         ws.write_manifest(existing, man)
+        _join_home_topic(ws, existing)
         return existing
     uploads = ws.root / ".kairo" / "uploads"
     uploads.mkdir(parents=True, exist_ok=True)
     src = uploads / f"review-{start.isoformat()}-{end.isoformat()}.md"
     src.write_text(body, encoding="utf-8")
-    return ws.add(
+    rid = ws.add(
         [src],
         title=review_title(start, end),
         occurred_at=(occurred or end).isoformat(),
@@ -247,6 +259,8 @@ def write_review_reference(
         source_class="stream",
         role="source_text",
     )
+    _join_home_topic(ws, rid)
+    return rid
 
 
 def prepare_range(
@@ -267,7 +281,9 @@ def prepare_range(
     return found
 
 
-def produce_review(root: Path, ws, start: dt.date, end: dt.date, *, provider=None) -> str:
+def produce_review(
+    root: Path, ws, start: dt.date, end: dt.date, *, provider=None
+) -> str:
     found = prepare_range(scan_timeline(root), start, end, root=root)
     with_d, without = collect_digests(root, found)
     body = generate_review_body(
