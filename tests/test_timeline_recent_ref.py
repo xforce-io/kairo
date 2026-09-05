@@ -13,6 +13,19 @@ from kairo.timeline import resolve_timeline_query
 from kairo.web.server import create_app
 
 
+def _ref_head(html: str) -> str:
+    match = re.search(r'<header class="ref-head">([\s\S]*?)</header>', html)
+    assert match is not None, "Ref page must have header.ref-head"
+    return match.group(1)
+
+
+def _occurred_line(html: str) -> str:
+    head = _ref_head(html)
+    match = re.search(r'<p class="ref-occurred">([^<]*)</p>', head)
+    assert match is not None, "occurred metadata must be a p.ref-occurred under the title"
+    return match.group(1).strip()
+
+
 def _client(root):
     return TestClient(create_app(root))
 
@@ -47,6 +60,41 @@ def test_timeline_root_selects_recent_tab(tmp_path):
     cal = _client(serve).get("/timeline", params={"day": "2026-08-24"})
     assert cal.status_code == 200
     assert re.search(r'<a class="on" href="/timeline\?day=', cal.text)
+
+
+def test_global_ref_shows_occurred_day_not_raw_id(tmp_path):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    src = tmp_path / "note.md"
+    src.write_text("note", encoding="utf-8")
+    rid = add_global_ref(
+        serve,
+        [src],
+        ref_id="2026-09-02-20260902-164853",
+        title="能源项目-260902",
+        copy=True,
+        occurred_at="2026-09-02",
+    )
+    html = _client(serve).get(f"/refs/{rid}").text
+    line = _occurred_line(html)
+    assert "2026-09-02" in line
+    assert rid not in line
+    head = _ref_head(html)
+    assert re.search(rf'<p class="ref-id">\s*{re.escape(rid)}\s*</p>', head)
+
+
+def test_global_ref_shows_unknown_occurred_copy(tmp_path):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    src = tmp_path / "note.md"
+    src.write_text("note", encoding="utf-8")
+    rid = add_global_ref(
+        serve, [src], ref_id="notes-candidate", title="未标日期", copy=True
+    )
+    html = _client(serve).get(f"/refs/{rid}").text
+    line = _occurred_line(html)
+    assert line == "Unknown occurred date"
+    assert rid not in line
 
 
 def test_global_ref_digest_renders_markdown(tmp_path):

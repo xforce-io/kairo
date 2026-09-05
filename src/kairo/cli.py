@@ -140,11 +140,11 @@ def init(topic: str = typer.Argument("main", help="本 Topic 的名称")) -> Non
         )
         raise typer.Exit(1)
     
+    from kairo.refs import set_include_tags
+
     ws = Workspace.init(Path.cwd(), topic=topic)
-    constitution = ws.constitution
-    constitution.include_tags = [topic]
-    ws.write_constitution(constitution)
-    typer.echo(f"initialized topic (topic={topic}, include_tags=[{topic}])")
+    saved = set_include_tags(serve, ws.root.name, [topic])
+    typer.echo(f"initialized topic (topic={topic}, include_tags=[{', '.join(saved)}])")
 
 
 @app.command(name="list")
@@ -232,11 +232,11 @@ def new(
             err=True,
         )
         raise typer.Exit(1)
+    from kairo.refs import set_include_tags
+
     ws = Workspace.init(dest, topic=topic)
-    constitution = ws.constitution
-    constitution.include_tags = [topic]
-    ws.write_constitution(constitution)
-    typer.echo(f"created {dest} (include_tags=[{topic}])")
+    saved = set_include_tags(serve, ws.root.name, [topic])
+    typer.echo(f"created {dest} (include_tags=[{', '.join(saved)}])")
 
 
 @app.command(name="rm-ws")

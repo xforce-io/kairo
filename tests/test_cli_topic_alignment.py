@@ -95,6 +95,30 @@ def test_init_topic_default_include_tags(tmp_path, monkeypatch):
     assert ws.constitution.include_tags == ["research"]
 
 
+def test_include_clear_and_set_keep_topic_name_tag(tmp_path, monkeypatch):
+    """Include writes cannot drop the Topic 名称 Tag; extras remain optional."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    create_tag(serve, "research")
+    create_tag(serve, "extra")
+    monkeypatch.chdir(serve)
+    created = runner.invoke(app, ["new", "research"])
+    assert created.exit_code == 0, created.output
+    assert Workspace.open(serve / "research").constitution.include_tags == ["research"]
+
+    monkeypatch.chdir(serve / "research")
+    extra = runner.invoke(app, ["include", "set", "extra", "--json"])
+    assert extra.exit_code == 0, extra.output
+    assert json.loads(extra.output)["include_tags"] == ["research", "extra"]
+
+    cleared = runner.invoke(app, ["include", "clear", "--json"])
+    assert cleared.exit_code == 0, cleared.output
+    payload = json.loads(cleared.output)
+    assert payload["include_tags"] == ["research"]
+    assert "extra" not in payload["include_tags"]
+
+
 def test_new_topic_fails_when_tag_missing(tmp_path, monkeypatch):
     """#269: kairo new fails when Topic-name Tag doesn't exist."""
     serve = tmp_path / "root"
