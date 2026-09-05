@@ -60,7 +60,7 @@ from kairo.timeline import (
     shift_month_day,
     week_bounds,
 )
-from kairo.web.discovery import activity_label, scan_workspaces
+from kairo.web.discovery import activity_label, scan_topic_identities, scan_workspaces
 from kairo.web.pins import read_pins, toggle_pin
 from kairo.web.i18n import SUPPORTED, resolve_lang, translator
 from kairo.web.public import (
@@ -439,7 +439,10 @@ def dashboard(
 ) -> HTMLResponse:
     t = _t(request)
     root = request.app.state.root
-    items = scan_workspaces(root)
+    from kairo.refs import RefError, list_all_refs, topic_members
+
+    catalog = list_all_refs(root)
+    items = scan_workspaces(root, catalog=catalog)
     if _is_public_read(request):
         bounds = _public_bounds(request)
         if bounds is None:
@@ -450,7 +453,6 @@ def dashboard(
     pin_list = read_pins(root)
     pinned, rest, qn = _dash_groups(items, pin_list, q or "", filt)
     now = datetime.datetime.now().astimezone()
-    from kairo.refs import RefError, topic_members
 
     for s in (*pinned, *rest):
         s.when = activity_label(
@@ -460,7 +462,7 @@ def dashboard(
             yesterday=t("dash.yesterday"),
         )
         try:
-            s.member_count = len(topic_members(root, s.slug))
+            s.member_count = len(topic_members(root, s.slug, catalog=catalog))
         except RefError:
             # 损坏的包含规则不应让首页不可用；沿用本 Topic 的本地资料数。
             s.member_count = s.ref_count
@@ -495,8 +497,7 @@ def pin_workspace(
 ) -> HTMLResponse:
     t = _t(request)
     root = Path(request.app.state.root)
-    items = scan_workspaces(root)
-    known = {s.slug for s in items}
+    known = {s.slug for s in scan_topic_identities(root)}
     if slug not in known:
         raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
     toggle_pin(root, slug, known)
@@ -765,7 +766,7 @@ def delete_workspace_view(
     return HTMLResponse("", headers={"HX-Redirect": "/"})
 
 
-def _split_refs(ws: Workspace, serve: Path | None = None):
+def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
     """参考分两层:stream(观测,进『参考』组)/ corpus(基线,单独置底)。成员走包含规则。"""
     streams, corpus = [], []
     if serve is not None:
@@ -774,7 +775,7 @@ def _split_refs(ws: Workspace, serve: Path | None = None):
         try:
             from kairo.refs import ref_nav, resolve_open
 
-            for rec in topic_members(serve, ws.root.name):
+            for rec in topic_members(serve, ws.root.name, catalog=catalog):
                 nav = ref_nav(rec.home, rec.id)
                 try:
                     ref_ws, ref_id = resolve_open(serve, rec.home, rec.id)
@@ -827,11 +828,11 @@ def _occurred_ref_groups(refs: list[dict]) -> tuple[list[dict], list[dict]]:
     return groups, unknown
 
 
-def _run_button_ctx(request: Request, ws: Workspace, slug: str) -> dict:
+def _run_button_ctx(request: Request, ws: Workspace, slug: str, catalog=None) -> dict:
     """#75 主按钮文案与是否可点。"""
     t = _t(request)
     running = request.app.state.registry.is_running(slug)
-    plan = workspace_run_plan(ws)
+    plan = workspace_run_plan(ws, catalog=catalog)
     mode = plan["mode"]
     if running:
         return {
@@ -987,9 +988,11 @@ def workspace_view(
     task_id: str | None = None,
 ) -> HTMLResponse:
     ws = _open(request, slug)
-    from kairo.refs import include_tags_of, list_tags
+    from kairo.refs import include_tags_of, list_all_refs, list_tags
 
-    streams, corpus = _split_refs(ws, Path(request.app.state.root))
+    serve = Path(request.app.state.root)
+    catalog = list_all_refs(serve)
+    streams, corpus = _split_refs(ws, serve, catalog=catalog)
     targets = _target_states(ws)
     if _is_public_read(request):
         bounds = _public_bounds(request)
@@ -1028,8 +1031,8 @@ def workspace_view(
                 if shown_task is not None
                 else {}
             ),
-            **_run_button_ctx(request, ws, slug),
-            "glossary_todo_n": _glossary_todo_n(ws, Path(request.app.state.root)),
+            **_run_button_ctx(request, ws, slug, catalog=catalog),
+            "glossary_todo_n": _glossary_todo_n(ws, serve),
         },
     )
 
@@ -1932,8 +1935,6 @@ def _root_glossary_page(
         machine_migration_hint,
         root_glossary_path,
     )
-    from kairo.web.discovery import scan_workspaces
-
     serve = Path(request.app.state.root)
     form = form or {}
     load_failed = False
@@ -1942,7 +1943,7 @@ def _root_glossary_page(
     promotions = []
     scanned = []
     try:
-        scanned = list(scan_workspaces(serve))
+        scanned = list(scan_topic_identities(serve))
         slugs = {s.slug for s in scanned}
         query_ws = (selected_slug or request.query_params.get("workspace") or "").strip()
         selected_slug = query_ws if query_ws in slugs else None
@@ -2123,7 +2124,7 @@ def _knowledge_page(
     from kairo.knowledge_review import invalidate_stale
 
     serve = Path(request.app.state.root)
-    slugs = [item.slug for item in scan_workspaces(serve)]
+    slugs = [item.slug for item in scan_topic_identities(serve)]
     selected = selected_slug or request.query_params.get("workspace")
     selected = selected if selected in slugs else None
     filter_text = (request.query_params.get("filter") or "").strip().lower()
@@ -2972,10 +2973,9 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
     except ProjectError:
         raise HTTPException(status_code=404)
     from kairo.refs import project_member_refs
-    from kairo.web.discovery import scan_workspaces
 
     serve = _serve(request)
-    available_topics = scan_workspaces(serve)
+    available_topics = scan_topic_identities(serve)
     by_slug = {item.slug: item for item in available_topics}
     linked_topics = [by_slug[slug] for slug in project.topics if slug in by_slug]
     return _render(
