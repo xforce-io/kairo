@@ -105,7 +105,7 @@ class ProjectCliTestProvider:
             f"[{topic['title']}](input:{t['input_id']})\n\n{t['content']}\n\n"
             f"[{ds['title']}](input:{d['input_id']})\n\n{d['content']}\n"
         )
-        dest = config.artifact_dir / (config.artifact or "artifact.md")
+        dest = config.artifact_dir / "artifact.md"
         dest.write_text(body, encoding="utf-8")
         return AgentResult(artifacts=[dest], result_text=body)
 
@@ -117,7 +117,7 @@ class BogusCiteProvider:
     supports_project_cli = True
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
-        dest = config.artifact_dir / (config.artifact or "artifact.md")
+        dest = config.artifact_dir / "artifact.md"
         dest.write_text("[x](input:inp-not-real)\n", encoding="utf-8")
         return AgentResult(artifacts=[dest], result_text=dest.read_text())
 

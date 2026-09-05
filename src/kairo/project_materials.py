@@ -450,9 +450,7 @@ def _scope(
 
 
 def _running_run(serve: Path, project_id: str, run_id: str):
-    from kairo.projects import reap_run
-
-    run = reap_run(serve, project_id, run_id)
+    run = get_run(serve, project_id, run_id)
     if run.project_id != project_id:
         raise ProjectError("Run 不属于该 Project", code="not_found")
     if run.status != "running":

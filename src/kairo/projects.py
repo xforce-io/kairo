@@ -676,19 +676,25 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
 
     record = get_run(serve, project_id, run_id)
     try:
+        import sys
+
         skill_path = skill_source_file()
         skill_text = skill_path.read_text(encoding="utf-8") if skill_path and skill_path.is_file() else ""
         work = Path(tempfile.mkdtemp(prefix=f"kairo-run-{record.id}-"))
         (work / "SKILL.md").write_text(skill_text, encoding="utf-8")
+        cli = f"{sys.executable} -m kairo"
+        root = Path(serve).resolve()
         prompt = (
             f"## Kairo Project Run\n"
-            f"serve_root: {Path(serve).resolve()}\n"
+            f"serve_root: {root}\n"
             f"project_id: {record.project_id}\n"
             f"run_id: {record.id}\n"
+            f"cli: {cli}\n"
             f"output_file: artifact.md\n\n"
             f"加载本目录 SKILL.md 的 Project 运行章节。"
-            f"使用 `kairo project context {record.project_id} --run {record.id} --root {Path(serve).resolve()}` "
-            f"获取目录，再 `kairo project read ... --run {record.id}` 按需读取。"
+            f"必须使用 `{cli}`，不要用 PATH 上可能过期的 `kairo`。"
+            f"先 `{cli} project context {record.project_id} --run {record.id} --root {root}` "
+            f"获取目录，再 `{cli} project read PROJECT SOURCE --run {record.id} --root {root}` 按需读取。"
             f"禁止 step / re-step / accept / 写 Topic。"
             f"引用材料使用 [标题](input:INPUT_ID)。把最终 Markdown 写入 artifact.md。\n\n"
             f"## Task\n{record.task_snapshot.get('prompt') or ''}\n"
@@ -699,7 +705,10 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
         scratch = scratch_dir(serve, record.project_id, record.id)
         scratch.mkdir(parents=True, exist_ok=True)
         old_root = os.environ.get("KAIRO_SERVE_ROOT")
+        old_path = os.environ.get("PATH")
         os.environ["KAIRO_SERVE_ROOT"] = str(Path(serve).resolve())
+        py_bin = str(Path(sys.executable).resolve().parent)
+        os.environ["PATH"] = py_bin + os.pathsep + (old_path or "")
         try:
             result = agent.run(
                 AgentConfig(
@@ -707,7 +716,7 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
                     context=prompt,
                     artifact_dir=work,
                     model=getattr(agent, "model", "") or "",
-                    artifact="artifact.md",
+                    artifact="_provider_last.md",
                     write_dirs=[cache_root, scratch],
                 )
             )
@@ -716,6 +725,10 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
                 os.environ.pop("KAIRO_SERVE_ROOT", None)
             else:
                 os.environ["KAIRO_SERVE_ROOT"] = old_root
+            if old_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = old_path
         artifact_file = work / "artifact.md"
         if not artifact_file.is_file():
             text = result.result_text if result and result.result_text else ""
