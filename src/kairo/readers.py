@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import subprocess
 from dataclasses import dataclass
+from pathlib import Path
 from urllib.parse import urlparse
 
 from kairo.settings import CONNECTION_TENCENT, Connection
@@ -18,9 +20,9 @@ READER_TENCENT = CONNECTION_TENCENT
 READER_WECOM = "wecom"
 READER_NOTION = "notion"
 
-_NOTION_HOSTS = ("notion.so", "notion.site")
-_WECOM_HOSTS = ("work.weixin.qq.com", "doc.weixin.qq.com")
+_WECOM_HOSTS = ("work.weixin.qq.com", "doc.weixin.qq.com", "page.weixin.qq.com")
 _TENCENT_DOCS_HOST = "docs.qq.com"
+_WECOM_KINDS = ("document", "spreadsheet", "smartsheet", "smartpage")
 
 
 @dataclass(frozen=True)
@@ -32,7 +34,7 @@ class InferredSource:
     live: bool
 
 _PERMISSION_MARKERS = ("401", "403", "unauthorized", "forbidden", "permission denied", "权限失效", "未授权")
-_INVALID_MARKERS = ("404", "invalid_link", "无效链接", "unknown url", "不是腾讯文档")
+_INVALID_MARKERS = ("404", "invalid_link", "无效链接", "unknown url", "不是腾讯文档", "不是企微文档")
 
 
 class ReadError(Exception):
@@ -63,8 +65,22 @@ def infer_source(url: str) -> InferredSource:
     if host == "notion.so" or host.endswith(".notion.so") or host == "notion.site" or host.endswith(".notion.site"):
         raise ReadError(UNSUPPORTED, "Notion Reader 尚未接入")
     if any(host == h or host.endswith("." + h) for h in _WECOM_HOSTS):
-        raise ReadError(UNSUPPORTED, "企微文档 Reader 尚未接入")
+        return _infer_wecom(path)
     raise ReadError(INVALID_LINK, "无法识别的资料平台")
+
+
+def _infer_wecom(path: str) -> InferredSource:
+    if path.startswith("/smartsheet/"):
+        kind = "smartsheet"
+    elif path.startswith("/sheet/"):
+        kind = "spreadsheet"
+    elif path.startswith("/doc/"):
+        kind = "document"
+    elif "/smartpage/" in path:
+        kind = "smartpage"
+    else:
+        raise ReadError(INVALID_LINK, "不是企微文档链接")
+    return InferredSource(READER_WECOM, READER_WECOM, kind, "企微文档", True)
 
 
 def _reject_url_credentials(parsed) -> None:
@@ -90,6 +106,16 @@ def validate_tencent_url(url: str, kind: str) -> None:
         raise ReadError(INVALID_LINK, f"不支持的类型:{kind}")
 
 
+def validate_wecom_url(url: str, kind: str) -> None:
+    inferred = infer_source(url)
+    if inferred.reader != READER_WECOM:
+        raise ReadError(INVALID_LINK, "不是企微文档链接")
+    if kind not in _WECOM_KINDS:
+        raise ReadError(INVALID_LINK, f"不支持的类型:{kind}")
+    if kind != inferred.kind:
+        raise ReadError(INVALID_LINK, "不是对应形态的企微文档链接")
+
+
 def _classify_failure(blob: str) -> str:
     low = blob.lower()
     if any(m in low for m in _PERMISSION_MARKERS):
@@ -102,21 +128,7 @@ def _classify_failure(blob: str) -> str:
 READER_TIMEOUT_SECONDS = 30.0
 
 
-def read_tencent_docs(
-    url: str,
-    kind: str,
-    connection: Connection,
-    *,
-    runner=subprocess.run,
-    timeout: float = READER_TIMEOUT_SECONDS,
-) -> str:
-    """真实 Reader 入口：先查连接与链接，再跑外部 cmd，映射三类失败。"""
-    if connection.authorized is False:
-        raise ReadError(PERMISSION, "连接未授权")
-    validate_tencent_url(url, kind)
-    cmd = (connection.cmd or "").strip()
-    if not cmd:
-        raise ReadError(READ_FAILED, "未配置腾讯文档读取命令")
+def _run_url_cmd(cmd: str, url: str, runner, timeout: float) -> str:
     try:
         argv = [part.format(url=url) for part in shlex.split(cmd)]
     except (ValueError, KeyError, IndexError) as exc:
@@ -137,7 +149,195 @@ def read_tencent_docs(
     return body
 
 
+def read_tencent_docs(
+    url: str,
+    kind: str,
+    connection: Connection,
+    *,
+    runner=subprocess.run,
+    timeout: float = READER_TIMEOUT_SECONDS,
+) -> str:
+    """真实 Reader 入口：先查连接与链接，再跑外部 cmd，映射三类失败。"""
+    if connection.authorized is False:
+        raise ReadError(PERMISSION, "连接未授权")
+    validate_tencent_url(url, kind)
+    cmd = (connection.cmd or "").strip()
+    if not cmd:
+        raise ReadError(READ_FAILED, "未配置腾讯文档读取命令")
+    return _run_url_cmd(cmd, url, runner, timeout)
+
+
+def read_wecom_docs(
+    url: str,
+    kind: str,
+    connection: Connection,
+    *,
+    runner=subprocess.run,
+    timeout: float = READER_TIMEOUT_SECONDS,
+) -> str:
+    """企微 Reader：已配 cmd 则与腾讯文档相同；否则走本机 wecom-cli 适配器。"""
+    if connection.authorized is False:
+        raise ReadError(PERMISSION, "连接未授权")
+    validate_wecom_url(url, kind)
+    cmd = (connection.cmd or "").strip()
+    if cmd:
+        return _run_url_cmd(cmd, url, runner, timeout)
+    return _read_wecom_cli(url, kind, runner=runner, timeout=timeout)
+
+
+def _wecom_invoke(runner, args: list[str], timeout: float) -> str:
+    try:
+        proc = runner(
+            ["wecom-cli", *args],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise ReadError(READ_FAILED, "读取超时") from exc
+    except OSError as exc:
+        raise ReadError(READ_FAILED, f"无法启动读取命令:{exc}") from exc
+    stdout = proc.stdout or ""
+    stderr = proc.stderr or ""
+    if proc.returncode != 0:
+        raise ReadError(_classify_failure(stdout + "\n" + stderr), (stderr or stdout).strip() or "读取失败")
+    return stdout
+
+
+def _wecom_json(runner, args: list[str], timeout: float):
+    raw = _wecom_invoke(runner, args, timeout).strip()
+    if not raw:
+        raise ReadError(READ_FAILED, "读取结果为空")
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+
+def _wecom_payload(runner, parts: list[str], payload: dict, timeout: float):
+    return _wecom_json(runner, [*parts, "--json", json.dumps(payload, ensure_ascii=False)], timeout)
+
+
+def _text_from_payload(data) -> str:
+    if isinstance(data, str):
+        text = data.strip()
+        if text:
+            return text
+        raise ReadError(READ_FAILED, "读取结果为空")
+    if not isinstance(data, dict):
+        dumped = json.dumps(data, ensure_ascii=False)
+        if dumped and dumped not in ("{}", "[]", "null"):
+            return dumped
+        raise ReadError(READ_FAILED, "读取结果为空")
+    content = data.get("content")
+    if content:
+        return str(content).strip()
+    path = data.get("file_path") or data.get("content_file_inner")
+    if path:
+        body = Path(str(path)).read_text(encoding="utf-8").strip()
+        if body:
+            return body
+    records = data.get("records")
+    if records:
+        return json.dumps(records, ensure_ascii=False)
+    dumped = json.dumps(data, ensure_ascii=False)
+    if dumped and dumped != "{}":
+        return dumped
+    raise ReadError(READ_FAILED, "读取结果为空")
+
+
+def _require_wecom_auth(runner, timeout: float) -> None:
+    status = _wecom_invoke(runner, ["auth", "show", "--status"], timeout).strip().lower()
+    if "authorized" not in status or "unauthorized" in status:
+        raise ReadError(PERMISSION, "连接未授权")
+
+
+def _read_wecom_cli(url: str, kind: str, *, runner, timeout: float) -> str:
+    _require_wecom_auth(runner, timeout)
+    if kind == "document":
+        data = _wecom_payload(runner, ["doc", "contents", "get"], {"docid": url, "content_type": "markdown"}, timeout)
+        return _text_from_payload(data)
+    if kind == "spreadsheet":
+        return _read_wecom_sheet(url, runner, timeout)
+    if kind == "smartsheet":
+        return _read_wecom_smartsheet(url, runner, timeout)
+    if kind == "smartpage":
+        return _read_wecom_smartpage(url, runner, timeout)
+    raise ReadError(INVALID_LINK, f"不支持的类型:{kind}")
+
+
+def _read_wecom_sheet(url: str, runner, timeout: float) -> str:
+    meta = _wecom_payload(runner, ["sheet", "get"], {"docid": url}, timeout)
+    sheets = meta.get("sheets") if isinstance(meta, dict) else None
+    if not sheets:
+        raise ReadError(READ_FAILED, "读取结果为空")
+    parts: list[str] = []
+    name = meta.get("name") if isinstance(meta, dict) else None
+    if name:
+        parts.append(f"# {name}")
+    for sheet in sheets:
+        sid = sheet.get("sheet_id")
+        title = sheet.get("title") or sid or "sheet"
+        payload = {"docid": url, "mode": "csv"}
+        if sid:
+            payload["sheet_id"] = sid
+        raw = _wecom_payload(runner, ["sheet", "ranges", "get"], payload, timeout)
+        parts.append(f"## {title}\n{_text_from_payload(raw)}")
+    body = "\n\n".join(parts).strip()
+    if not body:
+        raise ReadError(READ_FAILED, "读取结果为空")
+    return body
+
+
+def _read_wecom_smartsheet(url: str, runner, timeout: float) -> str:
+    meta = _wecom_payload(runner, ["smartsheet", "sheets", "list"], {"docid": url}, timeout)
+    sheets = meta.get("sheets") if isinstance(meta, dict) else None
+    if not sheets:
+        raise ReadError(READ_FAILED, "读取结果为空")
+    parts: list[str] = []
+    for sheet in sheets:
+        title = sheet.get("title") or sheet.get("sheet_title") or sheet.get("sheet_id") or "sheet"
+        raw = _wecom_payload(
+            runner,
+            ["smartsheet", "records", "list"],
+            {"docid": url, "sheet_title": title, "limit": 100},
+            timeout,
+        )
+        parts.append(f"## {title}\n{_text_from_payload(raw)}")
+    body = "\n\n".join(parts).strip()
+    if not body:
+        raise ReadError(READ_FAILED, "读取结果为空")
+    return body
+
+
+def _read_wecom_smartpage(url: str, runner, timeout: float) -> str:
+    meta = _wecom_payload(runner, ["smartpage", "pages", "get"], {"docid": url}, timeout)
+    pages = meta.get("pages") if isinstance(meta, dict) else None
+    if not pages:
+        return _text_from_payload(meta)
+    parts: list[str] = []
+    for page in pages:
+        page_id = page.get("page_id")
+        title = page.get("title") or page_id or "page"
+        if not page_id:
+            continue
+        raw = _wecom_payload(
+            runner,
+            ["smartpage", "pages", "get"],
+            {"docid": url, "page_id": page_id, "content_type": "markdown"},
+            timeout,
+        )
+        parts.append(f"# {title}\n{_text_from_payload(raw)}")
+    body = "\n\n".join(parts).strip()
+    if not body:
+        raise ReadError(READ_FAILED, "读取结果为空")
+    return body
+
+
 def read_datasource(url: str, kind: str, reader: str, connection: Connection, **kwargs) -> str:
-    if reader != CONNECTION_TENCENT and reader != "tencent-docs":
-        raise ReadError(READ_FAILED, f"未知 Reader:{reader}")
-    return read_tencent_docs(url, kind, connection, **kwargs)
+    if reader == CONNECTION_TENCENT or reader == "tencent-docs":
+        return read_tencent_docs(url, kind, connection, **kwargs)
+    if reader == READER_WECOM:
+        return read_wecom_docs(url, kind, connection, **kwargs)
+    raise ReadError(READ_FAILED, f"未知 Reader:{reader}")

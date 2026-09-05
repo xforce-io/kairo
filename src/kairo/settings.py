@@ -18,7 +18,7 @@ CONNECTION_NOTION = "notion"
 # id, label, token_env, live
 READER_CATALOG: tuple[tuple[str, str, str, bool], ...] = (
     (CONNECTION_TENCENT, "腾讯文档", "TENCENT_DOCS_TOKEN", True),
-    (CONNECTION_WECOM, "企微文档", "WECOM_TOKEN", False),
+    (CONNECTION_WECOM, "企微文档", "", True),
     (CONNECTION_NOTION, "Notion", "NOTION_TOKEN", False),
 )
 
@@ -105,7 +105,7 @@ def save_settings(doc: SettingsDoc) -> None:
 def as_public_dict(doc: SettingsDoc | None = None) -> dict[str, Any]:
     """对外展示：连接健康不含 token 值。"""
     doc = doc or load_settings()
-    catalog = {cid: (label, live) for cid, label, _env, live in READER_CATALOG}
+    catalog = {cid: (label, live, env) for cid, label, env, live in READER_CATALOG}
     connections = {}
     ordered = [cid for cid, *_ in READER_CATALOG] + [
         name for name in doc.connections if name not in catalog
@@ -114,19 +114,20 @@ def as_public_dict(doc: SettingsDoc | None = None) -> dict[str, Any]:
         conn = doc.connections.get(name)
         if conn is None:
             continue
-        token_present = bool(os.environ.get(conn.token_env or ""))
-        live = catalog.get(name, (name, False))[1]
+        label, live, env = catalog.get(name, (name, False, conn.token_env))
+        token_required = bool(env)
+        token_present = bool(os.environ.get(conn.token_env or env or ""))
         if not live:
             health = "unavailable"
         elif not conn.authorized:
             health = "unauthorized"
-        elif token_present:
+        elif (not token_required) or token_present:
             health = "authorized"
         else:
             health = "missing_token"
         connections[name] = {
             "id": name,
-            "label": catalog.get(name, (name, False))[0],
+            "label": label,
             "live": live,
             "authorized": conn.authorized,
             "token_env": conn.token_env,

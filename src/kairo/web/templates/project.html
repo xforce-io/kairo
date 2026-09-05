@@ -78,7 +78,7 @@
       {% for ds in project.datasources %}
       <li class="obj-row">
         <div>
-          <strong>{% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% else %}{{ ds.reader }}{% endif %}</strong>
+          <strong>{% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}</strong>
           <div class="chooser-id">{{ ds.url }}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</div>
         </div>
         <div class="obj-actions">
