@@ -226,6 +226,9 @@ def _read_saved_file(path: str) -> str:
         raise ReadError(READ_FAILED, f"无法读取落盘内容:{exc}") from exc
 
 
+_BODY_KEYS = ("content", "content_file_inner", "file_path", "records", "grid_data")
+
+
 def _text_from_payload(data) -> str:
     if isinstance(data, str):
         text = data.strip()
@@ -242,8 +245,8 @@ def _text_from_payload(data) -> str:
         nested = content.get("markdown_content") or content.get("text")
         if nested and str(nested).strip():
             return str(nested).strip()
-    elif content and str(content).strip() and not str(content).startswith("{"):
-        return str(content).strip()
+    elif isinstance(content, str) and content.strip():
+        return content.strip()
     inner = data.get("content_file_inner")
     if inner and str(inner).strip():
         return str(inner).strip()
@@ -255,6 +258,8 @@ def _text_from_payload(data) -> str:
     records = data.get("records")
     if records:
         return json.dumps(records, ensure_ascii=False)
+    if any(key in data for key in _BODY_KEYS):
+        raise ReadError(READ_FAILED, "读取结果为空")
     dumped = json.dumps(data, ensure_ascii=False)
     if dumped and dumped != "{}":
         return dumped

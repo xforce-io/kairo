@@ -915,6 +915,48 @@ def test_wecom_smartpage_title_only_is_read_failed():
         assert exc.code == READ_FAILED
 
 
+def test_wecom_empty_payload_fields_are_read_failed():
+    from kairo.readers import READ_FAILED, ReadError, read_datasource
+    from kairo.settings import Connection
+
+    class Proc:
+        def __init__(self, stdout="", returncode=0, stderr=""):
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = returncode
+
+    def _runner_for(kind: str, payload: dict):
+        def runner(argv, **_kwargs):
+            if argv[:3] == ["wecom-cli", "auth", "show"]:
+                return Proc("authorized\n")
+            if kind == "document" and "doc" in argv:
+                return Proc(json.dumps(payload))
+            if kind == "spreadsheet" and argv[1:3] == ["sheet", "get"]:
+                return Proc(json.dumps({"name": "表", "sheets": [{"sheet_id": "sid", "title": "Sheet1"}]}))
+            if kind == "spreadsheet" and argv[1:4] == ["sheet", "ranges", "get"]:
+                return Proc(json.dumps(payload))
+            if kind == "smartsheet" and argv[1:4] == ["smartsheet", "sheets", "list"]:
+                return Proc(json.dumps({"sheets": [{"sheet_id": "s1", "title": "需求"}]}))
+            if kind == "smartsheet" and argv[1:4] == ["smartsheet", "records", "list"]:
+                return Proc(json.dumps(payload))
+            return Proc("unexpected", returncode=1, stderr="no")
+
+        return runner
+
+    conn = Connection(authorized=True, cmd=None, token_env="")
+    cases = (
+        ("https://doc.weixin.qq.com/doc/e3_Empty", "document", {"name": "说明", "content": ""}),
+        ("https://doc.weixin.qq.com/sheet/e3_Empty", "spreadsheet", {"content": ""}),
+        ("https://doc.weixin.qq.com/smartsheet/s3_Empty", "smartsheet", {"records": []}),
+    )
+    for url, kind, payload in cases:
+        try:
+            read_datasource(url, kind, "wecom", conn, runner=_runner_for(kind, payload))
+            raise AssertionError(f"expected read_failed for {kind}")
+        except ReadError as exc:
+            assert exc.code == READ_FAILED
+
+
 def test_wecom_saved_file_missing_is_read_failed(tmp_path):
     from kairo.readers import READ_FAILED, ReadError, read_datasource
     from kairo.settings import Connection
