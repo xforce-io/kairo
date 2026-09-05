@@ -371,3 +371,101 @@ def test_s3_s5_prompt_task_and_legacy(tmp_path, monkeypatch):
     art_html = client.get(f"/projects/{pid}/runs/{rid}")
     assert art_html.status_code == 200
     assert "combined" in art_html.text or "来源" in art_html.text or "Sources" in art_html.text
+
+
+def test_concurrent_first_read_one_pull(tmp_path, monkeypatch):
+    serve, pid, ds_id, counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    env = os.environ.copy()
+    env["KAIRO_SERVE_ROOT"] = str(serve)
+    env["XDG_CONFIG_HOME"] = os.environ["XDG_CONFIG_HOME"]
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-m", "kairo", "datasource", "read", pid, ds_id, "--root", str(serve)],
+            cwd=str(serve),
+            env=env,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(4)
+    ]
+    codes = [p.wait() for p in procs]
+    assert codes == [0, 0, 0, 0]
+    assert _count(counter) == 1
+
+
+def test_concurrent_run_inputs_keep_both_sources(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    from kairo.project_materials import list_context, scratch_dir
+    from kairo.projects import RunRecord, _save_run
+
+    run_id = "run-parallel1"
+    scratch = scratch_dir(serve, pid, run_id)
+    scratch.mkdir(parents=True)
+    catalog = list_context(serve, pid)
+    und = next(i["source_id"] for i in catalog["items"] if i["type"] == "understanding")
+    ds_src = next(i["source_id"] for i in catalog["items"] if i["type"] == "datasource")
+    rec = RunRecord(
+        id=run_id,
+        project_id=pid,
+        task_id="tsk-x",
+        task_name="并",
+        task_version=1,
+        status="running",
+        schema_version=2,
+        mode="agent",
+        scope_topics=["alpha-ws"],
+        scope_datasources=[ds_id],
+        scratch_dir=str(scratch.relative_to(serve)),
+        created_at="2026-09-05T00:00:00+00:00",
+        started_at="2026-09-05T00:00:00+00:00",
+    )
+    _save_run(serve, rec)
+    env = os.environ.copy()
+    env["KAIRO_SERVE_ROOT"] = str(serve)
+    env["XDG_CONFIG_HOME"] = os.environ["XDG_CONFIG_HOME"]
+    procs = []
+    for source in (und, ds_src):
+        procs.append(
+            subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "kairo",
+                    "project",
+                    "read",
+                    pid,
+                    source,
+                    "--run",
+                    run_id,
+                    "--root",
+                    str(serve),
+                ],
+                cwd=str(serve),
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+        )
+    outs = []
+    for p in procs:
+        stdout, _stderr = p.communicate()
+        assert p.returncode == 0, stdout
+        outs.append(json.loads(stdout))
+    ids = {o["input_id"] for o in outs}
+    assert None not in ids and len(ids) == 2
+    index = json.loads((scratch / "index.json").read_text(encoding="utf-8"))
+    assert {i["input_id"] for i in index} == ids
+
+
+def test_cache_bundle_mismatch_is_uncached(tmp_path, monkeypatch):
+    serve, pid, ds_id, counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
+    bundle = serve / ".kairo" / "projects" / pid / "cache" / ds_id / "cache.json"
+    data = json.loads(bundle.read_text(encoding="utf-8"))
+    data["version"] = "deadbeef"
+    bundle.write_text(json.dumps(data), encoding="utf-8")
+    again = _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
+    assert again["ok"] is True
+    assert _count(counter) == 2

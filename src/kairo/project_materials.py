@@ -2,16 +2,17 @@
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
-import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from kairo.projects import (
     DataSource,
@@ -43,8 +44,6 @@ _SOURCE_DIGEST_RE = re.compile(r"^topic:([^:]+):digest:([^:]*):(.+)$")
 _SOURCE_DS_RE = re.compile(r"^datasource:(.+)$")
 
 _clock: Callable[[], datetime] | None = None
-_locks: dict[tuple[str, str], threading.Lock] = {}
-_locks_guard = threading.Lock()
 
 
 def utcnow() -> datetime:
@@ -114,14 +113,16 @@ def _parse_iso(value: str) -> datetime:
     return datetime.fromisoformat(text)
 
 
-def _ds_lock(project_id: str, ds_id: str) -> threading.Lock:
-    key = (project_id, ds_id)
-    with _locks_guard:
-        lock = _locks.get(key)
-        if lock is None:
-            lock = threading.Lock()
-            _locks[key] = lock
-        return lock
+@contextmanager
+def _exclusive_lock(path: Path) -> Iterator[None]:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -175,6 +176,26 @@ class CacheRecord:
 
 def load_cache(serve: Path, project_id: str, ds_id: str) -> CacheRecord | None:
     folder = cache_dir(serve, project_id, ds_id)
+    bundle = folder / "cache.json"
+    if bundle.is_file():
+        try:
+            meta = json.loads(bundle.read_text(encoding="utf-8"))
+            content = str(meta["content"])
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, KeyError, TypeError):
+            return None
+        if content_version(content) != str(meta.get("version") or ""):
+            return None
+        try:
+            return CacheRecord(
+                content=content,
+                fingerprint=str(meta["fingerprint"]),
+                version=str(meta["version"]),
+                fetched_at=str(meta["fetched_at"]),
+                expires_at=str(meta["expires_at"]),
+                bytes=int(meta.get("bytes") or len(content.encode("utf-8"))),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
     meta_path = folder / "meta.json"
     body_path = folder / "body.txt"
     if not meta_path.is_file() or not body_path.is_file():
@@ -183,6 +204,8 @@ def load_cache(serve: Path, project_id: str, ds_id: str) -> CacheRecord | None:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         content = body_path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if content_version(content) != str(meta.get("version") or ""):
         return None
     try:
         return CacheRecord(
@@ -208,15 +231,15 @@ def write_cache(serve: Path, project_id: str, ds: DataSource, content: str) -> C
         bytes=len(content.encode("utf-8")),
     )
     folder = cache_dir(serve, project_id, ds.id)
-    _atomic_text(folder / "body.txt", content)
     _atomic_json(
-        folder / "meta.json",
+        folder / "cache.json",
         {
             "fingerprint": record.fingerprint,
             "version": record.version,
             "fetched_at": record.fetched_at,
             "expires_at": record.expires_at,
             "bytes": record.bytes,
+            "content": record.content,
         },
     )
     return record
@@ -224,10 +247,9 @@ def write_cache(serve: Path, project_id: str, ds: DataSource, content: str) -> C
 
 def drop_cache(serve: Path, project_id: str, ds_id: str) -> None:
     folder = cache_dir(serve, project_id, ds_id)
-    body = folder / "body.txt"
-    meta = folder / "meta.json"
-    body.unlink(missing_ok=True)
-    meta.unlink(missing_ok=True)
+    (folder / "cache.json").unlink(missing_ok=True)
+    (folder / "body.txt").unlink(missing_ok=True)
+    (folder / "meta.json").unlink(missing_ok=True)
 
 
 def cache_status(serve: Path, project: Project, ds: DataSource) -> dict[str, Any]:
@@ -276,7 +298,7 @@ def read_cached_datasource(
     project = get_project(serve, project_id)
     ds = _ds(project, ds_id)
     source_id = f"datasource:{ds.id}"
-    with _ds_lock(project.id, ds.id):
+    with _exclusive_lock(cache_dir(serve, project.id, ds.id) / "lock"):
         return _read_cached_datasource_locked(serve, project, ds, source_id, refresh=refresh)
 
 
@@ -553,35 +575,36 @@ def record_run_input(serve: Path, project_id: str, run_id: str, result: Material
     folder = Path(run.scratch_dir) if run.scratch_dir else scratch_dir(serve, project_id, run_id)
     folder = folder if folder.is_absolute() else Path(serve) / folder
     folder.mkdir(parents=True, exist_ok=True)
-    items = _load_index(folder)
-    for item in items:
-        if item.get("source_id") == result.source_id and item.get("version") == result.version:
-            item["read_count"] = int(item.get("read_count") or 1) + 1
-            _atomic_json(_input_index_path(folder), items)
-            return str(item["input_id"])
-    input_id = f"inp-{uuid.uuid4().hex[:12]}"
-    body_name = f"{input_id}.md"
-    try:
-        _atomic_text(folder / body_name, result.content)
-    except ProjectError:
-        raise
-    except OSError as exc:
-        raise ProjectError(f"读取记录保存失败:{exc}", code="evidence_failed") from exc
-    items.append(
-        {
-            "input_id": input_id,
-            "source_id": result.source_id,
-            "type": result.type,
-            "title": result.title,
-            "url": None if result.type != SOURCE_DATASOURCE else result.source_id,
-            "version": result.version,
-            "read_at": _dt_to_iso(utcnow()),
-            "read_count": 1,
-            "body": body_name,
-        }
-    )
-    _atomic_json(_input_index_path(folder), items)
-    return input_id
+    with _exclusive_lock(folder / "lock"):
+        items = _load_index(folder)
+        for item in items:
+            if item.get("source_id") == result.source_id and item.get("version") == result.version:
+                item["read_count"] = int(item.get("read_count") or 1) + 1
+                _atomic_json(_input_index_path(folder), items)
+                return str(item["input_id"])
+        input_id = f"inp-{uuid.uuid4().hex[:12]}"
+        body_name = f"{input_id}.md"
+        try:
+            _atomic_text(folder / body_name, result.content)
+        except ProjectError:
+            raise
+        except OSError as exc:
+            raise ProjectError(f"读取记录保存失败:{exc}", code="evidence_failed") from exc
+        items.append(
+            {
+                "input_id": input_id,
+                "source_id": result.source_id,
+                "type": result.type,
+                "title": result.title,
+                "url": None if result.type != SOURCE_DATASOURCE else result.source_id,
+                "version": result.version,
+                "read_at": _dt_to_iso(utcnow()),
+                "read_count": 1,
+                "body": body_name,
+            }
+        )
+        _atomic_json(_input_index_path(folder), items)
+        return input_id
 
 
 def load_run_inputs(serve: Path, project_id: str, run_id: str, *, scratch: bool = False) -> list[dict[str, Any]]:
