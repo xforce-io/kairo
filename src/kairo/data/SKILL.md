@@ -166,3 +166,19 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 4. **退出码 2**：stdout 是 JSON 清单（`need-workspace` / `need-bind` / `fork`）。转述给人，问清 Topic，以及新建（`--workspace SLUG --create`）还是绑定已有归档（`--workspace SLUG --bind REF`）。**禁止**自行挑选。
 5. **退出码 1**：转述 stderr，不编造已归档。
 6. 归档成功后**不**自动 `step`。要把该会话折进 understanding，须按铁律单独确认后再 `step`。
+
+## Project 运行（无人值守 Task）
+
+当运行输入给出 **Project 标识、serve root、Run 标识与输出约定** 时，本节覆盖 Topic 铁律里的「先确认再写」：这是已授权的无人值守读取，**不要等待交互确认**，**不要**调用 `step` / `re-step` / `run` / `accept` / `rollback`，**不要写 Topic 或其它 Project**。
+
+1. 先取动态材料目录（不含正文、不拉外部、不触发 digest/fold）：
+   `kairo project context PROJECT_ID --run RUN_ID --root SERVE_ROOT`
+2. 按名称、用途、类型、可用状态与 `read_args` 选择材料。`source_id` 是不透明标识，原样回传。
+3. 按需读取正文：
+   `kairo project read PROJECT_ID SOURCE_ID --run RUN_ID --root SERVE_ROOT`
+   Data Source 显式刷新才加 `--refresh`。
+4. 成功 JSON 含 `content`、`version`、`input_id`。引用材料必须写成 `[标题](input:INPUT_ID)`，只用本次返回的 `input_id`。
+5. `state=unavailable` 表示尚未生成；空目录就是没有材料。不要为了读取去 step。
+6. 未出现在该 Project 目录里的来源不可读。把最终 Markdown 写到约定的 `output_file`（默认 `artifact.md`）。
+
+目录与读取失败时按 JSON `code` 如实处理，不要编造成功正文。

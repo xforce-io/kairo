@@ -48,6 +48,9 @@ class AgentConfig:
     read_dirs: list[Path] = field(
         default_factory=list
     )  # agent 可读目录；provider 不得扩大源目录写权限
+    write_dirs: list[Path] = field(
+        default_factory=list
+    )  # Project 缓存与本 Run 临时读取记录；不得含 serve root / Topic
 
 
 @dataclass
@@ -62,6 +65,7 @@ class AgentProvider(Protocol):
     name: str
     model: str
     supports_read_dirs: bool
+    supports_project_cli: bool
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult: ...
 
@@ -253,6 +257,7 @@ class StubProvider:
     name = "stub"
     model = "stub"
     supports_read_dirs = True
+    supports_project_cli = False
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
@@ -360,6 +365,7 @@ class OpenAICompatibleProvider:
 
     name = "openai"
     supports_read_dirs = False
+    supports_project_cli = False
 
     def __init__(self, *, base_url: str, api_key: str, model: str, client=None) -> None:
         self.base_url = base_url
@@ -557,6 +563,7 @@ class ClaudeCodeProvider:
 
     name = "claude-code"
     supports_read_dirs = True
+    supports_project_cli = False
 
     def __init__(self, model: str = "opus", runner=None) -> None:
         self.model = model
@@ -604,6 +611,7 @@ class CodexProvider:
 
     name = "codex"
     supports_read_dirs = True
+    supports_project_cli = True
 
     def __init__(
         self, model: str = "", reasoning_effort: str = "", runner=None
@@ -631,7 +639,10 @@ class CodexProvider:
             args += ["-m", self.model]
         if self.reasoning_effort.strip():
             args += ["-c", f'model_reasoning_effort="{self.reasoning_effort.strip()}"']
-        # Codex sandbox 本就可读绝对路径；--add-dir 会把源目录升级为可写，禁止使用。
+        # Codex sandbox 本就可读绝对路径；--add-dir 会把目录升级为可写。
+        # 只对 Run 约定的缓存/临时读取目录授写，禁止对 serve root 或 Topic 使用。
+        for extra in config.write_dirs:
+            args += ["--add-dir", str(extra)]
         self._runner(
             "codex",
             args,
@@ -659,6 +670,7 @@ class GrokProvider:
 
     name = "grok"
     supports_read_dirs = False
+    supports_project_cli = False
 
     def __init__(self, model: str = "", runner=None) -> None:
         self.model = model

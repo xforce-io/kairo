@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ payload.title or payload.input_id }}{% endblock %}
+{% block body %}
+<p class="artifact-back"><a href="/projects/{{ project.id }}/runs/{{ run.id }}">{{ t('art.back') }}</a></p>
+<article class="doc">
+  <p class="doc-kicker"><span class="dk-title">{{ payload.title or payload.source_id }}</span></p>
+  <p class="meta-hint">{{ payload.input_id }} · {{ payload.version }} · {{ payload.read_at }}</p>
+  {{ body_html | safe }}
+</article>
+{% endblock %}

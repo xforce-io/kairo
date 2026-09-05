@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ t('proj.datasources') }}{% endblock %}
+{% block body %}
+<p class="artifact-back"><a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
+{% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
+{% if payload %}
+<article class="doc">
+  <p class="doc-kicker"><span class="dk-title">{{ payload.url }}</span></p>
+  <p class="meta-hint">
+    {% if payload.state == 'fresh' %}{{ t('proj.cache_fresh') }}{% else %}{{ t('proj.cache_expired') }}{% endif %}
+    · {{ payload.fetched_at }} → {{ payload.expires_at }}
+    {% if payload.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
+  </p>
+  <pre class="doc">{{ payload.content }}</pre>
+</article>
+<form method="post" action="/projects/{{ project.id }}/datasources/{{ ds_id }}/read">
+  <input type="hidden" name="refresh" value="1">
+  <button class="btn btn-ghost btn-inline">{{ t('proj.refresh') }}</button>
+</form>
+{% else %}
+<p class="panel-hint">{{ t('proj.cache_none') }}</p>
+<form method="post" action="/projects/{{ project.id }}/datasources/{{ ds_id }}/read">
+  <button class="btn btn-step btn-inline">{{ t('proj.read') }}</button>
+</form>
+{% endif %}
+{% endblock %}

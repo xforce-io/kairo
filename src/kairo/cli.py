@@ -1495,10 +1495,17 @@ def datasource_add(
     _dump(as_json, ds.model_dump())
 
 
+def _cli_fail(as_json: bool, exc: Exception) -> None:
+    payload = {"ok": False, "code": getattr(exc, "code", "error"), "error": str(exc)}
+    _dump(as_json, payload)
+    raise typer.Exit(1) from None
+
+
 @datasource_app.command("read")
 def datasource_read_cmd(
     project_id: str = typer.Argument(...),
     ds_id: str = typer.Argument(...),
+    refresh: bool = typer.Option(False, "--refresh"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
@@ -1506,12 +1513,21 @@ def datasource_read_cmd(
     from kairo.readers import ReadError
 
     try:
-        text = read_project_datasource(_cli_root(root), project_id, ds_id)
+        result = read_project_datasource(_cli_root(root), project_id, ds_id, refresh=refresh)
     except (ProjectError, ReadError) as e:
-        payload = {"ok": False, "code": getattr(e, "code", "error"), "error": str(e)}
-        _dump(as_json, payload)
-        raise typer.Exit(1) from None
-    _dump(as_json, {"ok": True, "content": text})
+        _cli_fail(as_json, e)
+    _dump(
+        as_json,
+        {
+            "ok": True,
+            "content": result.content,
+            "source_id": result.source_id,
+            "version": result.version,
+            "fetched_at": result.fetched_at,
+            "expires_at": result.expires_at,
+            "state": result.state,
+        },
+    )
 
 
 @datasource_app.command("rm")
@@ -1534,7 +1550,9 @@ def datasource_rm(
 def task_create_cmd(
     project_id: str = typer.Argument(...),
     name: str = typer.Option(..., "--name"),
-    datasource_id: str = typer.Option(..., "--datasource"),
+    datasource_id: str = typer.Option(None, "--datasource"),
+    prompt: str = typer.Option(None, "--prompt"),
+    prompt_file: Path = typer.Option(None, "--prompt-file"),
     schedule: str = typer.Option("once", "--schedule"),
     interval_hours: int = typer.Option(None, "--interval-hours"),
     root: Path = typer.Option(None, "--root", "-r"),
@@ -1542,12 +1560,26 @@ def task_create_cmd(
 ) -> None:
     from kairo.projects import ProjectError, create_task
 
+    if prompt is not None and prompt_file is not None:
+        typer.secho("--prompt 与 --prompt-file 互斥", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    prompt_text = prompt
+    if prompt_file is not None:
+        try:
+            prompt_text = prompt_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            raise typer.Exit(1) from None
+    if datasource_id and prompt_text is not None:
+        typer.secho("--datasource 与 prompt 互斥", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
     try:
         task = create_task(
             _cli_root(root),
             project_id,
             name=name,
             datasource_id=datasource_id,
+            prompt=prompt_text,
             schedule=schedule,
             interval_hours=interval_hours,
         )
@@ -1564,11 +1596,19 @@ def task_edit_cmd(
     name: str = typer.Option(None, "--name"),
     schedule: str = typer.Option(None, "--schedule"),
     enabled: bool = typer.Option(None, "--enabled/--disabled"),
+    prompt: str = typer.Option(None, "--prompt"),
+    prompt_file: Path = typer.Option(None, "--prompt-file"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
     from kairo.projects import ProjectError, edit_task
 
+    if prompt is not None and prompt_file is not None:
+        typer.secho("--prompt 与 --prompt-file 互斥", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    prompt_text = prompt
+    if prompt_file is not None:
+        prompt_text = prompt_file.read_text(encoding="utf-8")
     try:
         task = edit_task(
             _cli_root(root),
@@ -1577,6 +1617,7 @@ def task_edit_cmd(
             name=name,
             schedule=schedule,
             enabled=enabled,
+            prompt=prompt_text,
         )
     except ProjectError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
@@ -1644,13 +1685,83 @@ def artifact_show(
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
+    from kairo.project_materials import load_run_inputs
     from kairo.projects import ProjectError, get_run, read_artifact
 
     serve = _cli_root(root)
     try:
         run = get_run(serve, project_id, run_id)
         body = read_artifact(serve, project_id, run_id)
+        inputs = load_run_inputs(serve, project_id, run_id)
     except ProjectError as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
-    _dump(as_json, {"run": run.model_dump(), "artifact": body})
+    _dump(as_json, {"run": run.model_dump(), "artifact": body, "inputs": inputs})
+
+
+@project_app.command("context")
+def project_context_cmd(
+    project_id: str = typer.Argument(...),
+    run_id: str = typer.Option(None, "--run"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_materials import list_context
+    from kairo.projects import ProjectError
+
+    try:
+        payload = list_context(_cli_root(root), project_id, run_id=run_id)
+    except ProjectError as e:
+        _cli_fail(as_json, e)
+    _dump(as_json, payload)
+
+
+@project_app.command("read")
+def project_read_cmd(
+    project_id: str = typer.Argument(...),
+    source_id: str = typer.Argument(...),
+    run_id: str = typer.Option(None, "--run"),
+    refresh: bool = typer.Option(False, "--refresh"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_materials import read_material
+    from kairo.projects import ProjectError
+    from kairo.readers import ReadError
+
+    try:
+        result = read_material(
+            _cli_root(root), project_id, source_id, run_id=run_id, refresh=refresh
+        )
+    except (ProjectError, ReadError) as e:
+        _cli_fail(as_json, e)
+    _dump(
+        as_json,
+        {
+            "ok": True,
+            "source_id": result.source_id,
+            "content": result.content,
+            "version": result.version,
+            "fetched_at": result.fetched_at,
+            "expires_at": result.expires_at,
+            "input_id": result.input_id,
+        },
+    )
+
+
+@project_app.command("input")
+def project_input_cmd(
+    project_id: str = typer.Argument(...),
+    run_id: str = typer.Argument(...),
+    input_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_materials import read_run_input
+    from kairo.projects import ProjectError
+
+    try:
+        payload = read_run_input(_cli_root(root), project_id, run_id, input_id)
+    except ProjectError as e:
+        _cli_fail(as_json, e)
+    _dump(as_json, payload)

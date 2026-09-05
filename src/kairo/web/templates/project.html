@@ -80,8 +80,16 @@
         <div>
           <strong>{% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}</strong>
           <div class="chooser-id">{{ ds.url }}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</div>
+          {% set st = ds_status.get(ds.id) if ds_status is defined else None %}
+          <div class="meta-hint">
+            {% if st and st.state == 'fresh' %}{{ t('proj.cache_fresh') }} · {{ st.fetched_at }} → {{ st.expires_at }}
+            {% elif st and st.state == 'expired' %}{{ t('proj.cache_expired') }} · {{ st.fetched_at }}
+            {% else %}{{ t('proj.cache_none') }}{% endif %}
+            {% if st and st.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
+          </div>
         </div>
         <div class="obj-actions">
+          <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/datasources/{{ ds.id }}">{{ t('proj.open_body') }}</a>
           <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/read">
             <button class="btn btn-ghost btn-inline">{{ t('proj.read') }}</button>
           </form>
@@ -108,7 +116,9 @@
     <ul class="obj-list">
       {% for task in project.tasks %}
       <li class="obj-row">
-        <div>{{ task.name }} · v{{ task.version }} · {{ task.schedule }}</div>
+        <div>{{ task.name }} · v{{ task.version }} · {{ task.schedule }}
+          {% if task.mode == 'source_snapshot' %} · {{ t('proj.legacy_task') }}{% endif %}
+        </div>
         <form method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}/run">
           <button class="btn btn-step btn-inline">{{ t('proj.run') }}</button>
         </form>
@@ -118,14 +128,12 @@
     {% else %}
     <p class="panel-hint">{{ t('proj.task_empty') }}</p>
     {% endif %}
-    {% if project.datasources %}
     <form class="obj-add" method="post" action="/projects/{{ project.id }}/tasks">
       <input name="name" placeholder="{{ t('proj.name_ph') }}" required>
-      <select name="datasource_id">{% for ds in project.datasources %}<option value="{{ ds.id }}">{{ ds.url }}</option>{% endfor %}</select>
+      <textarea name="prompt" rows="4" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}"></textarea>
       <select name="schedule"><option value="once">once</option><option value="interval">interval</option></select>
       <button class="btn btn-step btn-inline">{{ t('proj.create_task') }}</button>
     </form>
-    {% endif %}
   </section>
 
   <section class="obj-block">
@@ -137,9 +145,7 @@
         <div>{{ run.status }} · {{ run.task_name }} v{{ run.task_version }}
           {% if run.status != 'succeeded' %} · {{ run.reason }}{% endif %}
         </div>
-        {% if run.status == 'succeeded' %}
-        <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ run.id }}">Artifact</a>
-        {% endif %}
+        <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ run.id }}">{% if run.status == 'succeeded' %}Artifact{% else %}{{ t('proj.run') }}{% endif %}</a>
       </li>
       {% endfor %}
     </ul>

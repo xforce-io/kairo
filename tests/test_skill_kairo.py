@@ -65,6 +65,19 @@ def test_claude_skill_is_symlink_to_canonical():
     assert (CLAUDE_SKILL_LINK / "SKILL.md").resolve() == PACKAGED_SKILL.resolve()
 
 
+def test_skill_covers_project_run_cli():
+    text = _skill_text()
+    for needle in (
+        "kairo project context",
+        "kairo project read",
+        "input:",
+        "不要等待交互确认",
+        "Project 运行",
+    ):
+        assert needle in text, f"skill must mention {needle!r}"
+    assert "step" in text
+
+
 def test_skill_covers_discovery_status_and_understanding():
     text = _skill_text()
     for needle in (
