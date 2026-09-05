@@ -18,11 +18,14 @@ from typer.testing import CliRunner
 from kairo.cli import app
 from kairo.project_materials import (
     CACHE_TTL,
+    cache_status,
     content_version,
     is_fresh,
     parse_source_id,
+    peek_datasource_content,
     set_clock,
 )
+from kairo.projects import ProjectError, get_project
 from kairo.provider import AgentConfig, AgentResult
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -485,3 +488,68 @@ def test_cache_bundle_mismatch_is_uncached(tmp_path, monkeypatch):
     again = _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
     assert again["ok"] is True
     assert _count(counter) == 2
+
+
+def test_uncached_cache_status_exposes_content_none(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    project = get_project(serve, pid)
+    ds = next(item for item in project.datasources if item.id == ds_id)
+    status = cache_status(serve, project, ds)
+    assert status["state"] == "uncached"
+    assert status["content"] is None
+    try:
+        peek_datasource_content(serve, pid, ds_id)
+    except ProjectError as exc:
+        assert exc.code == "cache_missing"
+    else:
+        raise AssertionError("expected cache_missing")
+
+
+def test_uncached_body_page_and_content_api_do_not_call_reader(tmp_path, monkeypatch):
+    serve, pid, ds_id, counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    before = _count(counter)
+    client = TestClient(create_app(serve))
+    page = client.get(f"/projects/{pid}/datasources/{ds_id}")
+    assert page.status_code == 200
+    assert "Not read yet" in page.text or "尚未读取" in page.text
+    assert 'name="refresh"' not in page.text
+    api = client.get(f"/api/projects/{pid}/datasources/{ds_id}/content")
+    assert api.status_code == 404
+    payload = api.json()
+    assert payload["ok"] is False
+    assert payload["code"] == "cache_missing"
+    assert _count(counter) == before
+
+
+def test_first_read_failure_then_retry_succeeds(tmp_path, monkeypatch):
+    serve, pid, ds_id, counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    boom = _stub_cmd(tmp_path / "boom-first.py", "", counter, code=2)
+    _load(_cli(["settings", "set", "connections.tencent-docs.cmd", boom], serve, monkeypatch))
+    client = TestClient(create_app(serve))
+    failed = client.post(f"/projects/{pid}/datasources/{ds_id}/read")
+    assert failed.status_code == 200
+    assert "Internal Server Error" not in failed.text
+    assert "read_failed" in failed.text
+    assert "Not read yet" in failed.text or "尚未读取" in failed.text
+    ok = _stub_cmd(tmp_path / "ok-retry.py", "recovered-body\n", counter)
+    _load(_cli(["settings", "set", "connections.tencent-docs.cmd", ok], serve, monkeypatch))
+    recovered = client.post(f"/projects/{pid}/datasources/{ds_id}/read", follow_redirects=True)
+    assert recovered.status_code == 200
+    assert "recovered-body" in recovered.text
+
+
+def test_refresh_failure_keeps_old_body_on_page(tmp_path, monkeypatch):
+    serve, pid, ds_id, counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
+    boom = _stub_cmd(tmp_path / "boom-refresh.py", "", counter, code=2)
+    _load(_cli(["settings", "set", "connections.tencent-docs.cmd", boom], serve, monkeypatch))
+    client = TestClient(create_app(serve))
+    failed = client.post(
+        f"/projects/{pid}/datasources/{ds_id}/read",
+        data={"refresh": "1"},
+    )
+    assert failed.status_code == 200
+    assert "solar,80" in failed.text
+    assert "read_failed" in failed.text
+    assert "Reusable" in failed.text or "可复用" in failed.text
+    assert "Not read yet" not in failed.text and "尚未读取" not in failed.text
