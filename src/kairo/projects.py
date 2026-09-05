@@ -372,6 +372,8 @@ def create_task(
         raise ProjectError("Task 名称不能为空", code="invalid_request")
     if schedule not in ("once", "interval"):
         raise ProjectError(f"未知 schedule:{schedule}", code="invalid_request")
+    if schedule == "interval":
+        raise ProjectError("周期调度尚未提供，请使用手动触发", code="unsupported_schedule")
     project = get_project(serve, project_id)
     ds_id = (datasource_id or "").strip()
     if ds_id and prompt is not None:
@@ -435,6 +437,8 @@ def edit_task(
     if schedule is not None:
         if schedule not in ("once", "interval"):
             raise ProjectError(f"未知 schedule:{schedule}", code="invalid_request")
+        if schedule == "interval" and task.schedule != "interval":
+            raise ProjectError("周期调度尚未提供，请使用手动触发", code="unsupported_schedule")
         task.schedule = schedule
         changed = True
     if interval_hours is not None:

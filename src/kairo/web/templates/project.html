@@ -22,7 +22,7 @@
     <ul class="obj-list">
       {% for task in project.tasks %}
       <li class="obj-row">
-        <div>{{ task.name }} · v{{ task.version }} · {{ task.schedule }}
+        <div>{{ task.name }} · v{{ task.version }}{% if task.schedule == 'interval' %} · {{ t('proj.schedule_manual') }}{% endif %}
           {% if task.mode == 'source_snapshot' %} · {{ t('proj.legacy_task') }}{% endif %}
         </div>
         <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/tasks/{{ task.id }}">{{ t('proj.open_task') }}</a>
@@ -38,10 +38,7 @@
     <form class="task-create" method="post" action="/projects/{{ project.id }}/tasks">
       <div class="task-create-bar">
         <input name="name" value="{{ task_draft.get('name', '') }}" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
-        <select name="schedule" aria-label="{{ t('proj.tasks') }}">
-          <option value="once">once</option>
-          <option value="interval">interval</option>
-        </select>
+        <input type="hidden" name="schedule" value="once">
       </div>
       <textarea name="prompt" rows="5" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}">{{ task_draft.get('prompt', '') }}</textarea>
       <div class="task-create-submit">

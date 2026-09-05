@@ -2930,6 +2930,7 @@ _PROJECT_HTTP = {
     "evidence_failed": 500,
     "material_too_large": 413,
     "unsupported_run": 400,
+    "unsupported_schedule": 400,
     "provider_unsupported": 400,
     "empty_artifact": 400,
     "invalid_input_ref": 400,
