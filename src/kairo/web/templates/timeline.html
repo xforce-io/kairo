@@ -41,7 +41,7 @@
   <div class="timeline-list">
     {% for g in recent_groups %}
     <section class="tl-day">
-      <div class="tl-day-head"><h2>{{ g.key }}</h2><span class="count">{{ g.entries|length }}</span></div>
+      <div class="tl-day-head"><h2>{% if g.key %}{{ g.key }}{% else %}{{ t('tl.src_unknown') }}{% endif %}</h2><span class="count">{{ g.entries|length }}</span></div>
       {% for it in g.entries %}
       {{ tl_row(it, extra_meta=t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) ~ ' · ' ~ (t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) if it.occurred_at else t('tl.occurred_unknown'))) }}
       {% endfor %}

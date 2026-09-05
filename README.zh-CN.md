@@ -65,7 +65,7 @@ kairo add 截图.png --to <ref_id> --copy    # 向既有 Ref 追加形态
 | `include set` | 设置 Topic 的包含规则（命中任一 Tag 即成为成员） |
 | `title` | 重命名参考展示名（不动 id / 目录） |
 | `occurred` | 修正或清空参考发生时间（`--clear`；不改 id、不 step） |
-| `timeline` | 跨 Topic 按发生日列出观测（`--day` / `--recent` / `--json`） |
+| `timeline` | 跨 Topic 按发生日列出观测（`--day` / `--recent` 列表别名 / `--json`） |
 | `step` | 跑调和循环到收敛（在 Topic 目录内；自动选择可读取材料的 provider，顺序见下文） |
 | `run` | 有终态 blocked 则先清再 step（与 Web 主按钮一致） |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |

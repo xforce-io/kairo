@@ -45,6 +45,7 @@ from kairo.timeline import (
     MAX_RANGE_DAYS,
     filter_range,
     format_cli_timeline,
+    group_by_occurred,
     item_as_json,
     parse_calendar_date,
     scan_timeline,
@@ -477,13 +478,13 @@ def timeline(
         help="含多个 workspace 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd",
     ),
     day: str = typer.Option(None, "--day", help="只列出该发生日"),
-    recent: bool = typer.Option(False, "--recent", help="按录入时间倒序"),
+    recent: bool = typer.Option(False, "--recent", help="按发生日列出（兼容别名）"),
     from_day: str = typer.Option(None, "--from", help="区间起(发生日)"),
     to_day: str = typer.Option(None, "--to", help="区间止(发生日)"),
     as_json: bool = typer.Option(False, "--json", help="JSON 输出"),
     tags: list[str] = typer.Option(None, "--tag", help="按 Tag 筛选,可重复;多 Tag 为 AND"),
 ) -> None:
-    """跨 Topic 按发生日列出全部可访问 Ref;--recent 按录入时间。"""
+    """跨 Topic 按发生日列出全部可访问 Ref;--recent 与默认相同。"""
     if day and recent:
         typer.secho("--day 与 --recent 互斥", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
@@ -523,7 +524,7 @@ def timeline(
         if parsed is not None:
             items = [it for it in items if it.occurred_at == parsed]
         if recent:
-            items = sorted(items, key=lambda it: it.added_at, reverse=True)
+            items = [it for g in group_by_occurred(items) for it in g["entries"]]
         typer.echo(json.dumps([item_as_json(it) for it in items], ensure_ascii=False))
         return
     typer.echo(format_cli_timeline(items, recent=recent, day=parsed), nl=False)

@@ -65,7 +65,7 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 | `include set` | Set Topic's include rules (Ref becomes member if it matches any Tag) |
 | `title` | Rename a reference's display title (id / directory unchanged) |
 | `occurred` | Set or clear a reference's occurred date (`--clear`; does not change id or run step) |
-| `timeline` | List fold observations across Topics by occurred date (`--day` / `--recent` / `--json`) |
+| `timeline` | List fold observations across Topics by occurred date (`--day` / `--recent` list alias / `--json`) |
 | `step` | Run the reconciliation loop to convergence (in Topic directory; material-capable auto provider; selection details below) |
 | `run` | Clear terminal blocked then step (same as Web primary button) |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
