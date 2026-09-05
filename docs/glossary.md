@@ -59,4 +59,4 @@
 | 企微文档 | 企业微信文档平台 Reader，覆盖在线文档、在线表格、智能表格、智能文档。 | 微信文档、企微表格 |
 | Task | Project 内可编辑的工作定义，一次性或按规则触发。 | 作业、流水线 |
 | Run | 一次 Task 触发的不可变记录，冻结当时 Task 版本与输入。 | 执行、job |
-| Artifact | 成功 Run 产生的可阅读正文，追溯到该 Run、当时 Task 版本与输入 Data Source。 | 报告、产物文档 |
+| Artifact | 成功 Run 产生的可阅读正文，追溯到该 Run、当时 Task 版本与实际输入材料（Topic 或 Data Source）。 | 报告、产物文档 |
