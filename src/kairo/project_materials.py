@@ -262,6 +262,7 @@ def cache_status(serve: Path, project: Project, ds: DataSource) -> dict[str, Any
             "expires_at": None,
             "bytes": None,
             "authorized": bool(get_connection(ds.connection_id).authorized),
+            "content": None,
         }
     usable = cached.fingerprint == config_fingerprint(ds)
     return {
