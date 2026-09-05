@@ -743,10 +743,10 @@ def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
             status_code=409,
             detail="请先在 Settings 创建同名 Tag，再新建 Topic。",
         )
+    from kairo.refs import set_include_tags
+
     ws = Workspace.init(dest, topic=topic)
-    constitution = ws.constitution
-    constitution.include_tags = []
-    ws.write_constitution(constitution)
+    set_include_tags(root, ws.root.name, [topic])
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
 
@@ -880,12 +880,10 @@ def global_ref_view(
 ) -> HTMLResponse:
     from kairo.refs import (
         RefError,
-        list_all_refs,
         list_tags,
-        list_topic_slugs,
-        open_topic,
+        ref_tags,
+        related_topics_for_ref,
         resolve_open,
-        topic_members,
     )
 
     home = "" if home == "global" else home
@@ -896,28 +894,18 @@ def global_ref_view(
     _require_public_ref(request, home, rid)
     man = ws.read_manifest(rid)
     serve = _serve(request)
-    rec = next(
-        (r for r in list_all_refs(serve) if r.home == home and r.id == rid),
-        None,
-    )
-    related_topics = []
-    public_slugs = None
+    tags = ref_tags(serve, home, rid)
+    related_topics = related_topics_for_ref(serve, home, rid)
     if _is_public_read(request):
         bounds = _public_bounds(request)
         public_slugs = bounds[0] if bounds is not None else set()
-    if rec is not None:
-        for slug in list_topic_slugs(serve):
-            if public_slugs is not None and slug not in public_slugs:
-                continue
-            try:
-                if any(member.key == rec.key for member in topic_members(serve, slug)):
-                    related_topics.append(
-                        {"slug": slug, "title": open_topic(serve, slug).constitution.topic}
-                    )
-            except RefError:
-                continue
+        related_topics = [topic for topic in related_topics if topic["slug"] in public_slugs]
     digest = ws.references_dir() / rid / "digest.md"
     t = _t(request)
+    occ, _occ_src = effective_occurred(rid, man.occurred_at)
+    occurred_display = (
+        t("tl.occurred_on").format(d=occ.isoformat()) if occ is not None else t("ref.occurred_unknown")
+    )
     forms = [f for f in _ref_forms(ws, rid, man, t) if f["role"] != "digest"]
     digest_html = (
         render_markdown(digest.read_text(encoding="utf-8"), slug=ws.root.name)
@@ -929,14 +917,13 @@ def global_ref_view(
         "global_ref.html",
         {
             "nav_active": "timeline",
-            "ref": rec,
             "title": man.title or rid,
             "ref_id": rid,
-            "home": home or "global",
-            "tags": rec.tags if rec is not None else [],
+            "tags": tags,
             "tag_catalog": list_tags(serve),
             "home": home,
             "related_topics": related_topics,
+            "occurred_display": occurred_display,
             "digest_html": digest_html,
             "forms": forms,
             "back_url": back if back.startswith("/timeline") else "/timeline",

@@ -155,7 +155,37 @@ def test_create_workspace(tmp_path):
     assert r.headers.get("HX-Redirect") == "/w/" + quote("产品规划")
     ws = Workspace.open(tmp_path / "产品规划")
     assert ws.constitution.topic == "产品规划"
-    assert ws.constitution.include_tags == []
+    assert ws.constitution.include_tags == ["产品规划"]
+
+
+def test_create_workspace_locks_topic_name_include_tag(tmp_path):
+    from urllib.parse import quote
+
+    from kairo.refs import create_tag, include_tags_of, topic_members
+
+    create_tag(tmp_path, "产品规划")
+    create_tag(tmp_path, "extra")
+    client = _client(tmp_path)
+    created = client.post("/workspaces", data={"topic": "产品规划"})
+    assert created.status_code == 200
+    slug = quote("产品规划")
+    ws = Workspace.open(tmp_path / "产品规划")
+    assert include_tags_of(ws) == ["产品规划"]
+
+    only_extra = client.post(f"/w/{slug}/include-tags", data={"tag": ["extra"]})
+    assert only_extra.status_code == 200
+    assert include_tags_of(Workspace.open(tmp_path / "产品规划")) == ["产品规划", "extra"]
+
+    emptied = client.put(f"/api/topics/{slug}/include", json={"include_tags": []}).json()
+    assert emptied["include_tags"] == ["产品规划"]
+    assert "extra" not in emptied["include_tags"]
+
+    src = tmp_path / "orphan.txt"
+    src.write_text("orphan")
+    from kairo.refs import add_global_ref
+
+    add_global_ref(tmp_path, [src], ref_id="untagged-note", copy=True)
+    assert all(m.id != "untagged-note" for m in topic_members(tmp_path, "产品规划"))
 
 
 def test_create_workspace_requires_same_named_tag(tmp_path):

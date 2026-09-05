@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -91,7 +92,7 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
 
     monkeypatch.chdir(topic_a.root)
     included = _load(_cli(["include", "set", "energy", "--json"], topic_a.root, monkeypatch))
-    assert included["include_tags"] == ["energy"]
+    assert included["include_tags"] == ["综合能源研究", "energy"]
     members = topic_members(serve, "energy")
     assert {m.id for m in members} == {"loose-note"}
     assert all(m.dir != home_dir or m.id != "loose-note" for m in members)
@@ -121,7 +122,7 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
 
     inc = client.get("/api/topics/energy/include").json()
     assert inc["ok"] is True
-    assert inc["include_tags"] == ["energy"]
+    assert inc["include_tags"] == ["综合能源研究", "energy"]
     assert {m["id"] for m in inc["members"]} == {"loose-note"}
 
     dash = client.get("/")
@@ -162,7 +163,7 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
     assert "Topics" in proj.text
 
     cleared = client.put("/api/topics/energy/include", json={"include_tags": []}).json()
-    assert cleared["include_tags"] == []
+    assert cleared["include_tags"] == ["综合能源研究"]
     assert cleared["members"] == []
     assert understanding.is_file()
     assert global_dir.is_dir()
@@ -184,6 +185,53 @@ def test_corpus_appears_on_timeline(tmp_path):
 
     ids = {it.id for it in scan_timeline(root)}
     assert "base" in ids
+
+
+def test_global_ref_related_topics_without_full_catalog_scan(tmp_path, monkeypatch):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    Workspace.init(serve / "alpha", topic="alpha")
+    Workspace.init(serve / "beta", topic="beta")
+    Workspace.init(serve / "gamma", topic="gamma")
+    create_tag(serve, "alpha")
+    create_tag(serve, "beta")
+    create_tag(serve, "noise")
+    set_include_tags(serve, "alpha", ["alpha"])
+    set_include_tags(serve, "beta", ["beta"])
+    set_include_tags(serve, "gamma", ["noise"])
+
+    hit = tmp_path / "hit.txt"
+    hit.write_text("hit", encoding="utf-8")
+    add_global_ref(serve, [hit], ref_id="target-ref", title="Target", copy=True)
+    add_tag(serve, home="", ref_id="target-ref", tag="alpha")
+
+    for i in range(8):
+        noise = tmp_path / f"n{i}.txt"
+        noise.write_text("n", encoding="utf-8")
+        rid = add_global_ref(serve, [noise], ref_id=f"other-{i}", copy=True)
+        add_tag(serve, home="", ref_id=rid, tag="noise")
+
+    orphan_src = tmp_path / "orphan.txt"
+    orphan_src.write_text("o", encoding="utf-8")
+    add_global_ref(serve, [orphan_src], ref_id="orphan-ref", copy=True)
+    assert all(m.id != "orphan-ref" for m in topic_members(serve, "alpha"))
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("must not enumerate all refs")
+
+    monkeypatch.setattr("kairo.refs.list_all_refs", boom)
+    monkeypatch.setattr("kairo.refs.topic_members", boom)
+
+    page = TestClient(create_app(serve)).get("/refs/target-ref")
+    assert page.status_code == 200
+    related = re.search(r'<ul class="ref-topic-list">([\s\S]*?)</ul>', page.text)
+    assert related is not None, page.text
+    body = related.group(1)
+    assert "alpha" in body
+    assert 'href="/topics/alpha"' in body
+    assert 'href="/topics/beta"' not in body
+    assert 'href="/topics/gamma"' not in body
+    assert "gamma" not in body
 
 
 def test_untagged_global_ref_not_in_topic(tmp_path):
@@ -320,7 +368,7 @@ def test_tag_vocabulary_delete_protection_and_strict_migration(tmp_path):
     migrated = migrate_tag_rules(serve, evidence)
     assert migrated["dry_run"] is False
     assert {item.id for item in topic_members(serve, "energy")} == {rid}
-    assert Workspace.open(serve / "energy").constitution.include_tags == ["政策"]
+    assert Workspace.open(serve / "energy").constitution.include_tags == ["能源", "政策"]
     migrated_state = Workspace.open(serve / "energy").read_state()
     assert migrated_state.targets["understanding.md"].folded == {"energy/local": "digest-hash"}
     assert migrated_state.targets["understanding.md"].last_major_folded == {"energy/local": "digest-hash"}

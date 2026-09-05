@@ -1141,6 +1141,7 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .ref-back { display: inline-block; margin-bottom: 24px; color: var(--pine-deep); font-size: 13px; font-weight: 500; text-decoration: none; }
 .ref-head { padding-bottom: 22px; border-bottom: 1px solid var(--line); }
 .ref-head h1 { margin: 5px 0; font-family: var(--serif); font-size: 30px; font-weight: 600; }
+.ref-occurred { margin: 0 0 6px; color: var(--muted); font-size: 14px; }
 .ref-id { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 .ref-section { padding: 20px 0; border-bottom: 1px solid var(--line); }
 .ref-section h2 { margin: 0 0 10px; font-family: var(--serif); font-size: 19px; font-weight: 600; }

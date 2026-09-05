@@ -598,17 +598,51 @@ def include_tags_of(ws: Workspace) -> list[str] | None:
     return ws.constitution.include_tags
 
 
+def topic_name_tag(ws: Workspace) -> str:
+    return _normalize_tag(ws.constitution.topic)
+
+
+def ref_tags(serve: Path, home: str, ref_id: str) -> list[str]:
+    catalog = load_catalog(serve)
+    return list((catalog.get("assignments") or {}).get(ref_key(home, ref_id), []))
+
+
+def related_topics_for_ref(serve: Path, home: str, ref_id: str) -> list[dict[str, str]]:
+    """Topics whose stored include rules intersect this Ref's Tags.
+
+    Reads catalog assignments and each Topic constitution only. Does not
+    enumerate other Refs or compute Topic member lists.
+    """
+    tags = set(ref_tags(serve, home, ref_id))
+    if not tags:
+        return []
+    out: list[dict[str, str]] = []
+    for slug in list_topic_slugs(serve):
+        try:
+            ws = open_topic(serve, slug)
+        except RefError:
+            continue
+        con = ws.constitution
+        rules = set(con.include_tags or [])
+        if tags.intersection(rules):
+            out.append({"slug": slug, "title": con.topic})
+    return out
+
+
 def set_include_tags(serve: Path, slug: str, tags: list[str] | None) -> list[str]:
     ws = open_topic(serve, slug)
     con = ws.constitution
     catalog = load_catalog(serve)
-    cleaned: list[str] = []
+    name = topic_name_tag(ws)
+    cleaned: list[str] = [name]
     for raw in tags or []:
-        name = _normalize_tag(raw)
-        if name not in catalog["tags"]:
-            raise RefError(f"Tag 不在词表中:{name}")
-        if name not in cleaned:
-            cleaned.append(name)
+        extra = _normalize_tag(raw)
+        if extra == name:
+            continue
+        if extra not in catalog["tags"]:
+            raise RefError(f"Tag 不在词表中:{extra}")
+        if extra not in cleaned:
+            cleaned.append(extra)
     con.include_tags = cleaned
     ws.write_constitution(con)
     return con.include_tags
