@@ -324,7 +324,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert read_api["ok"] is True
     task_api = client.post(
         f"/api/projects/{pid}/tasks",
-        json={"name": "风险清单", "datasource_id": ds2["datasource"]["id"], "schedule": "interval"},
+        json={"name": "风险清单", "datasource_id": ds2["datasource"]["id"], "schedule": "once"},
     ).json()
     run_api = client.post(
         f"/api/projects/{pid}/tasks/{task_api['task']['id']}/run"

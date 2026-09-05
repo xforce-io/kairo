@@ -936,3 +936,44 @@ def test_run_page_hides_none_and_shows_elapsed(tmp_path, monkeypatch):
     assert retry.status_code == 303
     assert "/runs/" in retry.headers.get("location", "")
     assert "run-fail" not in retry.headers.get("location", "")
+
+
+def test_interval_is_rejected_but_legacy_interval_stays_manual(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    from kairo.projects import ProjectError, create_task, edit_task, get_project
+
+    client = TestClient(create_app(serve))
+    page = client.get(f"/projects/{pid}")
+    assert 'value="interval"' not in page.text
+    api = client.post(
+        f"/api/projects/{pid}/tasks",
+        json={"name": "周期", "prompt": "x", "schedule": "interval"},
+    )
+    assert api.status_code == 400
+    assert api.json()["code"] == "unsupported_schedule"
+    cli = _cli(
+        ["task", "create", pid, "--name", "周期CLI", "--prompt", "x", "--schedule", "interval"],
+        serve,
+        monkeypatch,
+    )
+    assert cli.exit_code != 0
+    once = create_task(serve, pid, name="手动", prompt="x", schedule="once")
+    try:
+        edit_task(serve, pid, once.id, schedule="interval")
+    except ProjectError as exc:
+        assert exc.code == "unsupported_schedule"
+    else:
+        raise AssertionError("expected unsupported_schedule")
+    project = get_project(serve, pid)
+    legacy = next(t for t in project.tasks)
+    legacy.schedule = "interval"
+    legacy.interval_hours = 24
+    from kairo.projects import save_project
+
+    save_project(serve, project)
+    edited = edit_task(serve, pid, legacy.id, name="历史周期")
+    assert edited.schedule == "interval"
+    assert edited.interval_hours == 24
+    shown = client.get(f"/projects/{pid}/tasks/{legacy.id}")
+    assert shown.status_code == 200
+    assert "Automatic schedule is not enabled" in shown.text or "未启用自动调度" in shown.text

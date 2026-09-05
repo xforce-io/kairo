@@ -7,11 +7,8 @@
 <form class="task-create" method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}">
   <div class="task-create-bar">
     <input name="name" value="{{ draft.get('name', task.name) }}" required aria-label="{{ t('proj.name_ph') }}">
-    {% if task.mode != 'agent' %}
-    <select name="schedule" aria-label="{{ t('proj.tasks') }}">
-      <option value="once" {% if (draft.get('schedule') or task.schedule) == 'once' %}selected{% endif %}>once</option>
-      <option value="interval" {% if (draft.get('schedule') or task.schedule) == 'interval' %}selected{% endif %}>interval</option>
-    </select>
+    {% if task.schedule == 'interval' %}
+    <p class="meta-hint">{{ t('proj.schedule_manual') }}</p>
     {% endif %}
   </div>
   {% if task.mode == 'agent' %}
