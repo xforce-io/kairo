@@ -782,8 +782,6 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
             scratch_folder = Path(serve) / scratch_folder
         validate_recorded_inputs(serve, record.project_id, record.id, inputs, scratch_folder)
         inputs = finalize_inputs(serve, record.project_id, record.id)
-        source_lines = _source_lines(inputs, cited)
-        body = body.rstrip() + "\n\n## 来源\n\n" + source_lines + "\n"
         rel = Path(".kairo") / "projects" / record.project_id / "artifacts" / f"{record.id}.md"
         dest = Path(serve) / rel
         dest.parent.mkdir(parents=True, exist_ok=True)

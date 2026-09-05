@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ task.name }}{% endblock %}
+{% block body %}
+<p class="artifact-back"><a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
+<h1 class="obj-title">{{ task.name }} · v{{ task.version }}</h1>
+{% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
+<form class="task-create" method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}">
+  <div class="task-create-bar">
+    <input name="name" value="{{ draft.get('name', task.name) }}" required aria-label="{{ t('proj.name_ph') }}">
+    {% if task.mode != 'agent' %}
+    <select name="schedule" aria-label="{{ t('proj.tasks') }}">
+      <option value="once" {% if (draft.get('schedule') or task.schedule) == 'once' %}selected{% endif %}>once</option>
+      <option value="interval" {% if (draft.get('schedule') or task.schedule) == 'interval' %}selected{% endif %}>interval</option>
+    </select>
+    {% endif %}
+  </div>
+  {% if task.mode == 'agent' %}
+  <textarea name="prompt" rows="8" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}">{{ draft.get('prompt', task.prompt) }}</textarea>
+  {% else %}
+  <p class="meta-hint">{{ t('proj.legacy_task') }} · {{ task.datasource_id }}</p>
+  <input name="datasource_id" value="{{ draft.get('datasource_id', task.datasource_id) }}" aria-label="{{ t('proj.datasources') }}">
+  {% endif %}
+  <div class="task-create-submit">
+    <button type="submit" class="btn btn-step btn-inline">{{ t('proj.edit') }}</button>
+  </div>
+</form>
+<form method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}/run">
+  <button class="btn btn-ghost btn-inline">{{ t('proj.run') }}</button>
+</form>
+{% endblock %}

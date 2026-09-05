@@ -848,3 +848,91 @@ def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monke
     ).json()
     assert api_ds["ok"] is True
     assert api_ds["datasource"]["name"] == "API名称"
+
+
+def test_task_page_edit_keeps_invalid_input(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    client = TestClient(create_app(serve))
+    created = client.post(
+        f"/projects/{pid}/tasks",
+        data={"name": "每周整理", "prompt": "整理风险", "schedule": "once"},
+        follow_redirects=True,
+    )
+    assert "每周整理" in created.text
+    assert f"/projects/{pid}/tasks/" in created.text
+    task_id = [t.id for t in __import__("kairo.projects", fromlist=["get_project"]).get_project(serve, pid).tasks][0]
+    page = client.get(f"/projects/{pid}/tasks/{task_id}")
+    assert page.status_code == 200
+    assert "整理风险" in page.text
+    bad = client.post(
+        f"/projects/{pid}/tasks/{task_id}",
+        data={"name": "保留名称XYZ", "prompt": "   "},
+    )
+    assert bad.status_code == 200
+    assert "保留名称XYZ" in bad.text
+    ok = client.post(
+        f"/projects/{pid}/tasks/{task_id}",
+        data={"name": "每周整理", "prompt": "改过的要求"},
+        follow_redirects=True,
+    )
+    assert ok.status_code == 200
+    assert "v2" in ok.text
+    assert "改过的要求" in ok.text
+
+
+def test_run_page_hides_none_and_shows_elapsed(tmp_path, monkeypatch):
+    import os
+    from kairo.projects import RunRecord, _save_run
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    from kairo.projects import create_task
+
+    task = create_task(serve, pid, name="每周整理", prompt="x")
+    rec = RunRecord(
+        id="run-live",
+        project_id=pid,
+        task_id=task.id,
+        task_name=task.name,
+        task_version=1,
+        status="running",
+        reason=None,
+        schema_version=2,
+        mode="agent",
+        started_at="2026-09-05T00:00:00+00:00",
+        created_at="2026-09-05T00:00:00+00:00",
+        worker_pid=os.getpid(),
+    )
+    _save_run(serve, rec)
+    client = TestClient(create_app(serve))
+    page = client.get(f"/projects/{pid}")
+    assert "None" not in page.text
+    assert "Running" in page.text or "运行中" in page.text
+    detail = client.get(f"/projects/{pid}/runs/run-live")
+    assert detail.status_code == 200
+    assert "None" not in detail.text
+    assert "m" in detail.text or "s" in detail.text
+    failed = RunRecord(
+        id="run-fail",
+        project_id=pid,
+        task_id=task.id,
+        task_name=task.name,
+        task_version=1,
+        status="failed",
+        reason="provider_failed",
+        schema_version=2,
+        mode="agent",
+        started_at="2026-09-05T00:00:00+00:00",
+        finished_at="2026-09-05T00:01:00+00:00",
+        created_at="2026-09-05T00:00:00+00:00",
+    )
+    _save_run(serve, failed)
+    fail_page = client.get(f"/projects/{pid}/runs/run-fail")
+    assert "provider_failed" not in fail_page.text
+    assert "failed" in fail_page.text.lower() or "失败" in fail_page.text
+    from kairo.provider import StubProvider
+
+    monkeypatch.setattr("kairo.projects.select_project_agent", lambda: StubProvider())
+    retry = client.post(f"/projects/{pid}/tasks/{task.id}/run", follow_redirects=False)
+    assert retry.status_code == 303
+    assert "/runs/" in retry.headers.get("location", "")
+    assert "run-fail" not in retry.headers.get("location", "")

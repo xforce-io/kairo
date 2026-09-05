@@ -4,25 +4,26 @@
 <p class="artifact-back"><a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
 {% if run.status == 'running' %}
 <meta http-equiv="refresh" content="2">
-<p class="meta-hint" role="status">{{ t('proj.run_running') }} · {{ run.id }}</p>
+<p class="meta-hint" role="status">{{ status_label }} · {{ run.id }} · Task v{{ run.task_version }} · {{ started_label }} · {{ elapsed_label }}</p>
 {% elif run.status == 'failed' %}
-<p class="ws-error" role="alert">{{ run.reason }}</p>
+<p class="ws-error" role="alert">{{ reason_label or run.reason }}</p>
+<p class="meta-hint">{{ run.id }} · Task v{{ run.task_version }} · {{ started_label }} · {{ elapsed_label }}</p>
 <form method="post" action="/projects/{{ project.id }}/tasks/{{ run.task_id }}/run">
   <button class="btn btn-step btn-inline">{{ t('proj.run') }}</button>
 </form>
 {% else %}
 <article class="doc">
   <p class="doc-kicker"><span class="dk-title">{{ run.task_name }}</span></p>
-  <p class="meta-hint">Run {{ run.id }} · Task v{{ run.task_version }}{% if run.datasource_url %} · {{ run.datasource_url }}{% endif %}</p>
+  <p class="meta-hint">{{ run.id }} · Task v{{ run.task_version }} · {{ started_label }} · {{ elapsed_label }}{% if run.datasource_url %} · {{ run.datasource_url }}{% endif %}</p>
   {{ body_html | safe }}
-  {% if inputs %}
   <h2>{{ t('proj.sources') }}</h2>
+  {% if inputs %}
   <ul>
     {% for item in inputs %}
-    <li><a href="/projects/{{ project.id }}/runs/{{ run.id }}/inputs/{{ item.input_id }}">{{ item.title or item.source_id }}</a> · {{ item.version }}</li>
+    <li><a href="/projects/{{ project.id }}/runs/{{ run.id }}/inputs/{{ item.input_id }}">{{ item.title or item.source_id }}</a> · {{ item.version }}{% if item.read_at %} · {{ item.read_at }}{% endif %}</li>
     {% endfor %}
   </ul>
-  {% elif run.mode == 'agent' %}
+  {% else %}
   <p class="meta-hint">{{ t('proj.no_inputs') }}</p>
   {% endif %}
 </article>
