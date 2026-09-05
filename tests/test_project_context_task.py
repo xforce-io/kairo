@@ -21,9 +21,12 @@ from kairo.project_materials import (
     cache_status,
     content_version,
     is_fresh,
+    list_context,
     parse_source_id,
     peek_datasource_content,
+    read_material,
     set_clock,
+    scratch_dir,
 )
 from kairo.projects import ProjectError, get_project
 from kairo.provider import AgentConfig, AgentResult
@@ -490,6 +493,7 @@ def test_cache_bundle_mismatch_is_uncached(tmp_path, monkeypatch):
     assert _count(counter) == 2
 
 
+<<<<<<< HEAD
 def test_uncached_cache_status_exposes_content_none(tmp_path, monkeypatch):
     serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
     project = get_project(serve, pid)
@@ -553,3 +557,234 @@ def test_refresh_failure_keeps_old_body_on_page(tmp_path, monkeypatch):
     assert "read_failed" in failed.text
     assert "Reusable" in failed.text or "可复用" in failed.text
     assert "Not read yet" not in failed.text and "尚未读取" not in failed.text
+
+
+def _running_record(serve, pid, run_id, *, topics, datasources, scratch=None):
+    from kairo.projects import RunRecord, _save_run
+
+    folder = scratch if scratch is not None else scratch_dir(serve, pid, run_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    rec = RunRecord(
+        id=run_id,
+        project_id=pid,
+        task_id="tsk-scope",
+        task_name="范围",
+        task_version=1,
+        status="running",
+        schema_version=2,
+        mode="agent",
+        task_snapshot={"prompt": "x"},
+        scope_topics=topics,
+        scope_datasources=datasources,
+        scratch_dir=str(folder.relative_to(serve)).replace("\\", "/"),
+        created_at="2026-09-05T00:00:00+00:00",
+        started_at="2026-09-05T00:00:00+00:00",
+    )
+    return _save_run(serve, rec)
+
+
+def test_frozen_empty_scope_stays_empty_after_link(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    _running_record(serve, pid, "run-empty", topics=[], datasources=[])
+    before = list_context(serve, pid, run_id="run-empty")
+    assert before["items"] == []
+    _load(
+        _cli(
+            ["datasource", "add", pid, "--url", "https://docs.qq.com/sheet/Dlater", "--purpose", "后来"],
+            serve,
+            monkeypatch,
+        )
+    )
+    after = list_context(serve, pid, run_id="run-empty")
+    assert after["items"] == []
+    try:
+        read_material(serve, pid, f"datasource:{ds_id}", run_id="run-empty")
+    except Exception as exc:
+        assert getattr(exc, "code", None) == "not_found"
+    else:
+        raise AssertionError("frozen empty scope must reject later sources")
+
+
+def test_missing_scope_fields_use_current_project(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-legacy"
+    path = serve / ".kairo" / "projects" / pid / "runs" / f"{run_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "id": run_id,
+                "project_id": pid,
+                "task_id": "tsk-old",
+                "task_name": "旧",
+                "task_version": 1,
+                "status": "running",
+                "schema_version": 1,
+                "mode": "agent",
+                "created_at": "2026-09-05T00:00:00+00:00",
+                "started_at": "2026-09-05T00:00:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    catalog = list_context(serve, pid, run_id=run_id)
+    kinds = {item["type"] for item in catalog["items"]}
+    assert "understanding" in kinds
+    assert "datasource" in kinds
+
+
+class _IndexOnlyProvider:
+    name = "index-only"
+    model = "test"
+    supports_read_dirs = True
+    supports_project_cli = True
+
+    def run(self, config, signal=None):
+        dest = config.artifact_dir / "artifact.md"
+        dest.write_text("[ghost](input:inp-missing)\n", encoding="utf-8")
+        return AgentResult(artifacts=[dest], result_text=dest.read_text())
+
+
+class _CiteProvider:
+    def __init__(self, input_id: str):
+        self.name = "cite"
+        self.model = "test"
+        self.supports_read_dirs = True
+        self.supports_project_cli = True
+        self._input_id = input_id
+
+    def run(self, config, signal=None):
+        dest = config.artifact_dir / "artifact.md"
+        dest.write_text(f"[t](input:{self._input_id})\n", encoding="utf-8")
+        return AgentResult(artifacts=[dest], result_text=dest.read_text())
+
+
+def test_missing_evidence_body_fails_publish(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json
+    from kairo.projects import _execute_agent_run
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-nobody"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-missing",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "ghost",
+                "version": "deadbeef",
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "inp-missing.md",
+            }
+        ],
+    )
+    out = _execute_agent_run(serve, pid, run_id, _IndexOnlyProvider())
+    assert out.status == "failed"
+    assert out.reason == "evidence_failed"
+    assert out.artifact_path is None
+
+
+def test_out_of_scope_evidence_fails_publish(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json
+    from kairo.projects import _execute_agent_run
+
+    serve, pid, _ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-oob"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[])
+    scratch = Path(serve) / rec.scratch_dir
+    body = "out-of-scope-body"
+    (scratch / "inp-oob.md").write_text(body, encoding="utf-8")
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-oob",
+                "source_id": "datasource:not-allowed",
+                "type": "datasource",
+                "title": "oob",
+                "version": content_version(body),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "inp-oob.md",
+            }
+        ],
+    )
+    out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-oob"))
+    assert out.status == "failed"
+    assert out.reason == "evidence_failed"
+    assert out.artifact_path is None
+
+
+def test_valid_recorded_evidence_still_succeeds(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json
+    from kairo.projects import _execute_agent_run, read_artifact
+    from kairo.project_materials import read_run_input
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-ok"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    body = "plant,mw\nsolar,80\n"
+    (scratch / "inp-ok.md").write_text(body, encoding="utf-8")
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-ok",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "装机",
+                "version": content_version(body),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "inp-ok.md",
+            }
+        ],
+    )
+    out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-ok"))
+    assert out.status == "succeeded"
+    artifact = read_artifact(serve, pid, run_id)
+    assert "inp-ok" in artifact
+    evidence = read_run_input(serve, pid, run_id, "inp-ok")
+    assert evidence["content"] == body
+    from kairo.projects import remove_datasource
+
+    remove_datasource(serve, pid, ds_id)
+    again = read_run_input(serve, pid, run_id, "inp-ok")
+    assert again["content"] == body
+    assert again["version"] == content_version(body)
+
+
+def test_recorded_datasource_survives_unlink_before_publish(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json
+    from kairo.projects import _execute_agent_run, remove_datasource
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-unlinked"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    body = "kept-after-unlink\n"
+    (scratch / "inp-keep.md").write_text(body, encoding="utf-8")
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-keep",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "装机",
+                "version": content_version(body),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "inp-keep.md",
+            }
+        ],
+    )
+    remove_datasource(serve, pid, ds_id)
+    out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-keep"))
+    assert out.status == "succeeded"
+    assert out.artifact_path

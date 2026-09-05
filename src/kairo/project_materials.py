@@ -465,8 +465,14 @@ def _scope(
     if not run_id:
         return list(project.topics), list(project.datasources)
     run = _running_run(serve, project.id, run_id)
-    topics = list(run.scope_topics or project.topics)
-    allowed = set(run.scope_datasources or [d.id for d in project.datasources])
+    if run.scope_topics is None:
+        topics = list(project.topics)
+    else:
+        topics = list(run.scope_topics)
+    if run.scope_datasources is None:
+        allowed = {d.id for d in project.datasources}
+    else:
+        allowed = set(run.scope_datasources)
     datasources = [d for d in project.datasources if d.id in allowed]
     # Frozen scope may include ids later removed; catalog only lists current objects in scope.
     return topics, datasources
@@ -635,6 +641,46 @@ def read_run_input(serve: Path, project_id: str, run_id: str, input_id: str) -> 
     raise ProjectError("输入记录不存在", code="not_found")
 
 
+def _source_in_scope(source_id: str, topics: list[str], datasource_ids: set[str]) -> bool:
+    try:
+        parsed = parse_source_id(source_id)
+    except ProjectError:
+        return False
+    if parsed["kind"] == SOURCE_DATASOURCE:
+        return parsed["ds_id"] in datasource_ids
+    return parsed.get("slug") in topics
+
+
+def validate_recorded_inputs(
+    serve: Path,
+    project_id: str,
+    run_id: str,
+    items: list[dict[str, Any]],
+    folder: Path,
+) -> None:
+    project = get_project(serve, project_id)
+    run = _running_run(serve, project_id, run_id)
+    if run.scope_topics is None:
+        topics = list(project.topics)
+    else:
+        topics = list(run.scope_topics)
+    if run.scope_datasources is None:
+        allowed_ds = {d.id for d in project.datasources}
+    else:
+        allowed_ds = set(run.scope_datasources)
+    for item in items:
+        iid = str(item.get("input_id") or "")
+        name = str(item.get("body") or f"{iid}.md")
+        body = folder / name
+        if not body.is_file():
+            raise ProjectError("输入证据正文缺失", code="evidence_failed")
+        actual = body.read_text(encoding="utf-8")
+        if content_version(actual) != item.get("version"):
+            raise ProjectError("输入证据校验失败", code="evidence_failed")
+        if not _source_in_scope(str(item.get("source_id") or ""), topics, allowed_ds):
+            raise ProjectError("输入来源越界", code="evidence_failed")
+
+
 def finalize_inputs(serve: Path, project_id: str, run_id: str) -> list[dict[str, Any]]:
     src = scratch_dir(serve, project_id, run_id)
     run = get_run(serve, project_id, run_id)
@@ -644,14 +690,14 @@ def finalize_inputs(serve: Path, project_id: str, run_id: str) -> list[dict[str,
             src = Path(serve) / src
     dest = inputs_dir(serve, project_id, run_id)
     items = _load_index(src)
+    validate_recorded_inputs(serve, project_id, run_id, items, src)
     dest.mkdir(parents=True, exist_ok=True)
     for item in items:
         name = str(item.get("body") or f"{item['input_id']}.md")
         body = src / name
-        if body.is_file():
-            _atomic_text(dest / name, body.read_text(encoding="utf-8"))
-            actual = (dest / name).read_text(encoding="utf-8")
-            if content_version(actual) != item.get("version"):
-                raise ProjectError("输入证据校验失败", code="evidence_failed")
+        _atomic_text(dest / name, body.read_text(encoding="utf-8"))
+        actual = (dest / name).read_text(encoding="utf-8")
+        if content_version(actual) != item.get("version"):
+            raise ProjectError("输入证据校验失败", code="evidence_failed")
     _atomic_json(_input_index_path(dest), items)
     return items
