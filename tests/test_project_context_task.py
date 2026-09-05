@@ -757,3 +757,34 @@ def test_valid_recorded_evidence_still_succeeds(tmp_path, monkeypatch):
     again = read_run_input(serve, pid, run_id, "inp-ok")
     assert again["content"] == body
     assert again["version"] == content_version(body)
+
+
+def test_recorded_datasource_survives_unlink_before_publish(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json
+    from kairo.projects import _execute_agent_run, remove_datasource
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-unlinked"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    body = "kept-after-unlink\n"
+    (scratch / "inp-keep.md").write_text(body, encoding="utf-8")
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-keep",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "装机",
+                "version": content_version(body),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "inp-keep.md",
+            }
+        ],
+    )
+    remove_datasource(serve, pid, ds_id)
+    out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-keep"))
+    assert out.status == "succeeded"
+    assert out.artifact_path

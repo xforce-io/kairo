@@ -659,8 +659,15 @@ def validate_recorded_inputs(
     folder: Path,
 ) -> None:
     project = get_project(serve, project_id)
-    topics, datasources = _scope(serve, project, run_id)
-    allowed_ds = {d.id for d in datasources}
+    run = _running_run(serve, project_id, run_id)
+    if run.scope_topics is None:
+        topics = list(project.topics)
+    else:
+        topics = list(run.scope_topics)
+    if run.scope_datasources is None:
+        allowed_ds = {d.id for d in project.datasources}
+    else:
+        allowed_ds = set(run.scope_datasources)
     for item in items:
         iid = str(item.get("input_id") or "")
         name = str(item.get("body") or f"{iid}.md")
