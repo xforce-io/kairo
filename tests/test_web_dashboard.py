@@ -26,6 +26,16 @@ def _cards(html: str) -> list[str]:
     return re.findall(r'class="card-main"[^>]*href="/topics/([^"]+)"', html)
 
 
+def _topic_card(html: str, slug: str) -> str:
+    m = re.search(
+        rf'<a class="card-main" href="/topics/{re.escape(slug)}">.*?</a>',
+        html,
+        re.S,
+    )
+    assert m, f"missing card for {slug}"
+    return m.group(0)
+
+
 def _mk(root: Path, slug: str, topic: str, age: float) -> Workspace:
     ws = Workspace.init(root / slug, topic=topic)
     _utime(ws.root / "constitution.yaml", time.time() - age)
@@ -85,6 +95,53 @@ def test_dashboard_search_and_filters(tmp_path, monkeypatch):
     assert r.status_code == 200
     assert "sort=name" not in r.text
     assert set(_cards(r.text)) == {"alpha", "beta"}
+
+
+def test_dashboard_badges_name_stale_and_blocked(tmp_path, monkeypatch):
+    """#283: stale / blocked / both use distinct badge words on GET /."""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    stale = _mk(tmp_path, "stale-ws", "Stale topic", 90)
+    blocked = _mk(tmp_path, "blocked-ws", "Blocked topic", 60)
+    both = _mk(tmp_path, "both-ws", "Both topic", 30)
+    src = tmp_path / "m.txt"
+    src.write_text("x")
+    stale.add([src])
+    both.add([src])
+    for ws in (blocked, both):
+        state = ws.read_state()
+        state.products["x"] = ProductState(
+            input_hash="h", status="blocked", reason="asr-failed"
+        )
+        ws.write_state(state)
+
+    html = _client(tmp_path).get("/").text
+    stale_card = _topic_card(html, "stale-ws")
+    assert 'class="badge stale"' in stale_card
+    assert ">to step<" in stale_card
+    assert "New or changed materials are ready to be processed." in stale_card
+    assert 'class="badge blocked"' not in stale_card
+    assert "Needs attention" not in stale_card
+
+    blocked_card = _topic_card(html, "blocked-ws")
+    assert 'class="badge blocked"' in blocked_card
+    assert ">Blocked<" in blocked_card
+    assert (
+        "A blocked item needs attention before this Topic can move forward."
+        in blocked_card
+    )
+    assert 'class="badge stale"' not in blocked_card
+    assert "Needs attention" not in blocked_card
+
+    both_card = _topic_card(html, "both-ws")
+    assert 'class="badge blocked"' in both_card
+    assert ">Blocked<" in both_card
+    assert 'class="badge stale"' in both_card
+    assert ">to step<" in both_card
+    assert (
+        "A blocked item needs attention before this Topic can move forward."
+        in both_card
+    )
+    assert "New or changed materials are ready to be processed." not in both_card
 
 
 def _filter_nav(html: str) -> str:
@@ -226,7 +283,6 @@ def test_dashboard_journal_card_chip_and_count(tmp_path, monkeypatch):
     assert "2 条 Ref" in card or "2 Ref" in card
     assert "观测" not in card and "obs" not in card
     assert "基线" not in card and "baseline" not in card
-    assert "待 step" not in card and "to step" not in card
     energy = re.search(r'href="/topics/energy".*?</a>', html, re.S)
     assert energy
     assert "0 条 Ref" in energy.group(0) or "0 Ref" in energy.group(0)
@@ -246,7 +302,8 @@ def test_dashboard_journal_shows_stale_when_attachment_pending(tmp_path):
     )
     assert m, html[:500]
     card = m.group(0)
-    assert "需要处理" in card or "Needs attention" in card
+    assert "待 step" in card or "to step" in card
+    assert "需要处理" not in card and "Needs attention" not in card
 
 
 def test_dashboard_journal_sits_with_pins(tmp_path):
