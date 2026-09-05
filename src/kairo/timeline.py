@@ -380,42 +380,38 @@ def shift_month_day(day: dt.date, delta_months: int) -> dt.date:
     return dt.date(y, m, min(day.day, last))
 
 
+def group_by_occurred(items: list[TimelineItem]) -> list[dict]:
+    """Unknown first, then occurred days newest-first. Empty key = unknown."""
+    unknown = [it for it in items if it.occurred_at is None]
+    dated = [it for it in items if it.occurred_at is not None]
+    dated.sort(key=lambda it: (it.workspace, it.id))
+    dated.sort(key=lambda it: it.occurred_at or dt.date.min, reverse=True)
+    groups: list[dict] = []
+    if unknown:
+        groups.append({"key": "", "entries": unknown})
+    buckets: dict[str, list[TimelineItem]] = {}
+    order: list[str] = []
+    for it in dated:
+        key = (it.occurred_at or dt.date.min).isoformat()
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(it)
+    groups.extend({"key": k, "entries": buckets[k]} for k in order)
+    return groups
+
+
 def format_cli_timeline(
     items: list[TimelineItem], *, recent: bool = False, day: dt.date | None = None
 ) -> str:
+    """Human timeline. ``recent`` is a compatibility alias of occurred-day grouping."""
     if day is not None:
         items = [it for it in items if it.occurred_at == day]
-    if recent:
-        ordered = sorted(items, key=lambda it: it.added_at, reverse=True)
-        lines: list[str] = []
-        groups: dict[str, list[TimelineItem]] = {}
-        order: list[str] = []
-        for it in ordered:
-            local = it.added_at.astimezone()
-            key = local.date().isoformat()
-            if key not in groups:
-                groups[key] = []
-                order.append(key)
-            groups[key].append(it)
-        for key in order:
-            lines.append(key)
-            for it in groups[key]:
-                lines.append(_cli_row(it))
-        return "\n".join(lines) + ("\n" if lines else "")
-    unknown = [it for it in items if it.occurred_at is None]
-    dated = [it for it in items if it.occurred_at is not None]
-    dated.sort(key=lambda it: it.occurred_at or dt.date.min, reverse=True)
-    lines = []
-    if unknown:
-        lines.append("⚠ 发生时间未知")
-        for it in unknown:
+    lines: list[str] = []
+    for g in group_by_occurred(items):
+        lines.append("⚠ 发生时间未知" if not g["key"] else g["key"])
+        for it in g["entries"]:
             lines.append(_cli_row(it))
-    current: dt.date | None = None
-    for it in dated:
-        if it.occurred_at != current:
-            current = it.occurred_at
-            lines.append(current.isoformat())
-        lines.append(_cli_row(it))
     return "\n".join(lines) + ("\n" if lines else "")
 
 

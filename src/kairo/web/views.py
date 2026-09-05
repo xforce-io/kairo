@@ -50,6 +50,7 @@ from kairo.timeline import (
     filter_by_tags,
     filter_range,
     format_range_label,
+    group_by_occurred,
     is_fold_class,
     month_cells,
     parse_calendar_date,
@@ -610,18 +611,7 @@ def timeline_view(
     )
     span = range_day_count(r0, r1) if range_on else 1
     too_long = span > MAX_RANGE_DAYS
-    recent_groups = []
-    if q.view == "recent":
-        ordered = sorted(items, key=lambda it: it.added_at, reverse=True)
-        buckets: dict[str, list] = {}
-        order: list[str] = []
-        for it in ordered:
-            key = it.added_at.astimezone().date().isoformat()
-            if key not in buckets:
-                buckets[key] = []
-                order.append(key)
-            buckets[key].append(it)
-        recent_groups = [{"key": k, "entries": buckets[k]} for k in order]
+    recent_groups = group_by_occurred(items) if q.view == "recent" else []
     lang = resolve_lang(request)
     if lang == "zh":
         month_label = f"{q.month.year}年{q.month.month}月"
