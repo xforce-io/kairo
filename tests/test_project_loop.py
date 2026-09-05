@@ -837,6 +837,13 @@ def test_wecom_default_adapter_reads_via_injected_runner():
     )
     assert "页正文" in page
     assert any(c[:1] == ["wecom-cli"] for c in calls)
+    assert all(c[1:3] != ["auth", "show"] for c in calls)
+
+    denied_calls: list[list[str]] = []
+
+    def deny_runner(argv, **_kwargs):
+        denied_calls.append(list(argv))
+        return Proc("no")
 
     try:
         read_datasource(
@@ -844,11 +851,12 @@ def test_wecom_default_adapter_reads_via_injected_runner():
             "document",
             "wecom",
             Connection(authorized=False, cmd=None, token_env=""),
-            runner=runner,
+            runner=deny_runner,
         )
         raise AssertionError("expected permission")
     except ReadError as exc:
         assert exc.code == PERMISSION
+    assert denied_calls == []
 
     def boom_runner(argv, **_kwargs):
         if argv[:3] == ["wecom-cli", "auth", "show"]:
@@ -987,3 +995,60 @@ def test_wecom_saved_file_missing_is_read_failed(tmp_path):
         raise AssertionError("expected read_failed")
     except ReadError as exc:
         assert exc.code == READ_FAILED
+
+
+def test_wecom_sheet_tab_reads_only_matching_subsheet():
+    from kairo.readers import INVALID_LINK, ReadError, read_datasource
+    from kairo.settings import Connection
+
+    class Proc:
+        def __init__(self, stdout="", returncode=0, stderr=""):
+            self.stdout = stdout
+            self.stderr = stderr
+            self.returncode = returncode
+
+    range_ids: list[str] = []
+
+    def runner(argv, **_kwargs):
+        if argv[1:3] == ["sheet", "get"]:
+            return Proc(
+                json.dumps(
+                    {
+                        "name": "表",
+                        "sheets": [
+                            {"sheet_id": "keepTab", "title": "本页"},
+                            {"sheet_id": "otherTab", "title": "其它"},
+                        ],
+                    }
+                )
+            )
+        if argv[1:4] == ["sheet", "ranges", "get"]:
+            payload = json.loads(argv[argv.index("--json") + 1])
+            range_ids.append(payload.get("sheet_id"))
+            return Proc(json.dumps({"content": f"id,{payload.get('sheet_id')}"}))
+        raise AssertionError(f"unexpected argv: {argv}")
+
+    conn = Connection(authorized=True, cmd=None, token_env="")
+    body = read_datasource(
+        "https://doc.weixin.qq.com/sheet/e3_Sheet?tab=keepTab",
+        "spreadsheet",
+        "wecom",
+        conn,
+        runner=runner,
+    )
+    assert range_ids == ["keepTab"]
+    assert "keepTab" in body
+    assert "其它" not in body
+
+    try:
+        read_datasource(
+            "https://doc.weixin.qq.com/sheet/e3_Sheet?tab=missingTab",
+            "spreadsheet",
+            "wecom",
+            conn,
+            runner=runner,
+        )
+        raise AssertionError("expected invalid_link")
+    except ReadError as exc:
+        assert exc.code == INVALID_LINK
+    assert range_ids == ["keepTab"]
