@@ -25,6 +25,10 @@ _REVIEW_TITLE = re.compile(r"^\d{4}-\d{2}-\d{2}～\d{4}-\d{2}-\d{2} 回顾$")
 _PROCESS = re.compile(r"先读取|提示被截断|完整提示|相关技能")
 
 
+def is_review_title(title: str | None) -> bool:
+    return bool(_REVIEW_TITLE.match((title or "").strip()))
+
+
 class ReviewError(ValueError):
     """区间非法、空、无纪要或生成失败。"""
 
