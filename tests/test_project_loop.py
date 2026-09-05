@@ -140,15 +140,15 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert "unsupported" in notion_add.output or "尚未接入" in notion_add.output
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", deny_cmd], serve, monkeypatch))
-    perm2 = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
+    perm2 = json.loads(_cli(["datasource", "read", pid, ds_id, "--refresh"], serve, monkeypatch).output)
     assert perm2["code"] == "permission"
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", miss_cmd], serve, monkeypatch))
-    miss = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
+    miss = json.loads(_cli(["datasource", "read", pid, ds_id, "--refresh"], serve, monkeypatch).output)
     assert miss["code"] == "invalid_link"
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", boom_cmd], serve, monkeypatch))
-    boom = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
+    boom = json.loads(_cli(["datasource", "read", pid, ds_id, "--refresh"], serve, monkeypatch).output)
     assert boom["code"] == "read_failed"
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", ok_cmd], serve, monkeypatch))
@@ -180,7 +180,15 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert old["run"]["task_name"] == "周报"
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", boom_cmd], serve, monkeypatch))
-    failed = _cli(["task", "run", pid, tid], serve, monkeypatch)
+    from datetime import UTC, datetime, timedelta
+
+    from kairo.project_materials import set_clock
+
+    set_clock(lambda: datetime.now(UTC) + timedelta(seconds=3601))
+    try:
+        failed = _cli(["task", "run", pid, tid], serve, monkeypatch)
+    finally:
+        set_clock(None)
     assert failed.exit_code != 0
     fail_run = json.loads(failed.output)
     assert fail_run["status"] == "failed"
@@ -699,15 +707,15 @@ def test_wecom_datasource_add_read_task_and_settings(tmp_path, monkeypatch):
 
     _load(_cli(["settings", "set", "connections.wecom.authorized", "true"], serve, monkeypatch))
     _load(_cli(["settings", "set", "connections.wecom.cmd", deny_cmd], serve, monkeypatch))
-    perm2 = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
+    perm2 = json.loads(_cli(["datasource", "read", pid, ds_id, "--refresh"], serve, monkeypatch).output)
     assert perm2["code"] == "permission"
 
     _load(_cli(["settings", "set", "connections.wecom.cmd", miss_cmd], serve, monkeypatch))
-    miss = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
+    miss = json.loads(_cli(["datasource", "read", pid, ds_id, "--refresh"], serve, monkeypatch).output)
     assert miss["code"] == "invalid_link"
 
     _load(_cli(["settings", "set", "connections.wecom.cmd", boom_cmd], serve, monkeypatch))
-    boom = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
+    boom = json.loads(_cli(["datasource", "read", pid, ds_id, "--refresh"], serve, monkeypatch).output)
     assert boom["code"] == "read_failed"
 
     _load(_cli(["settings", "set", "connections.wecom.cmd", ok_cmd], serve, monkeypatch))

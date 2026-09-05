@@ -3,7 +3,7 @@
 - Issue：[ #299 ](https://github.com/xforce-io/kairo/issues/299)
 - L1：[提案与批准依据](https://github.com/xforce-io/kairo/issues/299#issuecomment-5550695811)；用户于 2026-09-05 回复「go，完成 L2」，L1 Approved。
 - 分支：`feat/299-project-context-task`
-- 状态：Draft（L2 待人工评审，未实现）
+- 状态：Approved（2026-09-05，用户在交付会话回复「Approved」）
 - 日期：2026-09-05
 
 本文件是详细设计唯一事实源。Issue 仅保留不超过 10 行的设计摘要与链接。

@@ -2918,6 +2918,32 @@ def _api_error(exc: Exception, status: int = 400) -> JSONResponse:
     )
 
 
+_PROJECT_HTTP = {
+    "not_found": 404,
+    "cache_missing": 404,
+    "invalid_request": 400,
+    "permission": 403,
+    "run_closed": 409,
+    "material_unavailable": 409,
+    "read_failed": 502,
+    "invalid_link": 400,
+    "evidence_failed": 500,
+    "material_too_large": 413,
+    "unsupported_run": 400,
+    "provider_unsupported": 400,
+    "empty_artifact": 400,
+    "invalid_input_ref": 400,
+}
+
+
+def _project_api_error(exc: Exception) -> JSONResponse:
+    code = getattr(exc, "code", None) or "error"
+    return JSONResponse(
+        {"ok": False, "code": code, "error": str(exc)},
+        status_code=_PROJECT_HTTP.get(code, 400),
+    )
+
+
 def _serve(request: Request) -> Path:
     return Path(request.app.state.root)
 
@@ -2975,9 +3001,16 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
     from kairo.refs import project_member_refs
 
     serve = _serve(request)
+    from kairo.project_materials import cache_status
+
     available_topics = scan_topic_identities(serve)
     by_slug = {item.slug: item for item in available_topics}
     linked_topics = [by_slug[slug] for slug in project.topics if slug in by_slug]
+    ds_status = {}
+    for ds in project.datasources:
+        st = dict(cache_status(serve, project, ds))
+        st.pop("content", None)
+        ds_status[ds.id] = st
     return _render(
         request,
         "project.html",
@@ -2988,6 +3021,7 @@ def project_page(request: Request, project_id: str, error: str = "", notice: str
             "linked_topics": linked_topics,
             "member_refs": project_member_refs(serve, project.topics),
             "runs": list_runs(serve, project_id),
+            "ds_status": ds_status,
             "error": error,
             "notice": notice,
         },
@@ -3050,17 +3084,55 @@ def project_ds_add_form(
 
 
 @router.post("/projects/{project_id}/datasources/{ds_id}/read")
-def project_ds_read_form(request: Request, project_id: str, ds_id: str) -> HTMLResponse:
+def project_ds_read_form(
+    request: Request,
+    project_id: str,
+    ds_id: str,
+    refresh: str = Form(""),
+) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, read_project_datasource
     from kairo.readers import ReadError
 
     try:
-        text = read_project_datasource(_serve(request), project_id, ds_id)
+        read_project_datasource(
+            _serve(request), project_id, ds_id, refresh=refresh in ("1", "true", "on")
+        )
     except (ProjectError, ReadError) as e:
         code = getattr(e, "code", None)
-        return project_page(request, project_id, error=f"{code or 'error'}: {e}")
-    return project_page(request, project_id, notice=text[:500])
+        return datasource_page(request, project_id, ds_id, error=f"{code or 'error'}: {e}")
+    return RedirectResponse(f"/projects/{project_id}/datasources/{ds_id}", status_code=303)
+
+
+@router.get("/projects/{project_id}/datasources/{ds_id}", response_class=HTMLResponse)
+def datasource_page(
+    request: Request, project_id: str, ds_id: str, error: str = ""
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.project_materials import peek_datasource_content
+    from kairo.projects import ProjectError, get_project
+
+    try:
+        project = get_project(_serve(request), project_id)
+        try:
+            payload = peek_datasource_content(_serve(request), project_id, ds_id)
+        except ProjectError as e:
+            if getattr(e, "code", None) != "cache_missing":
+                raise
+            payload = None
+    except ProjectError:
+        raise HTTPException(status_code=404)
+    return _render(
+        request,
+        "datasource.html",
+        {
+            "nav_active": "projects",
+            "project": project,
+            "ds_id": ds_id,
+            "payload": payload,
+            "error": error,
+        },
+    )
 
 
 @router.post("/projects/{project_id}/datasources/{ds_id}/delete")
@@ -3080,14 +3152,20 @@ def project_task_create_form(
     request: Request,
     project_id: str,
     name: str = Form(...),
-    datasource_id: str = Form(...),
+    prompt: str = Form(""),
+    datasource_id: str = Form(""),
     schedule: str = Form("once"),
 ) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, create_task
 
     try:
-        create_task(_serve(request), project_id, name=name, datasource_id=datasource_id, schedule=schedule)
+        kwargs: dict = {"name": name, "schedule": schedule}
+        if (datasource_id or "").strip():
+            kwargs["datasource_id"] = datasource_id
+        else:
+            kwargs["prompt"] = prompt
+        create_task(_serve(request), project_id, **kwargs)
     except ProjectError as e:
         return project_page(request, project_id, error=str(e))
     return RedirectResponse(f"/projects/{project_id}", status_code=303)
@@ -3096,26 +3174,38 @@ def project_task_create_form(
 @router.post("/projects/{project_id}/tasks/{task_id}/run")
 def project_task_run_form(request: Request, project_id: str, task_id: str) -> HTMLResponse:
     _console_only(request)
-    from kairo.projects import ProjectError, run_task
+    from kairo.projects import ProjectError, get_project, run_task
 
     try:
-        record = run_task(_serve(request), project_id, task_id)
+        project = get_project(_serve(request), project_id)
+        task = next((t for t in project.tasks if t.id == task_id), None)
+        record = run_task(
+            _serve(request),
+            project_id,
+            task_id,
+            background=bool(task and task.mode == "agent"),
+        )
     except ProjectError as e:
         return project_page(request, project_id, error=str(e))
-    if record.status == "succeeded":
-        return RedirectResponse(f"/projects/{project_id}/runs/{record.id}", status_code=303)
-    return project_page(request, project_id, error=record.reason or "failed")
+    if record.status == "failed" and record.mode != "agent":
+        return project_page(request, project_id, error=record.reason or "failed")
+    return RedirectResponse(f"/projects/{project_id}/runs/{record.id}", status_code=303)
 
 
 @router.get("/projects/{project_id}/runs/{run_id}", response_class=HTMLResponse)
 def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLResponse:
     _console_only(request)
-    from kairo.projects import ProjectError, get_project, get_run, read_artifact
+    from kairo.project_materials import load_run_inputs
+    from kairo.projects import ProjectError, get_project, read_artifact, reap_run
 
     try:
         project = get_project(_serve(request), project_id)
-        run = get_run(_serve(request), project_id, run_id)
-        body = read_artifact(_serve(request), project_id, run_id)
+        run = reap_run(_serve(request), project_id, run_id)
+        body = ""
+        inputs: list = []
+        if run.status == "succeeded":
+            body = read_artifact(_serve(request), project_id, run_id)
+            inputs = load_run_inputs(_serve(request), project_id, run_id)
     except ProjectError:
         raise HTTPException(status_code=404)
     return _render(
@@ -3125,7 +3215,33 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
             "nav_active": "projects",
             "project": project,
             "run": run,
-            "body_html": render_markdown(body),
+            "inputs": inputs,
+            "body_html": render_markdown(body) if body else "",
+        },
+    )
+
+
+@router.get("/projects/{project_id}/runs/{run_id}/inputs/{input_id}", response_class=HTMLResponse)
+def run_input_page(request: Request, project_id: str, run_id: str, input_id: str) -> HTMLResponse:
+    _console_only(request)
+    from kairo.project_materials import read_run_input
+    from kairo.projects import ProjectError, get_project, reap_run
+
+    try:
+        project = get_project(_serve(request), project_id)
+        run = reap_run(_serve(request), project_id, run_id)
+        payload = read_run_input(_serve(request), project_id, run_id, input_id)
+    except ProjectError:
+        raise HTTPException(status_code=404)
+    return _render(
+        request,
+        "run_input.html",
+        {
+            "nav_active": "projects",
+            "project": project,
+            "run": run,
+            "payload": payload,
+            "body_html": render_markdown(payload.get("content") or ""),
         },
     )
 
@@ -3459,18 +3575,92 @@ async def api_ds_add(request: Request, project_id: str) -> JSONResponse:
 
 
 @router.post("/api/projects/{project_id}/datasources/{ds_id}/read")
-def api_ds_read(request: Request, project_id: str, ds_id: str) -> JSONResponse:
+async def api_ds_read(request: Request, project_id: str, ds_id: str) -> JSONResponse:
     _console_only(request)
     from kairo.projects import ProjectError, read_project_datasource
     from kairo.readers import ReadError
 
+    refresh = False
     try:
-        text = read_project_datasource(_serve(request), project_id, ds_id)
+        body = await request.json()
+        if isinstance(body, dict):
+            refresh = bool(body.get("refresh"))
+    except Exception:
+        refresh = False
+    try:
+        result = read_project_datasource(_serve(request), project_id, ds_id, refresh=refresh)
     except ReadError as e:
         return JSONResponse({"ok": False, "code": e.code, "error": str(e)}, status_code=400)
     except ProjectError as e:
         return _api_error(e)
-    return JSONResponse({"ok": True, "content": text})
+    return JSONResponse(
+        {
+            "ok": True,
+            "content": result.content,
+            "source_id": result.source_id,
+            "version": result.version,
+            "fetched_at": result.fetched_at,
+            "expires_at": result.expires_at,
+            "state": result.state,
+        }
+    )
+
+
+@router.get("/api/projects/{project_id}/datasources/{ds_id}/content")
+def api_ds_content(request: Request, project_id: str, ds_id: str) -> JSONResponse:
+    _console_only(request)
+    from kairo.project_materials import peek_datasource_content
+    from kairo.projects import ProjectError
+
+    try:
+        payload = peek_datasource_content(_serve(request), project_id, ds_id)
+    except ProjectError as e:
+        return _project_api_error(e)
+    return JSONResponse(payload)
+
+
+@router.get("/api/projects/{project_id}/context")
+def api_project_context(request: Request, project_id: str, run_id: str | None = None) -> JSONResponse:
+    _console_only(request)
+    from kairo.project_materials import list_context
+    from kairo.projects import ProjectError
+
+    try:
+        payload = list_context(_serve(request), project_id, run_id=run_id)
+    except ProjectError as e:
+        return _project_api_error(e)
+    return JSONResponse(payload)
+
+
+@router.post("/api/projects/{project_id}/context/read")
+async def api_project_context_read(request: Request, project_id: str) -> JSONResponse:
+    _console_only(request)
+    from kairo.project_materials import read_material
+    from kairo.projects import ProjectError
+    from kairo.readers import ReadError
+
+    body = await request.json()
+    try:
+        result = read_material(
+            _serve(request),
+            project_id,
+            body.get("source_id") or "",
+            run_id=body.get("run_id"),
+            refresh=bool(body.get("refresh")),
+        )
+    except (ProjectError, ReadError) as e:
+        return _project_api_error(e)
+    return JSONResponse(
+        {
+            "ok": True,
+            "source_id": result.source_id,
+            "content": result.content,
+            "version": result.version,
+            "fetched_at": result.fetched_at,
+            "expires_at": result.expires_at,
+            "input_id": result.input_id,
+        }
+    )
 
 
 @router.delete("/api/projects/{project_id}/datasources/{ds_id}")
@@ -3491,12 +3681,15 @@ async def api_task_create(request: Request, project_id: str) -> JSONResponse:
     from kairo.projects import ProjectError, create_task
 
     body = await request.json()
+    prompt = body["prompt"] if "prompt" in body else None
+    datasource_id = body.get("datasource_id") or None
     try:
         task = create_task(
             _serve(request),
             project_id,
             name=body.get("name") or "",
-            datasource_id=body.get("datasource_id") or "",
+            datasource_id=datasource_id,
+            prompt=prompt,
             schedule=body.get("schedule") or "once",
             interval_hours=body.get("interval_hours"),
         )
@@ -3520,6 +3713,7 @@ async def api_task_edit(request: Request, project_id: str, task_id: str) -> JSON
             schedule=body.get("schedule"),
             enabled=body.get("enabled"),
             datasource_id=body.get("datasource_id"),
+            prompt=body.get("prompt"),
         )
     except ProjectError as e:
         return _api_error(e)
@@ -3529,25 +3723,52 @@ async def api_task_edit(request: Request, project_id: str, task_id: str) -> JSON
 @router.post("/api/projects/{project_id}/tasks/{task_id}/run")
 def api_task_run(request: Request, project_id: str, task_id: str) -> JSONResponse:
     _console_only(request)
-    from kairo.projects import ProjectError, run_task
+    from kairo.projects import ProjectError, get_project, run_task
 
     try:
-        record = run_task(_serve(request), project_id, task_id)
+        project = get_project(_serve(request), project_id)
+        task = next((t for t in project.tasks if t.id == task_id), None)
+        record = run_task(
+            _serve(request),
+            project_id,
+            task_id,
+            background=bool(task and task.mode == "agent"),
+        )
     except ProjectError as e:
         return _api_error(e)
-    return JSONResponse({"ok": record.status == "succeeded", "run": record.model_dump()})
+    status = 202 if record.mode == "agent" and record.status == "running" else 200
+    return JSONResponse(
+        {"ok": record.status != "failed" or record.mode == "agent", "run": record.model_dump()},
+        status_code=status,
+    )
 
 
 @router.get("/api/projects/{project_id}/runs/{run_id}")
 def api_run_get(request: Request, project_id: str, run_id: str) -> JSONResponse:
     _console_only(request)
-    from kairo.projects import ProjectError, get_run, read_artifact
+    from kairo.project_materials import load_run_inputs
+    from kairo.projects import ProjectError, read_artifact, reap_run
 
     try:
-        run = get_run(_serve(request), project_id, run_id)
+        run = reap_run(_serve(request), project_id, run_id)
         artifact = None
+        inputs: list = []
         if run.status == "succeeded":
             artifact = read_artifact(_serve(request), project_id, run_id)
+            inputs = load_run_inputs(_serve(request), project_id, run_id)
     except ProjectError as e:
         return _api_error(e, 404)
-    return JSONResponse({"ok": True, "run": run.model_dump(), "artifact": artifact})
+    return JSONResponse({"ok": True, "run": run.model_dump(), "artifact": artifact, "inputs": inputs})
+
+
+@router.get("/api/projects/{project_id}/runs/{run_id}/inputs/{input_id}")
+def api_run_input(request: Request, project_id: str, run_id: str, input_id: str) -> JSONResponse:
+    _console_only(request)
+    from kairo.project_materials import read_run_input
+    from kairo.projects import ProjectError
+
+    try:
+        payload = read_run_input(_serve(request), project_id, run_id, input_id)
+    except ProjectError as e:
+        return _project_api_error(e)
+    return JSONResponse(payload)
