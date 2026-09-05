@@ -31,7 +31,7 @@
       </p>
       <div class="badges">
         <span class="badge stream">{{ t('dash.ref_count').format(n=s.member_count) }}</span>
-        {% if s.blocked_count %}<span class="badge blocked">{{ t('dash.needs_attention') }}</span>{% elif s.stale_count %}<span class="badge stale">{{ t('dash.needs_attention') }}</span>{% endif %}
+        {% if s.blocked_count %}<span class="badge blocked">{{ t('dash.badge_blocked') }}</span>{% endif %}{% if s.stale_count %}<span class="badge stale">{{ t('dash.badge_stale') }}</span>{% endif %}
       </div>
       <span class="card-next">{% if s.blocked_count or s.stale_count %}{{ t('dash.continue') }}{% else %}{{ t('dash.open_topic') }}{% endif %} →</span>
     </a>
