@@ -1335,6 +1335,38 @@ def test_unsaved_task_run_is_blocked_and_keeps_draft(tmp_path, monkeypatch):
     assert "/runs/" in ok.headers.get("location", "")
 
 
+def test_unsaved_legacy_task_run_is_blocked_and_keeps_draft(tmp_path, monkeypatch):
+    from kairo.projects import create_task, list_runs
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    task = create_task(serve, pid, name="快照", datasource_id=ds_id)
+    client = TestClient(create_app(serve))
+    before = list_runs(serve, pid)
+    blocked_name = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        data={"name": "未保存快照", "datasource_id": ds_id},
+        follow_redirects=False,
+    )
+    assert blocked_name.status_code == 200
+    assert "未保存快照" in blocked_name.text
+    assert "请先保存" in blocked_name.text or "Save your edits" in blocked_name.text
+    assert list_runs(serve, pid) == before
+    blocked_ds = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        data={"name": "快照", "datasource_id": "ds-other"},
+        follow_redirects=False,
+    )
+    assert blocked_ds.status_code == 200
+    assert "ds-other" in blocked_ds.text
+    assert list_runs(serve, pid) == before
+    ok = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        follow_redirects=False,
+    )
+    assert ok.status_code == 303
+    assert "/runs/" in ok.headers.get("location", "")
+
+
 def test_source_snapshot_artifact_does_not_claim_no_inputs(tmp_path, monkeypatch):
     from kairo.projects import create_task, run_task
 

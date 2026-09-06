@@ -3365,6 +3365,22 @@ def task_edit_form(
     return RedirectResponse(f"/projects/{project_id}/tasks/{task_id}", status_code=303)
 
 
+def _unsaved_task_draft(task, *, name: str | None, prompt: str | None, datasource_id: str | None) -> dict | None:
+    if name is None and prompt is None and datasource_id is None:
+        return None
+    posted_name = (name if name is not None else task.name) or ""
+    posted_prompt = prompt if prompt is not None else (task.prompt or "")
+    posted_ds = datasource_id if datasource_id is not None else (task.datasource_id or "")
+    changed = posted_name.strip() != (task.name or "").strip()
+    if task.mode == "agent" and prompt is not None:
+        changed = changed or posted_prompt.strip() != (task.prompt or "").strip()
+    if task.mode != "agent" and datasource_id is not None:
+        changed = changed or posted_ds.strip() != (task.datasource_id or "").strip()
+    if not changed:
+        return None
+    return {"name": posted_name, "prompt": posted_prompt, "datasource_id": posted_ds}
+
+
 @router.post("/projects/{project_id}/tasks/{task_id}/run")
 def project_task_run_form(
     request: Request,
@@ -3372,6 +3388,7 @@ def project_task_run_form(
     task_id: str,
     name: str | None = Form(None),
     prompt: str | None = Form(None),
+    datasource_id: str | None = Form(None),
 ) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, get_project, run_task
@@ -3379,17 +3396,15 @@ def project_task_run_form(
     try:
         project = get_project(_serve(request), project_id)
         task = next((t for t in project.tasks if t.id == task_id), None)
-        if task is not None and task.mode == "agent" and prompt is not None:
-            posted_name = (name if name is not None else task.name) or ""
-            if posted_name.strip() != (task.name or "").strip() or (prompt or "").strip() != (
-                task.prompt or ""
-            ).strip():
+        if task is not None:
+            draft = _unsaved_task_draft(task, name=name, prompt=prompt, datasource_id=datasource_id)
+            if draft is not None:
                 return task_page(
                     request,
                     project_id,
                     task_id,
                     error=_t(request)("proj.unsaved_run"),
-                    draft={"name": posted_name, "prompt": prompt or ""},
+                    draft=draft,
                 )
         record = run_task(
             _serve(request),
