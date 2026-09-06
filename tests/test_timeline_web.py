@@ -424,3 +424,15 @@ def test_timeline_review_submit_label_restores_on_pageshow(tmp_path):
     assert label in ("Write this review", "写这段回顾")
     assert "Running" not in label
     assert "运行中" not in label
+
+
+def test_ref_preserves_project_return_but_rejects_external_back(tmp_path):
+    root, _wa, _wb = _two_ws(tmp_path)
+    client = _client(root)
+    path = "/refs/2026-08-25-weekly"
+    html = client.get(path, params={"home": "alpha", "back": "/projects/prj-example"}).text
+    assert 'href="/projects/prj-example"' in html
+    assert 'href="/projects" class="on"' in html
+    for back in ("//evil.example", "/projects/prj-foo/../../settings", "/timeline-evil"):
+        html = client.get(path, params={"home": "alpha", "back": back}).text
+        assert 'class="ref-back" href="/timeline"' in html

@@ -41,6 +41,19 @@
     {% else %}
     <p class="panel-hint">{{ t('proj.task_empty') }}</p>
     {% endif %}
+    {% if attention_rows %}
+    <div id="project-attention" role="status">
+      <h3 class="obj-label">{{ t('proj.current_status') }}</h3>
+      <ul class="obj-list">
+        {% for row in attention_rows %}
+        <li class="obj-row">
+          <div>{{ row.status_label }} · {{ row.run.task_name }}{% if row.started_label %} · {{ row.started_label }}{% endif %}{% if row.reason_label %} · {{ row.reason_label }}{% endif %}</div>
+          <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ row.run.id }}">{{ t('proj.view_run') }}</a>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
     {% if recent_rows %}
     <div id="project-recent">
       <h3 class="obj-label">{{ t('proj.recent_results') }}</h3>
@@ -119,7 +132,8 @@
         <p class="panel-hint">{{ t('proj.associate_hint') }}</p>
         <input type="search" class="chooser-filter" placeholder="{{ t('proj.filter_ws') }}"
                aria-label="{{ t('proj.filter_ws') }}"
-               oninput="var q=this.value.toLowerCase(); this.form.querySelectorAll('.chooser-item').forEach(function(el){el.hidden=q && el.dataset.label.indexOf(q)<0;});">
+               oninput="var q=this.value.toLowerCase(); var count=0; this.form.querySelectorAll('.chooser-item').forEach(function(el){el.hidden=!!q && el.dataset.label.indexOf(q)<0; if(!el.hidden)count++;}); this.form.querySelector('.filter-empty').hidden=count>0;">
+        <p class="filter-empty panel-hint" role="status" hidden>{{ t('proj.no_matches') }}</p>
         <div class="chooser-list" role="group" aria-label="{{ t('proj.workspaces') }}">
           {% for ws in available_workspaces %}
           <label class="chooser-item" data-label="{{ (ws.topic ~ ' ' ~ ws.slug) | lower }}">
@@ -144,17 +158,18 @@
     <div class="material-toolbar">
       <input id="material-filter" type="search" placeholder="{{ t('proj.filter_materials') }}"
              aria-label="{{ t('proj.filter_materials') }}"
-             oninput="var q=this.value.toLowerCase(); var list=document.getElementById('material-list'); if(!list)return; list.querySelectorAll('.material-item').forEach(function(el){el.hidden=q && (el.dataset.label||'').indexOf(q)<0;});">
+             oninput="var q=this.value.toLowerCase(); var list=document.getElementById('material-list'); if(!list)return; var count=0; list.querySelectorAll('.material-item').forEach(function(el){el.hidden=!!q && (el.dataset.label||'').indexOf(q)<0; if(!el.hidden)count++;}); document.getElementById('material-empty').hidden=count>0;">
       <select id="material-sort" aria-label="{{ t('proj.sort_title') }}"
-              onchange="var list=document.getElementById('material-list'); if(!list)return; var key=this.value; var items=[].slice.call(list.children); items.sort(function(a,b){var av=(a.dataset[key]||''); var bv=(b.dataset[key]||''); return av<bv?-1:av>bv?1:0;}); items.forEach(function(el){list.appendChild(el);});">
+              onchange="var list=document.getElementById('material-list'); if(!list)return; var key=this.value; var items=[].slice.call(list.children); items.sort(function(a,b){var av=(a.dataset[key]||''); var bv=(b.dataset[key]||''); var order=av<bv?-1:av>bv?1:0; return key==='time'?-order:order;}); items.forEach(function(el){list.appendChild(el);});">
         <option value="title">{{ t('proj.sort_title') }}</option>
         <option value="time">{{ t('proj.sort_time') }}</option>
       </select>
     </div>
+    <p id="material-empty" class="panel-hint" role="status" hidden>{{ t('proj.no_matches') }}</p>
     <ul class="obj-list" id="material-list">
       {% for r in member_refs %}
       <li class="obj-row material-item" data-label="{{ (r.title ~ ' ' ~ r.id) | lower }}" data-title="{{ r.title | lower }}" data-time="{{ r.id }}">
-        <a href="/refs/{{ r.id | urlencode }}?home={{ (r.home or 'global') | urlencode }}">{{ r.title }}</a>
+        <a href="/refs/{{ r.id | urlencode }}?home={{ (r.home or 'global') | urlencode }}&amp;back=/projects/{{ project.id }}">{{ r.title }}</a>
       </li>
       {% endfor %}
     </ul>
@@ -173,7 +188,7 @@
         <div class="obj-copy">
           <strong>{{ ds_labels.get(ds.id, ds.purpose or ds.reader) }}</strong>
           <span class="meta-hint"> · {% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</span>
-          <div class="chooser-id" title="{{ ds.url }}">{{ ds.url }}</div>
+          {% if ds.url.startswith(('https://', 'http://')) %}<a class="source-link" href="{{ ds.url }}" target="_blank" rel="noopener noreferrer">{{ t('proj.open_original') }}</a>{% endif %}
           {% set st = ds_status.get(ds.id) if ds_status is defined else None %}
           <div class="meta-hint">
             {% if st and st.state == 'fresh' %}{{ t('proj.cache_fresh') }}{% if st.expires_label %} · {{ st.expires_label }}{% endif %}

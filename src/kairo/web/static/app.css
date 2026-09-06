@@ -1223,3 +1223,28 @@ header.top .root-gl.on { color: var(--pine-deep); }
   .ref-form-list li { align-items: start; flex-direction: column; gap: 2px; }
   .form-drawer { width: 100%; }
 }
+
+/* Project review: shared layout and usable long-table previews. */
+.chooser-item[hidden] { display: none !important; }
+.task-page .task-create-bar { display: flex; flex-direction: column; align-items: stretch; }
+.task-page label { display: block; margin: 12px 0 6px; }
+.task-page textarea { min-height: 280px; }
+.doc:has(.sheet-preview) { max-width: 1200px; }
+.doc .sheet-preview { max-height: 65vh; overflow: auto; }
+.doc .sheet-preview th { position: sticky; top: 0; z-index: 1; }
+.doc .sheet-preview td, .doc .sheet-preview th { max-width: 360px; overflow-wrap: anywhere; white-space: normal; }
+.source-link { display: inline-block; font-size: 13px; }
+
+body:has(> .task-page) > .artifact-back { max-width: 860px; padding-inline: 28px; }
+body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
+@media (max-width: 600px) {
+  .artifact-back { padding-inline: 20px; }
+  .task-page { padding-inline: 20px; }
+  body:has(> .task-page) > .artifact-back { padding-inline: 20px; }
+}
+
+@media print {
+  .doc .sheet-preview { max-height: none; overflow: visible; }
+  .doc .sheet-preview table { width: 100%; min-width: 0; table-layout: fixed; }
+  .doc .sheet-preview th { position: static; }
+}

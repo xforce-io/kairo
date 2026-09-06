@@ -141,8 +141,8 @@ def test_rewrite_artifact_input_links_only_recorded():
 def test_clock_label_strips_iso_noise():
     from kairo.web.views import _clock_label
 
-    assert _clock_label("2026-09-05T11:51:09+00:00") == "2026-09-05 11:51"
-    assert _clock_label("2026-09-05T12:51:09Z") == "2026-09-05 12:51"
+    assert _clock_label("2026-09-05T11:51:09+00:00") == "2026-09-05 11:51 UTC"
+    assert _clock_label("2026-09-05T12:51:09Z") == "2026-09-05 12:51 UTC"
     assert _clock_label(None) == ""
 
 
@@ -1534,3 +1534,23 @@ def test_warm_skips_fresh_cache_and_refreshes_expired(tmp_path, monkeypatch):
         assert _count(counter) == 2
     finally:
         set_clock(None)
+
+
+def test_project_surfaces_running_and_latest_failure(tmp_path, monkeypatch):
+    from kairo.projects import RunRecord, _save_run, create_task
+
+    serve, pid, _ds, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    task = create_task(serve, pid, name="日报", prompt="整理")
+    for index, status in enumerate(("succeeded", "running", "failed")):
+        _save_run(serve, RunRecord(
+            id=f"run-visibility-{index}", project_id=pid, task_id=task.id,
+            worker_pid=os.getpid() if status == "running" else None,
+            task_name=task.name, task_version=1, status=status,
+            schema_version=2, mode="agent",
+            created_at=f"2026-09-05T0{index}:00:00+00:00",
+        ))
+    html = TestClient(create_app(serve)).get(f"/projects/{pid}").text
+    attention = html.split('id="project-attention"')[1].split('id="project-recent"')[0]
+    assert "run-visibility-1" in attention
+    assert "run-visibility-2" in attention
+    assert "run-visibility-0" not in attention

@@ -7,7 +7,7 @@ import io
 import json
 import re
 from html import escape
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 from markdown_it import MarkdownIt
 
@@ -53,7 +53,7 @@ def _rewrite_digest_links(html: str, slug: str) -> str:
     qslug = quote(slug, safe="")
 
     def _repl(m: re.Match[str]) -> str:
-        ref_id = m.group(1)
+        ref_id = unquote(m.group(1))
         if not _is_safe_ref_id(ref_id):
             return m.group(0)
         url = f"/w/{qslug}/ref/{quote(ref_id, safe='')}/form/digest"

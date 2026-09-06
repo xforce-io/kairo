@@ -922,11 +922,13 @@ def global_ref_view(
     forms = [f for f in _ref_forms(ws, rid, man, t) if f["role"] != "digest"]
     primary_heading, primary_html = _global_ref_primary_body(ws, rid, man, t)
     locked_tags = [tag for tag in tags if is_locked_home_tag(serve, home, rid, tag)]
+    project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+", back)) and not _is_public_read(request)
+    back_url = back if project_back or back == "/timeline" or back.startswith("/timeline?") else "/timeline"
     return _render(
         request,
         "global_ref.html",
         {
-            "nav_active": "timeline",
+            "nav_active": "projects" if project_back else "timeline",
             "title": man.title or rid,
             "ref_id": rid,
             "tags": tags,
@@ -938,7 +940,8 @@ def global_ref_view(
             "primary_heading": primary_heading,
             "primary_html": primary_html,
             "forms": forms,
-            "back_url": back if back.startswith("/timeline") else "/timeline",
+            "back_url": back_url,
+            "back_label": t("art.back") if project_back else t("ref.back_timeline"),
         },
     )
 
@@ -2959,7 +2962,9 @@ def _clock_label(iso: str | None) -> str:
     text = text.replace("Z", "+00:00")
     if "T" in text:
         date, rest = text.split("T", 1)
-        return f"{date} {rest[:5]}"
+        offset = rest[rest.rfind("+"):] if "+" in rest else (rest[rest.rfind("-"):] if "-" in rest else "")
+        zone = " UTC" if offset == "+00:00" else (f" UTC{offset}" if offset else "")
+        return f"{date} {rest[:5]}{zone}"
     return text[:16]
 
 
@@ -3103,6 +3108,11 @@ def project_page(
             }
         )
     recent_rows = [row for row in run_rows if row["run"].status == "succeeded"][:3]
+    attention_rows = [
+        row for index, row in enumerate(run_rows)
+        if row["run"].status == "running"
+        or (index == 0 and row["run"].status == "failed")
+    ]
     ds_status = {}
     for ds in project.datasources:
         st = dict(cache_status(serve, project, ds))
@@ -3118,10 +3128,11 @@ def project_page(
             "project": project,
             "available_workspaces": available_topics,
             "linked_topics": linked_topics,
-            "member_refs": project_member_refs(serve, project.topics),
+            "member_refs": sorted(project_member_refs(serve, project.topics), key=lambda r: r.title.lower()),
             "runs": runs,
             "run_rows": run_rows,
             "recent_rows": recent_rows,
+            "attention_rows": attention_rows,
             "ds_status": ds_status,
             "ds_labels": {ds.id: datasource_label(ds) for ds in project.datasources},
             "error": error,

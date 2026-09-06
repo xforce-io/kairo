@@ -213,3 +213,20 @@ def test_preview_datasource_html_spreadsheet_two_columns():
     html = preview_datasource_html("plant,mw\nsolar,80\n", kind="spreadsheet")
     assert "<table>" in html
     assert "solar" in html
+
+
+def test_digest_link_with_chinese_id_is_decoded_before_validation():
+    from urllib.parse import quote
+
+    ref_id = "2026-08-26-ai智控一期概要设计"
+    for path_id in (ref_id, quote(ref_id, safe="")):
+        html = render_markdown(f"[digest](references/{path_id}/digest.md)", slug="能源梳理")
+        assert f"/ref/{quote(ref_id, safe='')}/form/digest" in html
+        assert 'hx-target="#reader"' in html
+        assert 'href="references/' not in html
+
+
+def test_digest_link_rejects_encoded_path_separators_and_traversal():
+    for ref_id in ("%2e%2e", "foo%2fbar", "foo%5cbar", "%252e%252e"):
+        html = render_markdown(f"[digest](references/{ref_id}/digest.md)", slug="alpha")
+        assert 'hx-get=' not in html

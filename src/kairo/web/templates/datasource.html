@@ -5,7 +5,7 @@
 {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
 {% if payload %}
 <article class="doc">
-  <p class="doc-kicker"><span class="dk-title">{{ payload.url }}</span></p>
+  <p class="doc-kicker"><span class="dk-title">{% if payload.url.startswith(('https://', 'http://')) %}<a href="{{ payload.url }}" target="_blank" rel="noopener noreferrer">{{ t('proj.open_original') }}</a>{% endif %}</span></p>
   <p class="meta-hint">
     {% if payload.state == 'fresh' %}{{ t('proj.cache_fresh') }}{% else %}{{ t('proj.cache_expired') }}{% endif %}
     {% if payload.fetched_label or payload.expires_label %}
@@ -13,12 +13,13 @@
     {% endif %}
     {% if payload.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
   </p>
-  {{ body_html | safe }}
-</article>
 <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds_id }}/read">
   <input type="hidden" name="refresh" value="1">
   <button class="btn btn-ghost btn-inline">{{ t('proj.refresh') }}</button>
 </form>
+  {{ body_html | safe }}
+</article>
+
 {% else %}
 <p class="panel-hint">{{ t('proj.cache_none') }}</p>
 <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds_id }}/read">

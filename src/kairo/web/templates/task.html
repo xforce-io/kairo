@@ -2,17 +2,20 @@
 {% block subtitle %}{{ task.name }}{% endblock %}
 {% block body %}
 <p class="artifact-back"><a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
+<main class="obj-page task-page">
 <h1 class="obj-title">{{ task.name }} · v{{ task.version }}</h1>
 {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
 <form class="task-create" method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}">
   <div class="task-create-bar">
-    <input name="name" value="{{ draft.get('name', task.name) }}" required aria-label="{{ t('proj.name_ph') }}">
+    <label for="task-name">{{ t('proj.name_ph') }}</label>
+    <input id="task-name" name="name" value="{{ draft.get('name', task.name) }}" required aria-label="{{ t('proj.name_ph') }}">
     {% if task.schedule == 'interval' %}
     <p class="meta-hint">{{ t('proj.schedule_manual') }}</p>
     {% endif %}
   </div>
   {% if task.mode == 'agent' %}
-  <textarea name="prompt" rows="8" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}">{{ draft.get('prompt', task.prompt) }}</textarea>
+  <label for="task-prompt">{{ t('proj.prompt_ph') }}</label>
+  <textarea id="task-prompt" name="prompt" rows="8" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}">{{ draft.get('prompt', task.prompt) }}</textarea>
   {% else %}
   <p class="meta-hint">{{ t('proj.legacy_task') }} · {{ task.datasource_id }}</p>
   <input name="datasource_id" value="{{ draft.get('datasource_id', task.datasource_id) }}" aria-label="{{ t('proj.datasources') }}">
@@ -22,4 +25,5 @@
     <button type="submit" class="btn btn-ghost btn-inline" formaction="/projects/{{ project.id }}/tasks/{{ task.id }}/run">{{ t('proj.run') }}</button>
   </div>
 </form>
+</main>
 {% endblock %}

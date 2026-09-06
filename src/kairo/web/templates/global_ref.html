@@ -2,13 +2,18 @@
 {% block subtitle %}{{ t('ref.global_kicker') }}{% endblock %}
 {% block body %}
 <main class="ref-page">
-  <a class="ref-back" href="{{ back_url }}">← {{ t('ref.back_timeline') }}</a>
+  <a class="ref-back" href="{{ back_url }}">← {{ back_label }}</a>
   <header class="ref-head">
     <p class="obj-kicker">{{ t('ref.global_kicker') }}</p>
     <h1>{{ title }}</h1>
     <p class="ref-occurred">{{ occurred_display }}</p>
     <p class="ref-id">{{ ref_id }}</p>
   </header>
+
+  <section class="ref-section">
+    <h2>{{ primary_heading }}</h2>
+    {% if primary_html %}<article class="doc">{{ primary_html|safe }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}
+  </section>
 
   <section class="ref-section">
     <h2>{{ t('ref.tags') }}</h2>
@@ -54,10 +59,7 @@
     {% endif %}
   </section>
 
-  <section class="ref-section">
-    <h2>{{ primary_heading }}</h2>
-    {% if primary_html %}<article class="doc">{{ primary_html|safe }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}
-  </section>
+
 
   <section class="ref-section">
     <h2>{{ t('ref.forms') }}</h2>
