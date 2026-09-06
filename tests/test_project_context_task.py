@@ -923,6 +923,69 @@ def test_valid_recorded_evidence_still_succeeds(tmp_path, monkeypatch):
     assert again["version"] == content_version(body)
 
 
+def test_archive_keeps_unique_bodies_when_basenames_collide(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json, inputs_dir, read_run_input
+    from kairo.projects import _execute_agent_run
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-collide"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    body_a = "content-A-only\n"
+    body_b = "content-B-only\n"
+    (scratch / "one").mkdir()
+    (scratch / "two").mkdir()
+    (scratch / "one" / "body.md").write_text(body_a, encoding="utf-8")
+    (scratch / "two" / "body.md").write_text(body_b, encoding="utf-8")
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-a",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "A",
+                "version": content_version(body_a),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "one/body.md",
+            },
+            {
+                "input_id": "inp-b",
+                "source_id": "topic:alpha-ws:understanding",
+                "type": "understanding",
+                "title": "B",
+                "version": content_version(body_b),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "two/body.md",
+            },
+        ],
+    )
+
+    class _TwoCiteProvider(_CiteProvider):
+        def __init__(self):
+            super().__init__("inp-a")
+
+        def run(self, config, signal=None):
+            dest = config.artifact_dir / "artifact.md"
+            dest.write_text("[a](input:inp-a)\n[b](input:inp-b)\n", encoding="utf-8")
+            return AgentResult(artifacts=[dest], result_text=dest.read_text())
+
+    out = _execute_agent_run(serve, pid, run_id, _TwoCiteProvider())
+    assert out.status == "succeeded"
+    assert out.artifact_path
+    got_a = read_run_input(serve, pid, run_id, "inp-a")
+    got_b = read_run_input(serve, pid, run_id, "inp-b")
+    assert got_a["content"] == body_a
+    assert got_b["content"] == body_b
+    assert got_a["version"] == content_version(body_a)
+    assert got_b["version"] == content_version(body_b)
+    dest = inputs_dir(serve, pid, run_id)
+    names = sorted(p.name for p in dest.glob("*.md"))
+    assert names == ["inp-a.md", "inp-b.md"]
+
+
 def test_recorded_datasource_survives_unlink_before_publish(tmp_path, monkeypatch):
     from kairo.project_materials import _atomic_json
     from kairo.projects import _execute_agent_run, remove_datasource
