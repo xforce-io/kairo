@@ -19,9 +19,7 @@
   {% endif %}
   <div class="task-create-submit">
     <button type="submit" class="btn btn-step btn-inline">{{ t('proj.edit') }}</button>
+    <button type="submit" class="btn btn-ghost btn-inline" formaction="/projects/{{ project.id }}/tasks/{{ task.id }}/run">{{ t('proj.run') }}</button>
   </div>
-</form>
-<form method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}/run">
-  <button class="btn btn-ghost btn-inline">{{ t('proj.run') }}</button>
 </form>
 {% endblock %}
