@@ -633,22 +633,65 @@ def read_run_input(serve: Path, project_id: str, run_id: str, input_id: str) -> 
     folder = inputs_dir(serve, project_id, run_id)
     for item in _load_index(folder):
         if item.get("input_id") == input_id:
-            body_path = folder / str(item.get("body") or f"{input_id}.md")
-            if not body_path.is_file():
-                raise ProjectError("输入正文缺失", code="not_found")
+            try:
+                body_path = evidence_body_path(folder, str(item.get("body") or f"{input_id}.md"))
+            except ProjectError as exc:
+                if getattr(exc, "code", None) == "evidence_failed":
+                    raise ProjectError("输入正文缺失", code="not_found") from exc
+                raise
             content = body_path.read_text(encoding="utf-8")
             return {**item, "content": content, "ok": True}
     raise ProjectError("输入记录不存在", code="not_found")
 
 
-def _source_in_scope(source_id: str, topics: list[str], datasource_ids: set[str]) -> bool:
+def _source_in_scope(
+    source_id: str,
+    topics: list[str],
+    datasource_ids: set[str],
+    serve: Path | None = None,
+) -> bool:
     try:
         parsed = parse_source_id(source_id)
     except ProjectError:
         return False
     if parsed["kind"] == SOURCE_DATASOURCE:
         return parsed["ds_id"] in datasource_ids
-    return parsed.get("slug") in topics
+    slug = parsed.get("slug") or ""
+    if slug not in topics:
+        return False
+    if parsed["kind"] == SOURCE_UNDERSTANDING:
+        return True
+    if parsed["kind"] != SOURCE_DIGEST:
+        return False
+    if serve is None:
+        return False
+    try:
+        members = topic_members(serve, slug)
+    except Exception:
+        return False
+    home = parsed.get("home") or ""
+    ref_id = parsed.get("ref_id") or ""
+    return any(m.home == home and m.id == ref_id for m in members)
+
+
+def evidence_body_path(folder: Path, name: str) -> Path:
+    raw = (name or "").strip()
+    if not raw or "\x00" in raw:
+        raise ProjectError("输入证据正文缺失", code="evidence_failed")
+    if Path(raw).is_absolute():
+        raise ProjectError("输入证据路径越界", code="evidence_failed")
+    try:
+        root = folder.resolve()
+        resolved = (folder / raw).resolve()
+    except OSError as exc:
+        raise ProjectError("输入证据正文缺失", code="evidence_failed") from exc
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise ProjectError("输入证据路径越界", code="evidence_failed") from None
+    if not resolved.is_file():
+        raise ProjectError("输入证据正文缺失", code="evidence_failed")
+    return resolved
 
 
 def validate_recorded_inputs(
@@ -671,13 +714,13 @@ def validate_recorded_inputs(
     for item in items:
         iid = str(item.get("input_id") or "")
         name = str(item.get("body") or f"{iid}.md")
-        body = folder / name
-        if not body.is_file():
-            raise ProjectError("输入证据正文缺失", code="evidence_failed")
+        body = evidence_body_path(folder, name)
         actual = body.read_text(encoding="utf-8")
         if content_version(actual) != item.get("version"):
             raise ProjectError("输入证据校验失败", code="evidence_failed")
-        if not _source_in_scope(str(item.get("source_id") or ""), topics, allowed_ds):
+        if not _source_in_scope(
+            str(item.get("source_id") or ""), topics, allowed_ds, serve=serve
+        ):
             raise ProjectError("输入来源越界", code="evidence_failed")
 
 
@@ -694,9 +737,13 @@ def finalize_inputs(serve: Path, project_id: str, run_id: str) -> list[dict[str,
     dest.mkdir(parents=True, exist_ok=True)
     for item in items:
         name = str(item.get("body") or f"{item['input_id']}.md")
-        body = src / name
-        _atomic_text(dest / name, body.read_text(encoding="utf-8"))
-        actual = (dest / name).read_text(encoding="utf-8")
+        body = evidence_body_path(src, name)
+        dest_name = Path(name).name
+        if dest_name in ("", ".", ".."):
+            dest_name = f"{item['input_id']}.md"
+        _atomic_text(dest / dest_name, body.read_text(encoding="utf-8"))
+        item["body"] = dest_name
+        actual = (dest / dest_name).read_text(encoding="utf-8")
         if content_version(actual) != item.get("version"):
             raise ProjectError("输入证据校验失败", code="evidence_failed")
     _atomic_json(_input_index_path(dest), items)
