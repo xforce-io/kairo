@@ -1242,3 +1242,66 @@ def test_interval_is_rejected_but_legacy_interval_stays_manual(tmp_path, monkeyp
     shown = client.get(f"/projects/{pid}/tasks/{legacy.id}")
     assert shown.status_code == 200
     assert "Automatic schedule is not enabled" in shown.text or "未启用自动调度" in shown.text
+
+
+def test_unsaved_task_run_is_blocked_and_keeps_draft(tmp_path, monkeypatch):
+    from kairo.projects import create_task, list_runs
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    task = create_task(serve, pid, name="每周整理", prompt="原始要求")
+    client = TestClient(create_app(serve))
+    before = list_runs(serve, pid)
+    blocked = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        data={"name": "每周整理", "prompt": "未保存的新要求"},
+        follow_redirects=False,
+    )
+    assert blocked.status_code == 200
+    assert "未保存的新要求" in blocked.text
+    assert "原始要求" not in blocked.text or "未保存" in blocked.text
+    assert "请先保存" in blocked.text or "Save your edits" in blocked.text
+    assert list_runs(serve, pid) == before
+    from kairo.provider import StubProvider
+
+    monkeypatch.setattr("kairo.projects.select_project_agent", lambda: StubProvider())
+    ok = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        follow_redirects=False,
+    )
+    assert ok.status_code == 303
+    assert "/runs/" in ok.headers.get("location", "")
+
+
+def test_source_snapshot_artifact_does_not_claim_no_inputs(tmp_path, monkeypatch):
+    from kairo.projects import create_task, run_task
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    task = create_task(serve, pid, name="快照", datasource_id=ds_id)
+    record = run_task(serve, pid, task.id)
+    assert record.status == "succeeded"
+    client = TestClient(create_app(serve))
+    page = client.get(f"/projects/{pid}/runs/{record.id}")
+    assert page.status_code == 200
+    assert "本次未读取项目材料" not in page.text
+    assert "This run did not read project materials" not in page.text
+    html = page.text
+    assert "docs.qq.com" in html or ds_id in html or "Input" in html or "solar" in html
+
+
+def test_elapsed_label_unknown_when_finished_missing(tmp_path):
+    from kairo.web.views import run_elapsed_label
+
+    assert (
+        run_elapsed_label(
+            "2019-01-01T00:00:00+00:00",
+            None,
+            status="succeeded",
+            unknown="未知",
+        )
+        == "未知"
+    )
+    running = run_elapsed_label("2026-09-05T00:00:00+00:00", None, status="running")
+    assert running.endswith("s") or "m" in running or "h" in running
+    assert "168h" not in run_elapsed_label(
+        "2019-01-01T00:00:00+00:00", None, status="failed", unknown="未知"
+    )

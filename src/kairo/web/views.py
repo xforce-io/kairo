@@ -2979,7 +2979,13 @@ def run_reason_label(t, reason: str | None) -> str:
     return t(key) if key else reason
 
 
-def run_elapsed_label(started_at: str | None, finished_at: str | None = None) -> str:
+def run_elapsed_label(
+    started_at: str | None,
+    finished_at: str | None = None,
+    *,
+    status: str | None = None,
+    unknown: str = "",
+) -> str:
     start = (started_at or "").strip()
     if not start:
         return ""
@@ -2993,9 +2999,13 @@ def run_elapsed_label(started_at: str | None, finished_at: str | None = None) ->
         try:
             end = datetime.datetime.fromisoformat(end_text)
         except ValueError:
+            if status != "running":
+                return unknown
             end = datetime.datetime.now(datetime.timezone.utc)
-    else:
+    elif status == "running":
         end = datetime.datetime.now(datetime.timezone.utc)
+    else:
+        return unknown
     if begin.tzinfo is None:
         begin = begin.replace(tzinfo=datetime.timezone.utc)
     if end.tzinfo is None:
@@ -3354,13 +3364,31 @@ def task_edit_form(
 
 
 @router.post("/projects/{project_id}/tasks/{task_id}/run")
-def project_task_run_form(request: Request, project_id: str, task_id: str) -> HTMLResponse:
+def project_task_run_form(
+    request: Request,
+    project_id: str,
+    task_id: str,
+    name: str | None = Form(None),
+    prompt: str | None = Form(None),
+) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, get_project, run_task
 
     try:
         project = get_project(_serve(request), project_id)
         task = next((t for t in project.tasks if t.id == task_id), None)
+        if task is not None and task.mode == "agent" and prompt is not None:
+            posted_name = (name if name is not None else task.name) or ""
+            if posted_name.strip() != (task.name or "").strip() or (prompt or "").strip() != (
+                task.prompt or ""
+            ).strip():
+                return task_page(
+                    request,
+                    project_id,
+                    task_id,
+                    error=_t(request)("proj.unsaved_run"),
+                    draft={"name": posted_name, "prompt": prompt or ""},
+                )
         record = run_task(
             _serve(request),
             project_id,
@@ -3403,7 +3431,12 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
             "status_label": t(f"proj.run_{run.status}") if run.status in ("running", "succeeded", "failed") else run.status,
             "reason_label": run_reason_label(t, run.reason),
             "started_label": _clock_label(run.started_at or run.created_at),
-            "elapsed_label": run_elapsed_label(run.started_at or run.created_at, run.finished_at),
+            "elapsed_label": run_elapsed_label(
+                run.started_at or run.created_at,
+                run.finished_at,
+                status=run.status,
+                unknown=t("proj.elapsed_unknown"),
+            ),
         },
     )
 
