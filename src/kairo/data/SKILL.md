@@ -173,10 +173,10 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 
 1. 先取动态材料目录（不含正文、不拉外部、不触发 digest/fold）：
    `kairo project context PROJECT_ID --run RUN_ID --root SERVE_ROOT`
-2. 按名称、用途、类型、可用状态与 `read_args` 选择材料。`source_id` 是不透明标识，原样回传。
+2. 目录里 `type=datasource` 在最前。必须先读这些源。按名称、用途、类型、可用状态与 `read_args` 选择材料。`source_id` 是不透明标识，原样回传。
 3. 按需读取正文：
    `kairo project read PROJECT_ID SOURCE_ID --run RUN_ID --root SERVE_ROOT`
-   Data Source 显式刷新才加 `--refresh`。
+   先不要加 `--refresh`；仅当该源 `uncached` 或读取失败时才刷新。单个源失败时继续读其它源，不要整篇放弃。
 4. 成功 JSON 含 `content`、`version`、`input_id`。引用材料必须写成 `[标题](input:INPUT_ID)`，只用本次返回的 `input_id`。
 5. `state=unavailable` 表示尚未生成；空目录就是没有材料。不要为了读取去 step。
 6. 未出现在该 Project 目录里的来源不可读。把最终 Markdown 写到约定的 `output_file`（默认 `artifact.md`）。

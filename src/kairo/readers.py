@@ -313,23 +313,49 @@ def _read_wecom_sheet(url: str, runner, timeout: float) -> str:
     return body
 
 
+def _smartsheet_usable(sheets: list, url: str) -> list:
+    tables = [
+        s
+        for s in sheets
+        if str(s.get("type") or "smartsheet") == "smartsheet"
+    ]
+    tab = _wecom_tab(url)
+    if not tab:
+        return tables
+    matched = [
+        s
+        for s in tables
+        if tab in (str(s.get("sheet_id") or ""), str(s.get("title") or ""))
+    ]
+    return matched or tables
+
+
 def _read_wecom_smartsheet(url: str, runner, timeout: float) -> str:
     meta = _wecom_payload(runner, ["smartsheet", "sheets", "list"], {"docid": url}, timeout)
     sheets = meta.get("sheets") if isinstance(meta, dict) else None
     if not sheets:
         raise ReadError(READ_FAILED, "读取结果为空")
+    usable = _smartsheet_usable(sheets, url)
+    if not usable:
+        raise ReadError(READ_FAILED, "没有可读取的表格")
     parts: list[str] = []
-    for sheet in sheets:
+    name = meta.get("name") if isinstance(meta, dict) else None
+    if name:
+        parts.append(f"# {name}")
+    for sheet in usable:
         title = sheet.get("title") or sheet.get("sheet_title") or sheet.get("sheet_id") or "sheet"
-        raw = _wecom_payload(
-            runner,
-            ["smartsheet", "records", "list"],
-            {"docid": url, "sheet_title": title, "limit": 100},
-            timeout,
-        )
+        try:
+            raw = _wecom_payload(
+                runner,
+                ["smartsheet", "records", "list"],
+                {"docid": url, "sheet_title": title, "limit": 100},
+                timeout,
+            )
+        except ReadError:
+            continue
         parts.append(f"## {title}\n{_text_from_payload(raw)}")
     body = "\n\n".join(parts).strip()
-    if not body:
+    if not any(p.startswith("## ") for p in parts):
         raise ReadError(READ_FAILED, "读取结果为空")
     return body
 

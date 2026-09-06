@@ -21,6 +21,7 @@ from kairo.projects import (
     _assert_no_secrets,
     _ds,
     _project_dir,
+    datasource_label,
     get_project,
     get_run,
 )
@@ -28,7 +29,7 @@ from kairo.readers import ReadError, read_datasource
 from kairo.refs import topic_members
 from kairo.settings import get_connection
 
-CACHE_TTL = timedelta(seconds=3600)
+CACHE_TTL = timedelta(hours=24)
 MATERIAL_MAX_BYTES = 2 * 1024 * 1024
 SOURCE_UNDERSTANDING = "understanding"
 SOURCE_DIGEST = "digest"
@@ -403,6 +404,21 @@ def list_context(
     project = get_project(serve, project_id)
     topics, datasources = _scope(serve, project, run_id)
     items: list[dict[str, Any]] = []
+    for ds in datasources:
+        source_id = f"datasource:{ds.id}"
+        status = cache_status(serve, project, ds)
+        items.append(
+            {
+                "source_id": source_id,
+                "title": datasource_label(ds),
+                "purpose": ds.purpose,
+                "type": SOURCE_DATASOURCE,
+                "state": status["state"],
+                "bytes": status["bytes"],
+                "version": status["version"],
+                "read_args": ["project", "read", project_id, source_id],
+            }
+        )
     for slug in topics:
         understanding = _topic_understanding_path(serve, slug)
         exists = understanding.is_file()
@@ -441,21 +457,6 @@ def list_context(
                     "read_args": ["project", "read", project_id, source_id],
                 }
             )
-    for ds in datasources:
-        source_id = f"datasource:{ds.id}"
-        status = cache_status(serve, project, ds)
-        items.append(
-            {
-                "source_id": source_id,
-                "title": ds.purpose or ds.url,
-                "purpose": ds.purpose,
-                "type": SOURCE_DATASOURCE,
-                "state": status["state"],
-                "bytes": status["bytes"],
-                "version": status["version"],
-                "read_args": ["project", "read", project_id, source_id],
-            }
-        )
     return {"ok": True, "project_id": project.id, "items": items}
 
 
