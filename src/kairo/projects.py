@@ -699,6 +699,28 @@ def _run_agent_task(
 _INPUT_CITE = re.compile(r"\[([^\]]+)\]\(input:([^)]+)\)")
 
 
+def _warm_run_datasources(serve: Path, record: RunRecord) -> None:
+    from kairo.project_materials import cache_status, read_cached_datasource
+
+    ids = list(record.scope_datasources or [])
+    if not ids:
+        return
+    project = get_project(serve, record.project_id)
+    for ds in project.datasources:
+        if ds.id not in ids:
+            continue
+        status = cache_status(serve, project, ds)
+        if status.get("state") == "fresh":
+            continue
+        try:
+            read_cached_datasource(serve, record.project_id, ds.id, refresh=True)
+        except Exception:
+            try:
+                read_cached_datasource(serve, record.project_id, ds.id, refresh=False)
+            except Exception:
+                continue
+
+
 def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunRecord:
     import shutil
     import tempfile
@@ -727,7 +749,8 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
             f"加载本目录 SKILL.md 的 Project 运行章节。"
             f"必须使用 `{cli}`，不要用 PATH 上可能过期的 `kairo`。"
             f"先 `{cli} project context {record.project_id} --run {record.id} --root {root}` "
-            f"获取目录，再 `{cli} project read PROJECT SOURCE --run {record.id} --root {root}` 按需读取。"
+            f"获取目录。type=datasource 在最前，必须先读这些源（不要一上来 --refresh；仅 uncached 才刷新）。"
+            f"再 `{cli} project read PROJECT SOURCE --run {record.id} --root {root}` 按需读取。"
             f"禁止 step / re-step / accept / 写 Topic。"
             f"引用材料使用 [标题](input:INPUT_ID)。把最终 Markdown 写入 artifact.md。\n\n"
             f"## Task\n{record.task_snapshot.get('prompt') or ''}\n"
@@ -737,6 +760,7 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
         cache_root.mkdir(parents=True, exist_ok=True)
         scratch = scratch_dir(serve, record.project_id, record.id)
         scratch.mkdir(parents=True, exist_ok=True)
+        _warm_run_datasources(serve, record)
         old_root = os.environ.get("KAIRO_SERVE_ROOT")
         old_path = os.environ.get("PATH")
         os.environ["KAIRO_SERVE_ROOT"] = str(Path(serve).resolve())
@@ -785,6 +809,12 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
         if not scratch_folder.is_absolute():
             scratch_folder = Path(serve) / scratch_folder
         validate_recorded_inputs(serve, record.project_id, record.id, inputs, scratch_folder)
+        if record.scope_datasources and not any(
+            str(item.get("type") or "") == "datasource"
+            or str(item.get("source_id") or "").startswith("datasource:")
+            for item in inputs
+        ):
+            raise ProjectError("未读取任何 Data Source", code="datasource_unread")
         inputs = finalize_inputs(serve, record.project_id, record.id)
         rel = Path(".kairo") / "projects" / record.project_id / "artifacts" / f"{record.id}.md"
         dest = Path(serve) / rel

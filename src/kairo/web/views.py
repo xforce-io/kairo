@@ -2934,6 +2934,7 @@ _PROJECT_HTTP = {
     "provider_unsupported": 400,
     "empty_artifact": 400,
     "invalid_input_ref": 400,
+    "datasource_unread": 400,
 }
 
 
@@ -2969,6 +2970,7 @@ _RUN_REASON_KEYS = {
     "invalid_input_ref": "proj.reason_input_ref",
     "empty_artifact": "proj.reason_empty",
     "read_failed": "proj.reason_read",
+    "datasource_unread": "proj.reason_ds_unread",
 }
 
 

@@ -837,6 +837,52 @@ def test_wecom_default_adapter_reads_via_injected_runner():
         runner=runner,
     )
     assert "行1" in smart
+    dash_calls: list[list[str]] = []
+
+    def dash_runner(argv, **_kwargs):
+        dash_calls.append(list(argv))
+        if argv[1:4] == ["smartsheet", "sheets", "list"]:
+            return Proc(
+                json.dumps(
+                    {
+                        "name": "综能进度",
+                        "sheets": [
+                            {
+                                "sheet_id": "q979lj",
+                                "title": "重点工作拆解",
+                                "type": "smartsheet",
+                            },
+                            {
+                                "sheet_id": "db_L9Phd0",
+                                "title": "需求设计进度",
+                                "type": "dashboard",
+                            },
+                        ],
+                    }
+                )
+            )
+        if argv[1:4] == ["smartsheet", "records", "list"]:
+            payload = json.loads(argv[argv.index("--json") + 1])
+            if payload.get("sheet_title") == "需求设计进度":
+                return Proc("", returncode=1, stderr="type dashboard expected smartsheet")
+            return Proc(json.dumps({"records": [{"工作": "拆解1"}]}))
+        return Proc("unexpected", returncode=1, stderr="no")
+
+    mixed = read_datasource(
+        "https://doc.weixin.qq.com/smartsheet/s3_Mix?tab=q979lj&viewId=vukaF8",
+        "smartsheet",
+        "wecom",
+        conn,
+        runner=dash_runner,
+    )
+    assert "拆解1" in mixed
+    assert "综能进度" in mixed
+    record_payloads = [
+        json.loads(c[c.index("--json") + 1])
+        for c in dash_calls
+        if c[1:4] == ["smartsheet", "records", "list"]
+    ]
+    assert all(p.get("sheet_title") != "需求设计进度" for p in record_payloads)
     page = read_datasource(
         "https://page.weixin.qq.com/smartpage/p/b1_Pub",
         "smartpage",

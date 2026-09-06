@@ -1305,3 +1305,48 @@ def test_elapsed_label_unknown_when_finished_missing(tmp_path):
     assert "168h" not in run_elapsed_label(
         "2019-01-01T00:00:00+00:00", None, status="failed", unknown="未知"
     )
+
+
+def test_context_lists_named_datasource_first(tmp_path, monkeypatch):
+    from kairo.projects import edit_datasource
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    edit_datasource(serve, pid, ds_id, name="需求池", purpose="周报输入")
+    catalog = list_context(serve, pid)
+    types = [i["type"] for i in catalog["items"]]
+    assert types[0] == "datasource"
+    assert types.index("datasource") < types.index("understanding")
+    ds_item = catalog["items"][0]
+    assert ds_item["title"] == "需求池"
+    assert "http" not in ds_item["title"]
+
+
+def test_topic_only_inputs_fail_when_datasources_in_scope(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json
+    from kairo.projects import _execute_agent_run
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-noids"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    body = "topic-only\n"
+    (scratch / "inp-t.md").write_text(body, encoding="utf-8")
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-t",
+                "source_id": "topic:alpha-ws:understanding",
+                "type": "understanding",
+                "title": "事实层",
+                "version": content_version(body),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "inp-t.md",
+            }
+        ],
+    )
+    out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-t"))
+    assert out.status == "failed"
+    assert out.reason == "datasource_unread"
+    assert out.artifact_path is None
