@@ -313,6 +313,10 @@ def _read_wecom_sheet(url: str, runner, timeout: float) -> str:
     return body
 
 
+def _sheet_matches_tab(sheet: dict, tab: str) -> bool:
+    return tab in (str(sheet.get("sheet_id") or ""), str(sheet.get("title") or ""))
+
+
 def _smartsheet_usable(sheets: list, url: str) -> list:
     tables = [
         s
@@ -322,12 +326,12 @@ def _smartsheet_usable(sheets: list, url: str) -> list:
     tab = _wecom_tab(url)
     if not tab:
         return tables
-    matched = [
-        s
-        for s in tables
-        if tab in (str(s.get("sheet_id") or ""), str(s.get("title") or ""))
-    ]
-    return matched or tables
+    matched = [s for s in tables if _sheet_matches_tab(s, tab)]
+    if matched:
+        return matched
+    if any(_sheet_matches_tab(s, tab) for s in sheets):
+        raise ReadError(INVALID_LINK, "指定的是看板不是表格")
+    raise ReadError(INVALID_LINK, "指定的子表不存在")
 
 
 def _read_wecom_smartsheet(url: str, runner, timeout: float) -> str:
@@ -342,6 +346,8 @@ def _read_wecom_smartsheet(url: str, runner, timeout: float) -> str:
     name = meta.get("name") if isinstance(meta, dict) else None
     if name:
         parts.append(f"# {name}")
+    skipped: list[str] = []
+    ok = 0
     for sheet in usable:
         title = sheet.get("title") or sheet.get("sheet_title") or sheet.get("sheet_id") or "sheet"
         try:
@@ -351,13 +357,15 @@ def _read_wecom_smartsheet(url: str, runner, timeout: float) -> str:
                 {"docid": url, "sheet_title": title, "limit": 100},
                 timeout,
             )
-        except ReadError:
-            continue
-        parts.append(f"## {title}\n{_text_from_payload(raw)}")
-    body = "\n\n".join(parts).strip()
-    if not any(p.startswith("## ") for p in parts):
+            parts.append(f"## {title}\n{_text_from_payload(raw)}")
+            ok += 1
+        except ReadError as exc:
+            skipped.append(f"- {title}: {exc}")
+    if skipped:
+        parts.append("## 未读取\n" + "\n".join(skipped))
+    if ok == 0:
         raise ReadError(READ_FAILED, "读取结果为空")
-    return body
+    return "\n\n".join(parts).strip()
 
 
 def _page_title(page: dict) -> str:
