@@ -1016,6 +1016,105 @@ def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monke
     assert api_ds["datasource"]["name"] == "API名称"
 
 
+def test_material_search_hidden_beats_obj_row_flex(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    client = TestClient(create_app(serve))
+    html = client.get(f"/projects/{pid}").text
+    assert 'id="material-filter"' in html
+    assert "material-item" in html
+    assert 'class="obj-row material-item"' in html or "material-item" in html
+    css = client.get("/static/app.css").text
+    assert ".obj-row { display: flex" in css or ".obj-row { display:flex" in css
+    hidden_rule = None
+    for chunk in css.split("}"):
+        if ".obj-row[hidden]" in chunk or ".material-item[hidden]" in chunk:
+            hidden_rule = chunk + "}"
+            break
+    assert hidden_rule is not None, "missing material [hidden] CSS rule"
+    assert "none" in hidden_rule
+    assert "!important" in hidden_rule
+
+
+def test_recent_artifact_precedes_collapsed_create_form(tmp_path, monkeypatch):
+    from kairo.projects import RunRecord, _artifact_path, _save_run, create_task
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    tasks = [
+        create_task(serve, pid, name=name, prompt="整理")
+        for name in ("日报甲", "日报乙", "日报丙")
+    ]
+    run_id = "run-recent"
+    dest = _artifact_path(serve, pid, run_id)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text("# 日报\n", encoding="utf-8")
+    _save_run(
+        serve,
+        RunRecord(
+            id=run_id,
+            project_id=pid,
+            task_id=tasks[0].id,
+            task_name=tasks[0].name,
+            task_version=1,
+            status="succeeded",
+            artifact_path=str(dest.relative_to(serve)).replace("\\", "/"),
+            schema_version=2,
+            mode="agent",
+            created_at="2026-09-05T00:00:00+00:00",
+            started_at="2026-09-05T00:00:00+00:00",
+            finished_at="2026-09-05T00:01:00+00:00",
+        ),
+    )
+    client = TestClient(create_app(serve))
+    html = client.get(f"/projects/{pid}").text
+    recent = html.find('id="project-recent"')
+    create_at = html.find('id="task-create"')
+    assert recent != -1 and create_at != -1
+    assert recent < create_at
+    assert f"/projects/{pid}/runs/{run_id}" in html[recent:create_at]
+    snippet = html[create_at : create_at + 80]
+    assert "<details" in html[create_at - 40 : create_at + 40] or snippet.startswith("task-create")
+    details = html[html.rfind("<details", 0, create_at + 1) : create_at + 120]
+    assert "open" not in details.split(">")[0]
+    primary = html[html.find('id="project-primary"') : html.find('id="project-materials"')]
+    assert 'class="obj-rename"' not in primary or "<details" in html[: html.find('class="obj-rename"')]
+
+
+def test_empty_project_shows_material_counts_and_next_step(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    client = TestClient(create_app(serve))
+    html = client.get(f"/projects/{pid}").text
+    primary = html[html.find('id="project-primary"') : html.find('id="project-materials"')]
+    assert "1" in primary
+    assert ("主题" in primary or "Topics" in primary)
+    assert ("数据源" in primary or "Data sources" in primary)
+    assert "下一步" in primary or "Next:" in primary
+    assert 'id="task-create"' in primary
+    head = primary[primary.find('id="task-create"') - 60 : primary.find('id="task-create"') + 40]
+    assert "open" not in head.split(">")[0]
+
+
+def test_overview_demotes_rename_and_datasource_edit(tmp_path, monkeypatch):
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    client = TestClient(create_app(serve))
+    html = client.get(f"/projects/{pid}").text
+    rename_at = html.find('class="obj-rename"')
+    assert rename_at != -1
+    before_rename = html[max(0, rename_at - 200) : rename_at]
+    assert "<details" in before_rename
+    ds_block = html[html.find("datasources") if "datasources" in html else 0 :]
+    # full name/purpose editor is inside a collapsed details, not a standing obj-add on the row
+    edit_forms = html.count(f'action="/projects/{pid}/datasources/{ds_id}/edit"')
+    assert edit_forms == 1
+    edit_at = html.find(f'action="/projects/{pid}/datasources/{ds_id}/edit"')
+    assert "<details" in html[max(0, edit_at - 400) : edit_at]
+    run_btn = html.find(f'action="/projects/{pid}/tasks/')
+    remove_at = html.find(f'action="/projects/{pid}/datasources/{ds_id}/delete"')
+    if run_btn != -1:
+        assert "btn-step" in html[run_btn : run_btn + 200]
+    assert remove_at != -1
+    assert "btn-step" not in html[remove_at : remove_at + 180]
+
+
 def test_task_page_edit_keeps_invalid_input(tmp_path, monkeypatch):
     serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
     client = TestClient(create_app(serve))
