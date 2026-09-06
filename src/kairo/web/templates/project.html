@@ -28,13 +28,15 @@
     <ul class="obj-list">
       {% for task in project.tasks %}
       <li class="obj-row">
-        <div>{{ task.name }} · v{{ task.version }}{% if task.schedule == 'interval' %} · {{ t('proj.schedule_manual') }}{% endif %}
+        <div class="obj-copy">{{ task.name }} · v{{ task.version }}{% if task.schedule == 'interval' %} · {{ t('proj.schedule_manual') }}{% endif %}
           {% if task.mode == 'source_snapshot' %} · {{ t('proj.legacy_task') }}{% endif %}
         </div>
-        <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/tasks/{{ task.id }}">{{ t('proj.open_task') }}</a>
-        <form method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}/run">
-          <button class="btn btn-step btn-inline">{{ t('proj.run') }}</button>
-        </form>
+        <div class="obj-actions">
+          <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/tasks/{{ task.id }}">{{ t('proj.open_task') }}</a>
+          <form method="post" action="/projects/{{ project.id }}/tasks/{{ task.id }}/run">
+            <button class="btn btn-step btn-inline">{{ t('proj.run') }}</button>
+          </form>
+        </div>
       </li>
       {% endfor %}
     </ul>
@@ -187,7 +189,7 @@
       <li class="obj-row">
         <div class="obj-copy">
           <strong>{{ ds_labels.get(ds.id, ds.purpose or ds.reader) }}</strong>
-          <span class="meta-hint"> · {% if ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</span>
+          <span class="meta-hint"> · {% if ds.kind == 'mail-search' and ds.reader == 'wecom' %}{{ t('proj.reader_wecom_mail') }}{% elif ds.reader == 'imap' %}{{ t('proj.reader_imap') }}{% elif ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</span>
           {% if ds.url.startswith(('https://', 'http://')) %}<a class="source-link" href="{{ ds.url }}" target="_blank" rel="noopener noreferrer">{{ t('proj.open_original') }}</a>{% endif %}
           {% set st = ds_status.get(ds.id) if ds_status is defined else None %}
           <div class="meta-hint">
@@ -222,7 +224,7 @@
     {% endif %}
     <form class="obj-add" method="post" action="/projects/{{ project.id }}/datasources">
       <input name="name" placeholder="{{ t('proj.ds_name') }}" aria-label="{{ t('proj.ds_name') }}">
-      <input name="url" type="url" required placeholder="{{ t('proj.paste_url') }}" aria-label="{{ t('proj.paste_url') }}">
+      <input name="url" type="text" required placeholder="{{ t('proj.paste_url') }}" aria-label="{{ t('proj.paste_url') }}">
       <input name="purpose" placeholder="{{ t('proj.purpose') }}" aria-label="{{ t('proj.purpose') }}">
       <button type="submit" class="btn btn-step btn-inline">{{ t('proj.add_ds') }}</button>
     </form>

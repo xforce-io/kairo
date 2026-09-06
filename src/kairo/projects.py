@@ -40,7 +40,7 @@ class DataSource(BaseModel):
     id: str
     connection_id: str = CONNECTION_TENCENT
     url: str
-    kind: str  # spreadsheet | smartsheet | document | smartpage
+    kind: str  # spreadsheet | smartsheet | document | smartpage | mail-search
     purpose: str = ""
     name: str = ""
     reader: str = CONNECTION_TENCENT
