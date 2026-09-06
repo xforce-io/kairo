@@ -6,8 +6,10 @@ import yaml
 
 from kairo.models import Manifest
 from kairo.timeline import (
+    TimelineItem,
     TimelineQueryError,
     cell_href,
+    collapse_artifacts,
     effective_occurred,
     filter_range,
     format_cli_timeline,
@@ -222,6 +224,7 @@ def test_scan_includes_project_and_artifact_without_owning_them(tmp_path):
     assert kinds["artifact"].id == rid
     assert kinds["artifact"].occurred_at == dt.date(2026, 8, 24)
     assert kinds["artifact"].href == f"/projects/{pid}/runs/{rid}"
+    assert kinds["artifact"].task_id == "tsk-1"
     assert not (root / ".kairo" / "timeline").exists()
 
 
@@ -346,7 +349,7 @@ def test_cell_href_two_click_and_week():
 
 def test_cli_format_unknown_first():
     items = [
-        __import__("kairo.timeline", fromlist=["TimelineItem"]).TimelineItem(
+        TimelineItem(
             workspace="w",
             topic="t",
             id="notes",
@@ -358,3 +361,118 @@ def test_cli_format_unknown_first():
     ]
     text = format_cli_timeline(items)
     assert text.startswith("⚠ 发生时间未知")
+
+
+def _artifact(**kwargs):
+    base = dict(
+        workspace="",
+        topic="能源团队管理",
+        id="run-1",
+        title="能源日报",
+        occurred_at=dt.date(2026, 9, 6),
+        occurred_source="user",
+        added_at=dt.datetime(2026, 9, 6, 10, 0, tzinfo=dt.timezone.utc),
+        kind="artifact",
+        href="/projects/p/runs/run-1",
+        task_id="tsk-1",
+    )
+    base.update(kwargs)
+    return TimelineItem(**base)
+
+
+def test_collapse_artifacts_keeps_latest_same_task_same_day():
+    items = [
+        _artifact(id="run-a", href="/projects/p/runs/run-a", added_at=dt.datetime(2026, 9, 6, 9, 22, tzinfo=dt.timezone.utc)),
+        _artifact(id="run-b", href="/projects/p/runs/run-b", added_at=dt.datetime(2026, 9, 6, 10, 36, tzinfo=dt.timezone.utc)),
+        _artifact(id="run-c", href="/projects/p/runs/run-c", added_at=dt.datetime(2026, 9, 6, 10, 23, tzinfo=dt.timezone.utc)),
+        _artifact(id="run-d", href="/projects/p/runs/run-d", added_at=dt.datetime(2026, 9, 6, 9, 24, tzinfo=dt.timezone.utc)),
+    ]
+    out = collapse_artifacts(items)
+    assert [it.id for it in out] == ["run-b"]
+    assert [it.id for it in out[0].folded] == ["run-c", "run-d", "run-a"]
+
+
+def test_collapse_artifacts_does_not_merge_across_task_or_day():
+    items = [
+        _artifact(id="a1", task_id="tsk-a", added_at=dt.datetime(2026, 9, 6, 10, tzinfo=dt.timezone.utc)),
+        _artifact(id="b1", task_id="tsk-b", added_at=dt.datetime(2026, 9, 6, 11, tzinfo=dt.timezone.utc)),
+        _artifact(
+            id="a0",
+            task_id="tsk-a",
+            occurred_at=dt.date(2026, 9, 5),
+            added_at=dt.datetime(2026, 9, 5, 10, tzinfo=dt.timezone.utc),
+        ),
+        TimelineItem(
+            workspace="alpha",
+            topic="能源梳理",
+            id="ref-1",
+            title="会议",
+            occurred_at=dt.date(2026, 9, 6),
+            occurred_source="user",
+            added_at=dt.datetime(2026, 9, 6, 8, tzinfo=dt.timezone.utc),
+        ),
+        _artifact(id="orphan", task_id="", added_at=dt.datetime(2026, 9, 6, 12, tzinfo=dt.timezone.utc)),
+        _artifact(id="orphan2", task_id="", added_at=dt.datetime(2026, 9, 6, 13, tzinfo=dt.timezone.utc)),
+    ]
+    out = collapse_artifacts(items)
+    assert [it.id for it in out] == ["a1", "b1", "a0", "ref-1", "orphan", "orphan2"]
+    assert all(not it.folded for it in out)
+
+
+def test_cli_timeline_folds_earlier_artifacts():
+    items = [
+        _artifact(id="run-old", added_at=dt.datetime(2026, 9, 6, 9, tzinfo=dt.timezone.utc)),
+        _artifact(id="run-new", added_at=dt.datetime(2026, 9, 6, 11, tzinfo=dt.timezone.utc)),
+        _artifact(id="run-mid", added_at=dt.datetime(2026, 9, 6, 10, tzinfo=dt.timezone.utc)),
+    ]
+    text = format_cli_timeline(items)
+    assert "run-new" in text
+    assert "(+2)" in text
+    assert text.count("\n  ") == 1
+    assert "run-old" not in text
+    assert "run-mid" not in text
+
+
+def test_scan_and_json_keep_all_artifacts(tmp_path):
+    import json
+
+    from typer.testing import CliRunner
+
+    from kairo.cli import app
+    from kairo.timeline import item_as_json
+
+    root = tmp_path / "root"
+    root.mkdir()
+    pid, first = _write_project_artifact(root, day="2026-09-06")
+    for i, hour in enumerate(("13:00", "14:00", "15:00"), start=2):
+        run_id = f"run-art-{i}"
+        rel = f".kairo/projects/{pid}/artifacts/{run_id}.md"
+        (root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (root / rel).write_text("# x\n", encoding="utf-8")
+        run_path = root / ".kairo" / "projects" / pid / "runs" / f"{run_id}.json"
+        run_path.write_text(
+            json.dumps(
+                {
+                    "id": run_id,
+                    "project_id": pid,
+                    "task_id": "tsk-1",
+                    "task_name": "周报",
+                    "task_version": 1,
+                    "status": "succeeded",
+                    "artifact_path": rel,
+                    "created_at": f"2026-09-06T{hour}:00+00:00",
+                }
+            ),
+            encoding="utf-8",
+        )
+    arts = [it for it in scan_timeline(root) if it.kind == "artifact"]
+    assert {it.id for it in arts} == {first, "run-art-2", "run-art-3", "run-art-4"}
+    payload = [item_as_json(it) for it in arts]
+    assert len(payload) == 4
+    assert all("folded" not in row for row in payload)
+    human = CliRunner().invoke(app, ["timeline", str(root)]).output
+    assert "(+3)" in human
+    assert human.count("run-art-4") == 1
+    js = json.loads(CliRunner().invoke(app, ["timeline", str(root), "--json"]).output)
+    art_js = [row for row in js if row.get("kind") == "artifact"]
+    assert {row["id"] for row in art_js} == {first, "run-art-2", "run-art-3", "run-art-4"}

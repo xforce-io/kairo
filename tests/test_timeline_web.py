@@ -130,6 +130,72 @@ def test_timeline_day_lists_ref_project_artifact_and_tag_keeps_ref(tmp_path):
     assert "2 without" not in rng
 
 
+def _write_extra_run(root, project_id, *, run_id, task_id, day="2026-08-24", hour="13:00", task_name="周报"):
+    import json
+
+    rel = f".kairo/projects/{project_id}/artifacts/{run_id}.md"
+    (root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (root / rel).write_text(f"# {run_id}\n", encoding="utf-8")
+    run_path = root / ".kairo" / "projects" / project_id / "runs" / f"{run_id}.json"
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    run_path.write_text(
+        json.dumps(
+            {
+                "id": run_id,
+                "project_id": project_id,
+                "task_id": task_id,
+                "task_name": task_name,
+                "task_version": 1,
+                "status": "succeeded",
+                "reason": None,
+                "artifact_path": rel,
+                "created_at": f"{day}T{hour}:00+00:00",
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def test_timeline_folds_same_task_artifacts_and_counts(tmp_path):
+    root, _, _ = _two_ws(tmp_path)
+    pid, first = _write_project_artifact(root, day="2026-08-26")
+    _write_extra_run(root, pid, run_id="run-art-2", task_id="tsk-1", day="2026-08-26", hour="13:00")
+    _write_extra_run(root, pid, run_id="run-art-3", task_id="tsk-1", day="2026-08-26", hour="14:00")
+    _write_extra_run(root, pid, run_id="run-art-4", task_id="tsk-1", day="2026-08-26", hour="15:00")
+    c = _client(root)
+    listed = c.get("/timeline", params={"mode": "recent"}).text
+    day = c.get("/timeline", params={"day": "2026-08-26"}).text
+    latest = f"/projects/{pid}/runs/run-art-4"
+    older = [
+        f"/projects/{pid}/runs/{first}",
+        f"/projects/{pid}/runs/run-art-2",
+        f"/projects/{pid}/runs/run-art-3",
+    ]
+    for html in (listed, day):
+        top = html.split('class="tl-fold"')[0]
+        assert latest in top
+        for href in older:
+            assert href not in top
+        assert "tl-fold" in html
+        folded = html[html.find("tl-fold") :]
+        for href in older:
+            assert href in folded
+        assert "3 earlier" in html or "还有 3 个更早版本" in html
+    day_section = day[day.find('class="tl-day"') :]
+    count_html = re.search(r'<span class="count">(\d+)</span>', day_section)
+    assert count_html is not None
+    assert count_html.group(1) == "2"
+    cell = re.search(
+        r'<a class="cal-cell[^"]*\bon\b[^"]*"[^>]*>([\s\S]*?)</a>',
+        day,
+    )
+    assert cell is not None
+    assert cell.group(1).count('class="cal-dot"') == 2
+
+
 def test_timeline_query_mutex_400(tmp_path):
     root, _, _ = _two_ws(tmp_path)
     c = _client(root)

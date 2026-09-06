@@ -48,6 +48,7 @@ from kairo.timeline import (
     cell_href,
     effective_added_at,
     effective_occurred,
+    collapse_artifacts,
     filter_by_tags,
     filter_range,
     format_range_label,
@@ -545,9 +546,10 @@ def timeline_view(
         tag_filters.extend(part for part in str(raw).split() if part)
     if tag_filters:
         items = filter_by_tags(items, tag_filters)
-    unknown_items = [it for it in items if it.occurred_at is None]
+    presented = collapse_artifacts(items)
+    unknown_items = [it for it in presented if it.occurred_at is None]
     counts: dict[str, int] = {}
-    for it in items:
+    for it in presented:
         if it.occurred_at is not None:
             key = it.occurred_at.isoformat()
             counts[key] = counts.get(key, 0) + 1
@@ -585,13 +587,15 @@ def timeline_view(
             )
         weeks[-1]["days"].append(cell)
     if range_on:
-        day_items = [
-            it
-            for it in filter_range(items, q.start, q.end)
-            if not is_journal_item(it, request.app.state.root)
-        ]
+        day_items = collapse_artifacts(
+            [
+                it
+                for it in filter_range(items, q.start, q.end)
+                if not is_journal_item(it, request.app.state.root)
+            ]
+        )
     else:
-        day_items = [it for it in items if it.occurred_at == q.day]
+        day_items = [it for it in presented if it.occurred_at == q.day]
     range_groups: list[dict] = []
     if range_on and r0 != r1:
         buckets: dict[str, list] = {}
@@ -613,7 +617,14 @@ def timeline_view(
     )
     span = range_day_count(r0, r1) if range_on else 1
     too_long = span > MAX_RANGE_DAYS
-    recent_groups = group_by_occurred(items) if q.view == "recent" else []
+    recent_groups = (
+        [
+            {"key": g["key"], "entries": collapse_artifacts(g["entries"])}
+            for g in group_by_occurred(items)
+        ]
+        if q.view == "recent"
+        else []
+    )
     lang = resolve_lang(request)
     if lang == "zh":
         month_label = f"{q.month.year}年{q.month.month}月"
@@ -3107,7 +3118,17 @@ def project_page(
                 "started_label": _clock_label(run.started_at or run.created_at),
             }
         )
-    recent_rows = [row for row in run_rows if row["run"].status == "succeeded"][:3]
+    existing_tasks = {task.id for task in project.tasks}
+    recent_rows = []
+    seen_tasks: set[str] = set()
+    for row in run_rows:
+        run = row["run"]
+        if run.status != "succeeded" or not run.artifact_path:
+            continue
+        if run.task_id not in existing_tasks or run.task_id in seen_tasks:
+            continue
+        seen_tasks.add(run.task_id)
+        recent_rows.append(row)
     attention_rows = [
         row for index, row in enumerate(run_rows)
         if row["run"].status == "running"

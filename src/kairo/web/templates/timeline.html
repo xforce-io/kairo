@@ -13,6 +13,18 @@
         <span class="tl-meta">{{ home_label(it) }}{% if extra_meta %} · {{ extra_meta }}{% endif %}</span>
       </a>
 {% endmacro %}
+{% macro recent_meta(it) %}{{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {{ t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) if it.occurred_at else t('tl.occurred_unknown') }}{% endmacro %}
+{% macro day_meta(it) %}{{ it.occurred_at.strftime('%m-%d') if it.occurred_at else t('tl.occurred_unknown') }}{% endmacro %}
+{% macro folded_block(it, mode='') %}
+      {% if it.folded %}
+      <details class="tl-fold">
+        <summary>{{ t('tl.earlier').format(n=it.folded|length) }}</summary>
+        {% for old in it.folded %}
+        {{ tl_row(old, extra_meta=(recent_meta(old) if mode == 'recent' else (day_meta(old) if mode == 'day' else ''))) }}
+        {% endfor %}
+      </details>
+      {% endif %}
+{% endmacro %}
 <div class="timeline cal-page">
   <div class="tl-toolbar">
     <div class="tl-modes">
@@ -43,7 +55,8 @@
     <section class="tl-day">
       <div class="tl-day-head"><h2>{% if g.key %}{{ g.key }}{% else %}{{ t('tl.src_unknown') }}{% endif %}</h2><span class="count">{{ g.entries|length }}</span></div>
       {% for it in g.entries %}
-      {{ tl_row(it, extra_meta=t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) ~ ' · ' ~ (t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) if it.occurred_at else t('tl.occurred_unknown'))) }}
+      {{ tl_row(it, extra_meta=recent_meta(it)) }}
+      {{ folded_block(it, 'recent') }}
       {% endfor %}
     </section>
     {% else %}
@@ -81,6 +94,7 @@
         <div class="tl-day-head"><h2>{{ t('tl.src_unknown') }}</h2><span class="count">{{ unknown_n }}</span></div>
         {% for it in unknown_items %}
         {{ tl_row(it) }}
+        {{ folded_block(it) }}
         {% endfor %}
       </section>
       {% else %}
@@ -123,13 +137,15 @@
           <div class="tl-range-day">{{ g.key }}</div>
           {% for it in g.entries %}
           {{ tl_row(it) }}
+          {{ folded_block(it) }}
           {% endfor %}
           {% else %}
           <p class="tl-empty">{{ t('tl.empty_range') }}</p>
           {% endfor %}
         {% else %}
           {% for it in day_items %}
-          {{ tl_row(it, extra_meta=(it.occurred_at.strftime('%m-%d') if it.occurred_at else t('tl.occurred_unknown'))) }}
+          {{ tl_row(it, extra_meta=day_meta(it)) }}
+          {{ folded_block(it, 'day') }}
           {% else %}
           <p class="tl-empty">{{ t('tl.empty_day') }}</p>
           {% endfor %}
