@@ -188,7 +188,7 @@ def _trim_empty_columns(headers: list[str], rows: list[list[str]]) -> tuple[list
     return headers, rows
 
 
-def _csv_table(text: str) -> str | None:
+def _csv_table(text: str, *, min_columns: int = 2) -> str | None:
     sample = text.strip()
     if not sample or "," not in sample.splitlines()[0]:
         return None
@@ -200,7 +200,7 @@ def _csv_table(text: str) -> str | None:
     if len(parsed) < 2:
         return None
     width = max(len(row) for row in parsed)
-    if width < 2:
+    if width < min_columns:
         return None
     rich = sum(1 for row in parsed if sum(1 for cell in row if str(cell).strip()) >= 2)
     if rich < 2:
@@ -271,6 +271,29 @@ def _block_html(body: str) -> str:
     if not text:
         return ""
     return _json_table(text) or _csv_table(text) or f'<pre class="doc-plain">{escape(text)}</pre>'
+
+
+_SHEET_KINDS = frozenset({"spreadsheet", "smartsheet"})
+
+
+def _obviously_tabular(text: str) -> bool:
+    body = _SECTION_HEADING_RE.sub("", text).strip()
+    if not body:
+        return False
+    return _json_table(body) is not None or _csv_table(body, min_columns=3) is not None
+
+
+def preview_datasource_html(text: str, *, kind: str | None = None) -> str:
+    """表格类 Data Source 走表；文档类走 markdown。kind 未知时只认明显的表。"""
+    if not (text or "").strip():
+        return ""
+    if kind in _SHEET_KINDS:
+        return render_sheet_preview(text)
+    if kind:
+        return render_markdown(text)
+    if _obviously_tabular(text):
+        return render_sheet_preview(text)
+    return render_markdown(text)
 
 
 def render_sheet_preview(text: str) -> str:

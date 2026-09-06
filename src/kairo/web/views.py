@@ -69,7 +69,7 @@ from kairo.web.public import (
     public_bounds,
     set_reference_public,
 )
-from kairo.web.render import render_markdown, render_sheet_preview
+from kairo.web.render import preview_datasource_html, render_markdown
 from kairo.web.tasks import classify_task, stream_events
 from kairo.models import State
 from kairo.rules import effective_compose_block_reason
@@ -3246,7 +3246,12 @@ def datasource_page(
             payload = None
     except ProjectError:
         raise HTTPException(status_code=404)
-    body_html = render_sheet_preview(payload.get("content") or "") if payload else ""
+    ds = next((item for item in project.datasources if item.id == ds_id), None)
+    body_html = (
+        preview_datasource_html(payload.get("content") or "", kind=ds.kind if ds else None)
+        if payload
+        else ""
+    )
     return _render(
         request,
         "datasource.html",
@@ -3487,6 +3492,16 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
     )
 
 
+def _run_input_body_html(project, payload: dict) -> str:
+    content = payload.get("content") or ""
+    if payload.get("type") != "datasource":
+        return render_markdown(content)
+    source_id = str(payload.get("source_id") or "")
+    ds_id = source_id.split(":", 1)[-1] if source_id.startswith("datasource:") else ""
+    ds = next((item for item in project.datasources if item.id == ds_id), None)
+    return preview_datasource_html(content, kind=ds.kind if ds else None)
+
+
 @router.get("/projects/{project_id}/runs/{run_id}/inputs/{input_id}", response_class=HTMLResponse)
 def run_input_page(request: Request, project_id: str, run_id: str, input_id: str) -> HTMLResponse:
     _console_only(request)
@@ -3507,9 +3522,7 @@ def run_input_page(request: Request, project_id: str, run_id: str, input_id: str
             "project": project,
             "run": run,
             "payload": payload,
-            "body_html": render_sheet_preview(payload.get("content") or "")
-            if payload.get("type") == "datasource"
-            else render_markdown(payload.get("content") or ""),
+            "body_html": _run_input_body_html(project, payload),
         },
     )
 

@@ -1,6 +1,6 @@
 """Test markdown rendering to HTML."""
 
-from kairo.web.render import render_markdown, render_sheet_preview
+from kairo.web.render import preview_datasource_html, render_markdown, render_sheet_preview
 
 
 def test_render_heading_and_paragraph():
@@ -194,3 +194,22 @@ def test_render_sheet_preview_smartsheet_records():
     assert "集团化改造" in html
     assert "蒋贻鑫" in html
     assert "userId" not in html
+
+
+def test_preview_datasource_html_skips_prose_with_commas():
+    prose = (
+        "# 会议纪要\n\n"
+        "今天完成设计,并提交评审。\n"
+        "明天开始开发,并安排联调。\n"
+    )
+    html = preview_datasource_html(prose, kind="document")
+    assert "<table>" not in html
+    assert "会议纪要" in html
+    unknown = preview_datasource_html(prose, kind=None)
+    assert "<table>" not in unknown
+
+
+def test_preview_datasource_html_spreadsheet_two_columns():
+    html = preview_datasource_html("plant,mw\nsolar,80\n", kind="spreadsheet")
+    assert "<table>" in html
+    assert "solar" in html
