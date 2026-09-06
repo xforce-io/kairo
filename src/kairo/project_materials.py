@@ -29,7 +29,7 @@ from kairo.readers import ReadError, read_datasource
 from kairo.refs import topic_members
 from kairo.settings import get_connection
 
-CACHE_TTL = timedelta(seconds=3600)
+CACHE_TTL = timedelta(hours=24)
 MATERIAL_MAX_BYTES = 2 * 1024 * 1024
 SOURCE_UNDERSTANDING = "understanding"
 SOURCE_DIGEST = "digest"

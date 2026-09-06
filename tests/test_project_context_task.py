@@ -234,7 +234,7 @@ def test_s1_s4_cache_ttl_refresh_and_web(tmp_path, monkeypatch):
         assert 'class="task-create"' in html_proj.text
         assert "task-create-bar" in html_proj.text
         assert "2026-09-05T" not in html_proj.text
-        assert "2026-09-05 13:00" in html_proj.text
+        assert "2026-09-06 12:00" in html_proj.text
         assert 'class="obj-actions"' in html_proj.text
 
         clock.when = clock.when + CACHE_TTL
@@ -1350,3 +1350,22 @@ def test_topic_only_inputs_fail_when_datasources_in_scope(tmp_path, monkeypatch)
     assert out.status == "failed"
     assert out.reason == "datasource_unread"
     assert out.artifact_path is None
+
+
+def test_warm_skips_fresh_cache_and_refreshes_expired(tmp_path, monkeypatch):
+    from kairo.projects import _warm_run_datasources, get_run
+
+    serve, pid, ds_id, counter, _ws = _prepare(tmp_path, monkeypatch)
+    clock = _Clock(datetime(2026, 9, 5, 12, 0, tzinfo=UTC))
+    set_clock(clock)
+    try:
+        _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
+        assert _count(counter) == 1
+        rec = _running_record(serve, pid, "run-warm", topics=["alpha-ws"], datasources=[ds_id])
+        _warm_run_datasources(serve, get_run(serve, pid, rec.id))
+        assert _count(counter) == 1
+        clock.when = clock.when + CACHE_TTL
+        _warm_run_datasources(serve, get_run(serve, pid, rec.id))
+        assert _count(counter) == 2
+    finally:
+        set_clock(None)

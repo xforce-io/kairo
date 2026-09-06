@@ -182,9 +182,9 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", boom_cmd], serve, monkeypatch))
     from datetime import UTC, datetime, timedelta
 
-    from kairo.project_materials import set_clock
+    from kairo.project_materials import CACHE_TTL as _TTL, set_clock
 
-    set_clock(lambda: datetime.now(UTC) + timedelta(seconds=3601))
+    set_clock(lambda: datetime.now(UTC) + _TTL + timedelta(seconds=1))
     try:
         failed = _cli(["task", "run", pid, tid], serve, monkeypatch)
     finally:
