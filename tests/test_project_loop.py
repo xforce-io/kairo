@@ -883,6 +883,65 @@ def test_wecom_default_adapter_reads_via_injected_runner():
         if c[1:4] == ["smartsheet", "records", "list"]
     ]
     assert all(p.get("sheet_title") != "需求设计进度" for p in record_payloads)
+
+    sheets_payload = {
+        "name": "综能进度",
+        "sheets": [
+            {"sheet_id": "q979lj", "title": "重点工作拆解", "type": "smartsheet"},
+            {"sheet_id": "tblB", "title": "版本清单", "type": "smartsheet"},
+            {"sheet_id": "db_L9Phd0", "title": "需求设计进度", "type": "dashboard"},
+        ],
+    }
+
+    def tab_runner(argv, **_kwargs):
+        if argv[1:4] == ["smartsheet", "sheets", "list"]:
+            return Proc(json.dumps(sheets_payload))
+        if argv[1:4] == ["smartsheet", "records", "list"]:
+            payload = json.loads(argv[argv.index("--json") + 1])
+            title = payload.get("sheet_title")
+            if title == "版本清单":
+                return Proc("", returncode=1, stderr="permission denied")
+            if title == "重点工作拆解":
+                return Proc(json.dumps({"records": [{"工作": "拆解1"}]}))
+            return Proc("", returncode=1, stderr="unexpected table")
+        return Proc("unexpected", returncode=1, stderr="no")
+
+    try:
+        read_datasource(
+            "https://doc.weixin.qq.com/smartsheet/s3_Mix?tab=nonexistent",
+            "smartsheet",
+            "wecom",
+            conn,
+            runner=tab_runner,
+        )
+        raise AssertionError("missing tab must fail")
+    except ReadError as exc:
+        assert exc.code == "invalid_link"
+        assert "不存在" in str(exc)
+
+    try:
+        read_datasource(
+            "https://doc.weixin.qq.com/smartsheet/s3_Mix?tab=db_L9Phd0",
+            "smartsheet",
+            "wecom",
+            conn,
+            runner=tab_runner,
+        )
+        raise AssertionError("dashboard tab must fail")
+    except ReadError as exc:
+        assert exc.code == "invalid_link"
+        assert "看板" in str(exc)
+
+    partial = read_datasource(
+        "https://doc.weixin.qq.com/smartsheet/s3_Mix",
+        "smartsheet",
+        "wecom",
+        conn,
+        runner=tab_runner,
+    )
+    assert "拆解1" in partial
+    assert "未读取" in partial
+    assert "版本清单" in partial
     page = read_datasource(
         "https://page.weixin.qq.com/smartpage/p/b1_Pub",
         "smartpage",
