@@ -725,6 +725,13 @@ def validate_recorded_inputs(
             raise ProjectError("输入来源越界", code="evidence_failed")
 
 
+def _archived_body_name(item: dict[str, Any]) -> str:
+    iid = str(item.get("input_id") or "").strip()
+    if not iid or iid in {".", ".."} or "/" in iid or "\\" in iid or "\x00" in iid:
+        raise ProjectError("输入证据校验失败", code="evidence_failed")
+    return f"{iid}.md"
+
+
 def finalize_inputs(serve: Path, project_id: str, run_id: str) -> list[dict[str, Any]]:
     src = scratch_dir(serve, project_id, run_id)
     run = get_run(serve, project_id, run_id)
@@ -736,16 +743,21 @@ def finalize_inputs(serve: Path, project_id: str, run_id: str) -> list[dict[str,
     items = _load_index(src)
     validate_recorded_inputs(serve, project_id, run_id, items, src)
     dest.mkdir(parents=True, exist_ok=True)
+    seen: set[str] = set()
     for item in items:
-        name = str(item.get("body") or f"{item['input_id']}.md")
+        dest_name = _archived_body_name(item)
+        if dest_name in seen:
+            raise ProjectError("输入证据校验失败", code="evidence_failed")
+        seen.add(dest_name)
+        name = str(item.get("body") or dest_name)
         body = evidence_body_path(src, name)
-        dest_name = Path(name).name
-        if dest_name in ("", ".", ".."):
-            dest_name = f"{item['input_id']}.md"
         _atomic_text(dest / dest_name, body.read_text(encoding="utf-8"))
         item["body"] = dest_name
         actual = (dest / dest_name).read_text(encoding="utf-8")
         if content_version(actual) != item.get("version"):
             raise ProjectError("输入证据校验失败", code="evidence_failed")
+    archived = {p.name for p in dest.glob("*.md")}
+    if archived != seen:
+        raise ProjectError("输入证据校验失败", code="evidence_failed")
     _atomic_json(_input_index_path(dest), items)
     return items
