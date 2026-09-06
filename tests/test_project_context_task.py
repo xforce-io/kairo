@@ -1170,26 +1170,27 @@ def test_recent_artifact_precedes_collapsed_create_form(tmp_path, monkeypatch):
     assert 'class="obj-rename"' not in primary or "<details" in html[: html.find('class="obj-rename"')]
 
 
-def test_recent_results_cap_at_three_with_times_and_history(tmp_path, monkeypatch):
+def test_recent_results_one_latest_per_existing_task(tmp_path, monkeypatch):
     from kairo.projects import RunRecord, _artifact_path, _save_run, create_task
 
     serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
-    task = create_task(serve, pid, name="日报", prompt="整理")
+    task_a = create_task(serve, pid, name="日报甲", prompt="整理")
+    task_b = create_task(serve, pid, name="日报乙", prompt="整理")
     ids = []
     for i in range(4):
-        run_id = f"run-{i}"
+        run_id = f"run-a-{i}"
         dest = _artifact_path(serve, pid, run_id)
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(f"# {i}\n", encoding="utf-8")
+        dest.write_text(f"# a{i}\n", encoding="utf-8")
         hour = f"{i:02d}"
         _save_run(
             serve,
             RunRecord(
                 id=run_id,
                 project_id=pid,
-                task_id=task.id,
-                task_name=task.name,
-                task_version=1,
+                task_id=task_a.id,
+                task_name=task_a.name,
+                task_version=i + 1,
                 status="succeeded",
                 artifact_path=str(dest.relative_to(serve)).replace("\\", "/"),
                 schema_version=2,
@@ -1200,14 +1201,37 @@ def test_recent_results_cap_at_three_with_times_and_history(tmp_path, monkeypatc
             ),
         )
         ids.append(run_id)
+    dest_b = _artifact_path(serve, pid, "run-b-0")
+    dest_b.parent.mkdir(parents=True, exist_ok=True)
+    dest_b.write_text("# b0\n", encoding="utf-8")
+    _save_run(
+        serve,
+        RunRecord(
+            id="run-b-0",
+            project_id=pid,
+            task_id=task_b.id,
+            task_name=task_b.name,
+            task_version=1,
+            status="succeeded",
+            artifact_path=str(dest_b.relative_to(serve)).replace("\\", "/"),
+            schema_version=2,
+            mode="agent",
+            created_at="2026-09-05T04:00:00+00:00",
+            started_at="2026-09-05T04:00:00+00:00",
+            finished_at="2026-09-05T04:01:00+00:00",
+        ),
+    )
     html = TestClient(create_app(serve)).get(f"/projects/{pid}").text
     recent = html[html.find('id="project-recent"') : html.find('id="task-create"')]
     history = html[html.find('id="project-run-history"') :]
-    assert recent.count("Artifact") == 3
-    assert "run-3" in recent and "run-2" in recent and "run-1" in recent
-    assert "run-0" not in recent
+    assert recent.count("Artifact") == 2
+    assert "run-a-3" in recent and "run-b-0" in recent
+    assert "run-a-0" not in recent and "run-a-1" not in recent and "run-a-2" not in recent
     assert "2026-09-05 03:00" in recent
-    assert history.count(f"/projects/{pid}/runs/") == 4
+    assert "2026-09-05 04:00" in recent
+    assert history.count(f"/projects/{pid}/runs/") == 5
+    for run_id in (*ids, "run-b-0"):
+        assert run_id in history
     assert "<details" in html[html.find('id="project-run-history"') - 20 : html.find('id="project-run-history"') + 80]
     assert "open" not in html[html.find('id="project-run-history"') : html.find('id="project-run-history"') + 40]
 
@@ -1550,7 +1574,11 @@ def test_project_surfaces_running_and_latest_failure(tmp_path, monkeypatch):
             created_at=f"2026-09-05T0{index}:00:00+00:00",
         ))
     html = TestClient(create_app(serve)).get(f"/projects/{pid}").text
-    attention = html.split('id="project-attention"')[1].split('id="project-recent"')[0]
+    attention = html.split('id="project-attention"')[1]
+    for marker in ("id=\"project-recent\"", "id=\"task-create\"", "id=\"project-run-history\""):
+        if marker in attention:
+            attention = attention.split(marker)[0]
+            break
     assert "run-visibility-1" in attention
     assert "run-visibility-2" in attention
     assert "run-visibility-0" not in attention

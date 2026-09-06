@@ -5,7 +5,7 @@ from __future__ import annotations
 import calendar
 import datetime as dt
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 _ID_DATE = re.compile(r"^(\d{4}-\d{2}-\d{2})(?:-|$)")
@@ -83,6 +83,8 @@ class TimelineItem:
     tags: tuple[str, ...] = ()
     kind: str = "ref"
     href: str = ""
+    task_id: str = ""
+    folded: tuple["TimelineItem", ...] = ()
 
 
 def scan_timeline(root: Path | str) -> list[TimelineItem]:
@@ -191,6 +193,7 @@ def _scan_project_events(root: Path) -> list[TimelineItem]:
                     tags=(),
                     kind="artifact",
                     href=f"/projects/{project.id}/runs/{run.id}",
+                    task_id=run.task_id or "",
                 )
             )
     return out
@@ -380,6 +383,30 @@ def shift_month_day(day: dt.date, delta_months: int) -> dt.date:
     return dt.date(y, m, min(day.day, last))
 
 
+def collapse_artifacts(items: list[TimelineItem]) -> list[TimelineItem]:
+    """人读折叠：同一 task_id、同一发生日只留 added_at 最新的 Artifact。"""
+    buckets: dict[tuple, list[TimelineItem]] = {}
+    order: list[tuple] = []
+    for index, it in enumerate(items):
+        if it.kind == "artifact" and it.task_id:
+            key: tuple = ("task", it.task_id, it.occurred_at)
+        else:
+            key = ("one", index)
+        if key not in buckets:
+            buckets[key] = []
+            order.append(key)
+        buckets[key].append(it)
+    out: list[TimelineItem] = []
+    for key in order:
+        group = buckets[key]
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        ranked = sorted(group, key=lambda it: (it.added_at, it.id), reverse=True)
+        out.append(replace(ranked[0], folded=tuple(ranked[1:])))
+    return out
+
+
 def group_by_occurred(items: list[TimelineItem]) -> list[dict]:
     """Unknown first, then occurred days newest-first. Empty key = unknown."""
     unknown = [it for it in items if it.occurred_at is None]
@@ -410,10 +437,11 @@ def format_cli_timeline(
     lines: list[str] = []
     for g in group_by_occurred(items):
         lines.append("⚠ 发生时间未知" if not g["key"] else g["key"])
-        for it in g["entries"]:
+        for it in collapse_artifacts(g["entries"]):
             lines.append(_cli_row(it))
     return "\n".join(lines) + ("\n" if lines else "")
 
 
 def _cli_row(it: TimelineItem) -> str:
-    return f"  {it.workspace}  {it.title}  {it.id}"
+    extra = f"  (+{len(it.folded)})" if it.folded else ""
+    return f"  {it.workspace}  {it.title}  {it.id}{extra}"
