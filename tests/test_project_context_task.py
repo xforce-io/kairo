@@ -147,6 +147,36 @@ def test_unit_cache_expiry_and_source_id():
     assert parsed["kind"] == "digest" and parsed["home"] == "" and parsed["ref_id"] == "ref-1"
 
 
+def test_unit_evidence_body_path_rejects_escape(tmp_path):
+    from kairo.project_materials import evidence_body_path
+
+    folder = tmp_path / "scratch"
+    folder.mkdir()
+    (folder / "ok.md").write_text("in-scratch\n", encoding="utf-8")
+    outside = tmp_path / "cache"
+    outside.mkdir()
+    (outside / "review-escape.md").write_text("from-cache\n", encoding="utf-8")
+    assert evidence_body_path(folder, "ok.md").read_text(encoding="utf-8") == "in-scratch\n"
+    rel = os.path.relpath(outside / "review-escape.md", folder)
+    try:
+        evidence_body_path(folder, rel)
+        raise AssertionError("relative escape must fail")
+    except ProjectError as exc:
+        assert exc.code == "evidence_failed"
+    try:
+        evidence_body_path(folder, str(outside / "review-escape.md"))
+        raise AssertionError("absolute path must fail")
+    except ProjectError as exc:
+        assert exc.code == "evidence_failed"
+    link = folder / "link.md"
+    link.symlink_to(outside / "review-escape.md")
+    try:
+        evidence_body_path(folder, "link.md")
+        raise AssertionError("symlink escape must fail")
+    except ProjectError as exc:
+        assert exc.code == "evidence_failed"
+
+
 def _prepare(tmp_path, monkeypatch, *, with_topic_body: bool = True):
     serve = tmp_path / "root"
     serve.mkdir()
@@ -715,6 +745,142 @@ def test_out_of_scope_evidence_fails_publish(tmp_path, monkeypatch):
     assert out.status == "failed"
     assert out.reason == "evidence_failed"
     assert out.artifact_path is None
+
+
+def test_non_member_digest_fails_publish_even_when_slug_matches(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json
+    from kairo.projects import _execute_agent_run
+    from kairo.workspace import Workspace
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    other = Workspace.init(serve / "unlinked", topic="未关联")
+    src = tmp_path / "outsider.txt"
+    src.write_text("outsider", encoding="utf-8")
+    outsider_id = other.add([src])
+    (other.references_dir() / outsider_id / "digest.md").write_text("not a member\n", encoding="utf-8")
+    source_id = f"topic:alpha-ws:digest:unlinked:{outsider_id}"
+    try:
+        read_material(serve, pid, source_id, run_id=None)
+        raise AssertionError("project read should reject non-member digest")
+    except Exception as exc:
+        assert getattr(exc, "code", None) in ("not_found", "invalid_request") or "digest" in str(exc).lower() or "成员" in str(exc)
+
+    run_id = "run-nonmember"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    body = "forged-non-member\n"
+    (scratch / "inp-nm.md").write_text(body, encoding="utf-8")
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-nm",
+                "source_id": source_id,
+                "type": "digest",
+                "title": "ghost",
+                "version": content_version(body),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": "inp-nm.md",
+            }
+        ],
+    )
+    out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-nm"))
+    assert out.status == "failed"
+    assert out.reason == "evidence_failed"
+    assert out.artifact_path is None
+
+
+def test_evidence_body_path_escape_fails_publish(tmp_path, monkeypatch):
+    from kairo.project_materials import _atomic_json, cache_dir
+    from kairo.projects import _execute_agent_run, get_run
+    from kairo.project_materials import read_run_input
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    run_id = "run-escape"
+    rec = _running_record(serve, pid, run_id, topics=["alpha-ws"], datasources=[ds_id])
+    scratch = Path(serve) / rec.scratch_dir
+    cache = cache_dir(serve, pid, ds_id)
+    cache.mkdir(parents=True, exist_ok=True)
+    escaped = cache / "review-escape.md"
+    escaped.write_text("from-cache\n", encoding="utf-8")
+    rel = os.path.relpath(escaped, scratch)
+    assert rel.startswith(".."), rel
+    _atomic_json(
+        scratch / "index.json",
+        [
+            {
+                "input_id": "inp-esc",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "装机",
+                "version": content_version("from-cache\n"),
+                "read_at": rec.created_at,
+                "read_count": 1,
+                "body": rel.replace("\\", "/"),
+            }
+        ],
+    )
+    out = _execute_agent_run(serve, pid, run_id, _CiteProvider("inp-esc"))
+    assert out.status == "failed"
+    assert out.reason == "evidence_failed"
+    assert out.artifact_path is None
+    assert get_run(serve, pid, run_id).status == "failed"
+
+    run_id_abs = "run-abs"
+    rec_abs = _running_record(serve, pid, run_id_abs, topics=["alpha-ws"], datasources=[ds_id])
+    scratch_abs = Path(serve) / rec_abs.scratch_dir
+    _atomic_json(
+        scratch_abs / "index.json",
+        [
+            {
+                "input_id": "inp-abs",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "装机",
+                "version": content_version("from-cache\n"),
+                "read_at": rec_abs.created_at,
+                "read_count": 1,
+                "body": str(escaped),
+            }
+        ],
+    )
+    out_abs = _execute_agent_run(serve, pid, run_id_abs, _CiteProvider("inp-abs"))
+    assert out_abs.status == "failed"
+    assert out_abs.reason == "evidence_failed"
+    assert out_abs.artifact_path is None
+
+    run_id_link = "run-link"
+    rec_link = _running_record(serve, pid, run_id_link, topics=["alpha-ws"], datasources=[ds_id])
+    scratch_link = Path(serve) / rec_link.scratch_dir
+    link = scratch_link / "inp-link.md"
+    link.symlink_to(escaped)
+    _atomic_json(
+        scratch_link / "index.json",
+        [
+            {
+                "input_id": "inp-link",
+                "source_id": f"datasource:{ds_id}",
+                "type": "datasource",
+                "title": "装机",
+                "version": content_version("from-cache\n"),
+                "read_at": rec_link.created_at,
+                "read_count": 1,
+                "body": "inp-link.md",
+            }
+        ],
+    )
+    out_link = _execute_agent_run(serve, pid, run_id_link, _CiteProvider("inp-link"))
+    assert out_link.status == "failed"
+    assert out_link.reason == "evidence_failed"
+    assert out_link.artifact_path is None
+
+    escaped.unlink()
+    for rid in (run_id, run_id_abs, run_id_link):
+        try:
+            read_run_input(serve, pid, rid, "inp-esc")
+        except Exception:
+            pass
 
 
 def test_valid_recorded_evidence_still_succeeds(tmp_path, monkeypatch):

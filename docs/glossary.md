@@ -60,3 +60,4 @@
 | Task | Project 内可编辑的工作定义，一次性或按规则触发。 | 作业、流水线 |
 | Run | 一次 Task 触发的不可变记录，冻结当时 Task 版本与输入。 | 执行、job |
 | Artifact | 成功 Run 产生的可阅读正文，追溯到该 Run、当时 Task 版本与实际输入材料（Topic 或 Data Source）。 | 报告、产物文档 |
+| 材料身份 | 一条已记录输入对应的具体来源：Data Source id，或某 Topic 的事实层，或某一 Ref digest（slug、home 与 ref id）。 | Topic 名、slug 匹配 |
