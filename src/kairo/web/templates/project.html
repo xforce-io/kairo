@@ -7,10 +7,13 @@
       <p class="obj-kicker">{{ t('nav.projects') }}</p>
       <h1 class="obj-title">{{ project.name }}</h1>
     </div>
-    <form class="obj-rename" method="post" action="/projects/{{ project.id }}/edit">
-      <input name="name" value="{{ project.name }}" required aria-label="{{ t('proj.name_ph') }}">
-      <button type="submit" class="btn btn-ghost btn-inline">{{ t('proj.edit') }}</button>
-    </form>
+    <details class="obj-manage">
+      <summary>{{ t('proj.manage') }}</summary>
+      <form class="obj-rename" method="post" action="/projects/{{ project.id }}/edit">
+        <input name="name" value="{{ project.name }}" required aria-label="{{ t('proj.name_ph') }}">
+        <button type="submit" class="btn btn-ghost btn-inline">{{ t('proj.edit') }}</button>
+      </form>
+    </details>
   </header>
   {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
   {% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
@@ -18,6 +21,9 @@
   <div id="project-primary">
   <section class="obj-block">
     <h2 class="obj-label">{{ t('proj.tasks') }}</h2>
+    {% if not project.tasks %}
+    <p class="panel-hint" id="project-empty-next">{{ linked_topics | length }} {{ t('proj.workspaces') }} · {{ (member_refs or []) | length }} {{ t('proj.members') }} · {{ project.datasources | length }} {{ t('proj.datasources') }} · {{ t('proj.next_create') }}</p>
+    {% endif %}
     {% if project.tasks %}
     <ul class="obj-list">
       {% for task in project.tasks %}
@@ -35,16 +41,34 @@
     {% else %}
     <p class="panel-hint">{{ t('proj.task_empty') }}</p>
     {% endif %}
-    <form class="task-create" method="post" action="/projects/{{ project.id }}/tasks">
-      <div class="task-create-bar">
-        <input name="name" value="{{ task_draft.get('name', '') }}" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
-        <input type="hidden" name="schedule" value="once">
-      </div>
-      <textarea name="prompt" rows="5" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}">{{ task_draft.get('prompt', '') }}</textarea>
-      <div class="task-create-submit">
-        <button type="submit" class="btn btn-step btn-inline">{{ t('proj.create_task') }}</button>
-      </div>
-    </form>
+    {% if run_rows %}
+    <div id="project-recent">
+      <h3 class="obj-label">{{ t('proj.recent_results') }}</h3>
+      <ul class="obj-list">
+        {% for row in run_rows %}
+        {% if row.run.status == 'succeeded' %}
+        <li class="obj-row">
+          <div>{{ row.status_label }} · {{ row.run.task_name }} v{{ row.run.task_version }}</div>
+          <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ row.run.id }}">Artifact</a>
+        </li>
+        {% endif %}
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    <details class="task-create-wrap" id="task-create"{% if error or task_draft.get('name') or task_draft.get('prompt') %} open{% endif %}>
+      <summary>{{ t('proj.create_task') }}</summary>
+      <form class="task-create" method="post" action="/projects/{{ project.id }}/tasks">
+        <div class="task-create-bar">
+          <input name="name" value="{{ task_draft.get('name', '') }}" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
+          <input type="hidden" name="schedule" value="once">
+        </div>
+        <textarea name="prompt" rows="5" required placeholder="{{ t('proj.prompt_ph') }}" aria-label="{{ t('proj.prompt_ph') }}">{{ task_draft.get('prompt', '') }}</textarea>
+        <div class="task-create-submit">
+          <button type="submit" class="btn btn-step btn-inline">{{ t('proj.create_task') }}</button>
+        </div>
+      </form>
+    </details>
   </section>
 
   <section class="obj-block">
@@ -157,19 +181,22 @@
             {% else %}{{ t('proj.cache_none') }}{% endif %}
             {% if st and st.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
           </div>
-          <form class="obj-add" method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/edit">
-            <input name="name" value="{{ ds.name }}" placeholder="{{ t('proj.ds_name') }}" aria-label="{{ t('proj.ds_name') }}">
-            <input name="purpose" value="{{ ds.purpose }}" placeholder="{{ t('proj.purpose') }}" aria-label="{{ t('proj.purpose') }}">
-            <button type="submit" class="btn btn-ghost btn-inline">{{ t('proj.edit') }}</button>
-          </form>
+          <details class="ds-manage">
+            <summary>{{ t('proj.edit_ds') }}</summary>
+            <form class="obj-add" method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/edit">
+              <input name="name" value="{{ ds.name }}" placeholder="{{ t('proj.ds_name') }}" aria-label="{{ t('proj.ds_name') }}">
+              <input name="purpose" value="{{ ds.purpose }}" placeholder="{{ t('proj.purpose') }}" aria-label="{{ t('proj.purpose') }}">
+              <button type="submit" class="btn btn-ghost btn-inline">{{ t('proj.edit') }}</button>
+            </form>
+            <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/delete">
+              <button class="btn btn-ghost btn-inline">{{ t('proj.remove') }}</button>
+            </form>
+          </details>
         </div>
         <div class="obj-actions">
           <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/datasources/{{ ds.id }}">{{ t('proj.open_body') }}</a>
           <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/read">
             <button class="btn btn-ghost btn-inline">{{ t('proj.read') }}</button>
-          </form>
-          <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds.id }}/delete">
-            <button class="btn btn-ghost btn-inline">{{ t('proj.remove') }}</button>
           </form>
         </div>
       </li>

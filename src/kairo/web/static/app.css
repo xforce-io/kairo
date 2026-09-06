@@ -547,6 +547,10 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .chooser-id { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 .obj-list { list-style: none; margin: 0 0 14px; padding: 0; }
 .obj-row { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.obj-row[hidden],
+.material-item[hidden] {
+  display: none !important;
+}
 .obj-copy { min-width: 0; flex: 1; }
 .obj-copy .chooser-id {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
