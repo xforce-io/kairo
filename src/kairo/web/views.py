@@ -5,6 +5,7 @@ from __future__ import annotations
 import datetime
 import json
 import os
+import re
 import subprocess
 import sys
 from html import escape
@@ -3419,6 +3420,21 @@ def project_task_run_form(
     return RedirectResponse(f"/projects/{project_id}/runs/{record.id}", status_code=303)
 
 
+_INPUT_HREF_RE = re.compile(r'href=(["\'])input:([^"\']+)\1')
+
+
+def rewrite_artifact_input_links(html: str, project_id: str, run_id: str, input_ids: set[str]) -> str:
+    allowed = {iid for iid in input_ids if iid}
+
+    def _replace(match: re.Match[str]) -> str:
+        quote, iid = match.group(1), match.group(2)
+        if iid not in allowed:
+            return match.group(0)
+        return f"href={quote}/projects/{project_id}/runs/{run_id}/inputs/{iid}{quote}"
+
+    return _INPUT_HREF_RE.sub(_replace, html)
+
+
 @router.get("/projects/{project_id}/runs/{run_id}", response_class=HTMLResponse)
 def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLResponse:
     _console_only(request)
@@ -3436,6 +3452,14 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
     except ProjectError:
         raise HTTPException(status_code=404)
     t = _t(request)
+    body_html = render_markdown(body) if body else ""
+    if body_html and inputs:
+        body_html = rewrite_artifact_input_links(
+            body_html,
+            project_id,
+            run_id,
+            {str(item.get("input_id") or "") for item in inputs},
+        )
     return _render(
         request,
         "artifact.html",
@@ -3444,7 +3468,7 @@ def artifact_page(request: Request, project_id: str, run_id: str) -> HTMLRespons
             "project": project,
             "run": run,
             "inputs": inputs,
-            "body_html": render_markdown(body) if body else "",
+            "body_html": body_html,
             "status_label": t(f"proj.run_{run.status}") if run.status in ("running", "succeeded", "failed") else run.status,
             "reason_label": run_reason_label(t, run.reason),
             "started_label": _clock_label(run.started_at or run.created_at),

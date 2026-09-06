@@ -128,6 +128,16 @@ class BogusCiteProvider:
         return AgentResult(artifacts=[dest], result_text=dest.read_text())
 
 
+def test_rewrite_artifact_input_links_only_recorded():
+    from kairo.web.views import rewrite_artifact_input_links
+
+    html = '<p><a href="input:inp-ok">t</a> <a href="input:inp-ghost">x</a></p>'
+    out = rewrite_artifact_input_links(html, "prj-1", "run-1", {"inp-ok"})
+    assert 'href="/projects/prj-1/runs/run-1/inputs/inp-ok"' in out
+    assert 'href="input:inp-ghost"' in out
+    assert "input:inp-ok" not in out
+
+
 def test_clock_label_strips_iso_noise():
     from kairo.web.views import _clock_label
 
@@ -921,6 +931,10 @@ def test_valid_recorded_evidence_still_succeeds(tmp_path, monkeypatch):
     again = read_run_input(serve, pid, run_id, "inp-ok")
     assert again["content"] == body
     assert again["version"] == content_version(body)
+    page = TestClient(create_app(serve)).get(f"/projects/{pid}/runs/{run_id}")
+    assert page.status_code == 200
+    assert f"/projects/{pid}/runs/{run_id}/inputs/inp-ok" in page.text
+    assert "input:inp-ok" not in page.text
 
 
 def test_archive_keeps_unique_bodies_when_basenames_collide(tmp_path, monkeypatch):
