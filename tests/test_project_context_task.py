@@ -1148,12 +1148,55 @@ def test_recent_artifact_precedes_collapsed_create_form(tmp_path, monkeypatch):
     assert recent != -1 and create_at != -1
     assert recent < create_at
     assert f"/projects/{pid}/runs/{run_id}" in html[recent:create_at]
+    assert "2026-09-05 00:00" in html[recent:create_at]
     snippet = html[create_at : create_at + 80]
     assert "<details" in html[create_at - 40 : create_at + 40] or snippet.startswith("task-create")
     details = html[html.rfind("<details", 0, create_at + 1) : create_at + 120]
     assert "open" not in details.split(">")[0]
     primary = html[html.find('id="project-primary"') : html.find('id="project-materials"')]
     assert 'class="obj-rename"' not in primary or "<details" in html[: html.find('class="obj-rename"')]
+
+
+def test_recent_results_cap_at_three_with_times_and_history(tmp_path, monkeypatch):
+    from kairo.projects import RunRecord, _artifact_path, _save_run, create_task
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    task = create_task(serve, pid, name="日报", prompt="整理")
+    ids = []
+    for i in range(4):
+        run_id = f"run-{i}"
+        dest = _artifact_path(serve, pid, run_id)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(f"# {i}\n", encoding="utf-8")
+        hour = f"{i:02d}"
+        _save_run(
+            serve,
+            RunRecord(
+                id=run_id,
+                project_id=pid,
+                task_id=task.id,
+                task_name=task.name,
+                task_version=1,
+                status="succeeded",
+                artifact_path=str(dest.relative_to(serve)).replace("\\", "/"),
+                schema_version=2,
+                mode="agent",
+                created_at=f"2026-09-05T{hour}:00:00+00:00",
+                started_at=f"2026-09-05T{hour}:00:00+00:00",
+                finished_at=f"2026-09-05T{hour}:01:00+00:00",
+            ),
+        )
+        ids.append(run_id)
+    html = TestClient(create_app(serve)).get(f"/projects/{pid}").text
+    recent = html[html.find('id="project-recent"') : html.find('id="task-create"')]
+    history = html[html.find('id="project-run-history"') :]
+    assert recent.count("Artifact") == 3
+    assert "run-3" in recent and "run-2" in recent and "run-1" in recent
+    assert "run-0" not in recent
+    assert "2026-09-05 03:00" in recent
+    assert history.count(f"/projects/{pid}/runs/") == 4
+    assert "<details" in html[html.find('id="project-run-history"') - 20 : html.find('id="project-run-history"') + 80]
+    assert "open" not in html[html.find('id="project-run-history"') : html.find('id="project-run-history"') + 40]
 
 
 def test_empty_project_shows_material_counts_and_next_step(tmp_path, monkeypatch):

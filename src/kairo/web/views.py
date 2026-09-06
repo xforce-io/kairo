@@ -3099,8 +3099,10 @@ def project_page(
                 if run.status in ("running", "succeeded", "failed")
                 else run.status,
                 "reason_label": run_reason_label(t, run.reason),
+                "started_label": _clock_label(run.started_at or run.created_at),
             }
         )
+    recent_rows = [row for row in run_rows if row["run"].status == "succeeded"][:3]
     ds_status = {}
     for ds in project.datasources:
         st = dict(cache_status(serve, project, ds))
@@ -3119,6 +3121,7 @@ def project_page(
             "member_refs": project_member_refs(serve, project.topics),
             "runs": runs,
             "run_rows": run_rows,
+            "recent_rows": recent_rows,
             "ds_status": ds_status,
             "ds_labels": {ds.id: datasource_label(ds) for ds in project.datasources},
             "error": error,
