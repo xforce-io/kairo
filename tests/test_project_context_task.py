@@ -232,9 +232,11 @@ def test_s1_s4_cache_ttl_refresh_and_web(tmp_path, monkeypatch):
         client = TestClient(create_app(serve))
         page = client.get(f"/projects/{pid}/datasources/{ds_id}")
         assert page.status_code == 200
-        assert "solar,80" in page.text
+        assert "<table>" in page.text
+        assert "solar" in page.text and "80" in page.text
         again = client.get(f"/projects/{pid}/datasources/{ds_id}")
-        assert "solar,80" in again.text
+        assert "<table>" in again.text
+        assert "solar" in again.text
         assert _count(counter) == 1
         html_proj = client.get(f"/projects/{pid}")
         assert html_proj.status_code == 200
@@ -272,7 +274,8 @@ def test_s1_s4_cache_ttl_refresh_and_web(tmp_path, monkeypatch):
         assert _count(counter) == 4
         view = client.get(f"/projects/{pid}/datasources/{ds_id}")
         assert view.status_code == 200
-        assert "solar,80" in view.text
+        assert "<table>" in view.text
+        assert "solar" in view.text
         assert "Expired" in view.text or "已过期" in view.text
         assert "read_failed" not in view.text or True  # page may show old body, not success of this fetch
 
@@ -591,7 +594,8 @@ def test_refresh_failure_keeps_old_body_on_page(tmp_path, monkeypatch):
         data={"refresh": "1"},
     )
     assert failed.status_code == 200
-    assert "solar,80" in failed.text
+    assert "<table>" in failed.text
+    assert "solar" in failed.text
     assert "read_failed" in failed.text
     assert "Reusable" in failed.text or "可复用" in failed.text
     assert "Not read yet" not in failed.text and "尚未读取" not in failed.text
@@ -925,13 +929,22 @@ def test_valid_recorded_evidence_still_succeeds(tmp_path, monkeypatch):
     assert "inp-ok" in artifact
     evidence = read_run_input(serve, pid, run_id, "inp-ok")
     assert evidence["content"] == body
+    client = TestClient(create_app(serve))
+    ds_page = client.get(f"/projects/{pid}/datasources/{ds_id}")
+    assert ds_page.status_code == 200
+    assert "<table>" in ds_page.text
+    assert "plant" in ds_page.text
+    evidence_page = client.get(f"/projects/{pid}/runs/{run_id}/inputs/inp-ok")
+    assert evidence_page.status_code == 200
+    assert "<table>" in evidence_page.text
+    assert "solar" in evidence_page.text
     from kairo.projects import remove_datasource
 
     remove_datasource(serve, pid, ds_id)
     again = read_run_input(serve, pid, run_id, "inp-ok")
     assert again["content"] == body
     assert again["version"] == content_version(body)
-    page = TestClient(create_app(serve)).get(f"/projects/{pid}/runs/{run_id}")
+    page = client.get(f"/projects/{pid}/runs/{run_id}")
     assert page.status_code == 200
     assert f"/projects/{pid}/runs/{run_id}/inputs/inp-ok" in page.text
     assert "input:inp-ok" not in page.text

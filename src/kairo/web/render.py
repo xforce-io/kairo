@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import json
 import re
+from html import escape
 from urllib.parse import quote
 
 from markdown_it import MarkdownIt
@@ -127,3 +131,163 @@ def render_markdown(text: str, *, slug: str | None = None) -> str:
     if slug:
         html = _rewrite_digest_links(html, slug)
     return html
+
+
+_SECTION_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)
+
+
+def _cell_text(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "、".join(part for part in (_cell_text(item) for item in value) if part)
+    if isinstance(value, dict):
+        if value.get("userName"):
+            return str(value.get("userName") or "")
+        if "text" in value:
+            return str(value.get("text") or "")
+        return "、".join(
+            f"{key}:{_cell_text(item)}"
+            for key, item in value.items()
+            if _cell_text(item)
+        )
+    return str(value)
+
+
+def _html_table(headers: list[str], rows: list[list[str]]) -> str:
+    head = "".join(f"<th>{escape(h)}</th>" for h in headers)
+    body = []
+    for row in rows:
+        padded = list(row) + [""] * (len(headers) - len(row))
+        body.append("<tr>" + "".join(f"<td>{escape(c)}</td>" for c in padded[: len(headers)]) + "</tr>")
+    return (
+        '<div class="sheet-preview"><table>'
+        f"<thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody>"
+        "</table></div>"
+    )
+
+
+def _trim_empty_columns(headers: list[str], rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    width = len(headers)
+    while width > 1:
+        last = width - 1
+        header_empty = not headers[last].strip()
+        cells_empty = all(len(row) <= last or not str(row[last]).strip() for row in rows)
+        if header_empty and cells_empty:
+            width -= 1
+            continue
+        break
+    headers = headers[:width]
+    rows = [(row + [""] * width)[:width] for row in rows]
+    return headers, rows
+
+
+def _csv_table(text: str) -> str | None:
+    sample = text.strip()
+    if not sample or "," not in sample.splitlines()[0]:
+        return None
+    try:
+        parsed = list(csv.reader(io.StringIO(sample)))
+    except csv.Error:
+        return None
+    parsed = [row for row in parsed if any(cell.strip() for cell in row)]
+    if len(parsed) < 2:
+        return None
+    width = max(len(row) for row in parsed)
+    if width < 2:
+        return None
+    rich = sum(1 for row in parsed if sum(1 for cell in row if str(cell).strip()) >= 2)
+    if rich < 2:
+        return None
+    headers = [(cell.strip() or f"列{i + 1}") for i, cell in enumerate((parsed[0] + [""] * width)[:width])]
+    rows = [[str(cell) for cell in (row + [""] * width)[:width]] for row in parsed[1:]]
+    headers, rows = _trim_empty_columns(headers, rows)
+    return _html_table(headers, rows)
+
+
+def _json_table(text: str) -> str | None:
+    sample = text.strip()
+    if not sample or sample[0] not in "[{":
+        return None
+    try:
+        data = json.loads(sample)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(data, dict) and isinstance(data.get("records"), list):
+        data = data["records"]
+    if not isinstance(data, list) or not data:
+        return None
+    if all(isinstance(item, dict) for item in data):
+        use_values = any(isinstance(item.get("values"), dict) for item in data)
+        headers: list[str] = []
+        seen: set[str] = set()
+
+        def add(key: str) -> None:
+            if key not in seen:
+                seen.add(key)
+                headers.append(key)
+
+        if use_values:
+            add("update_time")
+            for item in data:
+                values = item.get("values") if isinstance(item.get("values"), dict) else {}
+                for key in values:
+                    add(key)
+            rows = []
+            for item in data:
+                values = item.get("values") if isinstance(item.get("values"), dict) else {}
+                row = []
+                for key in headers:
+                    if key in item and key not in values:
+                        row.append(_cell_text(item.get(key)))
+                    else:
+                        row.append(_cell_text(values.get(key)))
+                rows.append(row)
+        else:
+            for item in data:
+                for key in item:
+                    add(key)
+            rows = [[_cell_text(item.get(key)) for key in headers] for item in data]
+        if len(headers) < 1 or len(rows) < 1:
+            return None
+        return _html_table(headers, rows)
+    if all(isinstance(item, list) for item in data) and len(data) >= 2:
+        headers = [_cell_text(cell) or f"列{i + 1}" for i, cell in enumerate(data[0])]
+        rows = [[_cell_text(cell) for cell in row] for row in data[1:]]
+        if len(headers) < 2:
+            return None
+        return _html_table(headers, rows)
+    return None
+
+
+def _block_html(body: str) -> str:
+    text = body.strip()
+    if not text:
+        return ""
+    return _json_table(text) or _csv_table(text) or f'<pre class="doc-plain">{escape(text)}</pre>'
+
+
+def render_sheet_preview(text: str) -> str:
+    """把 Data Source 缓存正文渲成可读表格；非表格块保持纯文本。不改存数。"""
+    if not (text or "").strip():
+        return ""
+    parts: list[str] = []
+    cursor = 0
+    matches = list(_SECTION_HEADING_RE.finditer(text))
+    if not matches:
+        return _block_html(text)
+    for match in matches:
+        if match.start() > cursor:
+            parts.append(_block_html(text[cursor : match.start()]))
+        level = min(len(match.group(1)), 3)
+        parts.append(f"<h{level}>{escape(match.group(2).strip())}</h{level}>")
+        cursor = match.end()
+    if cursor < len(text):
+        parts.append(_block_html(text[cursor:]))
+    return "".join(part for part in parts if part)

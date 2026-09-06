@@ -1,6 +1,6 @@
 """Test markdown rendering to HTML."""
 
-from kairo.web.render import render_markdown
+from kairo.web.render import render_markdown, render_sheet_preview
 
 
 def test_render_heading_and_paragraph():
@@ -158,3 +158,39 @@ def test_render_digest_link_rejects_traversal():
     assert "/w/ws/ref/" not in html
     # 仍可能是相对 href 原文(markdown 保留),但不得变成 console 路由
     assert "form/digest" not in html or ".." in html
+
+
+def test_render_sheet_preview_csv_is_table_not_paragraph():
+    text = (
+        "# 【综合能源】版本需求清单\n\n"
+        "## TOC版本需求清单\n"
+        "序号,归属版本,需求描述\n"
+        "1,V1.4.6,能源助手+页面交互调整\n"
+        "2,V1.4.7,平台新四算表对接\n"
+    )
+    html = render_sheet_preview(text)
+    assert "<table>" in html
+    assert "<th>" in html and "归属版本" in html
+    assert "<td>" in html and "能源助手+页面交互调整" in html
+    assert "<h2>" in html and "TOC版本需求清单" in html
+    assert "<p>" not in html or "V1.4.6,能源助手" not in html
+
+
+def test_render_sheet_preview_escapes_script_cells():
+    html = render_sheet_preview("h,x\n<script>alert(1)</script>,ok\n")
+    assert "<script>" not in html.lower()
+    assert "&lt;script&gt;" in html
+    assert "<table>" in html
+
+
+def test_render_sheet_preview_smartsheet_records():
+    text = (
+        "# 进度\n\n## 重点工作拆解\n"
+        '[{"values": {"重点工作": [{"text": "集团化改造", "type": "text"}], '
+        '"产品责任人": [{"userName": "蒋贻鑫"}]}, "update_time": "2026-04-27 11:10:02"}]'
+    )
+    html = render_sheet_preview(text)
+    assert "<table>" in html
+    assert "集团化改造" in html
+    assert "蒋贻鑫" in html
+    assert "userId" not in html

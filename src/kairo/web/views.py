@@ -69,7 +69,7 @@ from kairo.web.public import (
     public_bounds,
     set_reference_public,
 )
-from kairo.web.render import render_markdown
+from kairo.web.render import render_markdown, render_sheet_preview
 from kairo.web.tasks import classify_task, stream_events
 from kairo.models import State
 from kairo.rules import effective_compose_block_reason
@@ -3246,6 +3246,7 @@ def datasource_page(
             payload = None
     except ProjectError:
         raise HTTPException(status_code=404)
+    body_html = render_sheet_preview(payload.get("content") or "") if payload else ""
     return _render(
         request,
         "datasource.html",
@@ -3254,6 +3255,7 @@ def datasource_page(
             "project": project,
             "ds_id": ds_id,
             "payload": payload,
+            "body_html": body_html,
             "error": error,
         },
     )
@@ -3505,7 +3507,9 @@ def run_input_page(request: Request, project_id: str, run_id: str, input_id: str
             "project": project,
             "run": run,
             "payload": payload,
-            "body_html": render_markdown(payload.get("content") or ""),
+            "body_html": render_sheet_preview(payload.get("content") or "")
+            if payload.get("type") == "datasource"
+            else render_markdown(payload.get("content") or ""),
         },
     )
 

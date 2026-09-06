@@ -13,7 +13,7 @@
     {% endif %}
     {% if payload.authorized == false %} · {{ t('proj.conn_revoked') }}{% endif %}
   </p>
-  <pre class="doc">{{ payload.content }}</pre>
+  {{ body_html | safe }}
 </article>
 <form method="post" action="/projects/{{ project.id }}/datasources/{{ ds_id }}/read">
   <input type="hidden" name="refresh" value="1">
