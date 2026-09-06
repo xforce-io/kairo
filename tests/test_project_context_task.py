@@ -128,6 +128,16 @@ class BogusCiteProvider:
         return AgentResult(artifacts=[dest], result_text=dest.read_text())
 
 
+def test_rewrite_artifact_input_links_only_recorded():
+    from kairo.web.views import rewrite_artifact_input_links
+
+    html = '<p><a href="input:inp-ok">t</a> <a href="input:inp-ghost">x</a></p>'
+    out = rewrite_artifact_input_links(html, "prj-1", "run-1", {"inp-ok"})
+    assert 'href="/projects/prj-1/runs/run-1/inputs/inp-ok"' in out
+    assert 'href="input:inp-ghost"' in out
+    assert "input:inp-ok" not in out
+
+
 def test_clock_label_strips_iso_noise():
     from kairo.web.views import _clock_label
 
@@ -921,6 +931,10 @@ def test_valid_recorded_evidence_still_succeeds(tmp_path, monkeypatch):
     again = read_run_input(serve, pid, run_id, "inp-ok")
     assert again["content"] == body
     assert again["version"] == content_version(body)
+    page = TestClient(create_app(serve)).get(f"/projects/{pid}/runs/{run_id}")
+    assert page.status_code == 200
+    assert f"/projects/{pid}/runs/{run_id}/inputs/inp-ok" in page.text
+    assert "input:inp-ok" not in page.text
 
 
 def test_archive_keeps_unique_bodies_when_basenames_collide(tmp_path, monkeypatch):
@@ -1134,12 +1148,55 @@ def test_recent_artifact_precedes_collapsed_create_form(tmp_path, monkeypatch):
     assert recent != -1 and create_at != -1
     assert recent < create_at
     assert f"/projects/{pid}/runs/{run_id}" in html[recent:create_at]
+    assert "2026-09-05 00:00" in html[recent:create_at]
     snippet = html[create_at : create_at + 80]
     assert "<details" in html[create_at - 40 : create_at + 40] or snippet.startswith("task-create")
     details = html[html.rfind("<details", 0, create_at + 1) : create_at + 120]
     assert "open" not in details.split(">")[0]
     primary = html[html.find('id="project-primary"') : html.find('id="project-materials"')]
     assert 'class="obj-rename"' not in primary or "<details" in html[: html.find('class="obj-rename"')]
+
+
+def test_recent_results_cap_at_three_with_times_and_history(tmp_path, monkeypatch):
+    from kairo.projects import RunRecord, _artifact_path, _save_run, create_task
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch)
+    task = create_task(serve, pid, name="日报", prompt="整理")
+    ids = []
+    for i in range(4):
+        run_id = f"run-{i}"
+        dest = _artifact_path(serve, pid, run_id)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(f"# {i}\n", encoding="utf-8")
+        hour = f"{i:02d}"
+        _save_run(
+            serve,
+            RunRecord(
+                id=run_id,
+                project_id=pid,
+                task_id=task.id,
+                task_name=task.name,
+                task_version=1,
+                status="succeeded",
+                artifact_path=str(dest.relative_to(serve)).replace("\\", "/"),
+                schema_version=2,
+                mode="agent",
+                created_at=f"2026-09-05T{hour}:00:00+00:00",
+                started_at=f"2026-09-05T{hour}:00:00+00:00",
+                finished_at=f"2026-09-05T{hour}:01:00+00:00",
+            ),
+        )
+        ids.append(run_id)
+    html = TestClient(create_app(serve)).get(f"/projects/{pid}").text
+    recent = html[html.find('id="project-recent"') : html.find('id="task-create"')]
+    history = html[html.find('id="project-run-history"') :]
+    assert recent.count("Artifact") == 3
+    assert "run-3" in recent and "run-2" in recent and "run-1" in recent
+    assert "run-0" not in recent
+    assert "2026-09-05 03:00" in recent
+    assert history.count(f"/projects/{pid}/runs/") == 4
+    assert "<details" in html[html.find('id="project-run-history"') - 20 : html.find('id="project-run-history"') + 80]
+    assert "open" not in html[html.find('id="project-run-history"') : html.find('id="project-run-history"') + 40]
 
 
 def test_empty_project_shows_material_counts_and_next_step(tmp_path, monkeypatch):
@@ -1327,6 +1384,38 @@ def test_unsaved_task_run_is_blocked_and_keeps_draft(tmp_path, monkeypatch):
     from kairo.provider import StubProvider
 
     monkeypatch.setattr("kairo.projects.select_project_agent", lambda: StubProvider())
+    ok = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        follow_redirects=False,
+    )
+    assert ok.status_code == 303
+    assert "/runs/" in ok.headers.get("location", "")
+
+
+def test_unsaved_legacy_task_run_is_blocked_and_keeps_draft(tmp_path, monkeypatch):
+    from kairo.projects import create_task, list_runs
+
+    serve, pid, ds_id, _counter, _ws = _prepare(tmp_path, monkeypatch, with_topic_body=False)
+    task = create_task(serve, pid, name="快照", datasource_id=ds_id)
+    client = TestClient(create_app(serve))
+    before = list_runs(serve, pid)
+    blocked_name = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        data={"name": "未保存快照", "datasource_id": ds_id},
+        follow_redirects=False,
+    )
+    assert blocked_name.status_code == 200
+    assert "未保存快照" in blocked_name.text
+    assert "请先保存" in blocked_name.text or "Save your edits" in blocked_name.text
+    assert list_runs(serve, pid) == before
+    blocked_ds = client.post(
+        f"/projects/{pid}/tasks/{task.id}/run",
+        data={"name": "快照", "datasource_id": "ds-other"},
+        follow_redirects=False,
+    )
+    assert blocked_ds.status_code == 200
+    assert "ds-other" in blocked_ds.text
+    assert list_runs(serve, pid) == before
     ok = client.post(
         f"/projects/{pid}/tasks/{task.id}/run",
         follow_redirects=False,

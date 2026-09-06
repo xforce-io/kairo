@@ -41,17 +41,15 @@
     {% else %}
     <p class="panel-hint">{{ t('proj.task_empty') }}</p>
     {% endif %}
-    {% if run_rows %}
+    {% if recent_rows %}
     <div id="project-recent">
       <h3 class="obj-label">{{ t('proj.recent_results') }}</h3>
       <ul class="obj-list">
-        {% for row in run_rows %}
-        {% if row.run.status == 'succeeded' %}
+        {% for row in recent_rows %}
         <li class="obj-row">
-          <div>{{ row.status_label }} · {{ row.run.task_name }} v{{ row.run.task_version }}</div>
+          <div>{{ row.status_label }} · {{ row.run.task_name }} v{{ row.run.task_version }}{% if row.started_label %} · {{ row.started_label }}{% endif %}</div>
           <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ row.run.id }}">Artifact</a>
         </li>
-        {% endif %}
         {% endfor %}
       </ul>
     </div>
@@ -72,21 +70,23 @@
   </section>
 
   <section class="obj-block">
-    <h2 class="obj-label">{{ t('proj.runs') }}</h2>
-    {% if run_rows %}
-    <ul class="obj-list">
-      {% for row in run_rows %}
-      <li class="obj-row">
-        <div>{{ row.status_label }} · {{ row.run.task_name }} v{{ row.run.task_version }}
-          {% if row.run.status != 'succeeded' and row.reason_label %} · {{ row.reason_label }}{% endif %}
-        </div>
-        <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ row.run.id }}">{% if row.run.status == 'succeeded' %}Artifact{% else %}{{ t('proj.run') }}{% endif %}</a>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="panel-hint">{{ t('proj.run_empty') }}</p>
-    {% endif %}
+    <details id="project-run-history">
+      <summary class="obj-label">{{ t('proj.runs') }}</summary>
+      {% if run_rows %}
+      <ul class="obj-list">
+        {% for row in run_rows %}
+        <li class="obj-row">
+          <div>{{ row.status_label }} · {{ row.run.task_name }} v{{ row.run.task_version }}{% if row.started_label %} · {{ row.started_label }}{% endif %}
+            {% if row.run.status != 'succeeded' and row.reason_label %} · {{ row.reason_label }}{% endif %}
+          </div>
+          <a class="btn btn-ghost btn-inline" href="/projects/{{ project.id }}/runs/{{ row.run.id }}">{% if row.run.status == 'succeeded' %}Artifact{% else %}{{ t('proj.run') }}{% endif %}</a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="panel-hint">{{ t('proj.run_empty') }}</p>
+      {% endif %}
+    </details>
   </section>
   </div>
 
