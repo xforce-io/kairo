@@ -9,6 +9,9 @@ SUPPORTED: tuple[str, ...] = ("en", "zh")
 
 CATALOG: dict[str, dict[str, str]] = {
     "en": {
+        "reader.no_conclusion": "No readable conclusion yet. Select a reference or add materials to continue.",
+        "reader.target_unavailable": "This conclusion is unavailable. Return to the topic or select another item.",
+        "reader.return_topic": "Return to topic",
         "nav.workspaces": "Topics",
         "nav.projects": "Projects",
         "nav.settings": "Settings",
@@ -483,6 +486,9 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.review_readonly": "This surface is read-only — cannot write a review.",
     },
     "zh": {
+        "reader.no_conclusion": "尚无可读结论。可选择参考阅读，或添加资料继续。",
+        "reader.target_unavailable": "指定结论不可用。可返回主题或选择其它条目。",
+        "reader.return_topic": "返回主题",
         "nav.workspaces": "主题",
         "nav.projects": "项目",
         "nav.settings": "设置",

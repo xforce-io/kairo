@@ -873,8 +873,9 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str, catalog=None) ->
 
 
 @router.get("/topics/{slug}", response_class=RedirectResponse)
-def topic_alias(slug: str) -> RedirectResponse:
-    return RedirectResponse("/w/" + quote(slug), status_code=303)
+def topic_alias(request: Request, slug: str) -> RedirectResponse:
+    query = ("?" + str(request.url.query)) if request.url.query else ""
+    return RedirectResponse("/w/" + quote(slug) + query, status_code=303)
 
 
 def _global_ref_primary_body(ws: Workspace, rid: str, man, t) -> tuple[str, str]:
@@ -1001,6 +1002,7 @@ def workspace_view(
     slug: str,
     ref: str | None = None,
     task_id: str | None = None,
+    target: str | None = None,
 ) -> HTMLResponse:
     ws = _open(request, slug)
     from kairo.refs import include_tags_of, list_all_refs, list_tags
@@ -1026,6 +1028,26 @@ def workspace_view(
     shown_task = running or requested_task
     ids = {r["id"] for r in streams} | {r["id"] for r in corpus}
     select_ref = ref if ref in ids else None
+    select_target = None
+    target_meta = None
+    reader_notice = None
+    if ref is None:
+        declared = {item["path"] for item in targets}
+        choices = [target] if target is not None else sorted(
+            [item["path"] for item in targets], key=lambda path: path != "understanding.md"
+        )
+        for path in choices:
+            if path not in declared:
+                continue
+            try:
+                _safe_doc(ws, path)
+                target_meta = _target_meta_vars(request, ws, slug, path, include_reader=False)
+            except (HTTPException, OSError, UnicodeError):
+                continue
+            select_target = path
+            break
+        if select_target is None:
+            reader_notice = "reader.target_unavailable" if target is not None else "reader.no_conclusion"
     return _render(
         request,
         "workspace.html",
@@ -1040,6 +1062,9 @@ def workspace_view(
             "unknown_streams": unknown_streams,
             "corpus": corpus,
             "select_ref": select_ref,
+            "select_target": select_target,
+            "target_meta": target_meta,
+            "reader_notice": reader_notice,
             "run_task_id": shown_task.task_id if shown_task else None,
             **(
                 _step_template_vars(request, ws, slug, shown_task)
@@ -1468,11 +1493,15 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     if path not in {t.path for t in ws.constitution.targets}:
         raise HTTPException(status_code=404, detail="target not found")
     _require_public_target(request, slug, path)
-    return _render(
+    if (ws.root / path).is_file():
+        _safe_doc(ws, path)
+    response = _render(
         request,
         "_target_meta.html",
         _target_meta_vars(request, ws, slug, path, include_reader=True),
     )
+    response.headers["HX-Push-Url"] = f"/w/{quote(slug)}?{urlencode({'target': path})}"
+    return response
 
 
 def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
