@@ -1,8 +1,9 @@
 # #337 邮件检索 Data Source
 
 - Issue: [#337](https://github.com/xforce-io/kairo/issues/337)
-- 状态: Draft
+- 状态: Approved
 - 日期: 2026-09-06
+- 批准: 2026-09-07
 
 本文件是详细设计唯一事实源。Issue 只保留摘要与本链接。
 
