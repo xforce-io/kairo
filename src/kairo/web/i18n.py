@@ -9,6 +9,15 @@ SUPPORTED: tuple[str, ...] = ("en", "zh")
 
 CATALOG: dict[str, dict[str, str]] = {
     "en": {
+        'queue.candidates': 'Candidate review',
+        'queue.drift': 'Pending recorrection',
+        'queue.errors': 'Extraction failures',
+        'queue.local': 'Local knowledge',
+        'queue.global': 'Shared knowledge and review',
+        'queue.empty': 'No items in this category.',
+        'queue.categories': 'Knowledge categories',
+        'queue.count_hint': 'Counts describe records in each category, not unique materials; the same material may appear in more than one category.',
+
         "topic.tag_notice": 'Creating a topic also creates or reuses its same-named Tag. Materials matching that Tag enter this topic.',
         "topic.create_failed": 'Topic creation failed; correct the problem and retry.',
         'status.readable': 'Existing body is readable; this alone does not mean it is current.',
@@ -512,6 +521,15 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.review_readonly": "This surface is read-only — cannot write a review.",
     },
     "zh": {
+        'queue.candidates': '候选审核',
+        'queue.drift': '待校正内容',
+        'queue.errors': '提取失败',
+        'queue.local': '本地知识',
+        'queue.global': '公共知识与审核',
+        'queue.empty': '此类别暂无处理项。',
+        'queue.categories': '知识处理类别',
+        'queue.count_hint': '数量表示各类别处理记录，不是唯一资料数；同一资料可能出现在多个类别。',
+
         "topic.tag_notice": '新建将创建或复用同名 Tag，命中该 Tag 的资料会进入此主题。',
         "topic.create_failed": '新建失败，请修正问题后重试。',
         'status.readable': '已有正文可读；这不代表最新加工已完成。',

@@ -2302,10 +2302,23 @@ def _knowledge_page(
         error = error or str(exc)
     if error:
         error = _knowledge_error_text(request, error)
+    if filter_text:
+        drift = [row for row in drift if filter_text in " ".join(str(value) for value in row.values()).lower()]
+        extract_errors = [row for row in extract_errors if filter_text in " ".join(str(value) for value in row.values()).lower()]
+    queue_keys = ["candidates", "drift", "errors", "local", "global"] if selected else ["global"]
+    queue = request.query_params.get("queue", queue_keys[0])
+    if queue not in queue_keys:
+        queue = queue_keys[0]
+    queue_counts = {"candidates": len(candidates), "drift": len(drift), "errors": len(extract_errors),
+                    "local": len(local_entries), "global": len(global_entries) + len(promotions)}
     return _render(
         request,
         "knowledge.html",
         {
+            "knowledge_queue": queue,
+            "queue_keys": queue_keys,
+            "queue_order": [queue, *(key for key in queue_keys if key != queue)],
+            "queue_counts": queue_counts,
             "nav_active": "knowledge",
             "root": str(serve),
             "slugs": slugs,
@@ -2313,7 +2326,7 @@ def _knowledge_page(
             "global_entries": global_entries,
             "local_entries": local_entries,
             "candidates": candidates,
-            "candidate_open_count": sum(item["status"] in {"pending", "pending_global"} for item in candidates),
+            "candidate_open_count": len(candidates),
             "promotions": promotions,
             "extract_errors": extract_errors,
             "knowledge_drift": drift,
