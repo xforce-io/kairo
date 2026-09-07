@@ -840,14 +840,33 @@ def _occurred_ref_groups(refs: list[dict]) -> tuple[list[dict], list[dict]]:
     return groups, unknown
 
 
+def _processing_context(ws: Workspace, slug: str, plan: dict) -> dict:
+    from kairo.refs import ref_nav, resolve_open
+
+    affected = []
+    for item in plan["blocked_refs"]:
+        nav = ref_nav(item["home"], item["ref_id"])
+        try:
+            source, rid = resolve_open(ws.root.parent, item["home"], item["ref_id"])
+            title = source.read_manifest(rid).title
+        except (OSError, ValueError):
+            title = item["ref_id"]
+        affected.append({"title": title, "href": nav["href"], "retryable": item["retryable"]})
+    for item in plan["blocked_targets"]:
+        affected.append({"title": item["path"], "href": f"/w/{quote(slug)}?{urlencode({'target': item['path']})}", "retryable": item["retryable"]})
+    return {"processing_affected": affected, "processing_pending": plan["pending_count"]}
+
+
 def _run_button_ctx(request: Request, ws: Workspace, slug: str, catalog=None) -> dict:
     """#75 主按钮文案与是否可点。"""
     t = _t(request)
     running = request.app.state.registry.is_running(slug)
     plan = workspace_run_plan(ws, catalog=catalog)
     mode = plan["mode"]
+    context = _processing_context(ws, slug, plan)
     if running:
         return {
+            **context,
             "run_mode": "running",
             "run_label": t("run.running"),
             "run_disabled": True,
@@ -864,6 +883,7 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str, catalog=None) ->
         "attention": t("run.attention"),
     }
     return {
+        **context,
         "run_mode": mode,
         "run_label": labels[mode],
         "run_disabled": mode in ("clean", "attention"),
@@ -1465,7 +1485,12 @@ def _target_meta_vars(
     status = ts.status if ts else "missing"
     has_doc = (ws.root / path).is_file()
     diag = ts.diagnostic if ts else None
+    plan = workspace_run_plan(ws)
+    processing_state = ("status.incomplete" if plan["blocked_count"] or plan["pending_count"]
+                        else "status.current" if ts and ts.status == "ok" and has_doc
+                        else "status.unknown")
     return {
+        "processing_state": processing_state,
         "slug": slug,
         "path": path,
         "status": status,
@@ -2768,7 +2793,9 @@ def _run_status_oob(request: Request, ws: Workspace, slug: str, t) -> str:
         "_targets_list.html",
         {"slug": slug, "targets": _target_states(ws)},
     ).body.decode()
+    processing = _render(request, "_processing_status.html", btn).body.decode()
     parts = [
+        f'<div id="processing-status" hx-swap-oob="true">{processing}</div>',
         '<div id="run-btn-wrap" hx-swap-oob="true">'
         + _run_button_html(slug, btn, t)
         + "</div>",

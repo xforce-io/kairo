@@ -62,9 +62,11 @@
   {% if blocks %}
   <div class="ref-blocks" role="alert">
     <div class="meta-label">{{ t('ref.blocked_label') }}</div>
+    <p>{{ t('status.ref_failed') }}</p>
     <ul class="ref-block-list">
     {% for b in blocks %}
-      <li><code>{{ b.name }}</code> · {{ b.reason }}{% if b.stage %} (stage={{ b.stage }}){% endif %}{% if b.provider %} (provider={{ b.provider }}){% endif %}{% if b.summary %} — {{ b.summary }}{% endif %}</li>
+      <li><strong>{{ b.name }}</strong> · {{ t('status.reason_' ~ b.reason) if t('status.reason_' ~ b.reason) != 'status.reason_' ~ b.reason else t('status.reason_unknown') }}
+      <details><summary>{{ t('status.details') }}</summary>{{ b.reason }}{% if b.stage %} (stage={{ b.stage }}){% endif %}{% if b.provider %} (provider={{ b.provider }}){% endif %}{% if b.summary %} — {{ b.summary }}{% endif %}</details></li>
     {% endfor %}
     </ul>
   </div>

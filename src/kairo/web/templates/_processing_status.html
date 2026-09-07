@@ -1,0 +1,7 @@
+{% if processing_pending %}<p class="meta-hint" role="status">{{ t('status.pending').format(n=processing_pending) }}</p>{% endif %}
+{% if processing_affected %}
+<details class="processing-affected">
+  <summary>{{ t('status.affected') }} · {{ processing_affected|length }}</summary>
+  <ul>{% for item in processing_affected %}<li><a href="{{ item.href }}">{{ item.title }}</a><p class="meta-hint">{{ t('status.retry') if item.retryable else t('status.manual') }}</p></li>{% endfor %}</ul>
+</details>
+{% endif %}

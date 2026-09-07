@@ -141,13 +141,14 @@
       {% endif %}
       {% if run_blocked %}<span class="run-blocked-total">{{ t('run.blocked_total').format(n=run_blocked) }}</span>{% endif %}
     </div>
+    <div id="processing-status">{% include "_processing_status.html" %}</div>
     <div id="step-area">{% if run_task_id %}{% with task_id=run_task_id %}{% include "_step.html" %}{% endwith %}{% endif %}</div>
     {% if glossary_todo_n %}
     <a class="gl-todo-hint" href="/knowledge?workspace={{ slug | urlencode }}">{{ t('knowledge.todo_hint').format(n=glossary_todo_n) }}</a>
     {% endif %}
     {% endif %}
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
-    <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}>{% if target_meta %}{% with path=target_meta.path, status=target_meta.status, reason=target_meta.reason, diagnostic_summary=target_meta.diagnostic_summary, diagnostic_stage=target_meta.diagnostic_stage, diagnostic_provider=target_meta.diagnostic_provider, has_doc=target_meta.has_doc, can_regen=target_meta.can_regen, regen_confirm=target_meta.regen_confirm, include_reader=false %}{% include "_target_meta.html" %}{% endwith %}{% else %}<p class="panel-hint">{{ t('panel.hint') }}</p>{% endif %}</div>
+    <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}>{% if target_meta %}{% with processing_state=target_meta.processing_state, path=target_meta.path, status=target_meta.status, reason=target_meta.reason, diagnostic_summary=target_meta.diagnostic_summary, diagnostic_stage=target_meta.diagnostic_stage, diagnostic_provider=target_meta.diagnostic_provider, has_doc=target_meta.has_doc, can_regen=target_meta.can_regen, regen_confirm=target_meta.regen_confirm, include_reader=false %}{% include "_target_meta.html" %}{% endwith %}{% else %}<p class="panel-hint">{{ t('panel.hint') }}</p>{% endif %}</div>
     {% if not public_read %}
     <details class="include-rules">
       <summary>{% if include_tags %}包含规则 · {{ include_tags|length }} 个 Tag{% else %}包含规则{% endif %}</summary>
