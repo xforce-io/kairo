@@ -8,7 +8,7 @@ from kairo.workspace import Workspace
 def topic(tmp_path):
     ws = Workspace.init(tmp_path / 'topic', topic='研究')
     con = ws.constitution
-    con.targets.append(Target(path='other.md', intent='另一结论'))
+    con.targets.append(Target(path='other.md'))
     ws.write_constitution(con)
     (ws.root / 'understanding.md').write_text('# Current conclusion')
     (ws.root / 'other.md').write_text('# Other conclusion')

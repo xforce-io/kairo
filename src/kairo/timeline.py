@@ -85,6 +85,7 @@ class TimelineItem:
     href: str = ""
     task_id: str = ""
     folded: tuple["TimelineItem", ...] = ()
+    display_time: str = ""
 
 
 def scan_timeline(root: Path | str) -> list[TimelineItem]:
@@ -139,8 +140,7 @@ def _dt_and_day(text: str) -> tuple[dt.datetime | None, dt.date | None]:
     if parsed is None:
         day = parse_calendar_date((text or "")[:10])
         return None, day
-    if parsed.tzinfo is None:
-        parsed = parsed.astimezone()
+    parsed = parsed.astimezone()
     return parsed, parsed.date()
 
 
@@ -168,6 +168,7 @@ def _scan_project_events(root: Path) -> list[TimelineItem]:
                 added_at=added,
                 tags=(),
                 kind="project",
+                display_time=project.created_at,
                 href=f"/projects/{project.id}",
             )
         )
@@ -178,7 +179,7 @@ def _scan_project_events(root: Path) -> list[TimelineItem]:
         for run in runs:
             if run.status != "succeeded" or not run.artifact_path:
                 continue
-            r_added, r_day = _dt_and_day(run.created_at)
+            r_added, r_day = _dt_and_day(run.started_at or run.created_at)
             if r_added is None:
                 r_added = added
             out.append(
@@ -192,6 +193,7 @@ def _scan_project_events(root: Path) -> list[TimelineItem]:
                     added_at=r_added,
                     tags=(),
                     kind="artifact",
+                    display_time=run.started_at or run.created_at,
                     href=f"/projects/{project.id}/runs/{run.id}",
                     task_id=run.task_id or "",
                 )

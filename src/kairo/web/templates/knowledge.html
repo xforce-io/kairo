@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block subtitle %}{{ selected_slug or t('nav.knowledge') }}{% endblock %}
+{% block subtitle %}{{ root }}{% if selected_slug %} · {{ selected_slug }}{% endif %}{% endblock %}
 {% block body %}
 <main class="knowledge-work">
 <div class="dash-head"><p class="dlg-hint">{{ t('knowledge.hint') }}</p></div>
@@ -15,7 +15,7 @@
   {% if success %}<p class="meta-hint" role="status">{{ t('knowledge.saved') }}</p>{% endif %}
   <nav class="queue-nav" aria-label="{{ t('queue.categories') }}">{% for key in queue_keys %}<a class="btn btn-ghost btn-inline{% if key == knowledge_queue %} on{% endif %}" href="/knowledge?workspace={{ (selected_slug or '')|urlencode }}&amp;queue={{ key }}&amp;filter={{ knowledge_filter|urlencode }}"{% if key == knowledge_queue %} aria-current="page"{% endif %}>{{ t('queue.' ~ key) }} · {{ queue_counts[key] }}</a>{% endfor %}</nav>
   <p class="meta-hint">{{ t('queue.count_hint') }}</p>
-  <div class="gl-console knowledge-console knowledge-responsive"><div class="gl-ws-panel">
+  <div class="gl-console knowledge-console knowledge-responsive">
   {% for key in queue_order %}
   <section class="knowledge-section" data-queue="{{ key }}">
     {% if key != knowledge_queue %}<details><summary>{{ t('queue.' ~ key) }} · {{ queue_counts[key] }}</summary>{% endif %}
@@ -23,6 +23,6 @@
     {% if key != knowledge_queue %}</details>{% endif %}
   </section>
   {% endfor %}
-</div></div>
+</div>
 </main>
 {% endblock %}

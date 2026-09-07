@@ -32,6 +32,7 @@ from kairo.projects import ProjectError, get_project
 from kairo.provider import AgentConfig, AgentResult
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
+from kairo.time_display import clock_label
 
 runner = CliRunner()
 
@@ -144,8 +145,9 @@ def test_rewrite_artifact_input_links_only_recorded():
 def test_clock_label_strips_iso_noise():
     from kairo.web.views import _clock_label
 
-    assert _clock_label("2026-09-05T11:51:09+00:00") == "2026-09-05 11:51 UTC"
-    assert _clock_label("2026-09-05T12:51:09Z") == "2026-09-05 12:51 UTC"
+    local = datetime.fromisoformat("2026-09-05T11:51:09+00:00").astimezone()
+    assert _clock_label("2026-09-05T11:51:09+00:00").startswith(local.strftime("%Y-%m-%d %H:%M") + " UTC")
+    assert _clock_label("2026-09-05T11:51:09Z") == _clock_label("2026-09-05T11:51:09+00:00")
     assert _clock_label(None) == ""
 
 
@@ -249,7 +251,7 @@ def test_s1_s4_cache_ttl_refresh_and_web(tmp_path, monkeypatch):
         assert 'class="task-create"' in html_proj.text
         assert "task-create-bar" in html_proj.text
         assert "2026-09-05T" not in html_proj.text
-        assert "2026-09-06 12:00" in html_proj.text
+        assert clock_label("2026-09-06T12:00:00Z") in html_proj.text
         assert 'class="obj-actions"' in html_proj.text
 
         clock.when = clock.when + CACHE_TTL
@@ -1164,7 +1166,7 @@ def test_recent_artifact_precedes_collapsed_create_form(tmp_path, monkeypatch):
     assert recent != -1 and create_at != -1
     assert recent < create_at
     assert f"/projects/{pid}/runs/{run_id}" in html[recent:create_at]
-    assert "2026-09-05 00:00" in html[recent:create_at]
+    assert clock_label("2026-09-05T00:00:00Z") in html[recent:create_at]
     snippet = html[create_at : create_at + 80]
     assert "<details" in html[create_at - 40 : create_at + 40] or snippet.startswith("task-create")
     details = html[html.rfind("<details", 0, create_at + 1) : create_at + 120]
@@ -1230,8 +1232,8 @@ def test_recent_results_one_latest_per_existing_task(tmp_path, monkeypatch):
     assert recent.count("Artifact") == 2
     assert "run-a-3" in recent and "run-b-0" in recent
     assert "run-a-0" not in recent and "run-a-1" not in recent and "run-a-2" not in recent
-    assert "2026-09-05 03:00" in recent
-    assert "2026-09-05 04:00" in recent
+    assert clock_label("2026-09-05T03:00:00Z") in recent
+    assert clock_label("2026-09-05T04:00:00Z") in recent
     assert history.count(f"/projects/{pid}/runs/") == 5
     for run_id in (*ids, "run-b-0"):
         assert run_id in history

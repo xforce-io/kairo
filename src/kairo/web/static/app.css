@@ -1271,3 +1271,6 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 .input-line { display: block; }
 .input-line.selected { background: #fff0b0; color: #312a12; }
 .line-number { opacity: .65; user-select: none; }
+@media (min-width: 521px) {
+  .knowledge-queue > li > form .btn { width: auto; padding: 7px 12px; margin: 6px 8px 6px 0; }
+}

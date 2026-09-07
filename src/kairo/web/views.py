@@ -11,7 +11,7 @@ import sys
 from html import escape
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote, urlencode, quote as urlquote
+from urllib.parse import quote, urlencode, quote as urlquote, urlsplit, parse_qs
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
@@ -132,6 +132,7 @@ def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
     ctx = {
         "nav_active": "",
         **ctx,
+        "clock_label": _clock_label,
         "lang": lang,
         "t": translator(lang),
         "public_read": _is_public_read(request),
@@ -2800,10 +2801,15 @@ def _knowledge_run_summary_lines(ws: Workspace, slug: str, task, t) -> list[str]
 def _run_status_oob(request: Request, ws: Workspace, slug: str, t) -> str:
     """run-summary 后把 ACTIONS / 左栏圆点 / METADATA 换成当前 state。"""
     btn = _run_button_ctx(request, ws, slug)
+    current = parse_qs(urlsplit(request.headers.get("HX-Current-URL", "")).query, keep_blank_values=True)
+    live = [item.path for item in ws.constitution.live_targets()]
+    selected = current.get("target", ["understanding.md" if "understanding.md" in live else next(iter(live), "")])[0]
+    if "ref" in current or selected not in live:
+        selected = None
     nav = _render(
         request,
         "_targets_list.html",
-        {"slug": slug, "targets": _target_states(ws)},
+        {"slug": slug, "targets": _target_states(ws), "select_target": selected},
     ).body.decode()
     processing = _render(request, "_processing_status.html", btn).body.decode()
     parts = [
@@ -2813,9 +2819,8 @@ def _run_status_oob(request: Request, ws: Workspace, slug: str, t) -> str:
         + "</div>",
         f'<div id="targets-list" hx-swap-oob="true">{nav}</div>',
     ]
-    live = [item.path for item in ws.constitution.live_targets()]
-    if live:
-        path = "understanding.md" if "understanding.md" in live else live[0]
+    if selected:
+        path = selected
         meta = _render(
             request,
             "_target_meta.html",
@@ -3033,18 +3038,7 @@ def _serve(request: Request) -> Path:
     return Path(request.app.state.root)
 
 
-def _clock_label(iso: str | None) -> str:
-    """ISO timestamp → `YYYY-MM-DD HH:MM` for Project cache status."""
-    text = (iso or "").strip()
-    if not text:
-        return ""
-    text = text.replace("Z", "+00:00")
-    if "T" in text:
-        date, rest = text.split("T", 1)
-        offset = rest[rest.rfind("+"):] if "+" in rest else (rest[rest.rfind("-"):] if "-" in rest else "")
-        zone = " UTC" if offset == "+00:00" else (f" UTC{offset}" if offset else "")
-        return f"{date} {rest[:5]}{zone}"
-    return text[:16]
+from kairo.time_display import clock_label as _clock_label
 
 
 _RUN_REASON_KEYS = {
@@ -3053,6 +3047,7 @@ _RUN_REASON_KEYS = {
     "interrupted": "proj.reason_interrupted",
     "evidence_failed": "proj.reason_evidence",
     "invalid_input_ref": "proj.reason_input_ref",
+    "invalid_input_location": "proj.reason_input_ref",
     "empty_artifact": "proj.reason_empty",
     "read_failed": "proj.reason_read",
     "datasource_unread": "proj.reason_ds_unread",

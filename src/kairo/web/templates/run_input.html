@@ -4,7 +4,7 @@
 <p class="artifact-back"><a href="/projects/{{ project.id }}/runs/{{ run.id }}">{{ t('art.back_report') }}</a> · <a href="/projects/{{ project.id }}">{{ t('art.back') }}</a></p>
 <article class="doc">
   <p class="doc-kicker"><span class="dk-title">{{ payload.title or payload.source_id }}</span></p>
-  <p class="meta-hint">{{ payload.input_id }} · {{ payload.version }} · {{ payload.read_at }}</p>
+  <p class="meta-hint">{{ payload.input_id }} · {{ payload.version }} · <span title="{{ payload.read_at }}">{{ clock_label(payload.read_at) }}</span></p>
   <section id="input-location" class="input-location" tabindex="-1">
     <p class="meta-hint">{{ t('input.' ~ location_state) }}</p>
     {% if location_rows %}<pre>{% for row in location_rows %}<span class="input-line{% if row.selected %} selected{% endif %}" data-line="{{ row.number }}"><span class="line-number">{{ row.number }}</span> {{ row.text }}</span>

@@ -124,21 +124,21 @@ def test_glossary_page_hides_local_until_workspace_selected(tmp_path):
     c = _client(tmp_path)
     bare = c.get("/glossary")
     assert bare.status_code == 200
-    assert 'action="/knowledge/global"' in bare.text
+    assert 'action="/knowledge/global?queue=global' in bare.text
     assert _ws_panel(bare.text) is None
     assert "本区乙" not in bare.text
-    assert 'href="/knowledge?workspace=a"' in bare.text
-    assert 'href="/knowledge?workspace=b"' in bare.text
+    assert '<option value="a"' in bare.text
+    assert '<option value="b"' in bare.text
     selected = c.get("/glossary?workspace=b")
     panel = _ws_panel(selected.text)
     assert panel is not None
     assert "本区乙" in panel
-    assert 'action="/w/b/knowledge"' in panel
+    assert 'action="/w/b/knowledge?queue=' in panel
     a_page = c.get("/glossary?workspace=a")
     a_panel = _ws_panel(a_page.text)
     assert a_panel is not None
     assert "本区乙" not in a_panel
-    assert 'action="/w/a/knowledge"' in a_panel
+    assert 'action="/w/a/knowledge?queue=' in a_panel
 
 
 def test_glossary_invalid_workspace_query_not_selected(tmp_path):
