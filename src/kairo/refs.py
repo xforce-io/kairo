@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+import fcntl
+import shutil
+import tempfile
+from functools import wraps
 import os
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -19,6 +23,100 @@ MIGRATION_JOURNAL_REL = Path(".kairo") / "tag-rule-migration.json"
 
 class RefError(ValueError):
     """Ref / Tag / 包含规则操作非法。"""
+
+
+_catalog_locks: ContextVar[tuple[str, ...]] = ContextVar("catalog_locks", default=())
+
+
+def catalog_locked(fn):
+    @wraps(fn)
+    def locked(serve, *args, **kwargs):
+        if kwargs.get("dry_run"):
+            return fn(serve, *args, **kwargs)
+        key = str(Path(serve).resolve())
+        if key in _catalog_locks.get():
+            return fn(serve, *args, **kwargs)
+        lock_path = Path(key) / ".kairo" / "catalog.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a") as lock:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+            token = _catalog_locks.set((*_catalog_locks.get(), key))
+            try:
+                return fn(serve, *args, **kwargs)
+            finally:
+                _catalog_locks.reset(token)
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+    return locked
+
+
+@catalog_locked
+def recover_topic_creation(serve: Path) -> None:
+    serve = Path(serve).resolve()
+    journal = serve / ".kairo" / "topic-create.json"
+    if not journal.exists():
+        return
+    record = json.loads(journal.read_text())
+    name, stage_name = record["topic"], record["stage"]
+    if not isinstance(name, str) or not name or name.startswith(".") or "/" in name or "\\" in name:
+        raise RefError("新建 Topic 恢复记录无效")
+    if not isinstance(stage_name, str) or not stage_name.startswith("topic-create-") or "/" in stage_name or "\\" in stage_name:
+        raise RefError("新建 Topic 暂存记录无效")
+    dest = serve / name
+    stage = serve / ".kairo" / stage_name
+    # A published directory is the commit point. A unique staging directory
+    # supplies its inode identity, recorded before publication.
+    committed = dest.is_dir() and not dest.is_symlink() and dest.stat().st_ino == record["inode"]
+    if not committed:
+        before = record["catalog_before"]
+        if before is None:
+            catalog_path(serve).unlink(missing_ok=True)
+        else:
+            _atomic_text(catalog_path(serve), before)
+    if stage.is_dir() and not stage.is_symlink() and stage.stat().st_ino == record["inode"]:
+        shutil.rmtree(stage)
+    journal.unlink()
+
+
+@catalog_locked
+def create_topic_with_tag(serve: Path, topic: str, *, confirm_tag: bool = False) -> Workspace:
+    serve = Path(serve).resolve()
+    recover_topic_creation(serve)
+    name = _normalize_tag(topic)
+    if "\\" in name or len(name) > 64 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        raise RefError("非法 Topic 名称")
+    dest = serve / name
+    if dest.exists() or dest.is_symlink():
+        raise RefError("Topic 已存在")
+    catalog = load_catalog(serve)
+    if name not in catalog["tags"] and not confirm_tag:
+        raise RefError("请确认创建同名 Tag，再新建 Topic。")
+    parent = serve / ".kairo"
+    stage = Path(tempfile.mkdtemp(prefix="topic-create-", dir=parent))
+    journal = parent / "topic-create.json"
+    try:
+        ws = Workspace.init(stage, topic=name)
+        con = ws.constitution
+        con.include_tags = [name]
+        ws.write_constitution(con)
+        record = {"topic": name, "stage": stage.name, "inode": stage.stat().st_ino,
+                  "catalog_before": catalog_path(serve).read_text() if catalog_path(serve).exists() else None}
+        _atomic_json(journal, record)
+        if name not in catalog["tags"]:
+            catalog["tags"].append(name)
+            save_catalog(serve, catalog)
+        os.rename(stage, dest)
+    except Exception:
+        if journal.exists():
+            recover_topic_creation(serve)
+        elif stage.exists():
+            shutil.rmtree(stage)
+        raise
+    # A failure to clean the journal is recoverable on the next catalog access.
+    try:
+        journal.unlink()
+    except OSError:
+        pass
+    return Workspace.open(dest)
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -85,6 +183,8 @@ def recover_tag_rule_migration(serve: Path) -> None:
 
 
 def load_catalog(serve: Path) -> dict[str, Any]:
+    if (Path(serve) / ".kairo" / "topic-create.json").exists():
+        recover_topic_creation(serve)
     recover_tag_rule_migration(serve)
     path = catalog_path(serve)
     if not path.is_file():
@@ -105,6 +205,7 @@ def load_catalog(serve: Path) -> dict[str, Any]:
     }
 
 
+@catalog_locked
 def save_catalog(serve: Path, catalog: dict[str, Any]) -> None:
     tags = sorted({str(t).strip() for t in catalog.get("tags") or [] if str(t).strip()})
     assignments = {}
@@ -290,6 +391,7 @@ def _normalize_tag(tag: str) -> str:
     return name
 
 
+@catalog_locked
 def create_tag(serve: Path, tag: str) -> str:
     """在全局词表中创建 Tag；Ref/Topic 只能引用已存在项。"""
     name = _normalize_tag(tag)
@@ -352,6 +454,7 @@ def list_tag_records(serve: Path) -> list[dict[str, Any]]:
     ]
 
 
+@catalog_locked
 def delete_tag(serve: Path, tag: str) -> None:
     name = _normalize_tag(tag)
     catalog = load_catalog(serve)
@@ -394,6 +497,7 @@ def _load_tag_migration_evidence(evidence_path: Path | str) -> dict[str, Any]:
     return proof
 
 
+@catalog_locked
 def migrate_tag_rules(
     serve: Path, evidence_path: Path | str, *, dry_run: bool = False
 ) -> dict[str, Any]:
@@ -500,6 +604,7 @@ def migrate_tag_rules(
     return report
 
 
+@catalog_locked
 def migrate_home_membership(
     serve: Path, evidence_path: Path | str, *, dry_run: bool = False
 ) -> dict[str, Any]:
@@ -606,6 +711,7 @@ def migrate_home_membership(
     return report
 
 
+@catalog_locked
 def add_tag(serve: Path, *, home: str, ref_id: str, tag: str) -> list[str]:
     tag = _normalize_tag(tag)
     recs = {r.key: r for r in list_all_refs(serve)}
@@ -642,6 +748,7 @@ def is_locked_home_tag(serve: Path, home: str, ref_id: str, tag: str) -> bool:
     return is_review_title(ws.read_manifest(ref_id).title)
 
 
+@catalog_locked
 def remove_tag(serve: Path, *, home: str, ref_id: str, tag: str) -> list[str]:
     tag = _normalize_tag(tag)
     if is_locked_home_tag(serve, home, ref_id, tag):
@@ -693,6 +800,7 @@ def related_topics_for_ref(serve: Path, home: str, ref_id: str) -> list[dict[str
     return out
 
 
+@catalog_locked
 def set_include_tags(serve: Path, slug: str, tags: list[str] | None) -> list[str]:
     ws = open_topic(serve, slug)
     con = ws.constitution

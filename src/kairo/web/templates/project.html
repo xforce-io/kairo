@@ -153,34 +153,6 @@
     {% endif %}
   </section>
 
-  {% if member_refs is defined %}
-  <section class="obj-block">
-    <h2 class="obj-label">{{ t('proj.members') }}</h2>
-    {% if member_refs %}
-    <div class="material-toolbar">
-      <input id="material-filter" type="search" placeholder="{{ t('proj.filter_materials') }}"
-             aria-label="{{ t('proj.filter_materials') }}"
-             oninput="var q=this.value.toLowerCase(); var list=document.getElementById('material-list'); if(!list)return; var count=0; list.querySelectorAll('.material-item').forEach(function(el){el.hidden=!!q && (el.dataset.label||'').indexOf(q)<0; if(!el.hidden)count++;}); document.getElementById('material-empty').hidden=count>0;">
-      <select id="material-sort" aria-label="{{ t('proj.sort_title') }}"
-              onchange="var list=document.getElementById('material-list'); if(!list)return; var key=this.value; var items=[].slice.call(list.children); items.sort(function(a,b){var av=(a.dataset[key]||''); var bv=(b.dataset[key]||''); var order=av<bv?-1:av>bv?1:0; return key==='time'?-order:order;}); items.forEach(function(el){list.appendChild(el);});">
-        <option value="title">{{ t('proj.sort_title') }}</option>
-        <option value="time">{{ t('proj.sort_time') }}</option>
-      </select>
-    </div>
-    <p id="material-empty" class="panel-hint" role="status" hidden>{{ t('proj.no_matches') }}</p>
-    <ul class="obj-list" id="material-list">
-      {% for r in member_refs %}
-      <li class="obj-row material-item" data-label="{{ (r.title ~ ' ' ~ r.id) | lower }}" data-title="{{ r.title | lower }}" data-time="{{ r.id }}">
-        <a href="/refs/{{ r.id | urlencode }}?home={{ (r.home or 'global') | urlencode }}&amp;back=/projects/{{ project.id }}">{{ r.title }}</a>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="panel-hint">{{ t('proj.members_empty') }}</p>
-    {% endif %}
-  </section>
-  {% endif %}
-
   <section class="obj-block">
     <h2 class="obj-label">{{ t('proj.datasources') }}</h2>
     {% if project.datasources %}
@@ -229,6 +201,63 @@
       <button type="submit" class="btn btn-step btn-inline">{{ t('proj.add_ds') }}</button>
     </form>
   </section>
+  {% if member_refs is defined %}
+  <section class="obj-block">
+    <details id="project-member-refs"><summary class="obj-label">{{ t('proj.members') }} · {{ member_refs|length }}</summary>
+    {% if member_refs %}
+    <div class="material-toolbar">
+      <input id="material-filter" type="search" placeholder="{{ t('proj.filter_materials') }}"
+             aria-label="{{ t('proj.filter_materials') }}"
+             oninput="var q=this.value.toLowerCase(); var list=document.getElementById('material-list'); if(!list)return; var count=0; list.querySelectorAll('.material-item').forEach(function(el){el.hidden=!!q && (el.dataset.label||'').indexOf(q)<0; if(!el.hidden)count++;}); document.getElementById('material-empty').hidden=count>0;">
+      <select id="material-sort" aria-label="{{ t('proj.sort_title') }}"
+              onchange="var list=document.getElementById('material-list'); if(!list)return; var key=this.value; var items=[].slice.call(list.children); items.sort(function(a,b){var av=(a.dataset[key]||''); var bv=(b.dataset[key]||''); var order=av<bv?-1:av>bv?1:0; return key==='time'?-order:order;}); items.forEach(function(el){list.appendChild(el);});">
+        <option value="title">{{ t('proj.sort_title') }}</option>
+        <option value="time">{{ t('proj.sort_time') }}</option>
+      </select>
+    </div>
+    <p id="material-empty" class="panel-hint" role="status" hidden>{{ t('proj.no_matches') }}</p>
+    <ul class="obj-list" id="material-list">
+      {% for r in member_refs %}
+      <li class="obj-row material-item" data-label="{{ (r.title ~ ' ' ~ r.id) | lower }}" data-title="{{ r.title | lower }}" data-time="{{ r.id }}">
+        <a href="/refs/{{ r.id | urlencode }}?home={{ (r.home or 'global') | urlencode }}&amp;back=/projects/{{ project.id }}">{{ r.title }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint">{{ t('proj.members_empty') }}</p>
+    {% endif %}
+  </details></section>
+  {% endif %}
+
   </div>
 </div>
+<script>
+(function () {
+  const group = document.getElementById('project-member-refs');
+  const input = document.getElementById('material-filter');
+  const sort = document.getElementById('material-sort');
+  if (!group || !input || !sort) return;
+  const params = new URLSearchParams(location.search);
+  input.value = params.get('q') || '';
+  sort.value = params.get('sort') === 'time' ? 'time' : 'title';
+  group.open = params.get('materials') === '1' || !!input.value;
+  function persist() {
+    const url = new URL(location.href);
+    url.searchParams.set('q', input.value);
+    url.searchParams.set('sort', sort.value);
+    url.searchParams.set('materials', group.open ? '1' : '0');
+    history.replaceState(null, '', url);
+    document.querySelectorAll('#material-list a').forEach(function (a) {
+      const target = new URL(a.href);
+      target.searchParams.set('back', url.pathname + url.search);
+      a.href = target;
+    });
+  }
+  input.addEventListener('input', persist);
+  sort.addEventListener('change', persist);
+  group.addEventListener('toggle', persist);
+  input.dispatchEvent(new Event('input'));
+  sort.dispatchEvent(new Event('change'));
+})();
+</script>
 {% endblock %}

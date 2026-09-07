@@ -11,7 +11,7 @@ import sys
 from html import escape
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, quote as urlquote, urlsplit, parse_qs
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
@@ -132,6 +132,7 @@ def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
     ctx = {
         "nav_active": "",
         **ctx,
+        "clock_label": _clock_label,
         "lang": lang,
         "t": translator(lang),
         "public_read": _is_public_read(request),
@@ -722,7 +723,7 @@ def set_lang(request: Request, code: str) -> RedirectResponse:
 
 
 @router.post("/workspaces", response_class=HTMLResponse)
-def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
+def create_workspace(request: Request, topic: str = Form(""), confirm_tag: str = Form("")) -> HTMLResponse:
     t = _t(request)
     root = Path(request.app.state.root)
     topic = topic.strip()
@@ -739,17 +740,14 @@ def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
         raise HTTPException(status_code=400, detail=t("err.topic_invalid"))
     if dest.exists():
         raise HTTPException(status_code=400, detail=t("err.topic_exists").format(topic=topic))
-    from kairo.refs import list_tags
+    from kairo.refs import RefError, create_topic_with_tag
 
-    if topic not in list_tags(root):
-        raise HTTPException(
-            status_code=409,
-            detail="请先在 Settings 创建同名 Tag，再新建 Topic。",
-        )
-    from kairo.refs import set_include_tags
-
-    ws = Workspace.init(dest, topic=topic)
-    set_include_tags(root, ws.root.name, [topic])
+    try:
+        create_topic_with_tag(root, topic, confirm_tag=confirm_tag == "1")
+    except RefError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=t("topic.create_failed")) from exc
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
 
@@ -840,14 +838,33 @@ def _occurred_ref_groups(refs: list[dict]) -> tuple[list[dict], list[dict]]:
     return groups, unknown
 
 
+def _processing_context(ws: Workspace, slug: str, plan: dict) -> dict:
+    from kairo.refs import ref_nav, resolve_open
+
+    affected = []
+    for item in plan["blocked_refs"]:
+        nav = ref_nav(item["home"], item["ref_id"])
+        try:
+            source, rid = resolve_open(ws.root.parent, item["home"], item["ref_id"])
+            title = source.read_manifest(rid).title
+        except (OSError, ValueError):
+            title = item["ref_id"]
+        affected.append({"title": title, "href": nav["href"], "retryable": item["retryable"]})
+    for item in plan["blocked_targets"]:
+        affected.append({"title": item["path"], "href": f"/w/{quote(slug)}?{urlencode({'target': item['path']})}", "retryable": item["retryable"]})
+    return {"processing_affected": affected, "processing_pending": plan["pending_count"]}
+
+
 def _run_button_ctx(request: Request, ws: Workspace, slug: str, catalog=None) -> dict:
     """#75 主按钮文案与是否可点。"""
     t = _t(request)
     running = request.app.state.registry.is_running(slug)
     plan = workspace_run_plan(ws, catalog=catalog)
     mode = plan["mode"]
+    context = _processing_context(ws, slug, plan)
     if running:
         return {
+            **context,
             "run_mode": "running",
             "run_label": t("run.running"),
             "run_disabled": True,
@@ -864,6 +881,7 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str, catalog=None) ->
         "attention": t("run.attention"),
     }
     return {
+        **context,
         "run_mode": mode,
         "run_label": labels[mode],
         "run_disabled": mode in ("clean", "attention"),
@@ -873,8 +891,9 @@ def _run_button_ctx(request: Request, ws: Workspace, slug: str, catalog=None) ->
 
 
 @router.get("/topics/{slug}", response_class=RedirectResponse)
-def topic_alias(slug: str) -> RedirectResponse:
-    return RedirectResponse("/w/" + quote(slug), status_code=303)
+def topic_alias(request: Request, slug: str) -> RedirectResponse:
+    query = ("?" + str(request.url.query)) if request.url.query else ""
+    return RedirectResponse("/w/" + quote(slug) + query, status_code=303)
 
 
 def _global_ref_primary_body(ws: Workspace, rid: str, man, t) -> tuple[str, str]:
@@ -933,7 +952,7 @@ def global_ref_view(
     forms = [f for f in _ref_forms(ws, rid, man, t) if f["role"] != "digest"]
     primary_heading, primary_html = _global_ref_primary_body(ws, rid, man, t)
     locked_tags = [tag for tag in tags if is_locked_home_tag(serve, home, rid, tag)]
-    project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+", back)) and not _is_public_read(request)
+    project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+(?:\?[^\r\n#]*)?", back)) and not _is_public_read(request)
     back_url = back if project_back or back == "/timeline" or back.startswith("/timeline?") else "/timeline"
     return _render(
         request,
@@ -1001,6 +1020,7 @@ def workspace_view(
     slug: str,
     ref: str | None = None,
     task_id: str | None = None,
+    target: str | None = None,
 ) -> HTMLResponse:
     ws = _open(request, slug)
     from kairo.refs import include_tags_of, list_all_refs, list_tags
@@ -1026,6 +1046,26 @@ def workspace_view(
     shown_task = running or requested_task
     ids = {r["id"] for r in streams} | {r["id"] for r in corpus}
     select_ref = ref if ref in ids else None
+    select_target = None
+    target_meta = None
+    reader_notice = None
+    if ref is None:
+        declared = {item["path"] for item in targets}
+        choices = [target] if target is not None else sorted(
+            [item["path"] for item in targets], key=lambda path: path != "understanding.md"
+        )
+        for path in choices:
+            if path not in declared:
+                continue
+            try:
+                _safe_doc(ws, path)
+                target_meta = _target_meta_vars(request, ws, slug, path, include_reader=False)
+            except (HTTPException, OSError, UnicodeError):
+                continue
+            select_target = path
+            break
+        if select_target is None:
+            reader_notice = "reader.target_unavailable" if target is not None else "reader.no_conclusion"
     return _render(
         request,
         "workspace.html",
@@ -1040,6 +1080,9 @@ def workspace_view(
             "unknown_streams": unknown_streams,
             "corpus": corpus,
             "select_ref": select_ref,
+            "select_target": select_target,
+            "target_meta": target_meta,
+            "reader_notice": reader_notice,
             "run_task_id": shown_task.task_id if shown_task else None,
             **(
                 _step_template_vars(request, ws, slug, shown_task)
@@ -1440,7 +1483,12 @@ def _target_meta_vars(
     status = ts.status if ts else "missing"
     has_doc = (ws.root / path).is_file()
     diag = ts.diagnostic if ts else None
+    plan = workspace_run_plan(ws)
+    processing_state = ("status.incomplete" if plan["blocked_count"] or plan["pending_count"]
+                        else "status.current" if ts and ts.status == "ok" and has_doc
+                        else "status.unknown")
     return {
+        "processing_state": processing_state,
         "slug": slug,
         "path": path,
         "status": status,
@@ -1468,11 +1516,15 @@ def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     if path not in {t.path for t in ws.constitution.targets}:
         raise HTTPException(status_code=404, detail="target not found")
     _require_public_target(request, slug, path)
-    return _render(
+    if (ws.root / path).is_file():
+        _safe_doc(ws, path)
+    response = _render(
         request,
         "_target_meta.html",
         _target_meta_vars(request, ws, slug, path, include_reader=True),
     )
+    response.headers["HX-Push-Url"] = f"/w/{quote(slug)}?{urlencode({'target': path})}"
+    return response
 
 
 def _refs_fragment(request: Request, ws: Workspace, slug: str) -> HTMLResponse:
@@ -1518,7 +1570,7 @@ def add_ref(
     try:
         if has_file:
             src = _save_upload(ws, file)  # 浏览器无稳定 path → 必 copy
-            ws.add([src])
+            added_id = ws.add([src])
         elif path:
             # checkbox 未勾选时字段缺失;勾选时常为 "1" / "on"
             do_copy = bool(copy_flag) and str(copy_flag).lower() not in (
@@ -1526,12 +1578,25 @@ def add_ref(
                 "false",
                 "off",
             )
-            ws.add([Path(path)], copy=do_copy)
+            added_id = ws.add([Path(path)], copy=do_copy)
         else:
             raise HTTPException(status_code=400, detail="need file or path")
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     resp = _refs_fragment(request, ws, slug)
+    t = _t(request)
+    btn = _run_button_ctx(request, ws, slug)
+    result = _render(
+        request,
+        "_ref_add_result.html",
+        {
+            "slug": slug,
+            "added_id": added_id,
+            "needs_processing": btn["run_pending"] > 0,
+        },
+    )
+    oob = _run_status_oob(request, ws, slug, t)
+    resp = HTMLResponse(resp.body + result.body + oob.encode())
     return _with_running_add_toast(request, slug, resp)
 
 
@@ -2251,10 +2316,23 @@ def _knowledge_page(
         error = error or str(exc)
     if error:
         error = _knowledge_error_text(request, error)
+    if filter_text:
+        drift = [row for row in drift if filter_text in " ".join(str(value) for value in row.values()).lower()]
+        extract_errors = [row for row in extract_errors if filter_text in " ".join(str(value) for value in row.values()).lower()]
+    queue_keys = ["candidates", "drift", "errors", "local", "global"] if selected else ["global"]
+    queue = request.query_params.get("queue", queue_keys[0])
+    if queue not in queue_keys:
+        queue = queue_keys[0]
+    queue_counts = {"candidates": len(candidates), "drift": len(drift), "errors": len(extract_errors),
+                    "local": len(local_entries), "global": len(global_entries) + len(promotions)}
     return _render(
         request,
         "knowledge.html",
         {
+            "knowledge_queue": queue,
+            "queue_keys": queue_keys,
+            "queue_order": [queue, *(key for key in queue_keys if key != queue)],
+            "queue_counts": queue_counts,
             "nav_active": "knowledge",
             "root": str(serve),
             "slugs": slugs,
@@ -2262,7 +2340,7 @@ def _knowledge_page(
             "global_entries": global_entries,
             "local_entries": local_entries,
             "candidates": candidates,
-            "candidate_open_count": sum(item["status"] in {"pending", "pending_global"} for item in candidates),
+            "candidate_open_count": len(candidates),
             "promotions": promotions,
             "extract_errors": extract_errors,
             "knowledge_drift": drift,
@@ -2734,20 +2812,26 @@ def _knowledge_run_summary_lines(ws: Workspace, slug: str, task, t) -> list[str]
 def _run_status_oob(request: Request, ws: Workspace, slug: str, t) -> str:
     """run-summary 后把 ACTIONS / 左栏圆点 / METADATA 换成当前 state。"""
     btn = _run_button_ctx(request, ws, slug)
+    current = parse_qs(urlsplit(request.headers.get("HX-Current-URL", "")).query, keep_blank_values=True)
+    live = [item.path for item in ws.constitution.live_targets()]
+    selected = current.get("target", ["understanding.md" if "understanding.md" in live else next(iter(live), "")])[0]
+    if "ref" in current or selected not in live:
+        selected = None
     nav = _render(
         request,
         "_targets_list.html",
-        {"slug": slug, "targets": _target_states(ws)},
+        {"slug": slug, "targets": _target_states(ws), "select_target": selected},
     ).body.decode()
+    processing = _render(request, "_processing_status.html", btn).body.decode()
     parts = [
+        f'<div id="processing-status" hx-swap-oob="true">{processing}</div>',
         '<div id="run-btn-wrap" hx-swap-oob="true">'
         + _run_button_html(slug, btn, t)
         + "</div>",
         f'<div id="targets-list" hx-swap-oob="true">{nav}</div>',
     ]
-    live = [item.path for item in ws.constitution.live_targets()]
-    if live:
-        path = "understanding.md" if "understanding.md" in live else live[0]
+    if selected:
+        path = selected
         meta = _render(
             request,
             "_target_meta.html",
@@ -2965,18 +3049,7 @@ def _serve(request: Request) -> Path:
     return Path(request.app.state.root)
 
 
-def _clock_label(iso: str | None) -> str:
-    """ISO timestamp → `YYYY-MM-DD HH:MM` for Project cache status."""
-    text = (iso or "").strip()
-    if not text:
-        return ""
-    text = text.replace("Z", "+00:00")
-    if "T" in text:
-        date, rest = text.split("T", 1)
-        offset = rest[rest.rfind("+"):] if "+" in rest else (rest[rest.rfind("-"):] if "-" in rest else "")
-        zone = " UTC" if offset == "+00:00" else (f" UTC{offset}" if offset else "")
-        return f"{date} {rest[:5]}{zone}"
-    return text[:16]
+from kairo.time_display import clock_label as _clock_label
 
 
 _RUN_REASON_KEYS = {
@@ -2985,6 +3058,7 @@ _RUN_REASON_KEYS = {
     "interrupted": "proj.reason_interrupted",
     "evidence_failed": "proj.reason_evidence",
     "invalid_input_ref": "proj.reason_input_ref",
+    "invalid_input_location": "proj.reason_input_ref",
     "empty_artifact": "proj.reason_empty",
     "read_failed": "proj.reason_read",
     "datasource_unread": "proj.reason_ds_unread",
@@ -3469,10 +3543,12 @@ def rewrite_artifact_input_links(html: str, project_id: str, run_id: str, input_
     allowed = {iid for iid in input_ids if iid}
 
     def _replace(match: re.Match[str]) -> str:
-        quote, iid = match.group(1), match.group(2)
+        quote, citation = match.group(1), match.group(2)
+        iid, separator, location = citation.partition("#")
         if iid not in allowed:
             return match.group(0)
-        return f"href={quote}/projects/{project_id}/runs/{run_id}/inputs/{iid}{quote}"
+        suffix = f"?lines={urlquote(location, safe='')}#input-location" if separator else ""
+        return f"href={quote}/projects/{project_id}/runs/{run_id}/inputs/{iid}{suffix}{quote}"
 
     return _INPUT_HREF_RE.sub(_replace, html)
 
@@ -3534,6 +3610,19 @@ def _run_input_body_html(project, payload: dict) -> str:
     return preview_datasource_html(content, kind=ds.kind if ds else None)
 
 
+def _input_location(content: str, location: str | None) -> dict:
+    from kairo.input_citations import line_range
+
+    lines = content.splitlines()
+    selected = line_range(location, len(lines)) if location is not None else None
+    rows = []
+    if selected:
+        start, end = selected
+        rows = [{"number": i, "text": lines[i - 1], "selected": start <= i <= end}
+                for i in range(max(1, start - 2), min(len(lines), end + 2) + 1)]
+    return {"location_rows": rows, "location_state": "located" if selected else "invalid" if location is not None else "whole"}
+
+
 @router.get("/projects/{project_id}/runs/{run_id}/inputs/{input_id}", response_class=HTMLResponse)
 def run_input_page(request: Request, project_id: str, run_id: str, input_id: str) -> HTMLResponse:
     _console_only(request)
@@ -3555,6 +3644,7 @@ def run_input_page(request: Request, project_id: str, run_id: str, input_id: str
             "run": run,
             "payload": payload,
             "body_html": _run_input_body_html(project, payload),
+            **_input_location(payload.get("content") or "", request.query_params.get("lines")),
         },
     )
 

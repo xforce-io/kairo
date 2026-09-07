@@ -1,0 +1,41 @@
+    <div class="meta-label" style="margin-top:18px">{{ t('knowledge.candidates').format(n=candidate_open_count) }}</div>
+    {% if candidates %}<ul class="dlg-bullets knowledge-queue">{% for candidate in candidates %}<li>
+      <strong>{{ candidate.title }}</strong>
+      <span class="gl-aka">{{ t('knowledge.candidate_from').format(kind=t('knowledge.source_kind_' ~ candidate.source_kind),status=t('knowledge.status_' ~ candidate.status)) }}</span>
+      {% if candidate.sources and candidate.sources|length > 1 %}
+      <div class="gl-note">{{ candidate.quote[:240] }}</div>
+      <details><summary>{{ t('knowledge.sources').format(n=candidate.sources|length) }}</summary><ul class="knowledge-source-list">
+        {% for source in candidate.sources %}
+        <li>
+          {% if source.quote %}<div class="gl-note">{{ source.quote }}</div>{% endif %}
+          {% if source.path.startswith('references/') %}
+          <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}?ref={{ source.path.split('/')[1] | urlencode }}">{{ source.path }}</a>{% if source.available is defined and not source.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
+          {% else %}
+          <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}">{{ source.path }}</a>{% if source.available is defined and not source.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul></details>
+      {% else %}
+      <div class="gl-note">{{ candidate.quote[:240] }}</div>{% if candidate.quote|length > 240 %}<details><summary>{{ t('knowledge.sources').format(n=1) }}</summary><div class="gl-note-full">{{ candidate.quote }}</div></details>{% endif %}
+      <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}?ref={{ candidate.path.split('/')[1] if candidate.path.startswith('references/') else '' }}">{{ candidate.path }}</a>{% if not candidate.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
+      {% endif %}
+      {% if candidate.status == 'pending' %}
+        {% if candidate.suggestion_text %}<div class="gl-aka">{{ t('knowledge.suggestion').format(value=candidate.suggestion_text) }}</div>{% endif %}
+        <form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/candidates/{{ candidate.id }}/accept?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}" style="display:inline"><button class="btn btn-ghost btn-regen">{{ t('knowledge.accept_workspace') }}</button></form>
+        <form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/candidates/{{ candidate.id }}/ignore?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}" style="display:inline"><button class="btn btn-ghost btn-regen">{{ t('knowledge.ignore') }}</button></form>
+        {% if local_entries|selectattr('status', 'equalto', 'confirmed')|list %}<form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/candidates/{{ candidate.id }}/merge?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}" style="display:inline"><label>{{ t('knowledge.merge_target') }}<select name="entry_id" aria-label="{{ t('knowledge.merge_target') }}">{% for entry in local_entries if entry.status == 'confirmed' %}<option value="{{ entry.id }}">{{ entry.title }}</option>{% endfor %}</select></label><span class="gl-aka">{{ t('knowledge.merge_preview') }}</span><button class="btn btn-ghost btn-regen">{{ t('knowledge.merge') }}</button></form>{% endif %}
+        <details class="knowledge-candidate-edit"><summary>{{ t('knowledge.edit_candidate') }}</summary>
+          <form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/candidates/{{ candidate.id }}?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}">
+            <input name="title" value="{{ candidate.title }}" required aria-label="{{ t('knowledge.title_ph') }}">
+            <input name="description" value="{{ candidate.description }}" aria-label="{{ t('knowledge.description_ph') }}">
+            <input name="aliases" value="{% for alias in candidate.aliases %}{{ alias.value }}{% if not loop.last %}, {% endif %}{% endfor %}" aria-label="{{ t('knowledge.aliases_ph') }}">
+            <input name="tags" value="{{ candidate.tags|join(', ') }}" aria-label="{{ t('knowledge.tags_ph') }}">
+            <button class="btn btn-ghost btn-regen">{{ t('knowledge.save_candidate') }}</button>
+          </form>
+        </details>
+      {% elif candidate.status == 'pending_global' %}<span class="gl-aka">{{ t('knowledge.awaiting_global') }}</span>
+      {% elif candidate.status == 'rejected_global' %}<span class="gl-aka">{{ t('knowledge.global_rejected').format(reason=candidate.reject_reason) }}</span>
+      {% else %}<span class="gl-aka">{{ t('knowledge.completed').format(status=t('knowledge.status_' ~ candidate.status)) }}</span>
+      {% endif %}
+    </li>{% endfor %}</ul>{% else %}<p class="panel-hint">{{ t('knowledge.candidates_empty') }}</p>{% endif %}

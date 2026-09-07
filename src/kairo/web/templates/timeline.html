@@ -10,7 +10,7 @@
         {% if it.kind|default('ref') == 'ref' %}
         <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
         {% endif %}
-        <span class="tl-meta">{{ home_label(it) }}{% if extra_meta %} · {{ extra_meta }}{% endif %}</span>
+        <span class="tl-meta"{% if it.display_time %} title="{{ it.display_time }}"{% endif %}>{{ home_label(it) }}{% if it.kind != 'ref' and it.display_time %} · {{ clock_label(it.display_time) }}{% elif extra_meta %} · {{ extra_meta }}{% endif %}</span>
       </a>
 {% endmacro %}
 {% macro recent_meta(it) %}{{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {{ t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) if it.occurred_at else t('tl.occurred_unknown') }}{% endmacro %}

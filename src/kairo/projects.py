@@ -752,7 +752,7 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
             f"获取目录。type=datasource 在最前，必须先读这些源（不要一上来 --refresh；仅 uncached 才刷新）。"
             f"再 `{cli} project read PROJECT SOURCE --run {record.id} --root {root}` 按需读取。"
             f"禁止 step / re-step / accept / 写 Topic。"
-            f"引用材料使用 [标题](input:INPUT_ID)。把最终 Markdown 写入 artifact.md。\n\n"
+            f"读取结果 numbered_content 提供归档原文行号（从 1 开始），content 保持原文。引用具体片段使用 [标题](input:INPUT_ID#L起始-L结束)，例如 #L3-L5；仅引用完整材料时使用 [标题](input:INPUT_ID)。位置只标识原文，不证明语义支撑。把最终 Markdown 写入 artifact.md。\n\n"
             f"## Task\n{record.task_snapshot.get('prompt') or ''}\n"
         )
         (work / "_prompt.md").write_text(prompt, encoding="utf-8")
@@ -799,7 +799,8 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
 
         inputs = load_run_inputs(serve, record.project_id, record.id, scratch=True)
         known = {str(item.get("input_id")) for item in inputs}
-        cited = {m.group(2) for m in _INPUT_CITE.finditer(body)}
+        citations = [m.group(2) for m in _INPUT_CITE.finditer(body)]
+        cited = {citation.partition("#")[0] for citation in citations}
         unknown = cited - known
         if unknown:
             raise ProjectError("引用了未知 input_id", code="invalid_input_ref")
@@ -809,6 +810,17 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
         if not scratch_folder.is_absolute():
             scratch_folder = Path(serve) / scratch_folder
         validate_recorded_inputs(serve, record.project_id, record.id, inputs, scratch_folder)
+        from kairo.input_citations import line_range
+        from kairo.project_materials import evidence_body_path
+
+        by_id = {str(item.get("input_id")): item for item in inputs}
+        for citation in citations:
+            iid, separator, location = citation.partition("#")
+            if separator:
+                item = by_id[iid]
+                content = evidence_body_path(scratch_folder, str(item.get("body") or f"{iid}.md")).read_text(encoding="utf-8")
+                if line_range(location, len(content.splitlines())) is None:
+                    raise ProjectError("引用位置无效", code="invalid_input_location")
         if record.scope_datasources and not any(
             str(item.get("type") or "") == "datasource"
             or str(item.get("source_id") or "").startswith("datasource:")

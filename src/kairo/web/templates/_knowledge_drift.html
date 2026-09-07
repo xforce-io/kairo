@@ -1,0 +1,48 @@
+    {% if knowledge_drift %}
+    <aside class="knowledge-drift" role="status">
+      <p class="knowledge-drift-banner">{{ t('knowledge.drift_banner').format(n=knowledge_drift|length) }}</p>
+      {% set digest_rows = knowledge_drift | selectattr('kind', 'equalto', 'digest') | list %}
+      {% set prose_rows = knowledge_drift | selectattr('kind', 'equalto', 'prose') | list %}
+      {% set live_rows = knowledge_drift | selectattr('kind', 'equalto', 'live') | list %}
+      <p class="knowledge-drift-summary">{% if digest_rows %}{{ t('knowledge.drift_n_digest').format(n=digest_rows|length) }}{% endif %}{% if digest_rows and (prose_rows or live_rows) %} · {% endif %}{% if prose_rows %}{{ t('knowledge.drift_n_prose').format(n=prose_rows|length) }}{% endif %}{% if prose_rows and live_rows %} · {% endif %}{% if live_rows %}{{ t('knowledge.drift_n_live').format(n=live_rows|length) }}{% endif %}</p>
+      {% if digest_rows or prose_rows %}
+      <ul class="knowledge-drift-list">
+        {% for item in digest_rows %}
+        <li>
+          <a href="{{ item.href }}">{{ item.title }}</a>
+          <span class="gl-aka">{{ t('knowledge.drift_kind_digest') }}</span>
+          <form method="post" action="/w/{{ selected_slug | urlencode }}/step?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}">
+            <input type="hidden" name="target" value="{{ item.target }}">
+            <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_digest') }}</button>
+          </form>
+        </li>
+        {% endfor %}
+        {% for item in prose_rows %}
+        <li>
+          <a href="{{ item.href }}">{{ item.title }}</a>
+          <span class="gl-aka">{{ t('knowledge.drift_kind_prose') }}</span>
+          <form method="post" action="/w/{{ selected_slug | urlencode }}/step?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}">
+            <input type="hidden" name="target" value="{{ item.target }}">
+            <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_prose') }}</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if live_rows %}
+      <ul class="knowledge-drift-list">
+        {% for item in live_rows %}
+        <li>
+          <a href="{{ item.href }}">{{ item.title }}</a>
+          <span class="gl-aka">{{ t('knowledge.drift_kind_live') }}</span>
+          <form method="post" action="/w/{{ selected_slug | urlencode }}/step?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}">
+            <input type="hidden" name="target" value="{{ item.target }}">
+            <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_live') }}</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </aside>
+    {% endif %}
+{% if not knowledge_drift %}<p>{{ t("queue.empty") }}</p>{% endif %}

@@ -1251,3 +1251,26 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
   .doc .sheet-preview table { width: 100%; min-width: 0; table-layout: fixed; }
   .doc .sheet-preview th { position: static; }
 }
+
+/* Knowledge: the selected queue precedes reference and maintenance sections. */
+.knowledge-work { max-width: 1100px; margin: 24px auto; padding: 0 28px; }
+.knowledge-picker, .queue-nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.knowledge-picker input, .knowledge-picker select, .knowledge-work .dlg-form input { padding: 8px 10px; font: inherit; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); min-width: 0; }
+.queue-nav .on { background: var(--pine-soft); border-color: var(--pine); }
+.knowledge-section { margin: 16px 0; }
+.knowledge-section > details > summary { padding: 12px 0; cursor: pointer; border-top: 1px solid var(--line); }
+.knowledge-queue .gl-note { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.knowledge-queue > li { padding: 12px 0; }
+
+.knowledge-work .knowledge-console { max-width: none; margin: 0; }
+.knowledge-work .dash-head { margin: 0 0 12px; }
+.gl-note-full { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.input-location { scroll-margin-top: 80px; }
+.input-location pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.input-line { display: block; }
+.input-line.selected { background: #fff0b0; color: #312a12; }
+.line-number { opacity: .65; user-select: none; }
+@media (min-width: 521px) {
+  .knowledge-queue > li > form .btn { width: auto; padding: 7px 12px; margin: 6px 8px 6px 0; }
+}
