@@ -1,13 +1,8 @@
 {% extends "base.html" %}
 {% block subtitle %}{{ root }}{% endblock %}
 {% block body %}
-<div class="projects-head">
-  <div>
-    <p class="obj-kicker">{{ t('nav.projects') }}</p>
-    <h1 class="obj-title">{{ t('nav.projects') }}</h1>
-    <p class="panel-hint">{{ t('proj.index_hint') }}</p>
-  </div>
-  <form class="new-ws" method="post" action="/projects">
+<div class="page-toolbar">
+  <form class="page-toolbar-action new-ws" method="post" action="/projects">
     <input name="name" placeholder="{{ t('proj.name_ph') }}" required aria-label="{{ t('proj.name_ph') }}">
     <button type="submit">{{ t('proj.create') }}</button>
   </form>

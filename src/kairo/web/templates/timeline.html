@@ -25,8 +25,8 @@
       </details>
       {% endif %}
 {% endmacro %}
-<div class="timeline cal-page">
-  <div class="tl-toolbar">
+<div class="page-toolbar">
+  <div class="page-toolbar-find">
     <div class="tl-modes">
       <a class="{% if view == 'calendar' %}on{% endif %}" href="/timeline?day={{ day_iso }}">{{ t('tl.cal') }}</a>
       <a class="{% if view == 'recent' %}on{% endif %}" href="/timeline?mode=recent">{{ t('tl.recent') }}</a>
@@ -48,6 +48,8 @@
        href="/timeline?unknown=1&month={{ month_iso }}">{{ t('tl.unknown_chip').format(n=unknown_n) }}</a>
     {% endif %}
   </div>
+</div>
+<div class="timeline cal-page">
 
   {% if view == 'recent' %}
   <div class="timeline-list">

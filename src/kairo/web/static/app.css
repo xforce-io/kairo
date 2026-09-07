@@ -110,23 +110,42 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .new-ws button:hover { background: var(--pine-deep); }
 .new-ws .ws-error { color: var(--clay); font-size: 13px; }
 
+.page-toolbar,
 .dash-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-  padding: 22px 28px 0;
+  padding: 18px 28px 0;
   max-width: 1200px;
 }
+.page-toolbar-find,
 .dash-find {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 10px;
+  gap: 8px 12px;
   flex: 1 1 260px;
   min-width: 0;
 }
-.dash-search { flex: 1 1 200px; max-width: 380px; }
+.page-toolbar-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+.page-toolbar .new-ws,
+.dash-head .new-ws {
+  padding: 0;
+  max-width: none;
+  margin-left: auto;
+}
+.page-toolbar .new-ws input,
+.dash-head .new-ws input { min-width: 140px; width: 180px; }
+.page-toolbar .ws-error,
+.dash-head .ws-error { flex: 1 0 100%; }
+.dash-search { flex: 0 1 220px; min-width: 140px; max-width: 260px; }
 .dash-search input {
   width: 100%;
   font-family: var(--sans);
@@ -150,9 +169,6 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   font-family: var(--mono); font-size: 11px; font-weight: 500;
   margin-left: 4px; opacity: .75;
 }
-.dash-head .new-ws { padding: 0; margin-left: auto; }
-.dash-head .new-ws input { min-width: 140px; width: 160px; }
-.dash-head .ws-error { flex: 1 0 100%; }
 
 .dash-label {
   grid-column: 1 / -1;
@@ -1013,7 +1029,14 @@ header.top .root-gl.on { color: var(--pine-deep); }
 /* ---- #138 时间轴 ---- */
 .timeline { max-width: 820px; padding: 22px 28px 72px; }
 .timeline.cal-page { max-width: 1120px; }
-.tl-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+.tl-tags { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.tl-tags input {
+  font-family: var(--sans); font-size: 13.5px;
+  padding: 8px 12px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  min-width: 160px;
+}
+.tl-tags input:focus { outline: none; border-color: var(--pine); }
 .tl-modes { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); }
 .tl-modes a { font-size: 13px; font-weight: 500; text-decoration: none; color: var(--ink-soft); padding: 6px 14px; border-radius: 999px; }
 .tl-modes a.on { background: var(--pine); color: #fbfaf6; }
@@ -1095,13 +1118,16 @@ header.top .root-gl.on { color: var(--pine-deep); }
   .tl-title { white-space: normal; }
 }
 @media (max-width: 720px) {
-  .dash-head { padding: 16px 16px 0; }
-  .dash-find { flex: 1 1 100%; }
+  .page-toolbar, .dash-head { padding: 16px 16px 0; }
+  .page-toolbar-find, .dash-find { flex: 1 1 100%; }
   .dash-search { flex: 1 1 100%; max-width: none; }
   .dash-filter { flex: 1 1 100%; }
-  .dash-head .new-ws { margin-left: 0; }
-  .dash-head .new-ws input { width: auto; min-width: 140px; flex: 1; }
+  .page-toolbar-action, .page-toolbar .new-ws, .dash-head .new-ws { margin-left: 0; width: 100%; }
+  .page-toolbar .new-ws input, .dash-head .new-ws input { width: auto; min-width: 140px; flex: 1; }
   .grid { padding: 16px 16px 48px; }
+  .knowledge-work > .meta-hint,
+  .knowledge-work > .ref-blocks,
+  .knowledge-work .knowledge-console { padding-inline: 16px; }
 }
 
 /* public-read 人读拒绝：壳内空架，不是裸 404 */
@@ -1149,9 +1175,7 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .topic-card .card-main { padding-right: 18px; }
 .topic-state { min-height: 2.9em; margin: 8px 0 12px; color: var(--ink-soft); font-size: 13px; line-height: 1.45; }
 .card-next { display: inline-block; margin-top: 15px; color: var(--pine-deep); font-size: 13px; font-weight: 600; }
-.projects-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 16px; max-width: 1200px; padding: 28px 28px 0; }
-.projects-head .panel-hint { margin: 5px 0 0; }
-.projects-head .new-ws { padding: 0; }
+
 .topic-link-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
 .topic-link { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
 .topic-link a { color: var(--ink); font-weight: 500; text-decoration: none; }
@@ -1216,9 +1240,6 @@ header.top .root-gl.on { color: var(--pine-deep); }
   flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
 }
 @media (max-width: 720px) {
-  .projects-head { align-items: stretch; padding: 20px 16px 0; }
-  .projects-head .new-ws { width: 100%; }
-  .projects-head .new-ws input { flex: 1; }
   .topic-state { min-height: 0; }
   .tl-ref-tags { justify-content: start; }
   .ref-page { padding: 20px 16px 56px; }
@@ -1253,17 +1274,19 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 }
 
 /* Knowledge: the selected queue precedes reference and maintenance sections. */
-.knowledge-work { max-width: 1100px; margin: 24px auto; padding: 0 28px; }
-.knowledge-picker, .queue-nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 14px; }
+.knowledge-work { max-width: 1200px; padding: 0 0 64px; }
+.knowledge-picker, .queue-nav { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.knowledge-picker label { font-size: 13px; color: var(--ink-soft); white-space: nowrap; }
 .knowledge-picker input, .knowledge-picker select, .knowledge-work .dlg-form input { padding: 8px 10px; font: inherit; border: 1px solid var(--line-2); border-radius: 8px; background: var(--card); min-width: 0; }
+.page-toolbar .queue-nav { flex: 1 1 100%; }
 .queue-nav .on { background: var(--pine-soft); border-color: var(--pine); }
 .knowledge-section { margin: 16px 0; }
 .knowledge-section > details > summary { padding: 12px 0; cursor: pointer; border-top: 1px solid var(--line); }
 .knowledge-queue .gl-note { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .knowledge-queue > li { padding: 12px 0; }
-
-.knowledge-work .knowledge-console { max-width: none; margin: 0; }
-.knowledge-work .dash-head { margin: 0 0 12px; }
+.knowledge-work > .meta-hint,
+.knowledge-work > .ref-blocks { padding: 8px 28px 0; }
+.knowledge-work .knowledge-console { max-width: none; margin: 0; padding: 8px 28px 0; }
 .gl-note-full { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .input-location { scroll-margin-top: 80px; }

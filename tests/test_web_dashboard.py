@@ -347,7 +347,7 @@ def test_dashboard_journal_in_unpinned_grid_without_pins(tmp_path):
 
 
 def test_knowledge_is_console_nav_not_utility(tmp_path):
-    """#211: Knowledge 在主导航，不在右侧弱链，不在 dash-head。"""
+    """#211: Knowledge 在主导航，不在右侧弱链，不在页头工具条。"""
     Workspace.init(tmp_path / "ws", topic="t")
     client = _client(tmp_path)
     for path in ("/", "/timeline"):
@@ -359,7 +359,7 @@ def test_knowledge_is_console_nav_not_utility(tmp_path):
         assert "root-gl" not in header
         assert "Knowledge" in nav
     dash = client.get("/").text
-    start = dash.find('class="dash-head"')
+    start = dash.find('class="page-toolbar"')
     end = dash.find('class="grid"')
     assert start != -1 and end != -1 and start < end
     assert 'href="/knowledge"' not in dash[start:end]
