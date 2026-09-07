@@ -465,7 +465,7 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
     assert "Merge target" in page.text and "aliases and source" in page.text
     # 顶栏语言切换按钮固定显示“中”；知识功能区域本身的英文页不得漏出中文。
-    knowledge_region = page.text.split('<div class="dash-head">', 1)[1]
+    knowledge_region = page.text.split('<main class="knowledge-work">', 1)[1]
     assert not re.search(r"[\u4e00-\u9fff]", knowledge_region)
     chinese = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "zh"})
     assert "待审核知识候选" in chinese.text and "采纳到本工作区" in chinese.text

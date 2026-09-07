@@ -2,18 +2,22 @@
 {% block subtitle %}{{ root }}{% if selected_slug %} · {{ selected_slug }}{% endif %}{% endblock %}
 {% block body %}
 <main class="knowledge-work">
-<div class="dash-head"><p class="dlg-hint">{{ t('knowledge.hint') }}</p></div>
-  <form method="get" action="/knowledge" class="knowledge-picker">
-    <label for="knowledge-topic">{{ t('nav.workspaces') }}</label>
-    <select id="knowledge-topic" name="workspace"><option value="">{{ t('queue.global') }}</option>{% for slug in slugs %}<option value="{{ slug }}"{% if slug == selected_slug %} selected{% endif %}>{{ slug }}</option>{% endfor %}</select>
-    <input type="hidden" name="queue" value="{{ knowledge_queue }}">
-    <label for="knowledge-filter">{{ t('knowledge.filter') }}</label>
-    <input id="knowledge-filter" name="filter" value="{{ knowledge_filter }}">
-    <button class="btn btn-ghost btn-inline">{{ t('knowledge.apply_filter') }}</button>
-  </form>
+  <div class="page-toolbar">
+    <div class="page-toolbar-find">
+      <form method="get" action="/knowledge" class="knowledge-picker">
+        <label for="knowledge-topic">{{ t('nav.workspaces') }}</label>
+        <select id="knowledge-topic" name="workspace"><option value="">{{ t('queue.global') }}</option>{% for slug in slugs %}<option value="{{ slug }}"{% if slug == selected_slug %} selected{% endif %}>{{ slug }}</option>{% endfor %}</select>
+        <input type="hidden" name="queue" value="{{ knowledge_queue }}">
+        <label for="knowledge-filter">{{ t('knowledge.filter') }}</label>
+        <input id="knowledge-filter" name="filter" value="{{ knowledge_filter }}">
+        <button class="btn btn-ghost btn-inline">{{ t('knowledge.apply_filter') }}</button>
+      </form>
+      <nav class="queue-nav" aria-label="{{ t('queue.categories') }}">{% for key in queue_keys %}<a class="btn btn-ghost btn-inline{% if key == knowledge_queue %} on{% endif %}" href="/knowledge?workspace={{ (selected_slug or '')|urlencode }}&amp;queue={{ key }}&amp;filter={{ knowledge_filter|urlencode }}"{% if key == knowledge_queue %} aria-current="page"{% endif %}>{{ t('queue.' ~ key) }} · {{ queue_counts[key] }}</a>{% endfor %}</nav>
+    </div>
+  </div>
   {% if error %}<p class="ref-blocks glossary-error" role="alert">{{ t('knowledge.save_error').format(error=error) }}</p>{% endif %}
   {% if success %}<p class="meta-hint" role="status">{{ t('knowledge.saved') }}</p>{% endif %}
-  <nav class="queue-nav" aria-label="{{ t('queue.categories') }}">{% for key in queue_keys %}<a class="btn btn-ghost btn-inline{% if key == knowledge_queue %} on{% endif %}" href="/knowledge?workspace={{ (selected_slug or '')|urlencode }}&amp;queue={{ key }}&amp;filter={{ knowledge_filter|urlencode }}"{% if key == knowledge_queue %} aria-current="page"{% endif %}>{{ t('queue.' ~ key) }} · {{ queue_counts[key] }}</a>{% endfor %}</nav>
+  <p class="meta-hint">{{ t('knowledge.hint') }}</p>
   <p class="meta-hint">{{ t('queue.count_hint') }}</p>
   <div class="gl-console knowledge-console knowledge-responsive">
   {% for key in queue_order %}
