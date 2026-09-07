@@ -14,11 +14,13 @@ PARTITIONS = ("general", "projects", "workspaces", "timeline")
 CONNECTION_TENCENT = "tencent-docs"
 CONNECTION_WECOM = "wecom"
 CONNECTION_NOTION = "notion"
+CONNECTION_IMAP = "imap"
 
 # id, label, token_env, live
 READER_CATALOG: tuple[tuple[str, str, str, bool], ...] = (
     (CONNECTION_TENCENT, "腾讯文档", "TENCENT_DOCS_TOKEN", True),
     (CONNECTION_WECOM, "企微文档", "", True),
+    (CONNECTION_IMAP, "IMAP 邮件", "IMAP_PASSWORD", True),
     (CONNECTION_NOTION, "Notion", "NOTION_TOKEN", False),
 )
 
