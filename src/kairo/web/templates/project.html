@@ -1,34 +1,5 @@
 {% extends "base.html" %}
-{% block subtitle %}{{ project.name }}<script>
-(function () {
-  const group = document.getElementById('project-member-refs');
-  const input = document.getElementById('material-filter');
-  const sort = document.getElementById('material-sort');
-  if (!group || !input || !sort) return;
-  const params = new URLSearchParams(location.search);
-  input.value = params.get('q') || '';
-  sort.value = params.get('sort') === 'time' ? 'time' : 'title';
-  group.open = params.get('materials') === '1' || !!input.value;
-  function persist() {
-    const url = new URL(location.href);
-    url.searchParams.set('q', input.value);
-    url.searchParams.set('sort', sort.value);
-    url.searchParams.set('materials', group.open ? '1' : '0');
-    history.replaceState(null, '', url);
-    document.querySelectorAll('#material-list a').forEach(function (a) {
-      const target = new URL(a.href);
-      target.searchParams.set('back', url.pathname + url.search);
-      a.href = target;
-    });
-  }
-  input.addEventListener('input', persist);
-  sort.addEventListener('change', persist);
-  group.addEventListener('toggle', persist);
-  input.dispatchEvent(new Event('input'));
-  sort.dispatchEvent(new Event('change'));
-})();
-</script>
-{% endblock %}
+{% block subtitle %}{{ project.name }}{% endblock %}
 {% block body %}
 <div class="obj-page">
   <header class="obj-head">
