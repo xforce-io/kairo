@@ -5,6 +5,11 @@
 <article class="doc">
   <p class="doc-kicker"><span class="dk-title">{{ payload.title or payload.source_id }}</span></p>
   <p class="meta-hint">{{ payload.input_id }} · {{ payload.version }} · {{ payload.read_at }}</p>
+  <section id="input-location" class="input-location" tabindex="-1">
+    <p class="meta-hint">{{ t('input.' ~ location_state) }}</p>
+    {% if location_rows %}<pre>{% for row in location_rows %}<span class="input-line{% if row.selected %} selected{% endif %}" data-line="{{ row.number }}"><span class="line-number">{{ row.number }}</span> {{ row.text }}</span>
+{% endfor %}</pre>{% endif %}
+  </section>
   {{ body_html | safe }}
 </article>
 {% endblock %}

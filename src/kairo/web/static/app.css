@@ -1265,3 +1265,9 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 .knowledge-work .knowledge-console { max-width: none; margin: 0; }
 .knowledge-work .dash-head { margin: 0 0 12px; }
 .gl-note-full { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+.input-location { scroll-margin-top: 80px; }
+.input-location pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.input-line { display: block; }
+.input-line.selected { background: #fff0b0; color: #312a12; }
+.line-number { opacity: .65; user-select: none; }

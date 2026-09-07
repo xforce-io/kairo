@@ -106,10 +106,13 @@ class ProjectCliTestProvider:
         ds = next(i for i in catalog["items"] if i["type"] == "datasource")
         t = kairo("project", "read", pid, topic["source_id"], "--run", rid, "--root", serve)
         d = kairo("project", "read", pid, ds["source_id"], "--run", rid, "--root", serve)
+        assert t["numbered_content"].startswith("1: ") and t["line_count"] >= 1
+        assert d["numbered_content"].startswith("1: ") and d["line_count"] >= 2
+        location = "#L1" if getattr(self, "locate", False) else ""
         body = (
             f"# combined\n\n"
-            f"[{topic['title']}](input:{t['input_id']})\n\n{t['content']}\n\n"
-            f"[{ds['title']}](input:{d['input_id']})\n\n{d['content']}\n"
+            f"[{topic['title']}](input:{t['input_id']}{location})\n\n{t['content']}\n\n"
+            f"[{ds['title']}](input:{d['input_id']}{location})\n\n{d['content']}\n"
         )
         dest = config.artifact_dir / "artifact.md"
         dest.write_text(body, encoding="utf-8")

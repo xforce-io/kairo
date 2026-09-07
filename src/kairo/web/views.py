@@ -11,7 +11,7 @@ import sys
 from html import escape
 from pathlib import Path
 from typing import Annotated
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, quote as urlquote
 
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
@@ -3535,10 +3535,12 @@ def rewrite_artifact_input_links(html: str, project_id: str, run_id: str, input_
     allowed = {iid for iid in input_ids if iid}
 
     def _replace(match: re.Match[str]) -> str:
-        quote, iid = match.group(1), match.group(2)
+        quote, citation = match.group(1), match.group(2)
+        iid, separator, location = citation.partition("#")
         if iid not in allowed:
             return match.group(0)
-        return f"href={quote}/projects/{project_id}/runs/{run_id}/inputs/{iid}{quote}"
+        suffix = f"?lines={urlquote(location, safe='')}#input-location" if separator else ""
+        return f"href={quote}/projects/{project_id}/runs/{run_id}/inputs/{iid}{suffix}{quote}"
 
     return _INPUT_HREF_RE.sub(_replace, html)
 
@@ -3600,6 +3602,19 @@ def _run_input_body_html(project, payload: dict) -> str:
     return preview_datasource_html(content, kind=ds.kind if ds else None)
 
 
+def _input_location(content: str, location: str | None) -> dict:
+    from kairo.input_citations import line_range
+
+    lines = content.splitlines()
+    selected = line_range(location, len(lines)) if location is not None else None
+    rows = []
+    if selected:
+        start, end = selected
+        rows = [{"number": i, "text": lines[i - 1], "selected": start <= i <= end}
+                for i in range(max(1, start - 2), min(len(lines), end + 2) + 1)]
+    return {"location_rows": rows, "location_state": "located" if selected else "invalid" if location is not None else "whole"}
+
+
 @router.get("/projects/{project_id}/runs/{run_id}/inputs/{input_id}", response_class=HTMLResponse)
 def run_input_page(request: Request, project_id: str, run_id: str, input_id: str) -> HTMLResponse:
     _console_only(request)
@@ -3621,6 +3636,7 @@ def run_input_page(request: Request, project_id: str, run_id: str, input_id: str
             "run": run,
             "payload": payload,
             "body_html": _run_input_body_html(project, payload),
+            **_input_location(payload.get("content") or "", request.query_params.get("lines")),
         },
     )
 

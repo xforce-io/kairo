@@ -1729,6 +1729,7 @@ def project_read_cmd(
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
     from kairo.project_materials import read_material
+    from kairo.input_citations import numbered_content
     from kairo.projects import ProjectError
     from kairo.readers import ReadError
 
@@ -1748,6 +1749,7 @@ def project_read_cmd(
             "fetched_at": result.fetched_at,
             "expires_at": result.expires_at,
             "input_id": result.input_id,
+            **({"numbered_content": numbered_content(result.content), "line_count": len(result.content.splitlines())} if run_id else {}),
         },
     )
 

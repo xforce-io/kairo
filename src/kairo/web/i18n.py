@@ -9,6 +9,9 @@ SUPPORTED: tuple[str, ...] = ("en", "zh")
 
 CATALOG: dict[str, dict[str, str]] = {
     "en": {
+        "input.located": "Cited lines in the archived input, with surrounding context.",
+        "input.invalid": "The cited location is invalid. Showing the complete archived input below.",
+        "input.whole": "This citation has no specific location. Showing the complete archived input.",
         'queue.candidates': 'Candidate review',
         'queue.drift': 'Pending recorrection',
         'queue.errors': 'Extraction failures',
@@ -521,6 +524,9 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.review_readonly": "This surface is read-only — cannot write a review.",
     },
     "zh": {
+        "input.located": "已定位归档输入的引用行，并显示前后上下文。",
+        "input.invalid": "引用位置无效，下方展示整份归档输入。",
+        "input.whole": "此引用未指定位置，下方展示整份归档输入。",
         'queue.candidates': '候选审核',
         'queue.drift': '待校正内容',
         'queue.errors': '提取失败',
