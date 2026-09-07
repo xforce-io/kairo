@@ -1584,8 +1584,19 @@ def add_ref(
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     resp = _refs_fragment(request, ws, slug)
-    result = _render(request, "_ref_add_result.html", {"slug": slug, "added_id": added_id})
-    resp = HTMLResponse(resp.body + result.body)
+    t = _t(request)
+    btn = _run_button_ctx(request, ws, slug)
+    result = _render(
+        request,
+        "_ref_add_result.html",
+        {
+            "slug": slug,
+            "added_id": added_id,
+            "needs_processing": btn["run_pending"] > 0,
+        },
+    )
+    oob = _run_status_oob(request, ws, slug, t)
+    resp = HTMLResponse(resp.body + result.body + oob.encode())
     return _with_running_add_toast(request, slug, resp)
 
 
