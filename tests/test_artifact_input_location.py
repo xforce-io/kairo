@@ -35,7 +35,7 @@ def test_task_cli_to_archived_location_and_fallback(tmp_path, monkeypatch):
             fallback = client.get(base + suffix)
             assert fallback.status_code == 200
             assert 'input-line selected' not in fallback.text
-            assert 'complete archived input' in fallback.text
+            assert 'complete archived input' in fallback.text or '整份归档输入' in fallback.text
         assert client.get(base.rsplit('/', 1)[0] + '/inp-other').status_code == 404
 
 

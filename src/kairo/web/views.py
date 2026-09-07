@@ -951,7 +951,7 @@ def global_ref_view(
     forms = [f for f in _ref_forms(ws, rid, man, t) if f["role"] != "digest"]
     primary_heading, primary_html = _global_ref_primary_body(ws, rid, man, t)
     locked_tags = [tag for tag in tags if is_locked_home_tag(serve, home, rid, tag)]
-    project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+", back)) and not _is_public_read(request)
+    project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+(?:\?[^\r\n#]*)?", back)) and not _is_public_read(request)
     back_url = back if project_back or back == "/timeline" or back.startswith("/timeline?") else "/timeline"
     return _render(
         request,

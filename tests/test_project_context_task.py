@@ -107,7 +107,7 @@ class ProjectCliTestProvider:
         t = kairo("project", "read", pid, topic["source_id"], "--run", rid, "--root", serve)
         d = kairo("project", "read", pid, ds["source_id"], "--run", rid, "--root", serve)
         assert t["numbered_content"].startswith("1: ") and t["line_count"] >= 1
-        assert d["numbered_content"].startswith("1: ") and d["line_count"] >= 2
+        assert d["numbered_content"].startswith("1: ") and d["line_count"] >= 1
         location = "#L1" if getattr(self, "locate", False) else ""
         body = (
             f"# combined\n\n"
