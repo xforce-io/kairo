@@ -70,9 +70,11 @@
   </div>
   {% if not public_read %}
   <form class="new-ws" hx-post="/workspaces" hx-swap="none">
-    <input name="topic" placeholder="{{ t('dash.topic_placeholder') }}" required>
+    <input type="hidden" name="confirm_tag" value="1">
+    <input name="topic" aria-describedby="topic-tag-notice" placeholder="{{ t('dash.topic_placeholder') }}" required>
     <button type="submit">{{ t('dash.new_ws_btn') }}</button>
-    <span id="ws-error" class="ws-error"></span>
+    <span id="ws-error" class="ws-error" role="alert"></span>
+    <small id="topic-tag-notice" class="meta-hint">{{ t("topic.tag_notice") }}</small>
   </form>
   {% endif %}
 </div>

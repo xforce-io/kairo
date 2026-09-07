@@ -9,6 +9,8 @@ SUPPORTED: tuple[str, ...] = ("en", "zh")
 
 CATALOG: dict[str, dict[str, str]] = {
     "en": {
+        "topic.tag_notice": 'Creating a topic also creates or reuses its same-named Tag. Materials matching that Tag enter this topic.',
+        "topic.create_failed": 'Topic creation failed; correct the problem and retry.',
         'status.readable': 'Existing body is readable; this alone does not mean it is current.',
         'status.no_body': 'No generated body yet.',
         'status.incomplete': 'Current processing is incomplete. See pending or affected materials.',
@@ -510,6 +512,8 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.review_readonly": "This surface is read-only — cannot write a review.",
     },
     "zh": {
+        "topic.tag_notice": '新建将创建或复用同名 Tag，命中该 Tag 的资料会进入此主题。',
+        "topic.create_failed": '新建失败，请修正问题后重试。',
         'status.readable': '已有正文可读；这不代表最新加工已完成。',
         'status.no_body': '尚未生成正文。',
         'status.incomplete': '当前加工尚未完成，请查看待加工或受影响材料。',

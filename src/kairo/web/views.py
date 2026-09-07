@@ -722,7 +722,7 @@ def set_lang(request: Request, code: str) -> RedirectResponse:
 
 
 @router.post("/workspaces", response_class=HTMLResponse)
-def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
+def create_workspace(request: Request, topic: str = Form(""), confirm_tag: str = Form("")) -> HTMLResponse:
     t = _t(request)
     root = Path(request.app.state.root)
     topic = topic.strip()
@@ -739,17 +739,14 @@ def create_workspace(request: Request, topic: str = Form("")) -> HTMLResponse:
         raise HTTPException(status_code=400, detail=t("err.topic_invalid"))
     if dest.exists():
         raise HTTPException(status_code=400, detail=t("err.topic_exists").format(topic=topic))
-    from kairo.refs import list_tags
+    from kairo.refs import RefError, create_topic_with_tag
 
-    if topic not in list_tags(root):
-        raise HTTPException(
-            status_code=409,
-            detail="请先在 Settings 创建同名 Tag，再新建 Topic。",
-        )
-    from kairo.refs import set_include_tags
-
-    ws = Workspace.init(dest, topic=topic)
-    set_include_tags(root, ws.root.name, [topic])
+    try:
+        create_topic_with_tag(root, topic, confirm_tag=confirm_tag == "1")
+    except RefError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=t("topic.create_failed")) from exc
     return HTMLResponse("", headers={"HX-Redirect": "/w/" + quote(topic)})
 
 
