@@ -1569,7 +1569,7 @@ def add_ref(
     try:
         if has_file:
             src = _save_upload(ws, file)  # 浏览器无稳定 path → 必 copy
-            ws.add([src])
+            added_id = ws.add([src])
         elif path:
             # checkbox 未勾选时字段缺失;勾选时常为 "1" / "on"
             do_copy = bool(copy_flag) and str(copy_flag).lower() not in (
@@ -1577,12 +1577,14 @@ def add_ref(
                 "false",
                 "off",
             )
-            ws.add([Path(path)], copy=do_copy)
+            added_id = ws.add([Path(path)], copy=do_copy)
         else:
             raise HTTPException(status_code=400, detail="need file or path")
     except AddError as e:
         raise HTTPException(status_code=400, detail=str(e))
     resp = _refs_fragment(request, ws, slug)
+    result = _render(request, "_ref_add_result.html", {"slug": slug, "added_id": added_id})
+    resp = HTMLResponse(resp.body + result.body)
     return _with_running_add_toast(request, slug, resp)
 
 

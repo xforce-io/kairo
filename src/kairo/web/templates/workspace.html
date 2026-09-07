@@ -10,10 +10,13 @@
     </div>
     <div class="nav-group">
       <div class="nav-section">{{ t('nav.references') }}</div>
-      <div id="refs-list">{% include "_refs_list.html" %}</div>
       {% if not public_read %}
       <button type="button" class="btn btn-step btn-add-ref"
               onclick="document.getElementById('add-ref-dlg').showModal()">{{ t('ref.add_btn') }}</button>
+      <p id="ref-add-result" class="meta-hint" role="status"></p>
+      {% endif %}
+      <div id="refs-list">{% include "_refs_list.html" %}</div>
+      {% if not public_read %}
 
       <dialog id="add-ref-dlg" class="ref-dialog"
               onclick="if(event.target===this)this.close()">
@@ -24,6 +27,17 @@
         </div>
         <p class="dlg-err" id="add-ref-err" role="alert" hidden
            data-fallback="{{ t('ref.add_failed') }}"></p>
+        <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref" hx-encoding="multipart/form-data"
+              hx-target="#refs-list" hx-swap="innerHTML"
+              hx-on::after-request="if(event.detail.successful){this.reset();this.closest('dialog').close();}">
+          <label class="dlg-label">{{ t('ref.upload_label') }}</label>
+          <div class="dlg-row">
+            <input type="file" name="file" required>
+            <button type="submit" class="btn btn-step dlg-go">{{ t('ref.upload_btn') }}</button>
+          </div>
+          <p class="dlg-hint">{{ t('ref.copy_forced_hint') }}</p>
+        </form>
+        <div class="dlg-or"><span>{{ t('ref.or') }}</span></div>
         <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref"
               hx-target="#refs-list" hx-swap="innerHTML"
               hx-on::after-request="if(event.detail.successful){this.reset();this.closest('dialog').close();}">
@@ -34,17 +48,6 @@
           </div>
           <label class="dlg-check"><input type="checkbox" name="copy" value="1"> {{ t('ref.copy_label') }}</label>
           <p class="dlg-hint">{{ t('ref.dir_hint') }}</p>
-        </form>
-        <div class="dlg-or"><span>{{ t('ref.or') }}</span></div>
-        <form class="dlg-form" hx-post="/w/{{ slug | urlencode }}/ref" hx-encoding="multipart/form-data"
-              hx-target="#refs-list" hx-swap="innerHTML"
-              hx-on::after-request="if(event.detail.successful){this.reset();this.closest('dialog').close();}">
-          <label class="dlg-label">{{ t('ref.upload_label') }}</label>
-          <div class="dlg-row">
-            <input type="file" name="file" required>
-            <button type="submit" class="btn btn-step dlg-go">{{ t('ref.upload_btn') }}</button>
-          </div>
-          <p class="dlg-hint">{{ t('ref.copy_forced_hint') }}</p>
         </form>
         <script>
           // 集中处理弹框内两表单的错误回显:htmx 默认不渲染非 2xx,需手动取 detail
