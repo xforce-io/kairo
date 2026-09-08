@@ -162,7 +162,7 @@ def _run_agent(
     """跑 agent,从隔离 artifact_dir 取回产物内容。写沙箱:artifact-only;
     材料目录的必读项复制进工作集;read_dirs 授按需 Read。
 
-    #105:timeout_s 默认 DEFAULT_CLI_TIMEOUT_S;传入显式值可覆盖(测试/长任务)。
+    #105:timeout_s 默认 `[agent] timeout_s` 或 DEFAULT_CLI_TIMEOUT_S;传入显式值可覆盖。
     #153:需要授读但 provider 不支持时失败,不回退倾倒全文。
     """
     from kairo.provider import resolve_cli_timeout
@@ -176,7 +176,7 @@ def _run_agent(
     if (items or dirs) and not getattr(provider, "supports_read_dirs", False):
         name = getattr(provider, "name", "provider")
         raise RuntimeError(f"{name} 不支持授读(read_dirs),无法按目录引用运行")
-    # None → 默认 600s；显式值用于测试或长任务。
+    # None → `[agent] timeout_s` 或 600s；显式值用于测试或长任务。
     effective = resolve_cli_timeout(timeout_s)
     with tempfile.TemporaryDirectory() as d:
         dpath = Path(d)

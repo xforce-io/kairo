@@ -9,7 +9,7 @@ from pathlib import Path
 
 from kairo import __version__
 from kairo.machine import resolve_asr
-from kairo.provider import select_provider
+from kairo.provider import resolve_cli_timeout, select_provider
 
 _SKILL_MD = "SKILL.md"
 _NPX_HINT = "npx skills add xforce-io/kairo -g"
@@ -83,15 +83,23 @@ def doctor_lines(*, home: Path | None = None) -> list[str]:
         provider = select_provider()
         name = getattr(provider, "name", type(provider).__name__)
         model = (getattr(provider, "model", "") or "").strip()
+        effort = (getattr(provider, "reasoning_effort", "") or "").strip()
+        timeout_s = resolve_cli_timeout(None)
         if name == "stub":
             lines.append(
                 f"provider: {name}  ⚠ step 不会真算。"
                 " 配 grok CLI / [provider.openai] / claude CLI，或设 KAIRO_PROVIDER"
             )
-        elif model:
-            lines.append(f"provider: {name} ({model})")
         else:
-            lines.append(f"provider: {name}")
+            bits: list[str] = []
+            if model:
+                bits.append(model)
+            else:
+                bits.append("unpinned")
+            if effort:
+                bits.append(f"effort={effort}")
+            bits.append(f"timeout={timeout_s}s")
+            lines.append(f"provider: {name} ({', '.join(bits)})")
     except Exception as e:
         lines.append(f"provider: ⚠ {e}")
 

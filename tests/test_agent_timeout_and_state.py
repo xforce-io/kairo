@@ -18,6 +18,8 @@ from kairo.provider import (
     AgentResult,
     _default_cli_runner,
     _scan_artifacts,
+    resolve_agent_timeout_s,
+    resolve_cli_timeout,
 )
 from kairo.rules import _run_agent
 from kairo.web.tasks import StepTask, classify_task, is_fatal_agent_line
@@ -68,8 +70,28 @@ def test_default_cli_runner_timeout_kills_and_raises(tmp_path):
             pytest.fail(f"child pid {pid} still alive after timeout kill")
 
 
-def test_run_agent_applies_default_timeout_when_missing():
-    """S1:_run_agent 在未设 timeout 时注入 DEFAULT_CLI_TIMEOUT_S。"""
+def test_resolve_cli_timeout_uses_agent_config(tmp_path, monkeypatch):
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text("[agent]\ntimeout_s = 1800\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert resolve_agent_timeout_s() == 1800
+    assert resolve_cli_timeout(None) == 1800
+    assert resolve_cli_timeout(42) == 42
+
+
+def test_resolve_cli_timeout_ignores_invalid_agent_timeout(tmp_path, monkeypatch):
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text("[agent]\ntimeout_s = 0\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    assert resolve_agent_timeout_s() is None
+    assert resolve_cli_timeout(None) == DEFAULT_CLI_TIMEOUT_S
+
+
+def test_run_agent_applies_default_timeout_when_missing(tmp_path, monkeypatch):
+    """S1:_run_agent 在未设 timeout 且无 [agent] timeout_s 时注入 DEFAULT_CLI_TIMEOUT_S。"""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     seen: dict = {}
 
     class CapturingProvider:
@@ -86,6 +108,30 @@ def test_run_agent_applies_default_timeout_when_missing():
     text = _run_agent(CapturingProvider(), "persona", "ctx", "out.md")
     assert text == "ok"
     assert seen["timeout_s"] == DEFAULT_CLI_TIMEOUT_S
+
+
+def test_run_agent_uses_configured_agent_timeout(tmp_path, monkeypatch):
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text("[agent]\ntimeout_s = 1800\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    seen: dict = {}
+
+    class CapturingProvider:
+        name = "cap"
+        model = "m"
+        supports_read_dirs = False
+
+        def run(self, config: AgentConfig, signal=None):
+            seen["timeout_s"] = config.timeout_s
+            (config.artifact_dir / "out.md").write_text("ok")
+            return AgentResult(
+                artifacts=_scan_artifacts(config.artifact_dir), result_text="ok"
+            )
+
+    text = _run_agent(CapturingProvider(), "persona", "ctx", "out.md")
+    assert text == "ok"
+    assert seen["timeout_s"] == 1800
 
 
 def test_run_agent_preserves_explicit_timeout():
