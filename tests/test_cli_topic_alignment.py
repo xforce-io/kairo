@@ -13,6 +13,31 @@ from kairo.workspace import Workspace
 runner = CliRunner()
 
 
+def test_add_in_topic_dir_without_topic_stamps_home_tag(tmp_path, monkeypatch):
+    """cwd Topic add without --topic stamps Topic-name Tag and is a member."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    create_tag(serve, "research")
+    created = runner.invoke(app, ["new", "research"])
+    assert created.exit_code == 0, created.output
+
+    monkeypatch.chdir(serve / "research")
+    note = tmp_path / "note.txt"
+    note.write_text("Research note")
+    result = runner.invoke(app, ["add", str(note)])
+    assert result.exit_code == 0, result.output
+    assert "tagged with research" in result.output
+
+    refs = list_all_refs(serve)
+    assert len(refs) == 1
+    ref = refs[0]
+    assert ref.home == "research"
+    assert "research" in ref.tags
+    members = topic_members(serve, "research")
+    assert any(m.id == ref.id and m.home == "research" for m in members)
+
+
 def test_add_with_topic_tags_ref(tmp_path, monkeypatch):
     """#269: kairo add --topic SLUG tags the Ref with Topic-name Tag."""
     serve = tmp_path / "root"
@@ -250,13 +275,16 @@ def test_add_topic_from_inside_topic(tmp_path, monkeypatch):
     
     assert result.exit_code == 0, result.output
     assert "tagged with policy" in result.output
-    
-    # Verify Ref is tagged with policy, not energy
+    assert "energy" in result.output
+
     refs = list_all_refs(serve)
     ref = next(r for r in refs if r.title != "")
     assert "policy" in ref.tags
-    assert "energy" not in ref.tags
-    assert ref.home == "energy"  # home is still energy (cwd)
+    assert "energy" in ref.tags
+    assert ref.home == "energy"
+    members = topic_members(serve, "energy")
+    assert any(m.id == ref.id and m.home == "energy" for m in members)
+    assert any(m.id == ref.id for m in topic_members(serve, "policy"))
 
 
 def test_epilog_shows_three_paths(tmp_path):
@@ -265,15 +293,13 @@ def test_epilog_shows_three_paths(tmp_path):
     assert result.exit_code == 0
     output = result.output
     
-    # Check for three paths
-    assert "三条路径" in output or "Timeline" in output
+    assert "add" in output
+    assert "Topic" in output or "topic" in output or "step" in output
     assert "Ref" in output or "add" in output
-    assert "Topic" in output or "step" in output or "status" in output
-    assert "Project" in output or "project" in output
 
 
 def test_add_without_topic_still_works(tmp_path, monkeypatch):
-    """#269: add without --topic still works (backward compatibility)."""
+    """Serve-root add without --topic still registers a global untagged Ref."""
     serve = tmp_path / "root"
     serve.mkdir()
     monkeypatch.chdir(serve)

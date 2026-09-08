@@ -370,8 +370,8 @@ def add(
         None, "--root", "-r", help="serve root;非 Topic 目录时写入全局库"
     ),
 ) -> None:
-    """登记 Ref:新 Ref(可选 --topic)或 --to 追加 form。cwd 为 Topic 则 home 在该 Topic;否则写入全局库。"""
-    from kairo.refs import add_global_ref, add_tag, list_tags
+    """登记 Ref。cwd 为 Topic 则 home 在该目录并打该 Topic 名称 Tag;--topic 另打 Tag。"""
+    from kairo.refs import RefError, add_global_ref, stamp_add_membership
 
     try:
         ws = Workspace.open(Path.cwd())
@@ -404,20 +404,18 @@ def add(
                 occurred_at=occurred_at,
             )
             home_slug = ""
-        
-        if topic:
-            if topic not in list_tags(serve):
-                typer.secho(
-                    f"Topic-name Tag '{topic}' 不存在。下一步: kairo tag create {topic}",
-                    fg=typer.colors.RED,
-                    err=True,
-                )
-                raise typer.Exit(1)
-            add_tag(serve, home=home_slug, ref_id=rid, tag=topic)
-            typer.echo(f"added {rid}, tagged with {topic}")
+        stamped = stamp_add_membership(
+            serve,
+            home=home_slug,
+            ref_id=rid,
+            topic=topic,
+            home_ws=ws,
+        )
+        if stamped:
+            typer.echo(f"added {rid}, tagged with {', '.join(stamped)}")
         else:
             typer.echo(f"added {rid}")
-    except AddError as e:
+    except (AddError, RefError) as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
 

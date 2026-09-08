@@ -729,6 +729,40 @@ def add_tag(serve: Path, *, home: str, ref_id: str, tag: str) -> list[str]:
     return current
 
 
+def stamp_add_membership(
+    serve: Path,
+    *,
+    home: str,
+    ref_id: str,
+    topic: str | None,
+    home_ws: Workspace | None,
+) -> list[str]:
+    """Stamp Tags for a newly added Ref so it cannot be a home-Topic orphan.
+
+    ``topic`` (optional) is stamped as a Tag. If ``home_ws`` is a Topic,
+    also stamp that Topic's name Tag. Membership is still include-rules only.
+    """
+    wanted: list[str] = []
+    if topic:
+        wanted.append(_normalize_tag(topic))
+    if home_ws is not None:
+        home_tag = topic_name_tag(home_ws)
+        if home_tag not in wanted:
+            wanted.append(home_tag)
+    stamped: list[str] = []
+    for name in wanted:
+        add_tag(serve, home=home, ref_id=ref_id, tag=name)
+        stamped.append(name)
+    if home_ws is not None:
+        slug = home_ws.root.name
+        members = topic_members(serve, slug)
+        if not any(m.home == slug and m.id == ref_id for m in members):
+            raise RefError(
+                f"Ref home 是 Topic 目录但未成为该 Topic 成员:{slug}/{ref_id}"
+            )
+    return stamped
+
+
 def is_locked_home_tag(serve: Path, home: str, ref_id: str, tag: str) -> bool:
     """内置生成回顾的 home Topic-name Tag 不可摘。"""
     home = (home or "").strip()
