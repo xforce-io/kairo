@@ -414,11 +414,35 @@ class OpenAICompatibleProvider:
         )
 
 
+def resolve_agent_timeout_s() -> int | None:
+    """读 `[agent] timeout_s`。未配置或非法则 None,由调用方回落到 DEFAULT_CLI_TIMEOUT_S。"""
+    path = _config_path()
+    if not path.is_file():
+        return None
+    try:
+        section = tomllib.loads(path.read_text()).get("agent") or {}
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    raw = section.get("timeout_s")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value <= 0:
+        return None
+    return value
+
+
 def resolve_cli_timeout(timeout: int | None) -> int:
-    """#105:None → 默认超时;显式值原样使用(含测试用短超时)。"""
-    if timeout is None:
-        return DEFAULT_CLI_TIMEOUT_S
-    return int(timeout)
+    """#105:显式值原样使用;None → `[agent] timeout_s` → DEFAULT_CLI_TIMEOUT_S。"""
+    if timeout is not None:
+        return int(timeout)
+    configured = resolve_agent_timeout_s()
+    if configured is not None:
+        return configured
+    return DEFAULT_CLI_TIMEOUT_S
 
 
 def _kill_pgid(pgid: int, *, sig: int = signal.SIGTERM) -> None:

@@ -50,12 +50,29 @@ def test_doctor_shows_configured_codex_model(tmp_path, monkeypatch):
     from kairo.provider import CodexProvider
 
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    monkeypatch.setattr(
+        "kairo.install.select_provider",
+        lambda: CodexProvider(model="gpt-5.6-terra", reasoning_effort="medium"),
+    )
+    text = "\n".join(doctor_lines(home=tmp_path))
+    assert "provider: codex (gpt-5.6-terra, effort=medium, timeout=600s)" in text
+
+
+def test_doctor_shows_configured_agent_timeout(tmp_path, monkeypatch):
+    from kairo.provider import CodexProvider
+
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text("[agent]\ntimeout_s = 1800\n")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     monkeypatch.setattr(
         "kairo.install.select_provider",
         lambda: CodexProvider(model="gpt-5.6-terra"),
     )
     text = "\n".join(doctor_lines(home=tmp_path))
-    assert "provider: codex (gpt-5.6-terra)" in text
+    assert "provider: codex (gpt-5.6-terra, timeout=1800s)" in text
 
 
 def test_doctor_lines_stub_and_missing_skill(tmp_path, monkeypatch):
