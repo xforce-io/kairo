@@ -369,6 +369,7 @@ def add(
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;非 Topic 目录时写入全局库"
     ),
+    title: str = typer.Option(None, "--title", help="新建 Ref 的展示名;省略则用文件 stem"),
 ) -> None:
     """登记 Ref。cwd 为 Topic 则 home 在该目录并打该 Topic 名称 Tag;--topic 另打 Tag。"""
     from kairo.refs import RefError, add_global_ref, stamp_add_membership
@@ -383,11 +384,13 @@ def add(
     try:
         if occurred_at and corpus:
             raise AddError("fold=false 不能设发生时间")
+        add_title = title if ref_id is None else None
         if ws is not None:
             rid = ws.add(
                 files,
                 ref_id=ref_id,
                 role=role,
+                title=add_title,
                 source_class="corpus" if corpus else None,
                 copy=copy,
                 occurred_at=occurred_at,
@@ -399,6 +402,7 @@ def add(
                 files,
                 ref_id=ref_id,
                 role=role,
+                title=add_title,
                 source_class="corpus" if corpus else None,
                 copy=copy,
                 occurred_at=occurred_at,
@@ -427,13 +431,54 @@ def title(
     topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
 ) -> None:
     """重命名一条参考的 title(对标 Web 改名;不改 ref_id / 产物溯源)。"""
-    ws = _open_ws(topic)
-    if ref_id not in ws.list_reference_ids():
+    from kairo.refs import (
+        RefError,
+        list_all_refs,
+        resolve_open,
+        serve_root_of,
+        topic_members,
+    )
+
+    recs = []
+    topic_ws = None
+    if topic:
+        topic_ws = _open_ws(topic)
+    else:
+        try:
+            topic_ws = Workspace.open(Path.cwd())
+        except WorkspaceNotFound:
+            topic_ws = None
+    if topic_ws is not None:
+        serve = serve_root_of(topic_ws)
+        try:
+            recs = [m for m in topic_members(serve, topic_ws.root.name) if m.id == ref_id]
+        except RefError:
+            recs = []
+        if not recs and ref_id in topic_ws.list_reference_ids():
+            try:
+                topic_ws.set_title(ref_id, name)
+            except ValueError as e:
+                typer.secho(str(e), fg=typer.colors.RED, err=True)
+                raise typer.Exit(1) from None
+            typer.echo(f"titled {ref_id} → {name}")
+            return
+    else:
+        serve = _serve_root(None)
+        recs = [m for m in list_all_refs(serve) if m.id == ref_id]
+    if len(recs) > 1:
+        typer.secho(
+            f"reference 不唯一:{ref_id};请加 --topic",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(1)
+    if len(recs) != 1:
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
     try:
-        ws.set_title(ref_id, name)
-    except ValueError as e:
+        source_ws, rid = resolve_open(serve, recs[0].home, recs[0].id)
+        source_ws.set_title(rid, name)
+    except (RefError, ValueError) as e:
         typer.secho(str(e), fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from None
     typer.echo(f"titled {ref_id} → {name}")
@@ -753,17 +798,39 @@ def status(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省
         f"plan={plan['mode']}  stale={plan['pending_count']}  blocked={plan['blocked_count']}"
     )
     compose = ComposeRule(ws, None)  # 仅用于 corpus 漂移检测(不调 provider)
+    from kairo.refs import RefError, resolve_open, run_members, serve_root_of
+
+    rows: list[tuple[str, str, list]] = []
+    seen: set[str] = set()
+    for rec in run_members(ws):
+        seen.add(rec.id)
+        roles: list[str] = []
+        try:
+            src_ws, rid = resolve_open(serve_root_of(ws), rec.home, rec.id)
+            man = src_ws.read_manifest(rid)
+            roles = [f.role for f in man.forms]
+        except (RefError, OSError):
+            roles = []
+        rows.append((rec.id, rec.title, roles))
     for ref_id in ws.list_reference_ids():
+        if ref_id in seen:
+            continue
         man = ws.read_manifest(ref_id)
-        roles = ",".join(f.role for f in man.forms)
-        title_s = f" «{man.title}»" if man.title and man.title != ref_id else ""
+        rows.append((ref_id, man.title or "", [f.role for f in man.forms]))
+    for ref_id, title, roles in rows:
+        title_s = f" «{title}»" if title and title != ref_id else ""
         blocked = [
             f"{k.rsplit('/', 1)[-1]}:{_format_block_diag(v.reason, v.diagnostic)}"
             for k, v in state.products.items()
-            if k.startswith(f"references/{ref_id}/") and v.status == "blocked"
+            if (
+                k.startswith(f"references/{ref_id}/")
+                or k.endswith(f"/{ref_id}")
+                or k == ref_id
+            )
+            and v.status == "blocked"
         ]
         flag = f"  ⚠ {','.join(blocked)}" if blocked else ""
-        typer.echo(f"reference {ref_id}{title_s}: [{roles}]{flag}")
+        typer.echo(f"reference {ref_id}{title_s}: [{','.join(roles)}]{flag}")
     for target in ws.constitution.live_targets():
         ts = state.targets.get(target.path)
         if ts is None:

@@ -195,11 +195,10 @@ def test_cli_index_command_writes_meetings(tmp_path, monkeypatch):
     assert result.exit_code == 0
     index = tmp_path / "references" / "MEETINGS.md"
     assert index.is_file()
-    # #103:默认 title 为 YYYYMMDD-HH;索引应含该展示名
     ws = Workspace.open(tmp_path)
     rid = ws.list_reference_ids()[0]
     title = ws.read_manifest(rid).title
-    assert re.fullmatch(r"\d{8}-\d{2}", title)
+    assert title == "会议实录"
     assert title in index.read_text()
 
 

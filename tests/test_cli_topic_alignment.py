@@ -298,6 +298,85 @@ def test_epilog_shows_three_paths(tmp_path):
     assert "Ref" in output or "add" in output
 
 
+def test_cli_add_copy_without_title_uses_file_stem(tmp_path, monkeypatch):
+    """#352 S1: add --copy --topic --root without --title stores file stem."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    create_tag(serve, "energy")
+    runner.invoke(app, ["new", "energy", "--root", str(serve)])
+    src = tmp_path / "群控方向讨论-260908.txt"
+    src.write_text("group control")
+    result = runner.invoke(
+        app,
+        ["add", str(src), "--copy", "--topic", "energy", "--root", str(serve)],
+    )
+    assert result.exit_code == 0, result.output
+    refs = list_all_refs(serve)
+    assert len(refs) == 1
+    assert refs[0].title == "群控方向讨论-260908"
+    assert refs[0].title != "energy"
+    man = (refs[0].dir / "manifest.yaml").read_text()
+    assert "群控方向讨论-260908" in man
+    assert "title: " in man
+    import re
+
+    clock = re.search(r"title: ['\"]?\d{8}-\d{2}", man)
+    assert clock is None, man
+
+
+def test_cli_add_explicit_title_on_global_topic_member(tmp_path, monkeypatch):
+    """#352 S2: add --title HUMAN stores HUMAN."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    create_tag(serve, "energy")
+    runner.invoke(app, ["new", "energy", "--root", str(serve)])
+    src = tmp_path / "file-stem-should-not-win.txt"
+    src.write_text("x")
+    result = runner.invoke(
+        app,
+        [
+            "add",
+            str(src),
+            "--copy",
+            "--topic",
+            "energy",
+            "--root",
+            str(serve),
+            "--title",
+            "一张网 demo-260908",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    refs = list_all_refs(serve)
+    assert refs[0].title == "一张网 demo-260908"
+
+
+def test_cli_title_and_status_for_global_topic_member(tmp_path, monkeypatch):
+    """#352 S3: title renames a global-home member; status lists NEWNAME."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    create_tag(serve, "energy")
+    runner.invoke(app, ["new", "energy", "--root", str(serve)])
+    src = tmp_path / "群控方向讨论-260908.txt"
+    src.write_text("x")
+    added = runner.invoke(
+        app,
+        ["add", str(src), "--copy", "--topic", "energy", "--root", str(serve)],
+    )
+    assert added.exit_code == 0, added.output
+    rid = list_all_refs(serve)[0].id
+    monkeypatch.chdir(serve / "energy")
+    titled = runner.invoke(app, ["title", rid, "群控方向讨论"])
+    assert titled.exit_code == 0, titled.output
+    st = runner.invoke(app, ["status"])
+    assert st.exit_code == 0, st.output
+    assert rid in st.output
+    assert "群控方向讨论" in st.output
+
+
 def test_add_without_topic_still_works(tmp_path, monkeypatch):
     """Serve-root add without --topic still registers a global untagged Ref."""
     serve = tmp_path / "root"
