@@ -78,19 +78,17 @@ def test_write_creates_meetings_file(tmp_path):
     assert "会议实录" in path.read_text()
 
 
-def test_index_default_title_is_yyyymmdd_hh(tmp_path):
-    """#103:未指定 title 时索引行用默认时间格式展示名。"""
-    import re
-
+def test_index_default_title_is_file_stem(tmp_path):
+    """#352:未指定 title 时索引行用文件 stem 展示名。"""
     ws = Workspace.init(tmp_path)
     rid = ws.add([_write(tmp_path, "会议实录.txt")])
     title = ws.read_manifest(rid).title
-    assert re.fullmatch(r"\d{8}-\d{2}", title)
+    assert title == "会议实录"
 
     md = build_stream_index(ws)
 
     assert title in md
-    assert "会议实录" not in md  # 默认不再用文件 stem
+    assert "会议实录" in md
 
 
 def test_step_generates_stream_index(tmp_path):
