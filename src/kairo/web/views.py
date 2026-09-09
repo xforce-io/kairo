@@ -245,19 +245,19 @@ def _manifest_form_path(ws: Workspace, ref_id: str, key: str) -> Path:
     return _form_path(ws, man.forms[idx].location).resolve()
 
 
-def _render_doc(path: Path, *, slug: str | None = None) -> str:
+def _render_doc(path: Path, *, slug: str | None = None, ref_home: str | None = None) -> str:
     """.md → markdown;其余文本 → 保留换行的 <pre>(转义)。勿用于图片。"""
     text = path.read_text(errors="replace")
     if path.suffix.lower() in (".md", ".markdown"):
-        return render_markdown(text, slug=slug)
+        return render_markdown(text, slug=slug, ref_home=ref_home)
     return f'<pre class="doc-plain">{escape(text)}</pre>'
 
 
-def _render_transcript(path: Path, *, slug: str | None = None) -> str:
+def _render_transcript(path: Path, *, slug: str | None = None, ref_home: str | None = None) -> str:
     """将带时间戳的原始 ASR 分段展示；无时间戳时保留原有 Markdown 呈现。"""
     units = parse_units(path.read_text(errors="replace"))
     if not any(unit.start is not None for unit in units):
-        return _render_doc(path, slug=slug)
+        return _render_doc(path, slug=slug, ref_home=ref_home)
     parts = ['<div class="doc-transcript">']
     for unit in units:
         text = escape(unit.text)
@@ -271,16 +271,23 @@ def _render_transcript(path: Path, *, slug: str | None = None) -> str:
     return "".join(parts) + "</div>"
 
 
-def _form_preview_html(ws: Workspace, slug: str, ref_id: str, form: dict) -> str | None:
+def _form_preview_html(
+    ws: Workspace, slug: str, ref_id: str, form: dict, *,
+    file_src: str | None = None, ref_home: str | None = None
+) -> str | None:
     """按 form 类型生成预览 HTML:图片走 <img>,文本走 markdown/pre。"""
     path = _form_path(ws, form["location"])
     if _is_image_file(path):
-        src = f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(form['key'])}"
+        src = file_src or f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(form['key'])}"
         return (
             f'<img class="doc-img" src="{src}" alt="{escape(path.name)}">'
         )
     if _is_text_file(path):
-        return _render_transcript(path, slug=slug) if form["role"] == "transcript" else _render_doc(path, slug=slug)
+        return (
+            _render_transcript(path, slug=slug, ref_home=ref_home)
+            if form["role"] == "transcript"
+            else _render_doc(path, slug=slug, ref_home=ref_home)
+        )
     return None
 
 def _clock(sec: float) -> str:
@@ -776,6 +783,38 @@ def delete_workspace_view(
     return HTMLResponse("", headers={"HX-Redirect": "/"})
 
 
+def _topic_ref_nav(slug: str, home: str, ref_id: str) -> dict[str, str]:
+    base = f"/w/{quote(slug, safe='')}"
+    query = f"home={quote(home or 'global', safe='')}" if home != slug else ""
+    return {
+        "href": f"{base}?ref={quote(ref_id, safe='')}" + (f"&{query}" if query else ""),
+        "hx": f"{base}/ref/{quote(ref_id, safe='')}" + (f"?{query}" if query else ""),
+    }
+
+
+def _topic_ref_home(slug: str, home: str | None) -> str | None:
+    return slug if home is None else ("" if home == "global" else home or None)
+
+
+def _open_topic_ref(
+    request: Request, slug: str, ref_id: str, home: str | None
+) -> tuple[Workspace, str]:
+    """Resolve only a current member, with publication checked against its real identity."""
+    from kairo.refs import RefError, resolve_open, topic_members
+
+    _open(request, slug)
+    source = _topic_ref_home(slug, home)
+    try:
+        members = topic_members(_serve(request), slug)
+        if source is None or not any(r.home == source and r.id == ref_id for r in members):
+            raise HTTPException(status_code=404, detail="reference not found")
+        _require_public_ref(request, source, ref_id)
+        ws, _ = resolve_open(_serve(request), source, ref_id)
+        return ws, source
+    except (RefError, OSError, ValueError):
+        raise HTTPException(status_code=404, detail="reference not found") from None
+
+
 def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
     """参考分两层:stream(观测,进『参考』组)/ corpus(基线,单独置底)。成员走包含规则。"""
     streams, corpus = [], []
@@ -783,10 +822,10 @@ def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
         from kairo.refs import RefError, topic_members
 
         try:
-            from kairo.refs import ref_nav, resolve_open
+            from kairo.refs import resolve_open
 
             for rec in topic_members(serve, ws.root.name, catalog=catalog):
-                nav = ref_nav(rec.home, rec.id)
+                nav = _topic_ref_nav(ws.root.name, rec.home, rec.id)
                 try:
                     ref_ws, ref_id = resolve_open(serve, rec.home, rec.id)
                     man = ref_ws.read_manifest(ref_id)
@@ -1021,6 +1060,7 @@ def workspace_view(
     ref: str | None = None,
     task_id: str | None = None,
     target: str | None = None,
+    home: str | None = None,
 ) -> HTMLResponse:
     ws = _open(request, slug)
     from kairo.refs import include_tags_of, list_all_refs, list_tags
@@ -1034,8 +1074,8 @@ def workspace_view(
         if bounds is None:
             raise HTTPException(status_code=404)
         _, pub_targets, pub_refs = bounds
-        streams = [r for r in streams if (slug, r["id"]) in pub_refs]
-        corpus = [r for r in corpus if (slug, r["id"]) in pub_refs]
+        streams = [r for r in streams if (r["home"], r["id"]) in pub_refs]
+        corpus = [r for r in corpus if (r["home"], r["id"]) in pub_refs]
         targets = [t for t in targets if (slug, t["path"]) in pub_targets]
     stream_groups, unknown_streams = _occurred_ref_groups(streams)
     registry = request.app.state.registry
@@ -1044,11 +1084,14 @@ def workspace_view(
     if requested_task is not None and requested_task.slug != slug:
         requested_task = None
     shown_task = running or requested_task
-    ids = {r["id"] for r in streams} | {r["id"] for r in corpus}
-    select_ref = ref if ref in ids else None
+    select_home = _topic_ref_home(slug, home)
+    selected = next(
+        (r for r in streams + corpus if r["id"] == ref and r["home"] == select_home), None
+    )
+    select_ref = selected["id"] if selected else None
     select_target = None
     target_meta = None
-    reader_notice = None
+    reader_notice = "reader.ref_unavailable" if ref is not None and selected is None else None
     if ref is None:
         declared = {item["path"] for item in targets}
         choices = [target] if target is not None else sorted(
@@ -1080,6 +1123,8 @@ def workspace_view(
             "unknown_streams": unknown_streams,
             "corpus": corpus,
             "select_ref": select_ref,
+            "select_home": select_home,
+            "select_ref_hx": selected["hx"] if selected else None,
             "select_target": select_target,
             "target_meta": target_meta,
             "reader_notice": reader_notice,
@@ -1223,12 +1268,24 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
 
 
 @router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
-def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
+def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) -> HTMLResponse:
     """右栏元信息 + (OOB)中间预览主形态(默认 digest 摘要 → 否则 transcript → 首个可预览)。"""
-    ws = _open(request, slug)
-    if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
-    _require_public_ref(request, slug, ref_id)
+    _open(request, slug)
+    try:
+        ws, source = _open_topic_ref(request, slug, ref_id, home)
+    except HTTPException as exc:
+        if exc.status_code != 404 or (
+            _is_public_read(request) and request.headers.get("HX-Request") != "true"
+        ):
+            raise
+        response = _render(request, "_ref_unavailable.html", {"slug": slug})
+        if _is_public_read(request):
+            response.status_code = 404
+            response.headers["X-Kairo-Ref-Unavailable"] = "1"
+        return response
+    nav = _topic_ref_nav(slug, source, ref_id)
+    form_base = f"/w/{quote(slug, safe='')}/ref/{quote(ref_id, safe='')}"
+    form_query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
     t = _t(request)
     man = ws.read_manifest(ref_id)
     forms = _ref_forms(ws, ref_id, man, t)
@@ -1244,7 +1301,11 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     sc = ws.constitution.source_classes.get(man.source_class)
     preview_title = f"{man.title} · {primary['role_label']}" if primary else ""
     preview_html = (
-        _form_preview_html(ws, slug, ref_id, primary) if primary else None
+        _form_preview_html(
+            ws, slug, ref_id, primary,
+            ref_home=source or "global",
+            file_src=f"{form_base}/file/{quote(primary['key'], safe='')}{form_query}",
+        ) if primary else None
     )
     open_form = next((f for f in forms if f.get("openable")), None) if primary is None else None
     is_corpus = sc is not None and not sc.fold
@@ -1268,6 +1329,11 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
         {
             "slug": slug,
             "ref_id": ref_id,
+            "ref_read_only": source != slug,
+            "share_path": nav["href"],
+            "manage_href": f"/refs/{quote(ref_id, safe='')}?home={quote(source or 'global', safe='')}",
+            "form_base": form_base,
+            "form_query": form_query,
             "title": man.title,
             "label": sc.label if sc else man.source_class,
             "hint": sc.hint if sc else "",
@@ -1287,7 +1353,7 @@ def ref_view(request: Request, slug: str, ref_id: str) -> HTMLResponse:
             "occurred_iso": occ.isoformat() if occ else "",
             "occurred_src": occ_src,
             "added_display": added_dt.astimezone().strftime("%Y-%m-%d %H:%M"),
-            "is_public": _is_public_ref(request, slug, ref_id),
+            "is_public": _is_public_ref(request, source, ref_id),
         },
     )
 
@@ -1363,6 +1429,7 @@ def _form_preview_response(
     render_slug: str,
     listen_slug: str | None = None,
     home: str = "",
+    topic_home: str | None = None,
 ) -> HTMLResponse:
     """workspace 与全局 Ref 页共用的形态预览 HTML。
     
@@ -1375,7 +1442,11 @@ def _form_preview_response(
     title = f"{man.title} · {_role_label(role, t)}"
     if role == "audio" and form is not None and path.is_file():
         if listen_slug:
-            html = _listen_read_html(request, ws, listen_slug, ref_id, man, form)
+            html = _listen_read_html(
+                request, ws, listen_slug, ref_id, man, form,
+                audio_src=file_src,
+                form_url_query=f"home={quote(topic_home, safe='')}" if topic_home is not None else "",
+            )
         else:
             qhome = quote(home or "global", safe="")
             qref = quote(ref_id, safe="")
@@ -1412,9 +1483,9 @@ def _form_preview_response(
         {
             "title": title,
             "html": (
-                _render_transcript(path, slug=render_slug)
+                _render_transcript(path, slug=render_slug, ref_home=topic_home)
                 if role == "transcript"
-                else _render_doc(path, slug=render_slug)
+                else _render_doc(path, slug=render_slug, ref_home=topic_home)
             ),
             "exportable": key == "digest",
         },
@@ -1436,13 +1507,13 @@ def _form_file_response(ws: Workspace, ref_id: str, key: str) -> FileResponse:
 
 
 @router.get("/w/{slug}/ref/{ref_id}/form/{key}", response_class=HTMLResponse)
-def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLResponse:
+def ref_form_view(
+    request: Request, slug: str, ref_id: str, key: str, home: str | None = None
+) -> HTMLResponse:
     """预览某 form 正文。路径由服务端从 manifest 解析(可信),客户端只给受校验的 ref_id + key。"""
-    ws = _open(request, slug)
-    if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
-    _require_public_ref(request, slug, ref_id)
-    file_src = f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(key)}"
+    ws, source = _open_topic_ref(request, slug, ref_id, home)
+    query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
+    file_src = f"/w/{quote(slug, safe='')}/ref/{quote(ref_id, safe='')}/file/{quote(key, safe='')}{query}"
     return _form_preview_response(
         request,
         ws,
@@ -1451,17 +1522,17 @@ def ref_form_view(request: Request, slug: str, ref_id: str, key: str) -> HTMLRes
         file_src=file_src,
         render_slug=slug,
         listen_slug=slug,
+        topic_home=source or "global",
     )
 
 
 @router.get("/w/{slug}/ref/{ref_id}/file/{key}")
-def ref_form_file(request: Request, slug: str, ref_id: str, key: str) -> FileResponse:
+def ref_form_file(
+    request: Request, slug: str, ref_id: str, key: str, home: str | None = None
+) -> FileResponse:
     """直供某 form 的原始文件字节(图片预览用)。路径由服务端从 manifest 解析(可信),
     再校验落在 workspace 内,杜绝越界。"""
-    ws = _open(request, slug)
-    if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
-    _require_public_ref(request, slug, ref_id)
+    ws, _ = _open_topic_ref(request, slug, ref_id, home)
     return _form_file_response(ws, ref_id, key)
 
 

@@ -1,0 +1,6 @@
+<p class="panel-hint" role="status">{{ t('reader.ref_unavailable') }}</p>
+<main id="reader" class="pane-read" hx-swap-oob="true">
+  <div class="reader-empty-wrap"><p class="reader-empty">{{ t('reader.ref_unavailable') }}</p>
+    <a href="/topics/{{ slug | urlencode }}">{{ t('reader.return_topic') }}</a>
+  </div>
+</main>
