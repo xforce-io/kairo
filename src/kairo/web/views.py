@@ -245,19 +245,19 @@ def _manifest_form_path(ws: Workspace, ref_id: str, key: str) -> Path:
     return _form_path(ws, man.forms[idx].location).resolve()
 
 
-def _render_doc(path: Path, *, slug: str | None = None) -> str:
+def _render_doc(path: Path, *, slug: str | None = None, ref_home: str | None = None) -> str:
     """.md → markdown;其余文本 → 保留换行的 <pre>(转义)。勿用于图片。"""
     text = path.read_text(errors="replace")
     if path.suffix.lower() in (".md", ".markdown"):
-        return render_markdown(text, slug=slug)
+        return render_markdown(text, slug=slug, ref_home=ref_home)
     return f'<pre class="doc-plain">{escape(text)}</pre>'
 
 
-def _render_transcript(path: Path, *, slug: str | None = None) -> str:
+def _render_transcript(path: Path, *, slug: str | None = None, ref_home: str | None = None) -> str:
     """将带时间戳的原始 ASR 分段展示；无时间戳时保留原有 Markdown 呈现。"""
     units = parse_units(path.read_text(errors="replace"))
     if not any(unit.start is not None for unit in units):
-        return _render_doc(path, slug=slug)
+        return _render_doc(path, slug=slug, ref_home=ref_home)
     parts = ['<div class="doc-transcript">']
     for unit in units:
         text = escape(unit.text)
@@ -272,7 +272,8 @@ def _render_transcript(path: Path, *, slug: str | None = None) -> str:
 
 
 def _form_preview_html(
-    ws: Workspace, slug: str, ref_id: str, form: dict, *, file_src: str | None = None
+    ws: Workspace, slug: str, ref_id: str, form: dict, *,
+    file_src: str | None = None, ref_home: str | None = None
 ) -> str | None:
     """按 form 类型生成预览 HTML:图片走 <img>,文本走 markdown/pre。"""
     path = _form_path(ws, form["location"])
@@ -282,7 +283,11 @@ def _form_preview_html(
             f'<img class="doc-img" src="{src}" alt="{escape(path.name)}">'
         )
     if _is_text_file(path):
-        return _render_transcript(path, slug=slug) if form["role"] == "transcript" else _render_doc(path, slug=slug)
+        return (
+            _render_transcript(path, slug=slug, ref_home=ref_home)
+            if form["role"] == "transcript"
+            else _render_doc(path, slug=slug, ref_home=ref_home)
+        )
     return None
 
 def _clock(sec: float) -> str:
@@ -1265,12 +1270,19 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
 @router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
 def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) -> HTMLResponse:
     """右栏元信息 + (OOB)中间预览主形态(默认 digest 摘要 → 否则 transcript → 首个可预览)。"""
+    _open(request, slug)
     try:
         ws, source = _open_topic_ref(request, slug, ref_id, home)
     except HTTPException as exc:
-        if exc.status_code != 404 or _is_public_read(request):
+        if exc.status_code != 404 or (
+            _is_public_read(request) and request.headers.get("HX-Request") != "true"
+        ):
             raise
-        return _render(request, "_ref_unavailable.html", {"slug": slug})
+        response = _render(request, "_ref_unavailable.html", {"slug": slug})
+        if _is_public_read(request):
+            response.status_code = 404
+            response.headers["X-Kairo-Ref-Unavailable"] = "1"
+        return response
     nav = _topic_ref_nav(slug, source, ref_id)
     form_base = f"/w/{quote(slug, safe='')}/ref/{quote(ref_id, safe='')}"
     form_query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
@@ -1290,7 +1302,8 @@ def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) 
     preview_title = f"{man.title} · {primary['role_label']}" if primary else ""
     preview_html = (
         _form_preview_html(
-            ws, source, ref_id, primary,
+            ws, slug, ref_id, primary,
+            ref_home=source or "global",
             file_src=f"{form_base}/file/{quote(primary['key'], safe='')}{form_query}",
         ) if primary else None
     )
@@ -1470,9 +1483,9 @@ def _form_preview_response(
         {
             "title": title,
             "html": (
-                _render_transcript(path, slug=render_slug)
+                _render_transcript(path, slug=render_slug, ref_home=topic_home)
                 if role == "transcript"
-                else _render_doc(path, slug=render_slug)
+                else _render_doc(path, slug=render_slug, ref_home=topic_home)
             ),
             "exportable": key == "digest",
         },
@@ -1507,9 +1520,9 @@ def ref_form_view(
         ref_id,
         key,
         file_src=file_src,
-        render_slug=source,
+        render_slug=slug,
         listen_slug=slug,
-        topic_home=(source or "global") if source != slug else None,
+        topic_home=source or "global",
     )
 
 

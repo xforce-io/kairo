@@ -180,10 +180,24 @@
   document.body.addEventListener('htmx:afterSwap', function (e) {
     var target = e.detail && e.detail.target;
     kairoScrollReaderTop(target);
+    if (target && target.id === 'meta') {
+      var share = target.querySelector('[data-share-path]');
+      kairoClearNavActive();
+      if (share) document.querySelectorAll('.nav-doc.is-ref').forEach(function (link) {
+        if (link.getAttribute('href') === share.dataset.sharePath) link.classList.add('is-active');
+      });
+    }
     // 右栏滚到底部时，任务区在上方；自动带到状态，避免点击后像无响应。
     if (target && target.id === 'step-area') target.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   });
-  document.body.addEventListener('htmx:oobAfterSwap', function (e) {
+  document.body.addEventListener('htmx:beforeSwap', function (e) {
+    var detail = e.detail;
+    if (detail && detail.target && detail.target.id === 'meta' && detail.xhr.getResponseHeader('X-Kairo-Ref-Unavailable') === '1') {
+      detail.shouldSwap = true;
+      detail.isError = false;
+    }
+  });
+  document.body.addEventListener('htmx:oobAfterSwap' , function (e) {
     kairoScrollReaderTop(e.detail && e.detail.target);
   });
   // 复制路径:任意 [data-copy];捕获阶段拦截,避免冒泡触发行预览/打开

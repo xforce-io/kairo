@@ -48,7 +48,7 @@ def _is_safe_ref_id(ref_id: str) -> bool:
     return bool(re.fullmatch(r"[\w.\-]+", ref_id, flags=re.UNICODE))
 
 
-def _rewrite_digest_links(html: str, slug: str) -> str:
+def _rewrite_digest_links(html: str, slug: str, ref_home: str | None = None) -> str:
     """把相对 digest 路径改写成 /w/{slug}/ref/{id}/form/digest,并挂 hx 供阅读区加载。"""
     qslug = quote(slug, safe="")
 
@@ -56,6 +56,14 @@ def _rewrite_digest_links(html: str, slug: str) -> str:
         ref_id = unquote(m.group(1))
         if not _is_safe_ref_id(ref_id):
             return m.group(0)
+        if ref_home is not None:
+            query = f"home={quote(ref_home, safe='')}"
+            href = f"/w/{qslug}?ref={quote(ref_id, safe='')}&{query}"
+            url = f"/w/{qslug}/ref/{quote(ref_id, safe='')}?{query}"
+            return (
+                f'href="{escape(href, quote=True)}" hx-get="{url}" '
+                f'hx-target="#meta" hx-push-url="{escape(href, quote=True)}"'
+            )
         url = f"/w/{qslug}/ref/{quote(ref_id, safe='')}/form/digest"
         return (
             f'href="{url}" '
@@ -98,7 +106,9 @@ def _tag_source_index_rows(html: str) -> str:
     return _INDEX_TD_RE.sub(_td, html)
 
 
-def render_markdown(text: str, *, slug: str | None = None) -> str:
+def render_markdown(
+    text: str, *, slug: str | None = None, ref_home: str | None = None
+) -> str:
     """渲染 markdown 为 HTML。
 
     - 默认禁用原始 HTML(防注入)
@@ -129,7 +139,7 @@ def render_markdown(text: str, *, slug: str | None = None) -> str:
     html = _tag_source_index_rows(html)
     # 4) Web console:相对 digest → 预览路由
     if slug:
-        html = _rewrite_digest_links(html, slug)
+        html = _rewrite_digest_links(html, slug, ref_home)
     return html
 
 

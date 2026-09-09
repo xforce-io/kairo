@@ -160,3 +160,38 @@ def test_s2_encoded_source_and_id(tmp_path):
     assert '%20' in link[1] and '%20' in link[2]
     assert 'nav-doc is-ref is-active' in client.get(unescape(link[1])).text
     assert 'ENCODED CONTENT' in client.get(unescape(link[2])).text
+
+
+@pytest.mark.parametrize('home', ['topic', 'global', 'other'])
+def test_markdown_digest_links_keep_topic_and_source(members, home):
+    root, owners, client = members
+    ws = owners[home]
+    text = '# Linked body\n\n[self](references/shared/digest.md)\n\n[unavailable](references/hidden/digest.md)'
+    (ws.references_dir() / 'shared' / 'digest.md').write_text(text)
+    params = {'home': home}
+    for endpoint in ['/w/topic/ref/shared', '/w/topic/ref/shared/form/digest']:
+        response = client.get(endpoint, params=params)
+        link = re.search(r'<a href="([^"]+)" hx-get="([^"]+)" hx-target="#meta" hx-push-url="([^"]+)">self</a>', response.text)
+        assert link, response.text
+        address = unescape(link[1])
+        assert address == f'/w/topic?ref=shared&home={home}'
+        assert unescape(link[3]) == address
+        assert 'Linked body' in client.get(unescape(link[2])).text
+        assert 'nav-doc is-ref is-active' in client.get(address).text
+        denied = re.search(r'<a href="[^"]+" hx-get="([^"]+)"[^>]*>unavailable</a>', response.text)
+        assert 'This reference is unavailable' in client.get(unescape(denied[1])).text
+
+
+def test_public_stale_member_returns_swappable_404(members):
+    root, owners, _ = members
+    set_reference_public(root, owners['topic'], 'shared', public=True)
+    set_reference_public(root, owners['other'], 'shared', public=True)
+    client = TestClient(create_app(root, mode='public-read'))
+    assert 'other DIGEST BODY' in client.get('/w/topic/ref/shared?home=other').text
+    remove_tag(root, home='other', ref_id='shared', tag='reading')
+    response = client.get('/w/topic/ref/shared?home=other', headers={'HX-Request': 'true'})
+    assert response.status_code == 404
+    assert response.headers['X-Kairo-Ref-Unavailable'] == '1'
+    assert 'This reference is unavailable' in response.text
+    assert 'hx-swap-oob="true"' in response.text
+    assert 'DIGEST BODY' not in response.text
