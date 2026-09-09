@@ -227,20 +227,11 @@ def test_add_dir_stream_creates_multiform_ref(tmp_path):
     (d / "board.png").write_bytes(b"\x89PNG")
     (d / ".DS_Store").write_bytes(b"skip")
     (d / "readme.unknownext").write_text("skip unknown")
-    before = _dt.datetime.now()
     rid = ws.add([d])
-    after = _dt.datetime.now()
     assert rid == f"{_dt.date.today().isoformat()}-能源讨论"
     man = ws.read_manifest(rid)
     assert man.source_class == "stream"
-    # #103:默认 title 为 YYYYMMDD-HH,不再用目录名
-    import re as _re
-
-    assert _re.fullmatch(r"\d{8}-\d{2}", man.title)
-    assert man.title in {
-        before.strftime("%Y%m%d-%H"),
-        after.strftime("%Y%m%d-%H"),
-    }
+    assert man.title == "能源讨论"
     roles = sorted(f.role for f in man.forms)
     assert roles == ["attachment", "audio", "audio"]
     assert len(man.forms) == 3
@@ -302,46 +293,24 @@ def test_default_reference_title_format():
     )
 
 
-def test_add_default_title_is_yyyymmdd_hh(tmp_path):
-    """#103 S1:未指定 title 时,manifest.title 为本地时间 YYYYMMDD-HH,非文件 stem。"""
-    import re
-    from unittest.mock import patch
-
-    from kairo.workspace import default_reference_title
-
+def test_add_default_title_is_file_stem(tmp_path):
+    """#352:未指定 title 且有文件时,manifest.title 为文件 stem。"""
     ws = Workspace.init(tmp_path)
     src = tmp_path / "long-recording-name.m4a"
     src.write_bytes(b"\x00fake")
-    frozen = datetime.datetime(2026, 7, 28, 14, 35, 0)
-    with patch(
-        "kairo.workspace.default_reference_title",
-        side_effect=lambda now=None: default_reference_title(now=frozen),
-    ):
-        rid = ws.add([src])
+    rid = ws.add([src])
     man = ws.read_manifest(rid)
-    assert man.title == "20260728-14"
-    assert re.fullmatch(r"\d{8}-\d{2}", man.title)
-    assert man.title != "long-recording-name"
-    # ref_id 仍按既有规则(日期 slug),不改成 title 格式
+    assert man.title == "long-recording-name"
     assert rid == f"{datetime.date.today().isoformat()}-long-recording-name"
 
 
-def test_add_default_title_live_clock_matches_local_hour(tmp_path):
-    """#103 S1:真实时钟路径 — title 等于 add 前后本地小时之一(跨小时边界安全)。"""
-    import re
-
+def test_add_default_title_live_clock_unused_when_file_has_stem(tmp_path):
+    """#352:有文件 stem 时不用 YYYYMMDD-HH。"""
     ws = Workspace.init(tmp_path)
     src = tmp_path / "note.txt"
     src.write_text("x")
-    before = datetime.datetime.now()
     rid = ws.add([src])
-    after = datetime.datetime.now()
-    title = ws.read_manifest(rid).title
-    assert re.fullmatch(r"\d{8}-\d{2}", title)
-    assert title in {
-        before.strftime("%Y%m%d-%H"),
-        after.strftime("%Y%m%d-%H"),
-    }
+    assert ws.read_manifest(rid).title == "note"
 
 
 def test_add_explicit_title_preserved(tmp_path):
@@ -353,46 +322,27 @@ def test_add_explicit_title_preserved(tmp_path):
     assert ws.read_manifest(rid).title == "周会"
 
 
-def test_add_dir_stream_default_title_is_yyyymmdd_hh(tmp_path):
-    """#103 S1:目录 stream 默认 title 也是时间格式,非目录名。"""
-    from unittest.mock import patch
-
-    from kairo.workspace import default_reference_title
-
+def test_add_dir_stream_default_title_is_directory_name(tmp_path):
+    """#352:目录 stream 未给 title 时用目录名。"""
     ws = Workspace.init(tmp_path / "ws")
     d = tmp_path / "能源讨论"
     d.mkdir()
     (d / "a.m4a").write_bytes(b"a")
-    frozen = datetime.datetime(2026, 7, 28, 9, 1, 0)
-    with patch(
-        "kairo.workspace.default_reference_title",
-        side_effect=lambda now=None: default_reference_title(now=frozen),
-    ):
-        rid = ws.add([d])
+    rid = ws.add([d])
     man = ws.read_manifest(rid)
-    assert man.title == "20260728-09"
-    assert man.title != "能源讨论"
+    assert man.title == "能源讨论"
     # ref_id 仍含目录 slug
     assert "能源讨论" in rid
 
 
-def test_add_corpus_tree_default_title_is_yyyymmdd_hh(tmp_path):
-    """#103 S1:corpus 目录默认 title 为 YYYYMMDD-HH。"""
-    from unittest.mock import patch
-
-    from kairo.workspace import default_reference_title
-
+def test_add_corpus_tree_default_title_is_directory_name(tmp_path):
+    """#352:corpus 目录未给 title 时用目录名。"""
     ws = Workspace.init(tmp_path)
     d = tmp_path / "baseline_docs"
     d.mkdir()
     (d / "a.md").write_text("x")
-    frozen = datetime.datetime(2026, 3, 5, 23, 0, 0)
-    with patch(
-        "kairo.workspace.default_reference_title",
-        side_effect=lambda now=None: default_reference_title(now=frozen),
-    ):
-        rid = ws.add([d], source_class="corpus")
-    assert ws.read_manifest(rid).title == "20260305-23"
+    rid = ws.add([d], source_class="corpus")
+    assert ws.read_manifest(rid).title == "baseline_docs"
 
 
 def test_add_append_does_not_rewrite_title(tmp_path):
@@ -416,7 +366,7 @@ def test_set_title_after_default_add_preserves_id_and_forms(tmp_path):
     src.write_text("内容")
     rid = ws.add([src])
     before = ws.read_manifest(rid)
-    assert before.title != "260629_110439"  # 不再用 stem
+    assert before.title == "260629_110439"
     ws.set_title(rid, "数字员工架构对齐")
     man = ws.read_manifest(rid)
     assert man.title == "数字员工架构对齐"

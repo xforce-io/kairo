@@ -110,9 +110,13 @@ def default_reference_title(*, now: datetime.datetime | None = None) -> str:
     return t.strftime("%Y%m%d-%H")
 
 
-def _resolve_new_title(title: str | None) -> str:
-    """新建 manifest 时解析 title:显式传入保留,否则用默认时间格式。"""
-    return title if title is not None else default_reference_title()
+def _resolve_new_title(title: str | None, *, stem: str | None = None) -> str:
+    """新建 manifest 的 title:显式值 → 文件/目录 stem → 时钟默认。"""
+    if title is not None and str(title).strip():
+        return str(title).strip()
+    if stem and str(stem).strip():
+        return str(stem).strip()
+    return default_reference_title()
 
 
 class Workspace:
@@ -267,7 +271,8 @@ class Workspace:
         ref_dir = self.references_dir() / ref_id
         if copy:
             members = [self._copy_into(f, ref_dir) for f in members]
-        # 复用文件 add;copy 已处理。title 原样下传(None → add 内默认 YYYYMMDD-HH,#103)
+        if title is None:
+            title = d.name
         return self.add(
             members,
             ref_id=ref_id,
@@ -367,9 +372,10 @@ class Workspace:
         else:
             if not claimed:
                 ref_dir.mkdir(parents=True, exist_ok=True)
+            stem = files[0].stem if files[0].is_file() else files[0].name
             man = Manifest(
                 id=ref_id,
-                title=_resolve_new_title(title),
+                title=_resolve_new_title(title, stem=stem),
                 source_class=cls,
                 forms=new_forms,
                 occurred_at=occ.isoformat() if occ else None,
@@ -397,7 +403,7 @@ class Workspace:
             (self.references_dir() / ref_id).mkdir(parents=True, exist_ok=True)
         man = Manifest(
             id=ref_id,
-            title=_resolve_new_title(title),
+            title=_resolve_new_title(title, stem=d.name),
             source_class="corpus",
             forms=[
                 Form(

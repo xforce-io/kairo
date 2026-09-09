@@ -98,11 +98,8 @@ def test_add_ref_path_with_empty_file_field(tmp_path):
     ws = Workspace.open(tmp_path / "ws")
     ids = ws.list_reference_ids()
     assert len(ids) == 1
-    # #103:默认 title 为 YYYYMMDD-HH;且确为 path 添加(非空上传伪文件名)
-    import re
-
     title = ws.read_manifest(ids[0]).title
-    assert re.fullmatch(r"\d{8}-\d{2}", title)
+    assert title == "note"
     assert "upload" not in title.lower()
 
 
@@ -516,9 +513,7 @@ def test_add_ref_directory_creates_one_multiform(tmp_path):
     assert len(ids) == 1
     man = ws.read_manifest(ids[0])
     assert man.source_class == "stream"
-    import re
-
-    assert re.fullmatch(r"\d{8}-\d{2}", man.title)  # #103 默认时间 title
+    assert man.title == "能源讨论"
     assert len(man.forms) == 2
 
 
