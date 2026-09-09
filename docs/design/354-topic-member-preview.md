@@ -66,4 +66,4 @@ N/A。Issue、设计和本机部署/失败回退已获用户批准。
 
 ## 13 关联
 
-[#354](https://github.com/xforce-io/kairo/issues/354)、[L1](https://github.com/xforce-io/kairo/issues/354#issuecomment-5599751089)、#339、#252。PR 在发布时回链。
+[#354](https://github.com/xforce-io/kairo/issues/354)、[L1](https://github.com/xforce-io/kairo/issues/354#issuecomment-5599751089)、#339、#252。[PR #356](https://github.com/xforce-io/kairo/pull/356)。
