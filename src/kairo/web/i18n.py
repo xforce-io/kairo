@@ -51,6 +51,8 @@ CATALOG: dict[str, dict[str, str]] = {
         'status.reason_missing-source': 'Check source availability and conversion configuration before retrying.',
 
         "reader.no_conclusion": "No readable conclusion yet. Select a reference or add materials to continue.",
+        "ref.open_details": "Open reference details",
+        "reader.ref_unavailable": "This reference is unavailable. Return to the topic or select another item.",
         "reader.target_unavailable": "This conclusion is unavailable. Return to the topic or select another item.",
         "reader.return_topic": "Return to topic",
         "nav.workspaces": "Topics",
@@ -569,6 +571,8 @@ CATALOG: dict[str, dict[str, str]] = {
         'status.reason_missing-source': '请先检查源文件可用性和转换配置，再重试。',
 
         "reader.no_conclusion": "尚无可读结论。可选择参考阅读，或添加资料继续。",
+        "ref.open_details": "打开资料详情",
+        "reader.ref_unavailable": "指定材料不可用。可返回 Topic 或选择其它材料。",
         "reader.target_unavailable": "指定结论不可用。可返回主题或选择其它条目。",
         "reader.return_topic": "返回主题",
         "nav.workspaces": "主题",

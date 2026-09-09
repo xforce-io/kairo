@@ -150,7 +150,7 @@ def test_global_ref_tag_topic_project_cli_api_html(tmp_path, monkeypatch):
     topic_page = client.get("/w/energy")
     assert topic_page.status_code == 200
     assert "loose-note" in topic_page.text
-    assert 'href="/refs/loose-note"' in topic_page.text
+    assert 'href="/w/energy?ref=loose-note&amp;home=global"' in topic_page.text
     assert client.get("/refs/loose-note").status_code == 200
     assert "Data sources" not in topic_page.text
     assert home_id not in run_ref_ids(topic_a)
@@ -252,8 +252,8 @@ def test_untagged_global_ref_not_in_topic(tmp_path):
     add_global_ref(serve, [csrc], ref_id="g-corpus", source_class="corpus")
     add_tag(serve, home="", ref_id="g-corpus", tag="energy")
     page = TestClient(create_app(serve)).get("/w/t1")
-    assert 'href="/refs/orphan"' in page.text
-    assert 'href="/refs/g-corpus"' in page.text
+    assert 'href="/w/t1?ref=orphan&amp;home=global"' in page.text
+    assert 'href="/w/t1?ref=g-corpus&amp;home=global"' in page.text
     digest = timeline_digest_path(serve, "", "orphan")
     digest.parent.mkdir(parents=True, exist_ok=True)
     digest.write_text("纪要", encoding="utf-8")

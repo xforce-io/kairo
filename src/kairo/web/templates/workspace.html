@@ -74,7 +74,7 @@
       <div class="nav-section">{{ t('nav.corpus') }}</div>
       {% if corpus %}
       {% for r in corpus %}
-      <a class="nav-doc is-ref {% if select_ref == r.id %}is-active{% endif %}" href="{{ r.href }}"{% if r.hx %} hx-get="{{ r.hx }}" hx-target="#meta" hx-push-url="{{ r.href }}"{% endif %}>
+      <a class="nav-doc is-ref {% if select_ref == r.id and select_home == r.home %}is-active{% endif %}" href="{{ r.href }}"{% if r.hx %} hx-get="{{ r.hx }}" hx-target="#meta" hx-push-url="{{ r.href }}"{% endif %}>
         <span class="name">{{ r.title }}</span>
       </a>
       {% endfor %}
@@ -151,7 +151,7 @@
     {% endif %}
     {% endif %}
     <div class="panel-title" style="margin-top:24px">{{ t('panel.metadata') }}</div>
-    <div id="meta"{% if select_ref %} hx-get="/w/{{ slug | urlencode }}/ref/{{ select_ref }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}>{% if target_meta %}{% with processing_state=target_meta.processing_state, path=target_meta.path, status=target_meta.status, reason=target_meta.reason, diagnostic_summary=target_meta.diagnostic_summary, diagnostic_stage=target_meta.diagnostic_stage, diagnostic_provider=target_meta.diagnostic_provider, has_doc=target_meta.has_doc, can_regen=target_meta.can_regen, regen_confirm=target_meta.regen_confirm, include_reader=false %}{% include "_target_meta.html" %}{% endwith %}{% else %}<p class="panel-hint">{{ t('panel.hint') }}</p>{% endif %}</div>
+    <div id="meta"{% if select_ref %} hx-get="{{ select_ref_hx }}" hx-trigger="load" hx-swap="innerHTML"{% endif %}>{% if target_meta %}{% with processing_state=target_meta.processing_state, path=target_meta.path, status=target_meta.status, reason=target_meta.reason, diagnostic_summary=target_meta.diagnostic_summary, diagnostic_stage=target_meta.diagnostic_stage, diagnostic_provider=target_meta.diagnostic_provider, has_doc=target_meta.has_doc, can_regen=target_meta.can_regen, regen_confirm=target_meta.regen_confirm, include_reader=false %}{% include "_target_meta.html" %}{% endwith %}{% else %}<p class="panel-hint">{{ t('panel.hint') }}</p>{% endif %}</div>
     {% if not public_read %}
     <details class="include-rules">
       <summary>{% if include_tags %}包含规则 · {{ include_tags|length }} 个 Tag{% else %}包含规则{% endif %}</summary>

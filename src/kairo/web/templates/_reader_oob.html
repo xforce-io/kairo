@@ -9,7 +9,7 @@
       <p class="reader-card-file" title="{{ open_form.location }}">{{ open_form.filename or open_form.location }}</p>
       <p class="reader-card-kicker">{{ t('ref.empty_card_kicker') }}</p>
       <div class="reader-card-actions">
-        {% if not public_read %}
+        {% if not public_read and not ref_read_only %}
         <button type="button" class="btn-card-open"
                 hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ open_form.key }}/open"
                 hx-swap="none">{{ t('forms.open_in_system') }}</button>
@@ -23,7 +23,7 @@
   {% else %}
   <div class="reader-empty-wrap">
     <p class="reader-empty">{{ empty_hint }}</p>
-    {% if open_form and not public_read %}
+    {% if open_form and not public_read and not ref_read_only %}
     <button type="button" class="btn-card-open"
             hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id }}/form/{{ open_form.key }}/open"
             hx-swap="none">{{ t('forms.open_in_system') }}</button>
