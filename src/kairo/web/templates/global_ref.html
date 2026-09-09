@@ -63,6 +63,33 @@
 
   <section class="ref-section">
     <h2>{{ t('ref.forms') }}</h2>
+    {% if not public_read %}
+    <button type="button" class="btn btn-step btn-add-ref"
+            onclick="document.getElementById('attach-dlg').showModal()">{{ t('ref.attach_btn') }}</button>
+    <dialog id="attach-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
+      <div class="dlg-head">
+        <h3 class="dlg-title">{{ t('ref.attach_btn') }}</h3>
+        <button type="button" class="dlg-x" aria-label="close" onclick="this.closest('dialog').close()">×</button>
+      </div>
+      <form class="dlg-form" method="post" action="/refs/{{ ref_id | urlencode }}/attach">
+        <input type="hidden" name="home" value="{{ home or 'global' }}">
+        <input type="hidden" name="back" value="{{ back_url }}">
+        <div class="dlg-row">
+          <input type="text" name="path" placeholder="{{ t('ref.attach_path_placeholder') }}" required>
+          <button type="submit" class="btn btn-step dlg-go">{{ t('ref.add_path_btn') }}</button>
+        </div>
+      </form>
+      <div class="dlg-or"><span>{{ t('ref.or') }}</span></div>
+      <form class="dlg-form" method="post" action="/refs/{{ ref_id | urlencode }}/attach" enctype="multipart/form-data">
+        <input type="hidden" name="home" value="{{ home or 'global' }}">
+        <input type="hidden" name="back" value="{{ back_url }}">
+        <div class="dlg-row">
+          <input type="file" name="files" multiple required>
+          <button type="submit" class="btn btn-step dlg-go">{{ t('ref.upload_btn') }}</button>
+        </div>
+      </form>
+    </dialog>
+    {% endif %}
     {% if forms %}
     <ul class="ref-form-list">
       {% for form in forms %}
