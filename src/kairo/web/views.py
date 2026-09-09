@@ -1201,6 +1201,24 @@ def global_ref_tag_delete_view(
     return RedirectResponse(f"/refs/{quote(ref_id)}{suffix}", status_code=303)
 
 
+@router.post("/refs/{ref_id}/attach")
+def global_ref_attach_view(
+    request: Request,
+    ref_id: str,
+    path: str = Form(None),
+    files: list[UploadFile] = File(None),
+    home: str = Form(""),
+    back: str = Form(""),
+) -> RedirectResponse:
+    """Append forms on the independent Ref page; write the Ref's own home (#357)."""
+    _console_only(request)
+    ws, rid, home = _named_ref(request, ref_id, home)
+    _attach_forms(ws, rid, path, files)
+    suffix = f"?home={quote(home)}" if home else ""
+    if back.startswith("/timeline"):
+        suffix += ("&" if suffix else "?") + "back=" + quote(back, safe="/")
+    return RedirectResponse(f"/refs/{quote(rid)}{suffix}", status_code=303)
+
 
 @router.get("/w/{slug}/doc", response_class=HTMLResponse)
 def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
@@ -1621,6 +1639,29 @@ def _save_upload_to(dest_dir: Path, upload: UploadFile) -> Path:
     return dest
 
 
+def _attach_forms(
+    ws: Workspace,
+    ref_id: str,
+    path: str | None,
+    files: list[UploadFile] | None,
+) -> None:
+    """Copy path/uploads into the Ref directory and append forms. 404/400 on bad input."""
+    if ref_id not in ws.list_reference_ids():
+        raise HTTPException(status_code=404, detail="reference not found")
+    ref_dir = ws.references_dir() / ref_id
+    uploads = [f for f in (files or []) if f.filename]
+    try:
+        if uploads:
+            srcs = [_save_upload_to(ref_dir, f) for f in uploads]
+            ws.add(srcs, ref_id=ref_id)
+        elif path:
+            ws.add([Path(path)], ref_id=ref_id, copy=True)
+        else:
+            raise HTTPException(status_code=400, detail="need file or path")
+    except AddError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+
 def _save_upload(ws: Workspace, upload: UploadFile) -> Path:
     return _save_upload_to(ws.root / ".kairo" / "uploads", upload)
 
@@ -1690,22 +1731,7 @@ def attach_to_ref(
     files: list[UploadFile] = File(None),
 ) -> HTMLResponse:
     ws = _open(request, slug)
-    if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
-    ref_dir = ws.references_dir() / ref_id
-    uploads = [f for f in (files or []) if f.filename]
-    try:
-        if uploads:
-            srcs = [_save_upload_to(ref_dir, f) for f in uploads]  # 浏览器 → 必 copy 进 ref
-            ws.add(srcs, ref_id=ref_id)
-        elif path:
-            # 路径 attach:统一走 copy=True 物化进 ref 目录(自包含,#44/#64)
-            ws.add([Path(path)], ref_id=ref_id, copy=True)
-        else:
-            raise HTTPException(status_code=400, detail="need file or path")
-    except AddError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    # 复用 ref 详情渲染,刷新右栏元信息
+    _attach_forms(ws, ref_id, path, files)
     return ref_view(request, slug, ref_id)
 
 
