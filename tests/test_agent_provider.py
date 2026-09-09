@@ -336,25 +336,31 @@ def test_grok_provider_omits_model_flag_when_empty(tmp_path):
     assert "-m" not in calls[0]
 
 
-def test_grok_provider_rejects_read_dirs(tmp_path):
-    """#153:Grok 无授读,read_dirs 非空则失败,不回退倾倒。"""
+def test_grok_provider_allows_read_dirs_with_allow_read(tmp_path):
+    """#350:Grok 读 cwd 工作集;read_dirs 非空时预授 Read,不倾倒、不加 --add-dir。"""
     ref = tmp_path / "corpus"
     ref.mkdir()
-    try:
-        GrokProvider().run(
-            AgentConfig(
-                persona="P",
-                context="C",
-                artifact_dir=tmp_path,
-                model="",
-                artifact="out.md",
-                read_dirs=[ref],
-            )
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"text": "OK"}))
+
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+            read_dirs=[ref],
         )
-    except RuntimeError as exc:
-        assert "授读" in str(exc) or "read_dirs" in str(exc).lower()
-    else:
-        raise AssertionError("expected RuntimeError")
+    )
+    args = calls[0]
+    assert "--allow" in args and "Read" in args
+    assert "--always-approve" not in args
+    assert "--add-dir" not in args
+    assert str(ref) not in args
 
 
 def test_grok_provider_identity():

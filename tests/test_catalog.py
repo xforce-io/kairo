@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from kairo.catalog import CatalogItem, format_catalog, read_dirs_for, stage_files
@@ -100,23 +101,40 @@ def test_codex_does_not_make_read_dirs_writable(tmp_path):
     assert str(extra) not in args
 
 
-def test_grok_raises_on_read_dirs(tmp_path):
-    p = GrokProvider()
-    try:
-        p.run(
-            AgentConfig(
-                persona="P",
-                context="C",
-                artifact_dir=tmp_path,
-                model="",
-                artifact="digest.md",
-                read_dirs=[tmp_path],
-            )
+def test_grok_reads_cwd_workset_without_dumping_body(tmp_path):
+    work = tmp_path / "work"
+    required = work / "required"
+    required.mkdir(parents=True)
+    body = "SOURCE_FACT_TOKEN_42"
+    (required / "meeting.txt").write_text(body)
+    catalog = (
+        "材料目录\n"
+        "| 标记 | 角色 | 来源 | 路径 | 体量 |\n"
+        "| 必读 | source_text | added | required/meeting.txt | 20B |\n"
+    )
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(json.dumps({"text": f"纪要含 {body}"}))
+
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context=catalog,
+            artifact_dir=work,
+            model="",
+            artifact="digest.md",
+            read_dirs=[work],
         )
-    except RuntimeError as exc:
-        assert "授读" in str(exc) or "read_dirs" in str(exc).lower()
-    else:
-        raise AssertionError("expected RuntimeError")
+    )
+    args = calls[0]
+    assert "--allow" in args and "Read" in args
+    assert "--always-approve" not in args
+    assert "--add-dir" not in args
+    prompt = (work / "_prompt.md").read_text()
+    assert body not in prompt
+    assert (work / "digest.md").read_text() == f"纪要含 {body}"
 
 
 def test_openai_raises_on_read_dirs(tmp_path):
@@ -138,6 +156,25 @@ def test_openai_raises_on_read_dirs(tmp_path):
         assert "授读" in str(exc) or "read_dirs" in str(exc).lower()
     else:
         raise AssertionError("expected RuntimeError")
+
+
+def test_digest_rule_accepts_grok_provider(tmp_path):
+    ws = Workspace.init(tmp_path)
+    source = tmp_path / "meeting.txt"
+    source.write_text("会议正文内容ABC")
+    ref_id = ws.add([source])
+    captured = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        captured.append((Path(cwd) / "_prompt.md").read_text())
+        Path(stdout_file).write_text(json.dumps({"text": "纪要"}))
+
+    state = State()
+    DigestRule(ws, GrokProvider(runner=fake_runner)).discover(state)[0].run(state)
+    product = state.products[f"references/{ref_id}/digest.md"]
+    assert product.status != "blocked"
+    assert captured
+    assert "会议正文内容ABC" not in captured[0]
 
 
 def test_digest_fails_closed_when_provider_does_not_declare_read_support(tmp_path):

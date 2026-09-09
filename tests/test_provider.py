@@ -32,9 +32,9 @@ def test_select_provider_auto_non_material_prefers_grok_before_claude(monkeypatc
     assert isinstance(selected, GrokProvider)
 
 
-def test_select_provider_auto_materials_skip_grok_for_claude(monkeypatch):
+def test_select_provider_auto_materials_prefer_grok_over_claude(monkeypatch):
     selected = _auto(monkeypatch, available={"grok", "claude"}, require_read_dirs=True)
-    assert isinstance(selected, ClaudeCodeProvider)
+    assert isinstance(selected, GrokProvider)
 
 
 def test_select_provider_auto_materials_prefer_codex_over_grok(monkeypatch):
@@ -178,6 +178,42 @@ def test_select_provider_explicit_grok(monkeypatch):
     monkeypatch.delenv("KAIRO_STUB", raising=False)
     monkeypatch.setenv("KAIRO_PROVIDER", "grok")
     assert isinstance(select_provider(require_read_dirs=True), GrokProvider)
+
+
+def test_select_provider_explicit_grok_run_to_fold(tmp_path, monkeypatch):
+    from kairo.engine import run_workspace
+    from kairo.workspace import Workspace
+
+    class SelectedGrok(StubProvider):
+        name = "grok"
+        model = "selected-grok"
+
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "grok")
+    monkeypatch.setitem(provider._BACKENDS, "grok", SelectedGrok)
+    selected = select_provider(require_read_dirs=True)
+    assert isinstance(selected, SelectedGrok)
+
+    ws = Workspace.init(tmp_path / "ws")
+    source = tmp_path / "source.txt"
+    source.write_text("显式 grok 闭环事实")
+    ref_id = ws.add([source])
+    assert run_workspace(ws, selected)
+    state = ws.read_state()
+    digest = state.products[f"references/{ref_id}/digest.md"]
+    assert digest.produced_by == {"provider": "grok", "model": "selected-grok"}
+    assert state.targets["understanding.md"].produced_by == {
+        "provider": "grok",
+        "model": "selected-grok",
+    }
+
+
+def test_select_provider_auto_materials_prefer_grok_when_codex_missing(monkeypatch):
+    selected = _auto(monkeypatch, available={"grok"}, require_read_dirs=True)
+    assert isinstance(selected, GrokProvider)
 
 
 def test_select_provider_explicit_openai(monkeypatch):

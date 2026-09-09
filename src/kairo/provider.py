@@ -5,7 +5,8 @@ agent 靠往 `artifact_dir` 写文件来通信;外壳(rules/engine)只编排与�
 backend:StubProvider(测试)/ GrokProvider / OpenAICompatibleProvider /
 ClaudeCodeProvider / CodexProvider。
 auto 偏好:Codex → Grok → Claude → OpenAI-compatible → Stub;
-材料路径会跳过不支持授读的候选。显式 provider 不过滤,仍按契约 fail-closed。
+材料路径会跳过不支持授读的候选(openai-compatible)。Grok 读 cwd 工作集(#350)。
+显式 provider 不过滤,无能力者仍按契约 fail-closed。
 """
 
 from __future__ import annotations
@@ -687,13 +688,13 @@ class CodexProvider:
 class GrokProvider:
     """驱动 grok CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
 
-    #153:Grok 无授读;read_dirs 非空则失败,不回退倾倒全文。
+    #350:Grok 读 cwd 工作集;read_dirs 非空时预授 Read,不倾倒全文,不加 --add-dir。
     #145:prompt 走 --prompt-file,不把正文塞进 argv。
     JSON 成功字段为 text;错误为 {"type":"error","message":...},写产物前拦截(#8)。
     """
 
     name = "grok"
-    supports_read_dirs = False
+    supports_read_dirs = True
     supports_project_cli = False
 
     def __init__(self, model: str = "", runner=None) -> None:
@@ -701,7 +702,6 @@ class GrokProvider:
         self._runner = runner or _default_cli_runner
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
-        _reject_unsupported_read(config, self.name)
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
         prompt_file = config.artifact_dir / "_prompt.md"
@@ -709,6 +709,8 @@ class GrokProvider:
         stdout_file = config.artifact_dir / "_grok_stdout.json"
         # #145/#126:prompt 走 --prompt-file,不把正文塞进 argv。
         args = ["--prompt-file", "_prompt.md", "--output-format", "json"]
+        if config.read_dirs:
+            args += ["--allow", "Read"]
         if self.model.strip():
             args += ["-m", self.model]
         self._runner(
