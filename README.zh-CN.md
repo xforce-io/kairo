@@ -166,7 +166,7 @@ timeout_s = 1800
 
 `[provider.codex] model` 会传给 `codex exec -m`，钉死 kairo run/step 用的模型，不跟随 `~/.codex/config.toml` 的默认模型。未配置则不传 `-m`。`reasoning_effort` 传给 `codex exec -c model_reasoning_effort=…`。`[agent] timeout_s` 是 digest / compose / 其它 CLI agent 的默认超时（调用未显式传 timeout 时）；未配置则 600 秒。
 
-Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → auto 候选 `codex` CLI → `grok` CLI → `claude` CLI → 已配置 `[provider.openai]` → stub。需要读取材料的命令会跳过不支持授读的候选，所以有效 auto 顺序为 Codex → Claude → stub；其它命令保留完整偏好顺序。选中的 provider 失败后不跨 provider 重试。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` 强制指定（见 [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153) / [#160](https://github.com/xforce-io/kairo/issues/160)）。
+Provider 选择顺序：`KAIRO_STUB` → 显式 `KAIRO_PROVIDER` → auto 候选 `codex` CLI → `grok` CLI → `claude` CLI → 已配置 `[provider.openai]` → stub。需要读取材料的命令会跳过不支持授读的候选，所以有效 auto 顺序为 Codex → Grok → Claude → stub；其它命令保留完整偏好顺序。Grok 读取已 stage 进 cwd 的工作集（`--allow Read`），不授权 cwd 外目录。选中的 provider 失败后不跨 provider 重试。可用 `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` 强制指定（见 [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153) / [#160](https://github.com/xforce-io/kairo/issues/160) / [#350](https://github.com/xforce-io/kairo/issues/350)）。
 
 ## 技术栈
 
