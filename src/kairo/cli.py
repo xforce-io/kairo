@@ -87,8 +87,7 @@ def _open_ws(topic: str | None = None) -> Workspace:
     """打开工作区:显式 topic 或当前目录;非工作区给友好提示并非零退出(不吐 traceback)。"""
     try:
         if topic:
-            serve = _serve_root(None)
-            dest = serve / topic
+            dest = _topic_dir(topic)
             return Workspace.open(dest)
         return Workspace.open(Path.cwd())
     except WorkspaceNotFound:
@@ -98,6 +97,20 @@ def _open_ws(topic: str | None = None) -> Workspace:
             err=True,
         )
         raise typer.Exit(1) from None
+
+
+def _topic_dir(topic: str) -> Path:
+    """Resolve ``serve / slug``. cwd inside a Topic is not the serve root."""
+    env = os.environ.get("KAIRO_SERVE_ROOT")
+    if env:
+        return Path(env).expanduser().resolve() / topic
+    cwd = Path.cwd()
+    try:
+        from kairo.refs import serve_root_of
+
+        return serve_root_of(Workspace.open(cwd)) / topic
+    except WorkspaceNotFound:
+        return cwd.resolve() / topic
 
 
 def _serve_root(root: Path | None = None, *, follow: bool = True) -> Path:
@@ -450,8 +463,13 @@ def title(
             topic_ws = None
     if topic_ws is not None:
         serve = serve_root_of(topic_ws)
+        catalog = list_all_refs(serve)
         try:
-            recs = [m for m in topic_members(serve, topic_ws.root.name) if m.id == ref_id]
+            recs = [
+                m
+                for m in topic_members(serve, topic_ws.root.name, catalog=catalog)
+                if m.id == ref_id
+            ]
         except RefError:
             recs = []
         if not recs and ref_id in topic_ws.list_reference_ids():
