@@ -93,6 +93,23 @@ def _ws_with_text(tmp_path, text: str = "会议纪要材料") -> Workspace:
     return ws
 
 
+def _ws_with_two_texts(tmp_path) -> Workspace:
+    ws = Workspace.init(tmp_path / "ws2", topic="t-transport")
+    a = tmp_path / "a.txt"
+    b = tmp_path / "b.txt"
+    a.write_text("材料甲 需要 digest")
+    b.write_text("材料乙 需要 digest")
+    ws.add([a])
+    ws.add([b])
+    return ws
+
+
+_TRANSPORT_MSG = (
+    'Internal error: "reqwest error stream: error sending request for url '
+    '(https://cli-chat-proxy.grok.com/v1/responses)"'
+)
+
+
 def test_safe_provider_summary_redacts_and_truncates():
     s = safe_provider_summary("Error Authorization: Bearer SECRETTOKEN123 api_key=xyz")
     assert "SECRETTOKEN123" not in s
@@ -371,3 +388,58 @@ def test_web_shows_provider_failure_stage_for_reference_and_target(tmp_path):
     assert target.status_code == 200
     assert "stage=compose" in target.text
     assert "provider=fail-prov" in target.text
+
+
+def _digest_products(ws: Workspace) -> list[tuple[str, object]]:
+    st = ws.read_state()
+    return [
+        (key, ps)
+        for key, ps in st.products.items()
+        if key.endswith("/digest.md")
+    ]
+
+
+def test_transport_error_short_circuits_remaining_digests_on_step(tmp_path):
+    """同 Run 第一条 digest 传输失败后不再调后续 digest,两条都落 provider-failed。"""
+    ws = _ws_with_two_texts(tmp_path)
+    assert len(ws.list_reference_ids()) == 2
+    fail = FailProvider(_TRANSPORT_MSG)
+    step(ws, fail)
+    assert fail.calls == 1
+    products = _digest_products(ws)
+    assert len(products) == 2
+    for key, ps in products:
+        assert ps.status == "blocked"
+        assert ps.reason == REASON_PROVIDER_FAILED
+        assert ps.diagnostic is not None
+        assert ps.diagnostic.stage == "digest"
+        assert not (ws.root / key).exists()
+    calls = fail.calls
+    step(ws, fail)
+    assert fail.calls == calls
+
+
+def test_generic_provider_error_still_invokes_second_digest(tmp_path):
+    """非传输类失败不熔断,两条 digest 都会调用 provider。"""
+    ws = _ws_with_two_texts(tmp_path)
+    fail = FailProvider("model refused: safety")
+    step(ws, fail)
+    assert fail.calls == 2
+    products = _digest_products(ws)
+    assert len(products) == 2
+    assert all(ps.reason == REASON_PROVIDER_FAILED for _, ps in products)
+
+
+def test_run_workspace_transport_short_circuits_and_nonzero_retry_once(tmp_path):
+    """run 清掉 blocked 再 step 时,传输失败仍只调一次 provider,不切 backend。"""
+    ws = _ws_with_two_texts(tmp_path)
+    fail = FailProvider(_TRANSPORT_MSG)
+    run_workspace(ws, fail)
+    assert fail.name == "fail-prov"
+    assert fail.calls == 1
+    products = _digest_products(ws)
+    assert len(products) == 2
+    assert all(ps.status == "blocked" for _, ps in products)
+    run_workspace(ws, fail)
+    assert fail.calls == 2
+    assert fail.name == "fail-prov"

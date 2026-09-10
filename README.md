@@ -149,9 +149,11 @@ reasoning_effort = "medium"
 
 [agent]
 timeout_s = 1800
+https_proxy = "http://127.0.0.1:6478"
+no_proxy = "localhost,127.0.0.1,::1"
 ```
 
-`[provider.codex] model` is passed to `codex exec -m`, so kairo run/step uses that model instead of the default in `~/.codex/config.toml`. Omit it to leave `-m` unset. `reasoning_effort` is passed as `codex exec -c model_reasoning_effort=…`. `[agent] timeout_s` is the default CLI-agent timeout for digest / compose / other agent calls that do not pass an explicit timeout; omit it to keep 600s.
+`[provider.codex] model` is passed to `codex exec -m`, so kairo run/step uses that model instead of the default in `~/.codex/config.toml`. Omit it to leave `-m` unset. `reasoning_effort` is passed as `codex exec -c model_reasoning_effort=…`. `[agent] timeout_s` is the default CLI-agent timeout for digest / compose / other agent calls that do not pass an explicit timeout; omit it to keep 600s. `[agent] https_proxy` / `no_proxy` are injected into CLI-agent children (grok/codex/claude) even if the parent serve process has unset proxy variables.
 
 Provider selection order is: `KAIRO_STUB` → explicit `KAIRO_PROVIDER` → auto candidates `codex` CLI → `grok` CLI → `claude` CLI → configured `[provider.openai]` → stub. Material-reading commands skip candidates that cannot read the granted catalog, so their effective auto order is Codex → Grok → Claude → stub; other commands keep the full preference order. Grok reads the staged cwd workset (`--allow Read`); it does not grant extra-cwd directories. A selected provider failure does not trigger cross-provider retry. Set `KAIRO_PROVIDER=openai` / `claude-code` / `grok` / `codex` to force a backend (see [#61](https://github.com/xforce-io/kairo/issues/61) / [#153](https://github.com/xforce-io/kairo/issues/153) / [#160](https://github.com/xforce-io/kairo/issues/160) / [#350](https://github.com/xforce-io/kairo/issues/350)).
 

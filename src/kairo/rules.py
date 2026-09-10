@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import os
 import re
@@ -43,8 +44,25 @@ from kairo.catalog import (
     read_dirs_for,
     stage_files,
 )
-from kairo.provider import AgentConfig
+from kairo.provider import AgentConfig, is_transport_provider_error
 from kairo.workspace import _keyed_transform_filename
+
+# 同一次 step/run 内,传输类 digest 失败后不再调后续 provider.run。
+_digest_transport_halt: contextvars.ContextVar[BaseException | None] = (
+    contextvars.ContextVar("kairo_digest_transport_halt", default=None)
+)
+
+
+def clear_digest_transport_halt() -> None:
+    _digest_transport_halt.set(None)
+
+
+def digest_transport_halt() -> BaseException | None:
+    return _digest_transport_halt.get()
+
+
+def set_digest_transport_halt(exc: BaseException) -> None:
+    _digest_transport_halt.set(exc)
 
 # #98 安全摘要:单行长度上限
 _PROVIDER_SUMMARY_MAX = 200
@@ -647,6 +665,27 @@ class DigestRule:
                 + _OUTPUT_DISCIPLINE
             )
             context = format_catalog(catalog)
+            halt = digest_transport_halt()
+            if halt is not None:
+                skip_exc = RuntimeError(
+                    f"出网失败，本 Run 已停止后续 digest: {halt}"
+                )
+                import sys
+
+                print(
+                    f"Error: provider-failed stage=digest: {skip_exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                state.products[product_key] = ProductState(
+                    input_hash=input_hash,
+                    status="blocked",
+                    reason=REASON_PROVIDER_FAILED,
+                    diagnostic=make_provider_diagnostic(
+                        "digest", self.provider, skip_exc
+                    ),
+                )
+                return
             try:
                 content = _run_agent(
                     self.provider,
@@ -664,6 +703,8 @@ class DigestRule:
                     file=sys.stderr,
                     flush=True,
                 )
+                if is_transport_provider_error(exc):
+                    set_digest_transport_halt(exc)
                 state.products[product_key] = ProductState(
                     input_hash=input_hash,
                     status="blocked",
@@ -1106,6 +1147,31 @@ class ComposeRule:
                 if key == "understanding.md"
                 else ""
             )
+            halt = digest_transport_halt()
+            if halt is not None:
+                skip_exc = RuntimeError(
+                    f"出网失败，本 Run 已停止后续 digest: {halt}"
+                )
+                import sys
+
+                print(
+                    f"Error: provider-failed stage=compose: {skip_exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                ts = ts0 or TargetState(depends_on=list(target.depends_on))
+                ts.status = "blocked"
+                ts.reason = REASON_PROVIDER_FAILED
+                ts.diagnostic = make_provider_diagnostic(
+                    "compose", self.provider, skip_exc
+                )
+                ts.retry_reason = (
+                    REASON_EXPLICIT_RECOMPOSE
+                    if explicit_recompose
+                    else "materials-changed" if materials_changed else None
+                )
+                state.targets[key] = ts
+                return
             try:
                 content = _run_agent(
                     self.provider,

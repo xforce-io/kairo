@@ -15,6 +15,7 @@ import atexit
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -446,6 +447,94 @@ def resolve_cli_timeout(timeout: int | None) -> int:
     return DEFAULT_CLI_TIMEOUT_S
 
 
+_PROXY_ENV_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
+
+_cli_proxy_snapshot: dict[str, str] = {}
+
+# 与 Web 任务致命行同族:reqwest / cli-chat-proxy / 发请求失败 / 连接超时。
+_TRANSPORT_PROVIDER_RE = re.compile(
+    r"(?i)("
+    r"reqwest"
+    r"|request error stream"
+    r"|error sending request"
+    r"|cli-chat-proxy\.grok\.com"
+    r"|connection timed out"
+    r"|connection timeout"
+    r"|cli agent timeout"
+    r")"
+)
+
+
+def reset_cli_proxy_snapshot() -> None:
+    """测试隔离:清空启动时拍下的代理环境。"""
+    _cli_proxy_snapshot.clear()
+
+
+def snapshot_cli_proxy_env(env: dict[str, str] | None = None) -> dict[str, str]:
+    """把当前(或给定)环境里的代理变量并入快照。空值忽略。"""
+    src = os.environ if env is None else env
+    for key in _PROXY_ENV_KEYS:
+        value = src.get(key)
+        if value:
+            _cli_proxy_snapshot[key] = value
+    return dict(_cli_proxy_snapshot)
+
+
+def resolve_agent_proxy_config() -> dict[str, str]:
+    """读 `[agent] https_proxy` / `no_proxy`。未配置则空。"""
+    path = _config_path()
+    if not path.is_file():
+        return {}
+    try:
+        section = tomllib.loads(path.read_text()).get("agent") or {}
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+    out: dict[str, str] = {}
+    proxy = str(section.get("https_proxy") or section.get("http_proxy") or "").strip()
+    if proxy:
+        out["HTTPS_PROXY"] = proxy
+        out["https_proxy"] = proxy
+        out["HTTP_PROXY"] = proxy
+        out["http_proxy"] = proxy
+    no_proxy = str(section.get("no_proxy") or "").strip()
+    if no_proxy:
+        out["NO_PROXY"] = no_proxy
+        out["no_proxy"] = no_proxy
+    return out
+
+
+def resolve_cli_proxy_env() -> dict[str, str]:
+    """子进程代理 overlay:config < 启动快照 < 当前非空环境。"""
+    snapshot_cli_proxy_env()
+    out: dict[str, str] = {}
+    out.update(resolve_agent_proxy_config())
+    out.update(_cli_proxy_snapshot)
+    for key in _PROXY_ENV_KEYS:
+        value = os.environ.get(key)
+        if value:
+            out[key] = value
+    return out
+
+
+def is_transport_provider_error(exc: BaseException | str) -> bool:
+    """digest/compose 异常是否为 grok 代理传输类失败(#359)。"""
+    if not exc:
+        return False
+    return bool(_TRANSPORT_PROVIDER_RE.search(str(exc)))
+
+
+snapshot_cli_proxy_env()
+
+
 def _kill_pgid(pgid: int, *, sig: int = signal.SIGTERM) -> None:
     try:
         os.killpg(pgid, sig)
@@ -552,6 +641,8 @@ def _default_cli_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None
     out = open(stdout_file, "w") if stdout_file else None
     proc: subprocess.Popen | None = None
     pgid: int | None = None
+    child_env = os.environ.copy()
+    child_env.update(resolve_cli_proxy_env())
     try:
         proc = subprocess.Popen(
             [cmd, *args],
@@ -562,6 +653,7 @@ def _default_cli_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None
             stderr=None,
             text=True,
             start_new_session=True,
+            env=child_env,
         )
         try:
             pgid = os.getpgid(proc.pid)

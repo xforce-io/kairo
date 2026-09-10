@@ -919,6 +919,9 @@ def serve(
     if mode == "console" and host not in loopback:
         typer.secho("console 只能绑定回环地址", fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
+    from kairo.provider import snapshot_cli_proxy_env
+
+    snapshot_cli_proxy_env()
     serve_root = _serve_root(root, follow=(mode != "public-read"))
     if mode == "public-read" and not Path(serve_root).is_dir():
         typer.secho(f"数据根不是目录:{serve_root}", fg=typer.colors.RED, err=True)
