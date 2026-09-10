@@ -377,6 +377,61 @@ def test_cli_title_and_status_for_global_topic_member(tmp_path, monkeypatch):
     assert "群控方向讨论" in st.output
 
 
+def test_title_topic_from_inside_topic_dir_without_env(tmp_path, monkeypatch):
+    """#360 S1: cwd=Topic, no KAIRO_SERVE_ROOT, --topic titles a tagged global ref."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    create_tag(serve, "energy")
+    created = runner.invoke(app, ["new", "energy", "--root", str(serve)])
+    assert created.exit_code == 0, created.output
+    src = tmp_path / "数仓技术评审-260910.txt"
+    src.write_text("x")
+    added = runner.invoke(
+        app,
+        ["add", str(src), "--copy", "--topic", "energy", "--root", str(serve)],
+    )
+    assert added.exit_code == 0, added.output
+    rid = list_all_refs(serve)[0].id
+    monkeypatch.delenv("KAIRO_SERVE_ROOT", raising=False)
+    monkeypatch.chdir(serve / "energy")
+    titled = runner.invoke(app, ["title", rid, "数仓技术评审-260910", "--topic", "energy"])
+    assert titled.exit_code == 0, titled.output
+    assert "不是 kairo Topic" not in (titled.output + titled.stdout)
+    refs = list_all_refs(serve)
+    assert len(refs) == 1
+    assert refs[0].home == ""
+    assert refs[0].title == "数仓技术评审-260910"
+
+
+def test_title_topic_immediately_after_serve_root_add(tmp_path, monkeypatch):
+    """#360 S2: serve-root add --topic then title --topic hits the same global home."""
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.chdir(serve)
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    create_tag(serve, "energy")
+    created = runner.invoke(app, ["new", "energy"])
+    assert created.exit_code == 0, created.output
+    src = tmp_path / "C 端菜品制作流程讨论-260910.txt"
+    src.write_text("x")
+    added = runner.invoke(
+        app,
+        ["add", str(src), "--copy", "--topic", "energy"],
+    )
+    assert added.exit_code == 0, added.output
+    rid = list_all_refs(serve)[0].id
+    titled = runner.invoke(app, ["title", rid, "C 端菜品制作流程讨论-260910", "--topic", "energy"])
+    assert titled.exit_code == 0, titled.output
+    refs = list_all_refs(serve)
+    assert len(refs) == 1
+    assert refs[0].id == rid
+    assert refs[0].home == ""
+    assert refs[0].title == "C 端菜品制作流程讨论-260910"
+    topic_dir = serve / "energy" / "references" / rid
+    assert not topic_dir.exists()
+
+
 def test_add_without_topic_still_works(tmp_path, monkeypatch):
     """Serve-root add without --topic still registers a global untagged Ref."""
     serve = tmp_path / "root"
