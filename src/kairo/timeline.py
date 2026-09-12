@@ -81,6 +81,7 @@ class TimelineItem:
     occurred_source: str
     added_at: dt.datetime
     tags: tuple[str, ...] = ()
+    brief: str = ""  # #362;仅 Ref 有,缺失即空串
     kind: str = "ref"
     href: str = ""
     task_id: str = ""
@@ -127,6 +128,7 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
                 occurred_source=src,
                 added_at=added,
                 tags=tuple(rec.tags),
+                brief=(man.brief or "").strip(),
                 kind="ref",
                 href=f"/refs/{ref_id}?home={home}",
             )

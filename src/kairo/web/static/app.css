@@ -1101,6 +1101,13 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .tl-title { font-family: var(--serif); font-size: 16.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-ws { font-size: 12.5px; color: var(--pine-deep); background: var(--pine-soft); border: 1px solid #cfe0d6; border-radius: 999px; padding: 2px 8px; white-space: nowrap; }
 .tl-meta { font-family: var(--mono); font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+/* #362 brief 独占第二行并跨到行尾:标题与 brief 不再争同一格,两边都不截断。 */
+.tl-row.has-brief { grid-template-areas: "kind title tags meta" "kind brief brief brief"; row-gap: 2px; }
+.tl-row.has-brief .tl-kind { grid-area: kind; align-self: baseline; }
+.tl-row.has-brief .tl-title { grid-area: title; }
+.tl-row.has-brief .tl-ref-tags { grid-area: tags; }
+.tl-row.has-brief .tl-meta { grid-area: meta; }
+.tl-brief { grid-area: brief; min-width: 0; font-size: 13px; line-height: 1.45; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-empty { padding: 48px 8px; color: var(--muted); font-style: italic; }
 .meta-time { margin: 8px 0 4px; padding: 10px 12px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
 .meta-time-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
@@ -1115,7 +1122,9 @@ header.top .root-gl.on { color: var(--pine-deep); }
   .cal-weekdays span { letter-spacing: 0; font-size: 10px; }
   .timeline.cal-page { padding: 16px 16px 56px; }
   .tl-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .tl-row.has-brief { grid-template-areas: none; }
   .tl-title { white-space: normal; }
+  .tl-brief { white-space: normal; }
 }
 @media (max-width: 720px) {
   .page-toolbar, .dash-head { padding: 16px 16px 0; }

@@ -255,6 +255,10 @@ class Manifest(BaseModel):
     archive: ArchiveBinding | None = None
     occurred_at: str | None = None
     added_at: str | None = None
+    # #362:一句话概述,由该 Ref 的 digest 派生;brief_hash 记住产出时的 digest 内容 hash,
+    # 用于判断 brief 是否已过期。旧 manifest 无这两键 → 无 brief。
+    brief: str | None = None
+    brief_hash: str | None = None
 
     @field_validator("occurred_at", "added_at", mode="before")
     @classmethod

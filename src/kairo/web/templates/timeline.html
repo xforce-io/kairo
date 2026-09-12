@@ -3,10 +3,12 @@
 {% block body %}
 {% macro home_label(it) %}{% if it.workspace == 'global' %}{{ t('tl.home_global') }}{% else %}{{ it.topic }}{% endif %}{% endmacro %}
 {% macro row_href(it) %}{% if it.kind == 'project' or it.kind == 'artifact' %}{{ it.href }}{% else %}/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}{% endif %}{% endmacro %}
-{% macro tl_row(it, extra_meta='') %}
-      <a class="tl-row tl-kind-{{ it.kind|default('ref') }}" href="{{ row_href(it) }}">
+{% macro tl_row(it, extra_meta='', show_brief=false) %}
+      {% set brief = it.brief if show_brief else '' %}
+      <a class="tl-row tl-kind-{{ it.kind|default('ref') }}{% if brief %} has-brief{% endif %}" href="{{ row_href(it) }}">
         <span class="tl-kind">{{ t('tl.kind_' ~ (it.kind|default('ref'))) }}</span>
         <span class="tl-title">{{ it.title }}</span>
+        {% if brief %}<span class="tl-brief">{{ brief }}</span>{% endif %}
         {% if it.kind|default('ref') == 'ref' %}
         <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
         {% endif %}
@@ -20,7 +22,7 @@
       <details class="tl-fold">
         <summary>{{ t('tl.earlier').format(n=it.folded|length) }}</summary>
         {% for old in it.folded %}
-        {{ tl_row(old, extra_meta=(recent_meta(old) if mode == 'recent' else (day_meta(old) if mode == 'day' else ''))) }}
+        {{ tl_row(old, extra_meta=(recent_meta(old) if mode == 'recent' else (day_meta(old) if mode == 'day' else '')), show_brief=(mode == 'recent')) }}
         {% endfor %}
       </details>
       {% endif %}
@@ -57,7 +59,7 @@
     <section class="tl-day">
       <div class="tl-day-head"><h2>{% if g.key %}{{ g.key }}{% else %}{{ t('tl.src_unknown') }}{% endif %}</h2><span class="count">{{ g.entries|length }}</span></div>
       {% for it in g.entries %}
-      {{ tl_row(it, extra_meta=recent_meta(it)) }}
+      {{ tl_row(it, extra_meta=recent_meta(it), show_brief=true) }}
       {{ folded_block(it, 'recent') }}
       {% endfor %}
     </section>
