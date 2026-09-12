@@ -1,0 +1,60 @@
+/* Timeline list brief: delta styles for the mockups only. Merge into app.css when implemented. */
+
+/* ---- Variant A: brief inline, sharing the middle column with the title ---- */
+/* Rejected: at 1010px the brief only gets 300-430px, so both the title and the
+   brief fight over the same track and most briefs truncate. */
+.brief-inline .tl-main { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.brief-inline .tl-main > .tl-title { flex: 0 1 auto; max-width: 62%; }
+.brief-inline .tl-brief {
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.brief-inline .tl-brief::before { content: "· "; color: var(--line-2); }
+
+/* ---- Variant B: brief on its own second line, spanning the full row ---- */
+/* The brief no longer competes with the title, tags or meta: it gets the whole
+   row width, so neither side truncates. Cost is row height. */
+.brief-2line .tl-row {
+  grid-template-areas:
+    "kind title tags meta"
+    "kind brief brief brief";
+  row-gap: 2px;
+}
+.brief-2line .tl-kind { grid-area: kind; align-self: baseline; }
+.brief-2line .tl-title { grid-area: title; }
+.brief-2line .tl-ref-tags { grid-area: tags; }
+.brief-2line .tl-meta { grid-area: meta; }
+.brief-2line .tl-brief {
+  grid-area: brief;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  /* Narrow screens already stack the row; let the brief wrap there. */
+  .brief-inline .tl-main { flex-direction: column; gap: 2px; }
+  .brief-inline .tl-brief::before { content: none; }
+  .brief-2line .tl-row { grid-template-areas: none; }
+  .tl-brief { white-space: normal; }
+}
+
+/* Mockup scaffolding only, never shipped. */
+.mock-switch { max-width: 900px; margin: 20px auto 0; display: flex; gap: 8px; align-items: baseline; font-size: 13px; color: var(--ink-soft); }
+.mock-switch a { font-family: var(--mono); font-size: 12.5px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; color: var(--ink-soft); }
+.mock-switch a.on { background: var(--pine-deep); border-color: var(--pine-deep); color: #fff; }
+.mock-note { max-width: 900px; margin: 8px auto 64px; padding: 18px 20px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+.mock-note h2 { margin: 0 0 10px; font-family: var(--serif); font-size: 17px; }
+.mock-note ul { margin: 0; padding-left: 20px; }
+.mock-note li { margin: 6px 0; font-size: 13.5px; line-height: 1.6; color: var(--ink-soft); }
+.mock-note code { font-family: var(--mono); font-size: 12.5px; }
