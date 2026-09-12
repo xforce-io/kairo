@@ -174,7 +174,9 @@ class GlossaryEntry(BaseModel):
 class Constitution(BaseModel):
     topic: str = "main"
     kind: str | None = None  # deprecated; use preset
-    preset: str = "standard"  # standard | journal; runtime reads digest.enabled / targets / review_input
+    # standard | journal; filled at create time. Must default to None so legacy yaml
+    # without the key still resolves via `kind` / topic alias instead of being forced standard.
+    preset: str | None = None
     pipeline: Pipeline = Field(default_factory=Pipeline)
     roles_by_ext: dict[str, str] = Field(default_factory=_default_roles_by_ext)
     default_role: str = "transcript"  # 无匹配扩展名时兜底

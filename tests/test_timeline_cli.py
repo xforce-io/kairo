@@ -3,6 +3,7 @@ import json
 from typer.testing import CliRunner
 
 from kairo.cli import app
+from kairo.refs import create_tag, set_include_tags
 from kairo.workspace import Workspace
 
 runner = CliRunner()
@@ -13,11 +14,15 @@ def test_cli_timeline_and_occurred(tmp_path, monkeypatch):
     wsdir = root / "alpha"
     wsdir.mkdir(parents=True)
     monkeypatch.chdir(wsdir)
+    # A Topic's name Tag must exist in the vocabulary before `kairo add` stamps it (#350).
+    create_tag(root, "A")
     Workspace.init(wsdir, topic="A")
+    set_include_tags(root, "alpha", ["A"])
     src = tmp_path / "m.txt"
     src.write_text("hi")
     add = runner.invoke(app, ["add", str(src), "--id", "2026-08-25-weekly", "--occurred", "2026-08-24"])
-    assert add.exit_code == 0
+    assert add.exit_code == 0, add.output + (add.stderr or "")
+    assert "tagged with a" in add.output.lower()
     out = runner.invoke(app, ["timeline", str(root), "--day", "2026-08-24"]).output
     assert "2026-08-25-weekly" in out
     js = json.loads(runner.invoke(app, ["timeline", str(root), "--json"]).output)

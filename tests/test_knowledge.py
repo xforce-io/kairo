@@ -448,7 +448,7 @@ def test_knowledge_review_queue_omits_stale_candidates(tmp_path):
     )
     queue = page.text.split("Knowledge candidates to review", 1)[1]
     assert "LiveTerm" in queue
-    assert "Accept to this workspace" in queue
+    assert "Accept to this Topic" in queue  # #264 workspace→Topic
     assert "ExpiredTerm" not in queue
     assert "Completed: stale" not in page.text
     assert "Knowledge candidates to review · 1" in page.text
