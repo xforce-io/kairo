@@ -1482,6 +1482,16 @@ def test_ingest_resighting_of_confirmed_term_attaches_provenance_instead_of_requ
     )
     assert len(next(e for e in load_global(root)[0].entries if e.id == public.id).sources) == 1
 
+    # A later digest re-sighting the already-merged candidate still feeds provenance.
+    b = _write_digest(ws, "r2", "胡博拍板。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=b, source_text="胡博拍板。",
+        drafts=[{"title": "胡博", "quote": "胡博拍板"}], matcher=matcher, serve_root=root,
+    )
+    g_entry = next(e for e in load_global(root)[0].entries if e.id == public.id)
+    assert [s.path for s in g_entry.sources] == [a, b]
+    assert load_review(ws.root).candidates and all(c.title != "胡博" or c.status == "merged" for c in load_review(ws.root).candidates)
+
 
 def test_ingest_closes_open_candidate_once_its_term_is_confirmed(tmp_path):
     root = tmp_path / "root"

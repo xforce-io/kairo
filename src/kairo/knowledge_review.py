@@ -652,11 +652,18 @@ def ingest_candidates(
         if tags:
             updates["tags"] = tags
         current = current.model_copy(update=updates)
-        owner = _confirmed_owner(matcher, current.title, current.aliases) if current.status not in _LOCKED else ""
+        owner = (
+            _confirmed_owner(matcher, current.title, current.aliases)
+            if current.status not in _LOCKED or current.status == "merged"
+            else ""
+        )
         if owner:
+            # Re-sighting of a confirmed term keeps feeding provenance to the entry,
+            # whether the candidate was just closed or was merged in an earlier run.
             if serve_root is not None:
                 _attach_provenance(serve_root, workspace_root, owner, src)
-            current = current.model_copy(update={"status": "merged", "merged_into": owner, "suggestion": {}})
+            if current.status != "merged":
+                current = current.model_copy(update={"status": "merged", "merged_into": owner, "suggestion": {}})
         elif current.status not in _LOCKED:
             current = apply_review_threshold(current, workspace_root)
             if matcher is not None:
