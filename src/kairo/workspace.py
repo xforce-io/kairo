@@ -29,6 +29,10 @@ class AddError(Exception):
     """add 的输入不合法(如目录摄入未加 --corpus);CLI 转友好提示。"""
 
 
+# resolved constitution.yaml path -> ((mtime_ns, size), parsed yaml document)
+_CONSTITUTION_CACHE: dict[str, tuple[tuple[int, int], dict]] = {}
+
+
 class WorkspaceNotFound(Exception):
     """当前目录不是 kairo 工作区(无 .kairo/state.json)。"""
 
@@ -170,8 +174,22 @@ class Workspace:
 
     @property
     def constitution(self) -> Constitution:
-        data = yaml.safe_load((self.root / "constitution.yaml").read_text())
-        return Constitution.model_validate(data)
+        """Parse constitution.yaml, reusing the parsed document while the file is unchanged.
+
+        Rule discovery reads this property hundreds of times per request; YAML parsing
+        dominated console GET latency. A fresh model is validated on every call so
+        callers may mutate the returned instance freely.
+        """
+        path = self.root / "constitution.yaml"
+        st = path.stat()
+        key = str(path.resolve())
+        stamp = (st.st_mtime_ns, st.st_size)
+        cached = _CONSTITUTION_CACHE.get(key)
+        if cached is None or cached[0] != stamp:
+            data = yaml.safe_load(path.read_text())
+            cached = (stamp, data)
+            _CONSTITUTION_CACHE[key] = cached
+        return Constitution.model_validate(cached[1])
 
     @property
     def state_path(self) -> Path:
