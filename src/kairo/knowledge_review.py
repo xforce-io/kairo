@@ -486,6 +486,49 @@ def todo_count(workspace_root: Path) -> int:
     return sum(c.status in OPEN for c in review.candidates) + len(review.extract_errors)
 
 
+def _confirmed_owner(matcher: KnowledgeMatcher | None, title: str, aliases: list[KnowledgeAlias]) -> str:
+    """Entry id when the draft is a pure re-sighting of one confirmed entry, else "".
+
+    A draft that proposes a term the entry does not know yet (e.g. an ASR mishearing
+    as alias) is *not* a duplicate: it is an alias proposal and stays reviewable.
+    """
+    if matcher is None:
+        return ""
+    verdicts = matcher.suggest([title, *(alias.value for alias in aliases)])
+    owners = set(verdicts.values())
+    if len(owners) != 1:
+        return ""
+    verdict = owners.pop()
+    return verdict.removeprefix("merge:") if verdict.startswith("merge:") else ""
+
+
+def _attach_provenance(serve_root: Path, workspace_root: Path, entry_id: str, source: KnowledgeSource) -> None:
+    """Append one source to a confirmed entry wherever it is authoritative (workspace, then global)."""
+    document, _ = load_workspace(workspace_root)
+    for entry in document.entries:
+        if entry.id == entry_id:
+            sources = _append_source(entry.sources, source)
+            if len(sources) != len(entry.sources):
+                document.entries = [
+                    entry.model_copy(update={"sources": sources, "updated_at": _now()}) if item.id == entry_id else item
+                    for item in document.entries
+                ]
+                save_workspace(workspace_root, document)
+            return
+    document, _ = load_global(serve_root)
+    for entry in document.entries:
+        if entry.id == entry_id:
+            sources = _append_source(entry.sources, source)
+            if len(sources) != len(entry.sources):
+                document.entries = [
+                    entry.model_copy(update={"sources": sources, "updated_at": _now()}) if item.id == entry_id else item
+                    for item in document.entries
+                ]
+                save_global(serve_root, document)
+            return
+    raise KnowledgeError(f"confirmed entry not found for provenance: {entry_id}")
+
+
 def ingest_candidates(
     workspace_root: Path,
     *,
@@ -494,6 +537,7 @@ def ingest_candidates(
     source_text: str,
     drafts: list[dict],
     matcher: KnowledgeMatcher | None = None,
+    serve_root: Path | None = None,
 ) -> KnowledgeReview:
     if source_kind not in {"digest", "compose"}:
         raise KnowledgeError(f"未知候选来源:{source_kind}")
@@ -537,6 +581,31 @@ def ingest_candidates(
             None,
         )
         if index is None:
+            owner = _confirmed_owner(matcher, title, aliases)
+            if owner:
+                # Pure re-sighting of confirmed knowledge: record provenance on the
+                # entry instead of re-queuing the same term for review.
+                if serve_root is not None:
+                    _attach_provenance(serve_root, workspace_root, owner, src)
+                review.candidates.append(
+                    KnowledgeCandidate(
+                        id="kc-" + fp[:20],
+                        title=title,
+                        aliases=aliases,
+                        description=description,
+                        tags=tags,
+                        source_kind=source_kind,
+                        path=path,
+                        quote=quote,
+                        content_hash=source_hash,
+                        fingerprint=fp,
+                        sources=[src],
+                        status="merged",
+                        merged_into=owner,
+                        updated_at=_now(),
+                    )
+                )
+                continue
             if added_new >= MAX_DRAFTS_PER_SOURCE:
                 continue
             added_new += 1
@@ -583,7 +652,12 @@ def ingest_candidates(
         if tags:
             updates["tags"] = tags
         current = current.model_copy(update=updates)
-        if current.status not in _LOCKED:
+        owner = _confirmed_owner(matcher, current.title, current.aliases) if current.status not in _LOCKED else ""
+        if owner:
+            if serve_root is not None:
+                _attach_provenance(serve_root, workspace_root, owner, src)
+            current = current.model_copy(update={"status": "merged", "merged_into": owner, "suggestion": {}})
+        elif current.status not in _LOCKED:
             current = apply_review_threshold(current, workspace_root)
             if matcher is not None:
                 current = current.model_copy(
@@ -694,7 +768,7 @@ def extract_after_success(
     try:
         matcher = KnowledgeMatcher(effective_entries(serve_root, workspace_root))
         drafts = (extractor or provider_extractor(provider))(text, list(matcher.entries), path) if (extractor or provider) else []
-        ingest_candidates(workspace_root, source_kind=source_kind, path=path, source_text=text, drafts=drafts, matcher=matcher)
+        ingest_candidates(workspace_root, source_kind=source_kind, path=path, source_text=text, drafts=drafts, matcher=matcher, serve_root=serve_root)
     except Exception as exc:
         # 提取永远是旁路：即使审核 YAML 损坏或写诊断也失败，也不能反噬 digest/compose。
         try:

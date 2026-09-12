@@ -209,13 +209,23 @@ def _render_context(matches: tuple[KnowledgeMatch, ...]) -> str:
 
 
 def _context_header() -> str:
-    return "\n\n[领域知识上下文]\n以下条目仅作参考，不能替代本次材料证据；冲突时保留材料说法并标明待核。\n"
+    return (
+        "\n\n[领域知识上下文]\n"
+        "以下是人工确认的专名(人/组织/系统/项目)。材料中出现其命中词或别名时,"
+        "一律按条目标题书写,视为已核实,不必再标 ⚠️ 待核;"
+        "条目说明仅作背景,不能替代本次材料证据;若材料与说明冲突,保留材料说法并标明待核。\n"
+    )
 
 
 def _context_line(hit: KnowledgeMatch) -> str:
     entry = hit.entry
-    source = "、".join(item.path for item in entry.sources) if entry.sources else "无出处"
-    return f"- {entry.title}（{entry.scope}；命中：{hit.term}；出处：{source}）：{entry.description}".rstrip("：") + "\n"
+    parts = [f"命中：{hit.term}"]
+    aliases = [alias.value for alias in entry.aliases if alias.value != hit.term]
+    if aliases:
+        parts.append("别名：" + "、".join(aliases))
+    if entry.description:
+        parts.append(entry.description)
+    return f"- {entry.title}（{'；'.join(parts)}）\n"
 
 
 def matcher_for(entries: list[KnowledgeEntry]) -> KnowledgeMatcher:
