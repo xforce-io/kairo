@@ -155,6 +155,28 @@ def test_brief_failure_leaves_manifest_and_digest_intact(tmp_path, capsys):
     assert digest.read_text() == before
 
 
+def test_rewritten_digest_drops_stale_brief_when_regen_fails(tmp_path, capsys):
+    _, ws = _serve_root(tmp_path)
+    digest = _ref_with_digest(ws, tmp_path, "r1")
+    generate_brief(ws, "r1", generator=lambda body: "BRIEF: 旧结论")
+    assert ws.read_manifest("r1").brief == "旧结论"
+
+    digest.write_text("# 纪要\n\n结论变了。\n", encoding="utf-8")  # digest 被重算
+    brief_after_digest(ws, "r1", provider=None)  # 无 provider → 重算失败
+    assert ws.read_manifest("r1").brief is None  # 不留与新 digest 不符的旧概述
+    assert "brief skipped" in capsys.readouterr().err
+
+
+def test_unchanged_digest_keeps_brief_without_calling_provider(tmp_path, capsys):
+    _, ws = _serve_root(tmp_path)
+    _ref_with_digest(ws, tmp_path, "r1")
+    generate_brief(ws, "r1", generator=lambda body: "BRIEF: 仍然成立")
+
+    brief_after_digest(ws, "r1", provider=None)  # 若走到产出必失败并告警
+    assert ws.read_manifest("r1").brief == "仍然成立"
+    assert capsys.readouterr().err == ""
+
+
 def test_manifest_without_brief_key_is_supported(tmp_path):
     _, ws = _serve_root(tmp_path)
     _ref_with_digest(ws, tmp_path, "r1")

@@ -87,6 +87,8 @@ flowchart LR
 
 超长纠正：只对「超长」这一种违约做**一次**确定性纠正——把实测字数与上限回给模型并要求删掉次要议题重写；第二次仍超长即失败。空输出与缺锚点不重试。放宽上限不可取：第二行会变成被截断的长句，正是本期要解决的问题。
 
+digest 被重算时：旁路先按 `brief_hash` 判断 digest 内容是否真的变了。没变就沿用现有 brief、不再调用 provider；变了就**先作废旧 brief 再重算**，这样重算失败时该行只显示标题，不会留下与新 digest 不符的旧概述。
+
 失败路径：provider 失败、纠正后仍不合契约 → 抛 `BriefError`，不写 manifest，stderr 留可归属诊断；digest 正文不受影响，该行列表只显示标题。命令层逐条记账，失败条数 >0 → 退出码 1，已成功的照常写入。
 
 ## 7. 模块
@@ -144,6 +146,7 @@ manifest 新增两个可选键，旧 manifest 无键即无 brief，无需回填�
 | Unit | 锚点抽取 | 旁白与 `BRIEF:` 同行、锚点独立成行、全角冒号三种形态都取出同一句；多锚点取最后一个 |
 | Unit | 超长纠正 | 首次超长 + 二次合规 → 写入且只调用 2 次；二次仍超长 → 失败且调用停在 2 次；缺锚点不触发重试（调用 1 次） |
 | Unit | Timeline 扫描 | `TimelineItem.brief` 取自 manifest；无键时为空串 |
+| Unit | digest 重算 | digest 改写且重算失败 → 旧 brief 被作废（manifest 无 brief）；digest 未变 → 沿用且不调用 provider |
 
 ### 验收结果
 

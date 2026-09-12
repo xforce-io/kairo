@@ -135,11 +135,27 @@ def generate_brief(
     return one
 
 
+def clear_brief(ws, ref_id: str) -> None:
+    """作废已存的 brief。宁可不展示,也不把过期的一句话当成当前 digest 的概述。"""
+    man = ws.read_manifest(ref_id)
+    if man.brief is None and man.brief_hash is None:
+        return
+    man.brief = None
+    man.brief_hash = None
+    ws.write_manifest(ref_id, man)
+
+
 def brief_after_digest(ws, ref_id: str, *, provider=None) -> None:
     """digest 成功后的旁路。永不反噬 digest:失败只留 stderr 诊断。"""
     import sys
 
     try:
+        path = digest_path(ws, ref_id)
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        if not brief_stale(ws.read_manifest(ref_id), text):
+            return  # digest 内容没变,沿用现有 brief,不再调用 provider
+        # 先作废再重算:重算失败时该行只显示标题,不会留下与新 digest 不符的旧概述。
+        clear_brief(ws, ref_id)
         generate_brief(ws, ref_id, provider=provider)
     except Exception as exc:
         print(f"Warning: brief skipped ref={ref_id}: {exc}", file=sys.stderr, flush=True)
