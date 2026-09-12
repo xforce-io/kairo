@@ -7,28 +7,36 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Callable
 from pathlib import Path
 
 MAX_BRIEF_CHARS = 50
+
+# provider 常把过程旁白与正文粘在同一行(digest.md 的 H1 也有同样毛病),所以锚点不限行首;
+# 规则唯一:取最后一个 `BRIEF:` 之后、到行尾为止的内容。
+BRIEF_ANCHOR = re.compile(r"BRIEF[:：][ \t]*(\S[^\n]*)")
 
 _BRIEF_PERSONA = (
     "把这份纪要压成一句话,让人在时间轴列表上不点开就知道这条资料讲了什么。"
     "写实质内容:结论、争议、未决点或关键数字;不要写「本文讨论了…」这类空话。"
     "结论放前半句。\n"
     f"硬约束(违反即作废):总长不超过 {MAX_BRIEF_CHARS} 个字符,标点计入;"
-    "只有一句,不换行,不分点,不加标题/引号/markdown 标记;不做解释、不加前后缀。\n"
+    "只有一句,不分点,不加标题/引号/markdown 标记。\n"
     f"{MAX_BRIEF_CHARS} 字装不下全部议题时,只留最重要的一到两点,其余舍弃,"
     "不要靠压缩句子塞进更多信息。\n"
-    "示例(合规):扫门分流已跑通,设备类型解析旧 bug 未定改期。\n"
-    "示例(违规,过长且分点):本次会议讨论了扫门分流的整体进展、标注页的产品形态、"
-    "日志系统的拆分计划以及 IPD 中台接口的排期分歧,其中…\n"
-    "只输出这一句话本身。"
+    "输出格式(唯一被接受的形式):最后一行必须是\n"
+    "BRIEF: <这一句话>\n"
+    "该行之前不要有正文;若你有过程说明,也必须让 BRIEF: 行是最后一行。\n"
+    "`BRIEF:` 之后只放纪要内容本身:不要写你如何核对字数、如何遵守约束,"
+    "也不要任何关于本次作答的自述。\n"
+    "合规示例:\nBRIEF: 扫门分流已跑通,设备类型解析旧 bug 未定改期。"
 )
 
 _RETRY_HINT = (
-    "上一版是 {n} 个字符,超过上限 {limit}。删掉次要议题重写,不要改写成更密的长句。"
-    f"只输出一句、不超过 {MAX_BRIEF_CHARS} 个字符的正文。"
+    "上一版 BRIEF 是 {n} 个字符,超过上限 {limit}。删掉次要议题重写,不要改写成更密的长句。"
+    f"仍然只用最后一行 BRIEF: 开头输出,不超过 {MAX_BRIEF_CHARS} 个字符;"
+    "该行只放纪要内容,不要提字数、不要写核对过程。"
 )
 
 
@@ -52,14 +60,18 @@ def brief_stale(man, digest_text: str) -> bool:
 
 
 def normalize_brief(text: str) -> str:
-    """规范成单行:非空、只有一行。长度不在此判,便于对超长做一次纠正重试。"""
+    """按锚点取正文:最后一个 `BRIEF: …` 行。
+
+    provider 会把过程旁白粘在输出里(现网实测,digest.md 同样如此),所以正文位置不可靠,
+    只认这一条锚点规则;没有锚点即失败,不去猜哪一段是正文。长度不在此判,便于纠正重试。
+    """
     raw = (text or "").strip()
     if not raw:
         raise BriefError("brief is empty")
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    if len(lines) != 1:
-        raise BriefError(f"brief must be a single line, got {len(lines)}")
-    return lines[0]
+    found = BRIEF_ANCHOR.findall(raw)
+    if not found:
+        raise BriefError("brief anchor missing: no `BRIEF:` line")
+    return found[-1].strip()
 
 
 def check_brief(text: str) -> str:

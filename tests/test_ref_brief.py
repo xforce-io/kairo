@@ -39,14 +39,26 @@ def _serve_root(tmp_path):
 # ---- unit:契约校验与过期判定 ----
 
 
-def test_check_brief_rejects_empty_multiline_and_overlong():
+def test_check_brief_rejects_empty_missing_anchor_and_overlong():
     with pytest.raises(BriefError):
         check_brief("   ")
     with pytest.raises(BriefError):
-        check_brief("第一句。\n第二句。")
+        check_brief("没有锚点的一句话。")  # 不猜哪段是正文
     with pytest.raises(BriefError):
-        check_brief("很长" * 26)
-    assert check_brief("  扫门分流已跑通，设备类型解析旧 bug 未定改期  ") == "扫门分流已跑通，设备类型解析旧 bug 未定改期"
+        check_brief("BRIEF: " + "很长" * 26)
+    assert check_brief("BRIEF: 扫门分流已跑通，设备类型解析旧 bug 未定改期") == "扫门分流已跑通，设备类型解析旧 bug 未定改期"
+
+
+def test_anchor_survives_provider_narration():
+    # 现网实测形态:provider 把过程旁白与 BRIEF: 粘在同一行。
+    glued = (
+        "先查本地纪要写法并读完全部必读材料，再压成合规的一句话。已定位 kairo 的规则。"
+        "BRIEF: 实体建对方平台、不另起一套,群控先做事后分析、控制后置。"
+    )
+    assert check_brief(glued) == "实体建对方平台、不另起一套,群控先做事后分析、控制后置。"
+    assert check_brief("过程说明\n\nBRIEF：数仓 OOM 已缓解,OLAP 未选定。") == "数仓 OOM 已缓解,OLAP 未选定。"
+    # 多个锚点取最后一个,规则唯一。
+    assert check_brief("BRIEF: 旧的一句\nBRIEF: 新的一句") == "新的一句"
 
 
 def test_brief_stale_tracks_digest_hash(tmp_path):
@@ -66,7 +78,7 @@ def test_brief_stale_tracks_digest_hash(tmp_path):
 def test_generate_brief_writes_manifest(tmp_path):
     _, ws = _serve_root(tmp_path)
     digest = _ref_with_digest(ws, tmp_path, "r1")
-    got = generate_brief(ws, "r1", generator=lambda body: " 扫门分流已跑通 \n")
+    got = generate_brief(ws, "r1", generator=lambda body: "BRIEF: 扫门分流已跑通 \n")
     assert got == "扫门分流已跑通"
     man = ws.read_manifest("r1")
     assert man.brief == "扫门分流已跑通"
@@ -81,7 +93,7 @@ def test_overlong_brief_gets_one_corrective_retry(tmp_path):
 
     def twice(body):
         calls.append(body)
-        return "很长" * 40 if len(calls) == 1 else "扫门分流已跑通"
+        return "BRIEF: " + ("很长" * 40 if len(calls) == 1 else "扫门分流已跑通")
 
     assert generate_brief(ws, "r1", generator=twice) == "扫门分流已跑通"
     assert len(calls) == 2
@@ -96,7 +108,7 @@ def test_still_overlong_after_retry_fails_without_writing(tmp_path):
 
     def always_long(body):
         calls.append(body)
-        return "很长" * 40
+        return "BRIEF: " + "很长" * 40
 
     with pytest.raises(BriefError):
         generate_brief(ws, "r1", generator=always_long)
@@ -104,17 +116,17 @@ def test_still_overlong_after_retry_fails_without_writing(tmp_path):
     assert ws.read_manifest("r1").brief is None
 
 
-def test_multiline_output_is_not_retried(tmp_path):
+def test_missing_anchor_is_not_retried(tmp_path):
     _, ws = _serve_root(tmp_path)
     _ref_with_digest(ws, tmp_path, "r1")
     calls = []
 
-    def multi(body):
+    def no_anchor(body):
         calls.append(body)
-        return "第一句。\n第二句。"
+        return "模型忘了锚点,直接给了一句话。"
 
     with pytest.raises(BriefError):
-        generate_brief(ws, "r1", generator=multi)
+        generate_brief(ws, "r1", generator=no_anchor)
     assert len(calls) == 1
 
 
@@ -131,9 +143,9 @@ def test_brief_failure_leaves_manifest_and_digest_intact(tmp_path, capsys):
     assert ws.read_manifest("r1").brief is None
     assert digest.read_text() == before
 
-    # 契约不合(多行)同样不写盘。
+    # 契约不合(缺锚点)同样不写盘。
     with pytest.raises(BriefError):
-        generate_brief(ws, "r1", generator=lambda body: "第一句。\n第二句。")
+        generate_brief(ws, "r1", generator=lambda body: "没有锚点的一句话。")
     assert ws.read_manifest("r1").brief is None
 
     # 旁路吞掉异常,只留 stderr 诊断,digest 不受影响。
@@ -148,7 +160,7 @@ def test_manifest_without_brief_key_is_supported(tmp_path):
     _ref_with_digest(ws, tmp_path, "r1")
     raw = (ws.references_dir() / "r1" / "manifest.yaml").read_text()
     assert "brief:" not in raw  # exclude_none:空值不落键
-    generate_brief(ws, "r1", generator=lambda body: "一句话结论")
+    generate_brief(ws, "r1", generator=lambda body: "BRIEF: 一句话结论")
     assert "brief:" in (ws.references_dir() / "r1" / "manifest.yaml").read_text()
 
 
@@ -159,7 +171,7 @@ def test_list_shows_brief_and_calendar_does_not(tmp_path):
     root, ws = _serve_root(tmp_path)
     _ref_with_digest(ws, tmp_path, "2026-09-11-with-brief")
     _ref_with_digest(ws, tmp_path, "2026-09-11-no-brief")
-    generate_brief(ws, "2026-09-11-with-brief", generator=lambda body: "扫门分流已跑通")
+    generate_brief(ws, "2026-09-11-with-brief", generator=lambda body: "BRIEF: 扫门分流已跑通")
 
     client = TestClient(create_app(root))
     listing = client.get("/timeline?mode=recent")
@@ -187,7 +199,7 @@ def test_cli_brief_backfills_skips_and_keeps_digest(tmp_path, monkeypatch):
     hashes = {p: hashlib.sha256(p.read_bytes()).hexdigest() for p in (d1, d2)}
 
     monkeypatch.setattr(
-        "kairo.brief.provider_generator", lambda provider: (lambda body: "一句话结论")
+        "kairo.brief.provider_generator", lambda provider: (lambda body: "BRIEF: 一句话结论")
     )
     monkeypatch.setattr("kairo.cli.select_provider", lambda: object())
 
@@ -217,7 +229,7 @@ def test_cli_brief_reports_failure_with_exit_1(tmp_path, monkeypatch):
     _ref_with_digest(ws, tmp_path, "r1")
     monkeypatch.setattr(
         "kairo.brief.provider_generator",
-        lambda provider: (lambda body: "第一句。\n第二句。"),
+        lambda provider: (lambda body: "缺锚点的输出"),
     )
     monkeypatch.setattr("kairo.cli.select_provider", lambda: object())
 
