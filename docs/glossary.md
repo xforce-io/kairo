@@ -25,7 +25,7 @@
 | stream | 观测型参考，digest 后 fold 进产物。 | 流水、观测流 |
 | corpus | 基线型参考，只读参考层，不 digest、不 fold。 | 语料库 |
 | digest | 一条 reference 的高密度记忆纪要，compose / 时段回顾的输入。 | 摘要、纪要原文 |
-| brief | 一条 Ref 的一句话概述，由 digest 按首行契约产出并存于该 Ref 的 manifest；缺失即不展示，不从正文派生。 | 摘要、简介、一句话摘要、副标题 |
+| brief | 一条 Ref 的一句话概述，由该 Ref 的 digest 经一次短调用产出（按 `BRIEF:` 锚点取正文），存于该 Ref 的 manifest；缺失即不展示，不从正文派生。 | 摘要、简介、一句话摘要、副标题 |
 | preset | constitution 建仓时选用的填法名；运行时读 digest.enabled / targets / review_input。 | 工作区类型枚举 |
 | standard | preset 默认值：开 digest、有 targets、材料进时段回顾原料。替代旧 kind: topic。 | topic preset、默认预设 |
 | journal | preset 预设：空 targets、开 digest（不计回顾自身 source_text）、关 compose、材料不进时段回顾原料。现网「总结」仓。 | 回顾仓、总结仓 |

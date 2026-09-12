@@ -145,6 +145,18 @@ manifest 新增两个可选键，旧 manifest 无键即无 brief，无需回填�
 | Unit | 超长纠正 | 首次超长 + 二次合规 → 写入且只调用 2 次；二次仍超长 → 失败且调用停在 2 次；缺锚点不触发重试（调用 1 次） |
 | Unit | Timeline 扫描 | `TimelineItem.brief` 取自 manifest；无键时为空串 |
 
+### 验收结果
+
+`tests/test_ref_brief.py` 13 项全过；全量回归 1125 passed（rebase 到含 [#365](https://github.com/xforce-io/kairo/pull/365) 的 main 之后）。
+
+| 项 | 结果 |
+|---|---|
+| S1 列表/日历呈现 | 列表有 brief 的行渲染 `.tl-brief`；无 brief 的行既无节点也无占位；`?day=` 不含 `.tl-brief` |
+| S2 digest 旁路 | 成功例写入 brief 与 `brief_hash`；provider 失败 / 缺锚点 / 纠正后仍超长三例均不写 manifest，digest.md 内容不变；旁路异常只留 stderr |
+| S3 存量补齐 | 现网 `kairo brief` 一次跑完：ok=87 skipped=9 no-digest=22 failed=0；digest.md 未被改写；再次执行全部跳过 |
+| 现网抽检 | 96 条 brief 最长 38 字、超 50 字 0 条、旁白残留 0 条 |
+| 现网排版 | 1010px 下标题 621px、brief 903px 独占第二行、Tag 与 meta 仍在第一行，行高 49px→68px，无横向溢出 |
+
 ## 12. 开放问题
 
 N/A。排版（第二行）、存数（manifest 字段）、产出方式（独立短调用）、行高不齐（接受）均已拍板。
