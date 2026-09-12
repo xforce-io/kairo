@@ -464,7 +464,7 @@ def test_workspace_view_has_copy_checkbox(tmp_path):
     r = _client(tmp_path).get("/w/ws")
     assert r.status_code == 200
     assert 'name="copy"' in r.text
-    assert "复制到工作区" in r.text or "Copy into workspace" in r.text
+    assert "复制到工作区" in r.text or "Copy into Topic" in r.text  # #264 workspace→Topic
 
 
 def test_add_ref_by_path_with_copy(tmp_path):
