@@ -685,6 +685,39 @@ class CodexProvider:
         )
 
 
+def _grok_final_text(stdout_file: Path) -> str:
+    """Return the final assistant text from grok `streaming-messages-json` NDJSON.
+
+    Only the terminal `result` line is trusted: intermediate assistant messages carry
+    tool-use narration that must never land in a product. Fail fast otherwise.
+    """
+    result_line: dict | None = None
+    for raw in stdout_file.read_text().splitlines():
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"grok stdout 非 NDJSON:{stdout_file}: {exc}") from exc
+        if not isinstance(data, dict):
+            continue
+        if data.get("type") == "error":
+            raise RuntimeError(f"grok 报错:{data.get('message')!r}")
+        if data.get("type") == "result":
+            result_line = data
+    if result_line is None:
+        raise RuntimeError(f"grok stdout 缺 result 行:{stdout_file}")
+    if result_line.get("is_error") or result_line.get("subtype") not in (None, "success"):
+        raise RuntimeError(
+            f"grok 结束于 {result_line.get('subtype')!r}:{result_line.get('result')!r}"
+        )
+    text = result_line.get("result")
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError(f"grok result 行缺最终文本:{stdout_file}")
+    return text
+
+
 class GrokProvider:
     """驱动 grok CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
 
@@ -706,9 +739,16 @@ class GrokProvider:
         prompt = f"{config.persona}\n\n---\n\n{config.context}"
         prompt_file = config.artifact_dir / "_prompt.md"
         prompt_file.write_text(prompt)
-        stdout_file = config.artifact_dir / "_grok_stdout.json"
+        stdout_file = config.artifact_dir / "_grok_stdout.ndjson"
         # #145/#126:prompt 走 --prompt-file,不把正文塞进 argv。
-        args = ["--prompt-file", "_prompt.md", "--output-format", "json"]
+        # `--output-format json` 的 `text` 会把多轮工具调用之间的过程叙述与最终答复
+        # 拼在一起;NDJSON 的 `result` 行只含最后一轮 assistant 文本。
+        args = [
+            "--prompt-file",
+            "_prompt.md",
+            "--output-format",
+            "streaming-messages-json",
+        ]
         if config.read_dirs:
             args += ["--allow", "Read"]
         if self.model.strip():
@@ -723,12 +763,7 @@ class GrokProvider:
         )
         if not stdout_file.exists():
             raise RuntimeError(f"grok 无 stdout 输出:{stdout_file}")
-        data = json.loads(stdout_file.read_text())
-        if data.get("type") == "error":
-            raise RuntimeError(f"grok 报错:{data.get('message')!r}")
-        result = data.get("text")
-        if not isinstance(result, str) or not result.strip():
-            raise RuntimeError(f"grok stdout 缺 text 字段:{stdout_file}")
+        result = _grok_final_text(stdout_file)
         (config.artifact_dir / (config.artifact or "output.md")).write_text(result)
         return AgentResult(
             artifacts=_scan_artifacts(config.artifact_dir), result_text=result

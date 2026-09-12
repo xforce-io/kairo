@@ -112,3 +112,31 @@ def test_set_title_rejects_empty(tmp_path):
     rid = ws.add([src])
     with pytest.raises(ValueError):
         ws.set_title(rid, "   ")
+
+
+def test_constitution_is_cached_until_file_changes(tmp_path, monkeypatch):
+    """P1: console pages parsed constitution.yaml ~1000x per GET; reuse while unchanged."""
+    import kairo.workspace as wsmod
+
+    ws = Workspace.init(tmp_path, topic="main")
+    calls = []
+    real_load = wsmod.yaml.safe_load
+    monkeypatch.setattr(wsmod.yaml, "safe_load", lambda s: (calls.append(1), real_load(s))[1])
+
+    a = ws.constitution
+    b = ws.constitution
+    assert len(calls) == 1
+    assert a is not b  # callers may mutate their copy without poisoning the cache
+    a.topic = "mutated"
+    assert ws.constitution.topic == "main"
+
+    con = ws.constitution
+    con.topic = "renamed"
+    ws.write_constitution(con)
+    assert ws.constitution.topic == "renamed"
+    assert len(calls) == 2
+
+    # Out-of-band edit with a changed size is also picked up.
+    p = tmp_path / "constitution.yaml"
+    p.write_text(p.read_text().replace("renamed", "renamed-again"))
+    assert ws.constitution.topic == "renamed-again"

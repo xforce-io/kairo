@@ -116,7 +116,7 @@ def test_grok_reads_cwd_workset_without_dumping_body(tmp_path):
 
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         calls.append(args)
-        Path(stdout_file).write_text(json.dumps({"text": f"纪要含 {body}"}))
+        Path(stdout_file).write_text(json.dumps({"type": "result", "subtype": "success", "result": f"纪要含 {body}"}))
 
     GrokProvider(runner=fake_runner).run(
         AgentConfig(
@@ -167,7 +167,7 @@ def test_digest_rule_accepts_grok_provider(tmp_path):
 
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         captured.append((Path(cwd) / "_prompt.md").read_text())
-        Path(stdout_file).write_text(json.dumps({"text": "纪要"}))
+        Path(stdout_file).write_text(json.dumps({"type": "result", "subtype": "success", "result": "纪要"}))
 
     state = State()
     DigestRule(ws, GrokProvider(runner=fake_runner)).discover(state)[0].run(state)

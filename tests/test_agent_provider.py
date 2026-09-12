@@ -277,14 +277,50 @@ def test_codex_provider_passes_reasoning_effort(tmp_path):
 # ---- GrokProvider(driving `grok -p`,注入 runner)----
 
 
+def _grok_ndjson(final: str, *, narration: str | None = None) -> str:
+    """Mimic `--output-format streaming-messages-json`: optional tool-use turn, then result."""
+    lines = [json.dumps({"type": "system", "subtype": "init", "model": "grok-4.6"})]
+    if narration is not None:
+        lines.append(
+            json.dumps(
+                {
+                    "type": "assistant",
+                    "message": {
+                        "role": "assistant",
+                        "content": [
+                            {"type": "text", "text": narration},
+                            {"type": "tool_use", "id": "call-1", "name": "read_file", "input": {}},
+                        ],
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
+        lines.append(json.dumps({"type": "user", "message": {"role": "user", "content": []}}))
+    lines.append(
+        json.dumps(
+            {
+                "type": "assistant",
+                "message": {"role": "assistant", "content": [{"type": "text", "text": final}]},
+            },
+            ensure_ascii=False,
+        )
+    )
+    lines.append(
+        json.dumps(
+            {"type": "result", "subtype": "success", "is_error": False, "num_turns": 2, "result": final},
+            ensure_ascii=False,
+        )
+    )
+    return "\n".join(lines) + "\n"
+
+
 def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
     calls = []
 
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         calls.append((cmd, args, input, timeout))
-        Path(stdout_file).write_text(
-            json.dumps({"text": "GROK 纪要", "stopReason": "EndTurn"})
-        )
+        Path(stdout_file).write_text(_grok_ndjson("GROK 纪要"))
 
     p = GrokProvider(model="grok-4.5", runner=fake_runner)
     res = p.run(
@@ -302,7 +338,8 @@ def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
     assert "--prompt-file" in args
     assert "_prompt.md" in args
     assert "-p" not in args
-    assert "--output-format" in args and "json" in args
+    assert "--output-format" in args and "streaming-messages-json" in args
+    assert "json" not in args  # aggregate `text` glues narration onto the answer
     assert "-m" in args and "grok-4.5" in args
     assert timeout == 30
     prompt_blob = " ".join(str(a) for a in args) + "\n" + (sent or "")
@@ -314,7 +351,7 @@ def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
     assert out.read_text() == "GROK 纪要"
     assert res.result_text == "GROK 纪要"
     names = {Path(a).name for a in res.artifacts}
-    assert "_prompt.md" not in names and "_grok_stdout.json" not in names
+    assert "_prompt.md" not in names and "_grok_stdout.ndjson" not in names
 
 
 def test_grok_provider_omits_model_flag_when_empty(tmp_path):
@@ -322,7 +359,7 @@ def test_grok_provider_omits_model_flag_when_empty(tmp_path):
 
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         calls.append(args)
-        Path(stdout_file).write_text(json.dumps({"text": "OK"}))
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
 
     GrokProvider(model="", runner=fake_runner).run(
         AgentConfig(
@@ -344,7 +381,7 @@ def test_grok_provider_allows_read_dirs_with_allow_read(tmp_path):
 
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         calls.append(args)
-        Path(stdout_file).write_text(json.dumps({"text": "OK"}))
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
 
     GrokProvider(runner=fake_runner).run(
         AgentConfig(
@@ -372,7 +409,7 @@ def test_grok_provider_identity():
 def test_grok_provider_raises_on_error_type(tmp_path):
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         Path(stdout_file).write_text(
-            json.dumps({"type": "error", "message": "Couldn't set model"})
+            json.dumps({"type": "error", "message": "Couldn't set model"}) + "\n"
         )
 
     p = GrokProvider(runner=fake_runner)
@@ -391,7 +428,8 @@ def test_grok_provider_raises_on_error_type(tmp_path):
 
 def test_grok_provider_raises_on_missing_text(tmp_path):
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
-        Path(stdout_file).write_text(json.dumps({"stopReason": "EndTurn"}))
+        # An init line but no terminal `result` line (process died mid-run).
+        Path(stdout_file).write_text(json.dumps({"type": "system", "subtype": "init"}) + "\n")
 
     with pytest.raises(RuntimeError):
         GrokProvider(runner=fake_runner).run(
@@ -402,6 +440,36 @@ def test_grok_provider_raises_on_missing_text(tmp_path):
                 model="",
                 artifact="out.md",
             )
+        )
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_grok_provider_keeps_only_final_turn_text(tmp_path):
+    """P0: multi-turn tool use must not glue narration onto the product (`…结构。# 标题`)."""
+    narration = "先读常驻技能和必读材料，再按议题写纪要。"
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        Path(stdout_file).write_text(_grok_ndjson("# 纪要\n\n正文", narration=narration))
+
+    res = GrokProvider(runner=fake_runner).run(
+        AgentConfig(persona="P", context="C", artifact_dir=tmp_path, model="", artifact="digest.md")
+    )
+    assert res.result_text == "# 纪要\n\n正文"
+    assert narration not in (tmp_path / "digest.md").read_text()
+
+
+def test_grok_provider_raises_on_failed_result_line(tmp_path):
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        Path(stdout_file).write_text(
+            json.dumps(
+                {"type": "result", "subtype": "error_max_turns", "is_error": True, "result": "max turns"}
+            )
+            + "\n"
+        )
+
+    with pytest.raises(RuntimeError, match="error_max_turns"):
+        GrokProvider(runner=fake_runner).run(
+            AgentConfig(persona="X", context="Y", artifact_dir=tmp_path, model="", artifact="out.md")
         )
     assert not (tmp_path / "out.md").exists()
 
