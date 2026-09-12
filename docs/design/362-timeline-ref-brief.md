@@ -1,7 +1,7 @@
 # #362 — 列表每条 Ref 补一句话 brief
 
 - Issue: [#362](https://github.com/xforce-io/kairo/issues/362)
-- L1: 待批
+- L1: [提案](https://github.com/xforce-io/kairo/issues/362#issuecomment-5645317895)（待批）
 - 分支: `feat/362-timeline-ref-brief`
 - 状态: 待 L1 审批
 - 日期: 2026-09-12
