@@ -493,13 +493,16 @@ def test_knowledge_drift_is_visible_and_offers_manual_restep(tmp_path):
     ws.write_manifest(
         "r", Manifest(id="r", title="Kickoff", occurred_at="2026-08-11")
     )
-    entry = new_entry(title="current", scope="workspace")
+    entry = new_entry(title="CurrentTerm", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    # #372: the digest mentions a confirmed entry it never matched → drifted.
+    _write_digest(ws, "r", "The CurrentTerm rollout was discussed.")
     state = ws.read_state()
     state.products["references/r/digest.md"] = ProductState(input_hash="x", knowledge_hash="old")
     ws.write_state(state)
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
     region = _drift_region(page.text)
+    assert "new: CurrentTerm" in region
     assert 'role="status"' in region
     assert 'role="alert"' not in region
     assert "ref-blocks" not in region
@@ -536,20 +539,27 @@ def test_knowledge_drift_only_lists_products_that_consume_knowledge(tmp_path):
     ws.write_manifest(
         "meeting", Manifest(id="meeting", title="Weekly", occurred_at="2026-08-18")
     )
-    entry = new_entry(title="current", scope="workspace")
+    entry = new_entry(title="CurrentTerm", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
     state = ws.read_state()
     for path in (
         "references/r/transcript.md",
         "references/r/source_text.md",
         "references/r/evidence.md",
+        "references/r/digest.md",
+        "references/r/prose.md",
+        "references/meeting/digest.md",
+        "understanding.md",
+        "assessment.md",
     ):
+        # Every file mentions the entry; only knowledge consumers may be reported (#372).
+        file = ws.root / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("CurrentTerm appears here.")
         state.products[path] = ProductState(input_hash="source")
-    state.products["references/r/digest.md"] = ProductState(input_hash="digest")
-    state.products["references/r/prose.md"] = ProductState(input_hash="prose")
-    state.products["references/meeting/digest.md"] = ProductState(input_hash="digest2")
-    state.targets["understanding.md"] = TargetState()
-    state.targets["assessment.md"] = TargetState()
+    for path in ("understanding.md", "assessment.md"):
+        state.products.pop(path)
+        state.targets[path] = TargetState()
     ws.write_state(state)
     # legacy 兼容写会把旧产物的 None 标为 ""；这仍不能把原料误判成知识消费者。
     ws.add_glossary_entry("兼容写入")
@@ -592,7 +602,11 @@ def test_knowledge_drift_restep_retries_the_reference(tmp_path, monkeypatch):
     from kairo.engine import generate_prose
 
     generate_prose(ws, StubProvider(), "r")
-    ws.add_glossary_entry("Alpha")
+    # #372: drift needs a confirmed entry that the products actually mention.
+    digest_text = (ws.root / "references/r/digest.md").read_text()
+    term = next(word for word in re.findall(r"[A-Za-z]{4,}", digest_text))
+    (ws.root / "references/r/prose.md").write_text(f"{term} {(ws.root / 'references/r/prose.md').read_text()}")
+    ws.add_glossary_entry(term)
 
     client = TestClient(create_app(root))
     page = client.get("/knowledge?workspace=ws", headers={"accept-language": "en"})
@@ -638,8 +652,13 @@ def test_workspace_knowledge_todo_count_does_not_double_count_legacy_advisory(tm
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
-    entry = new_entry(title="current", scope="workspace")
+    entry = new_entry(title="CurrentTerm", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    # #372: drift is per product text; transcript mentions it too but is raw material, never counted.
+    for path in ("references/r/transcript.md", "references/r/digest.md", "understanding.md"):
+        file = ws.root / path
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text("CurrentTerm mentioned")
     state = ws.read_state()
     state.products["references/r/transcript.md"] = ProductState(
         input_hash="raw", knowledge_hash="", glossary_hash=""
@@ -654,6 +673,7 @@ def test_workspace_knowledge_todo_count_does_not_double_count_legacy_advisory(tm
 
     page = TestClient(create_app(root)).get("/w/ws", headers={"accept-language": "en"})
     assert "Knowledge: 2 item(s) need attention" in page.text
+    assert "2 product(s) are based on outdated knowledge" in page.text
     assert "Knowledge: 4 item(s) need attention" not in page.text
 
 

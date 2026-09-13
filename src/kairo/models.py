@@ -338,6 +338,9 @@ class KnowledgeDiagnostic(BaseModel):
     """一次产物实际采用的知识匹配诊断；只保存计数与稳定 id，绝不保存 prompt。"""
 
     matched_entry_ids: list[str] = Field(default_factory=list)
+    # id → entry_semantic_hash at production time (#372). None = produced before
+    # the field existed: changes to matched entries cannot be detected for it.
+    matched_entry_hashes: dict[str, str] | None = None
     ambiguities: int = 0
     truncated: int = 0
     skipped: int = 0
