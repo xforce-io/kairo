@@ -1564,6 +1564,51 @@ def test_sighted_queue_lists_single_sightings_and_accept_ignore_work(tmp_path):
     assert "目击 · 0" in client.get("/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"}).text
 
 
+def test_sighted_candidate_can_be_edited_and_merged(tmp_path):
+    """#370 review: every action the sighted queue renders must be accepted by the backend."""
+    from kairo.knowledge_review import merge_workspace, update_candidate
+
+    ws = Workspace.init(tmp_path / "ws")
+    a = _write_digest(ws, "a", "静脱发言,内验跟进")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="静脱发言,内验跟进",
+        drafts=[{"title": "静脱", "quote": "静脱发言"}, {"title": "内验", "quote": "内验跟进"}],
+    )
+    by_title = {c.title: c for c in load_review(ws.root).candidates}
+    assert {c.status for c in by_title.values()} == {"sighted"}
+    updated = update_candidate(ws.root, by_title["静脱"].id, title="净托", description="", aliases=[], tags=[])
+    assert updated.title == "净托" and updated.status == "sighted"
+    target = new_entry(title="内验系统", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [target]}))
+    merge_workspace(ws.root, by_title["内验"].id, target.id)
+    assert next(c for c in load_review(ws.root).candidates if c.id == by_title["内验"].id).status == "merged"
+
+
+def test_page_load_replays_journal_before_purging_stale(tmp_path, monkeypatch):
+    """#370 review: a GET between a half-finished accept and its retry must not purge the row."""
+    import kairo.knowledge_review as module
+    from kairo.knowledge_review import invalidate_stale
+
+    ws = Workspace.init(tmp_path / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    _ingest_pending(ws, "半程", "证据")
+    candidate = load_review(ws.root).candidates[0]
+    original = module.save_review
+    monkeypatch.setattr(module, "save_review", lambda *_: (_ for _ in ()).throw(OSError("review")))
+    with pytest.raises(OSError):
+        accept_workspace(ws.root, candidate.id)
+    monkeypatch.setattr(module, "save_review", original)
+    digest.unlink()
+    # Simulates the knowledge page GET: no explicit recovery call.
+    review = invalidate_stale(ws.root)
+    row = next(c for c in review.candidates if c.id == candidate.id)
+    assert row.status == "accepted"
+    assert not (ws.root / ".kairo/knowledge_transaction.yaml").exists()
+    assert any(e.title == "半程" for e in load_workspace(ws.root)[0].entries)
+
+
 def test_ignored_candidate_cannot_be_accepted(tmp_path):
     ws = Workspace.init(tmp_path / "ws")
     a = _write_digest(ws, "a", "王五发言")

@@ -448,6 +448,9 @@ def _purge_stale(review: KnowledgeReview) -> bool:
 
 
 def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
+    # Converge any half-finished accept/merge first: purging a `stale` row before
+    # the journal is replayed would orphan the authority entry (#370 review).
+    _recover_transaction(workspace_root)
     review = load_review(workspace_root)
     changed = False
     root = Path(workspace_root)
@@ -802,7 +805,6 @@ def extract_after_success(
 
 
 def _candidate(workspace_root: Path, candidate_id: str) -> tuple[KnowledgeReview, int, KnowledgeCandidate]:
-    _recover_transaction(workspace_root)
     review = invalidate_stale(workspace_root)
     for index, candidate in enumerate(review.candidates):
         if candidate.id == candidate_id or candidate.legacy_id == candidate_id:
@@ -959,6 +961,9 @@ def _recover_transaction(workspace_root: Path) -> None:
                 save_review(workspace_root, review)
                 _clear_transaction(workspace_root)
                 return
+        # Authority is written but the candidate row no longer exists: nothing left
+        # to converge, so drop the journal instead of replaying it forever.
+        _clear_transaction(workspace_root)
     except (KnowledgeError, OSError):
         # 保留 journal，下一次显式动作继续恢复；绝不先 stale 掉候选。
         return
@@ -1019,7 +1024,7 @@ def ignore(workspace_root: Path, candidate_id: str) -> None:
 
 def update_candidate(workspace_root: Path, candidate_id: str, *, title: str, description: str, aliases: list[KnowledgeAlias], tags: list[str]) -> KnowledgeCandidate:
     review, index, candidate = _candidate(workspace_root, candidate_id)
-    if candidate.status != "pending":
+    if candidate.status not in _REVIEWABLE:
         raise KnowledgeError(f"候选不可编辑:{candidate.status}")
     updated = _set_candidate(review, index, candidate, title=title.strip(), description=description.strip(), aliases=aliases, tags=tags)
     _validate_candidate(updated)
@@ -1124,7 +1129,7 @@ def merge_workspace(workspace_root: Path, candidate_id: str, entry_id: str) -> N
     review, index, candidate = _candidate(workspace_root, candidate_id)
     if candidate.status == "merged" and candidate.merged_into == entry_id:
         return
-    if candidate.status != "pending":
+    if candidate.status not in _REVIEWABLE:
         raise KnowledgeError(f"候选不可合并:{candidate.status}")
     document, _ = load_workspace(workspace_root)
     target = next((entry for entry in document.entries if entry.id == entry_id), None)
