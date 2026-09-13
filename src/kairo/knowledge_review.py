@@ -447,21 +447,39 @@ def _purge_stale(review: KnowledgeReview) -> bool:
     return changed
 
 
-def current_provider_name() -> str:
-    """Name of the provider a Run would use right now (no network, no subprocess)."""
-    from kairo.provider import select_provider
+def workspace_provider_name(workspace_root: Path) -> str | None:
+    """Provider that last produced this Topic's live targets, from state alone.
 
-    return str(getattr(select_provider(require_read_dirs=True), "name", ""))
-
-
-def _purge_foreign_extract_errors(review: KnowledgeReview, provider_name: str) -> bool:
-    """Drop extract errors that the current provider cannot reproduce (#373).
-
-    An error only says "this provider failed on this text". Once the provider
-    changes it is noise, and the same key may never be re-extracted (compose
-    keys, legacy path formats), so it would otherwise stay forever. Records
-    written before the `provider` field existed are dropped for the same reason.
+    Read from `produced_by` so no provider probing (subprocess / config) happens
+    on page loads. None when the Topic has never composed.
     """
+    from kairo.workspace import Workspace, WorkspaceNotFound
+
+    try:
+        ws = Workspace.open(workspace_root)
+    except WorkspaceNotFound:
+        return None
+    state = ws.read_state()
+    for target in ws.constitution.live_targets():
+        target_state = state.targets.get(target.path)
+        produced_by = (target_state.produced_by if target_state else None) or {}
+        name = str(produced_by.get("provider", "")).strip()
+        if name:
+            return name
+    return None
+
+
+def _purge_foreign_extract_errors(review: KnowledgeReview, provider_name: str | None) -> bool:
+    """Drop extract errors that the Topic's current provider cannot reproduce (#373).
+
+    An error only says "this provider failed on this text". Once another
+    provider has produced the Topic, it is noise, and the same key may never be
+    re-extracted (compose keys, legacy path formats), so it would otherwise stay
+    forever. Records written before the `provider` field existed are dropped
+    for the same reason. With no provider evidence yet, nothing is touched.
+    """
+    if provider_name is None:
+        return False
     foreign = [
         key
         for key in review.extract_errors
@@ -479,7 +497,7 @@ def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
     # the journal is replayed would orphan the authority entry (#370 review).
     _recover_transaction(workspace_root)
     review = load_review(workspace_root)
-    changed = _purge_foreign_extract_errors(review, current_provider_name())
+    changed = _purge_foreign_extract_errors(review, workspace_provider_name(workspace_root))
     root = Path(workspace_root)
     for index, candidate in enumerate(review.candidates):
         if candidate.status in _LOCKED:
@@ -734,7 +752,7 @@ def ingest_candidates(
 
 
 def mark_extract_error(
-    workspace_root: Path, path: str, message: str, *, source_kind: str = "digest", provider_name: str | None = None
+    workspace_root: Path, path: str, message: str, *, source_kind: str = "digest", provider_name: str = ""
 ) -> None:
     review = load_review(workspace_root)
     key = _error_key(source_kind, path)
@@ -744,7 +762,7 @@ def mark_extract_error(
         "source_kind": source_kind,
         "path": path,
         "version": str(review.extract_error_versions[key]),
-        "provider": current_provider_name() if provider_name is None else provider_name,
+        "provider": provider_name,
     }
     save_review(workspace_root, review)
 
@@ -838,8 +856,7 @@ def extract_after_success(
                 path,
                 safe_provider_summary(exc),
                 source_kind=source_kind,
-                # A custom extractor has no provider identity: attribute to the current one.
-                provider_name=str(getattr(provider, "name", "")) if provider is not None else None,
+                provider_name=str(getattr(provider, "name", "")),
             )
         except Exception:
             pass

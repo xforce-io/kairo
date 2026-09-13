@@ -113,6 +113,20 @@ def _topic_dir(topic: str) -> Path:
         return cwd.resolve() / topic
 
 
+def _scan_root() -> Path:
+    """Serve root for cross-Topic commands: KAIRO_SERVE_ROOT → parent of the Topic cwd is in → cwd."""
+    env = os.environ.get("KAIRO_SERVE_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    cwd = Path.cwd()
+    try:
+        from kairo.refs import serve_root_of
+
+        return serve_root_of(Workspace.open(cwd))
+    except WorkspaceNotFound:
+        return cwd.resolve()
+
+
 def _serve_root(root: Path | None = None, *, follow: bool = True) -> Path:
     """解析 serve root:显式参数 → KAIRO_SERVE_ROOT → cwd。
 
@@ -823,17 +837,24 @@ def _run_all_topics() -> None:
     """
     from kairo.web.discovery import scan_topic_identities
 
-    serve = _serve_root()
+    serve = _scan_root()
     provider = select_provider(require_read_dirs=True)
     ran: list[str] = []
     skipped: list[str] = []
+    attention: list[str] = []
     failed: list[str] = []
     for identity in scan_topic_identities(serve):
         ws = Workspace.open(serve / identity.slug)
         promote_oversized_degraded(ws)
-        if workspace_run_plan(ws)["mode"] == "clean":
+        mode = workspace_run_plan(ws)["mode"]
+        if mode == "clean":
             skipped.append(identity.slug)
             typer.echo(f"{identity.slug}: up to date")
+            continue
+        if mode == "attention":
+            # Same as single-Topic `run`: non-retryable blocks need a human, not another pass.
+            attention.append(identity.slug)
+            typer.secho(f"{identity.slug}: needs attention (non-retryable block)", fg=typer.colors.RED, err=True)
             continue
         try:
             engine_run_workspace(ws, provider)
@@ -847,9 +868,15 @@ def _run_all_topics() -> None:
         else:
             ran.append(identity.slug)
             typer.echo(f"{identity.slug}: ran")
-    typer.echo(f"run --all: ran {len(ran)}, up to date {len(skipped)}, failed {len(failed)}")
+    typer.echo(
+        f"run --all: ran {len(ran)}, up to date {len(skipped)}, "
+        f"needs attention {len(attention)}, failed {len(failed)}"
+    )
     if failed:
         typer.secho("still failed: " + ", ".join(failed), fg=typer.colors.RED, err=True)
+    if attention:
+        typer.secho("needs attention: " + ", ".join(attention), fg=typer.colors.RED, err=True)
+    if failed or attention:
         raise typer.Exit(1)
 
 

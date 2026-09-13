@@ -19,11 +19,17 @@ from kairo.workspace import Workspace
 runner = CliRunner()
 
 
-def _ws(tmp_path: Path, name: str = "ws") -> Workspace:
+def _ws(tmp_path: Path, name: str = "ws", *, produced_by: str | None = "stub") -> Workspace:
     ws = Workspace.init(tmp_path / name)
     digest = ws.root / "references/r/digest.md"
     digest.parent.mkdir(parents=True)
     digest.write_text("正文")
+    if produced_by is not None:
+        from kairo.models import TargetState
+
+        state = ws.read_state()
+        state.targets["understanding.md"] = TargetState(produced_by={"provider": produced_by, "model": "m"})
+        ws.write_state(state)
     return ws
 
 
@@ -63,7 +69,7 @@ def test_foreign_provider_errors_are_purged_and_current_ones_kept(tmp_path, monk
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = _ws(tmp_path)
     mark_extract_error(ws.root, "references/r/digest.md", "codex timeout", source_kind="digest", provider_name="codex")
-    mark_extract_error(ws.root, "references/r/digest.md", "stub boom", source_kind="compose")
+    mark_extract_error(ws.root, "references/r/digest.md", "stub boom", source_kind="compose", provider_name="stub")
     stored = load_review(ws.root)
     assert stored.extract_error_meta[extract_error_key("compose", "references/r/digest.md")]["provider"] == "stub"
     review = invalidate_stale(ws.root)
@@ -71,11 +77,26 @@ def test_foreign_provider_errors_are_purged_and_current_ones_kept(tmp_path, monk
     assert review.extract_errors[extract_error_key("compose", "references/r/digest.md")] == "stub boom"
 
 
+def test_errors_are_kept_until_the_topic_has_provider_evidence(tmp_path, monkeypatch):
+    """A Topic that never composed carries no provider evidence: nothing is purged yet."""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = _ws(tmp_path, produced_by=None)
+    mark_extract_error(ws.root, "references/r/digest.md", "codex timeout", source_kind="digest", provider_name="codex")
+    assert len(invalidate_stale(ws.root).extract_errors) == 1
+    # First compose by another provider is the evidence; the codex error is then noise.
+    from kairo.models import TargetState
+
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(produced_by={"provider": "grok", "model": "m"})
+    ws.write_state(state)
+    assert invalidate_stale(ws.root).extract_errors == {}
+
+
 def test_extract_after_success_records_provider_of_failure(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     from kairo.knowledge_review import extract_after_success
 
-    ws = _ws(tmp_path)
+    ws = _ws(tmp_path, produced_by="grok")
 
     class Boom:
         name = "grok"
@@ -130,7 +151,7 @@ def test_run_all_runs_each_non_clean_topic_once(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert calls == ["b-pending", "c-failed"]
     assert "a-clean: up to date" in result.output
-    assert "run --all: ran 2, up to date 1, failed 0" in result.output
+    assert "run --all: ran 2, up to date 1, needs attention 0, failed 0" in result.output
     assert (pending.root / "understanding.md").is_file() and (failed.root / "understanding.md").is_file()
 
     # Second pass: everything is clean → nothing runs.
@@ -156,6 +177,47 @@ def test_run_all_reports_leftover_failures_nonzero(tmp_path, monkeypatch):
     assert result.exit_code == 1
     assert "t: failed (provider-failed)" in result.output
     assert "still failed: t" in result.output
+
+
+def test_run_all_from_inside_a_topic_scans_the_serve_root(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    monkeypatch.delenv("KAIRO_SERVE_ROOT", raising=False)
+    from kairo.refs import create_tag
+
+    for slug in ("one", "two"):
+        create_tag(tmp_path, slug)
+    one = Workspace.init(tmp_path / "one", topic="one")
+    two = Workspace.init(tmp_path / "two", topic="two")
+    m = tmp_path / "m.txt"
+    m.write_text("材料")
+    two.add([m])
+    monkeypatch.chdir(one.root)
+    result = runner.invoke(app, ["run", "--all"])
+    assert result.exit_code == 0, result.output
+    assert "one: up to date" in result.output and "two: ran" in result.output
+
+
+def test_run_all_stops_at_attention_topics_like_single_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(tmp_path))
+    from kairo.refs import create_tag
+    from kairo.models import TargetState
+    from kairo.rules import REASON_COMPOSE_MIGRATION_REQUIRED
+
+    create_tag(tmp_path, "t")
+    ws = Workspace.init(tmp_path / "t", topic="t")
+    (ws.root / "understanding.md").write_text("旧正文")
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(status="blocked", reason=REASON_COMPOSE_MIGRATION_REQUIRED)
+    ws.write_state(state)
+    import kairo.cli as cli
+
+    calls = []
+    monkeypatch.setattr(cli, "engine_run_workspace", lambda ws, p, **kw: calls.append(ws.root.name))
+    result = runner.invoke(app, ["run", "--all"])
+    assert result.exit_code == 1
+    assert calls == []
+    assert "t: needs attention" in result.output and "needs attention: t" in result.output
 
 
 def test_run_all_and_topic_are_mutually_exclusive(tmp_path, monkeypatch):
