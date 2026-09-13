@@ -447,12 +447,39 @@ def _purge_stale(review: KnowledgeReview) -> bool:
     return changed
 
 
+def current_provider_name() -> str:
+    """Name of the provider a Run would use right now (no network, no subprocess)."""
+    from kairo.provider import select_provider
+
+    return str(getattr(select_provider(require_read_dirs=True), "name", ""))
+
+
+def _purge_foreign_extract_errors(review: KnowledgeReview, provider_name: str) -> bool:
+    """Drop extract errors that the current provider cannot reproduce (#373).
+
+    An error only says "this provider failed on this text". Once the provider
+    changes it is noise, and the same key may never be re-extracted (compose
+    keys, legacy path formats), so it would otherwise stay forever. Records
+    written before the `provider` field existed are dropped for the same reason.
+    """
+    foreign = [
+        key
+        for key in review.extract_errors
+        if review.extract_error_meta.get(key, {}).get("provider", "") != provider_name
+    ]
+    for key in foreign:
+        review.extract_errors.pop(key, None)
+        review.extract_error_versions.pop(key, None)
+        review.extract_error_meta.pop(key, None)
+    return bool(foreign)
+
+
 def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
     # Converge any half-finished accept/merge first: purging a `stale` row before
     # the journal is replayed would orphan the authority entry (#370 review).
     _recover_transaction(workspace_root)
     review = load_review(workspace_root)
-    changed = False
+    changed = _purge_foreign_extract_errors(review, current_provider_name())
     root = Path(workspace_root)
     for index, candidate in enumerate(review.candidates):
         if candidate.status in _LOCKED:
@@ -706,12 +733,19 @@ def ingest_candidates(
     return review
 
 
-def mark_extract_error(workspace_root: Path, path: str, message: str, *, source_kind: str = "digest") -> None:
+def mark_extract_error(
+    workspace_root: Path, path: str, message: str, *, source_kind: str = "digest", provider_name: str | None = None
+) -> None:
     review = load_review(workspace_root)
     key = _error_key(source_kind, path)
     review.extract_errors[key] = message
     review.extract_error_versions[key] = review.extract_error_versions.get(key, 0) + 1
-    review.extract_error_meta[key] = {"source_kind": source_kind, "path": path, "version": str(review.extract_error_versions[key])}
+    review.extract_error_meta[key] = {
+        "source_kind": source_kind,
+        "path": path,
+        "version": str(review.extract_error_versions[key]),
+        "provider": current_provider_name() if provider_name is None else provider_name,
+    }
     save_review(workspace_root, review)
 
 
@@ -799,7 +833,14 @@ def extract_after_success(
         try:
             from kairo.rules import safe_provider_summary
 
-            mark_extract_error(workspace_root, path, safe_provider_summary(exc), source_kind=source_kind)
+            mark_extract_error(
+                workspace_root,
+                path,
+                safe_provider_summary(exc),
+                source_kind=source_kind,
+                # A custom extractor has no provider identity: attribute to the current one.
+                provider_name=str(getattr(provider, "name", "")) if provider is not None else None,
+            )
         except Exception:
             pass
 

@@ -788,8 +788,19 @@ def step(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省�
 
 
 @app.command(name="run")
-def run_cmd(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
+def run_cmd(
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+    all_topics: bool = typer.Option(
+        False, "--all", help="serve root 下每个非 clean Topic 顺序 run 一次;有剩余失败则非零退出"
+    ),
+) -> None:
     """推进 Topic:有 blocked 则先清终态再 step(与 Web 主按钮一致)。"""
+    if all_topics:
+        if topic:
+            typer.secho("--all 与 --topic 互斥", fg=typer.colors.RED, err=True)
+            raise typer.Exit(2)
+        _run_all_topics()
+        return
     ws = _open_ws(topic)
     plan = workspace_run_plan(ws)
     if plan["mode"] == "clean":
@@ -802,6 +813,44 @@ def run_cmd(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;�
     )
     typer.echo("ran" if progressed else "no change")
     _exit_if_run_failed(ws)
+
+
+def _run_all_topics() -> None:
+    """One bounded pass over the serve root: each non-clean Topic runs exactly once (#373).
+
+    No second attempt and no scheduler; whatever is still provider-failed after
+    its single run is listed and turns the exit code non-zero.
+    """
+    from kairo.web.discovery import scan_topic_identities
+
+    serve = _serve_root()
+    provider = select_provider(require_read_dirs=True)
+    ran: list[str] = []
+    skipped: list[str] = []
+    failed: list[str] = []
+    for identity in scan_topic_identities(serve):
+        ws = Workspace.open(serve / identity.slug)
+        promote_oversized_degraded(ws)
+        if workspace_run_plan(ws)["mode"] == "clean":
+            skipped.append(identity.slug)
+            typer.echo(f"{identity.slug}: up to date")
+            continue
+        try:
+            engine_run_workspace(ws, provider)
+        except Exception as exc:  # one Topic must not abort the pass; the failure is reported below
+            failed.append(identity.slug)
+            typer.secho(f"{identity.slug}: failed ({exc})", fg=typer.colors.RED, err=True)
+            continue
+        if has_provider_failed(ws):
+            failed.append(identity.slug)
+            typer.secho(f"{identity.slug}: failed (provider-failed)", fg=typer.colors.RED, err=True)
+        else:
+            ran.append(identity.slug)
+            typer.echo(f"{identity.slug}: ran")
+    typer.echo(f"run --all: ran {len(ran)}, up to date {len(skipped)}, failed {len(failed)}")
+    if failed:
+        typer.secho("still failed: " + ", ".join(failed), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
 
 
 @app.command(name="re-step")
