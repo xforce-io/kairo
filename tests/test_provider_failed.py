@@ -443,3 +443,11 @@ def test_run_workspace_transport_short_circuits_and_nonzero_retry_once(tmp_path)
     run_workspace(ws, fail)
     assert fail.calls == 2
     assert fail.name == "fail-prov"
+
+
+def test_cli_agent_timeout_is_not_a_transport_error():
+    """A slow single reference must not short-circuit the remaining digests."""
+    from kairo.provider import is_transport_provider_error
+
+    assert not is_transport_provider_error(RuntimeError("CLI agent timeout after 600s: grok"))
+    assert is_transport_provider_error(RuntimeError("error sending request for url (https://cli-chat-proxy.grok.com/v1/responses)"))

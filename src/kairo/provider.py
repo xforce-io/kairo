@@ -469,9 +469,10 @@ _TRANSPORT_PROVIDER_RE = re.compile(
     r"|cli-chat-proxy\.grok\.com"
     r"|connection timed out"
     r"|connection timeout"
-    r"|cli agent timeout"
     r")"
 )
+# NOTE: the runner's own "CLI agent timeout" is deliberately *not* transport: a single
+# oversized reference hitting the budget must not short-circuit unrelated digests.
 
 
 def reset_cli_proxy_snapshot() -> None:
