@@ -174,7 +174,9 @@ class GlossaryEntry(BaseModel):
 class Constitution(BaseModel):
     topic: str = "main"
     kind: str | None = None  # deprecated; use preset
-    preset: str = "standard"  # standard | journal; runtime reads digest.enabled / targets / review_input
+    # standard | journal; filled at create time. Must default to None so legacy yaml
+    # without the key still resolves via `kind` / topic alias instead of being forced standard.
+    preset: str | None = None
     pipeline: Pipeline = Field(default_factory=Pipeline)
     roles_by_ext: dict[str, str] = Field(default_factory=_default_roles_by_ext)
     default_role: str = "transcript"  # 无匹配扩展名时兜底
@@ -253,6 +255,10 @@ class Manifest(BaseModel):
     archive: ArchiveBinding | None = None
     occurred_at: str | None = None
     added_at: str | None = None
+    # #362:一句话概述,由该 Ref 的 digest 派生;brief_hash 记住产出时的 digest 内容 hash,
+    # 用于判断 brief 是否已过期。旧 manifest 无这两键 → 无 brief。
+    brief: str | None = None
+    brief_hash: str | None = None
 
     @field_validator("occurred_at", "added_at", mode="before")
     @classmethod

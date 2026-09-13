@@ -177,7 +177,7 @@ def test_grok_review_uses_prompt_file_not_digest_argv(tmp_path, monkeypatch):
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         calls.append(args)
         Path(stdout_file).write_text(
-            json.dumps({"text": "# 回顾\n推进并网\n"}, ensure_ascii=False)
+            json.dumps({"type": "result", "subtype": "success", "result": "# 回顾\n推进并网\n"}, ensure_ascii=False)
         )
 
     body = generate_review_body(

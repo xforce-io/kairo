@@ -39,19 +39,17 @@ def resolve_preset(preset: str | None, kind: str | None, topic: str) -> str:
         if p in (PRESET_STANDARD, PRESET_JOURNAL):
             return p
     
-    # Legacy kind compatibility: kind: topic → standard, kind: journal → journal
-    if kind:
-        k = kind.strip()
-        if k == KIND_JOURNAL:
-            return PRESET_JOURNAL
-        if k == KIND_TOPIC:
-            return PRESET_STANDARD
-    
-    # Topic-based preset (e.g. "总结" → journal)
+    # Legacy kind compatibility: kind: journal → journal
+    k = (kind or "").strip()
+    if k == KIND_JOURNAL:
+        return PRESET_JOURNAL
+
+    # Topic-based preset (e.g. "总结" → journal). Legacy `kind: topic` was the
+    # default written to every old repo, so it must not suppress the alias.
     alias = TOPIC_PRESET.get((topic or "").strip())
     if alias:
         return alias
-    
+
     return PRESET_STANDARD
 
 
@@ -94,11 +92,11 @@ def fill_at_create(con) -> None:
 def effective_preset(ws) -> str:
     """运行时 preset: yaml preset 优先，回退 kind，再看 slug/topic 是否为「总结」。"""
     con = ws.constitution
-    return resolve_preset(
-        getattr(con, "preset", None),
-        getattr(con, "kind", None),
-        con.topic if hasattr(con, "topic") else ws.root.name
-    )
+    topic = (getattr(con, "topic", None) or "").strip()
+    if topic not in TOPIC_PRESET and ws.root.name in TOPIC_PRESET:
+        # Legacy 总结 repos may carry another topic name; the slug still decides.
+        topic = ws.root.name
+    return resolve_preset(getattr(con, "preset", None), getattr(con, "kind", None), topic)
 
 
 def effective_kind(ws) -> str:

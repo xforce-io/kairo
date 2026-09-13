@@ -13,8 +13,10 @@ from kairo.engine import step
 from kairo.cli import app
 from kairo.knowledge import (
     KnowledgeAlias,
+    KnowledgeDocument,
     KnowledgeEntry,
     KnowledgeSource,
+    effective_entries,
     load_global,
     load_workspace,
     migrate_global,
@@ -23,7 +25,7 @@ from kairo.knowledge import (
     save_global,
     save_workspace,
 )
-from kairo.knowledge_matcher import KnowledgeMatcher, MatchBudget
+from kairo.knowledge_matcher import KnowledgeMatcher, MatchBudget, format_knowledge_context
 from kairo.knowledge_review import (
     MAX_DRAFTS_PER_SOURCE,
     KnowledgeCandidate,
@@ -448,7 +450,7 @@ def test_knowledge_review_queue_omits_stale_candidates(tmp_path):
     )
     queue = page.text.split("Knowledge candidates to review", 1)[1]
     assert "LiveTerm" in queue
-    assert "Accept to this workspace" in queue
+    assert "Accept to this Topic" in queue  # #264 workspace→Topic
     assert "ExpiredTerm" not in queue
     assert "Completed: stale" not in page.text
     assert "Knowledge candidates to review · 1" in page.text
@@ -1433,3 +1435,88 @@ def test_readme_v2_example_has_strict_audit_fields(tmp_path):
     block = text.split("```yaml\nknowledge:\n", 1)[1].split("```", 1)[0]
     document = KnowledgeDocument.model_validate(yaml.safe_load("knowledge:\n" + block)["knowledge"])
     validate_entries(document.entries, scope="workspace")
+
+
+def test_ingest_resighting_of_confirmed_term_attaches_provenance_instead_of_requeueing(tmp_path):
+    """P0: 已确认的「胡博」被反复提为候选、而条目出处始终为 0。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    public = new_entry(title="胡值彬", scope="global", aliases=[KnowledgeAlias(value="胡博")])
+    save_global(root, KnowledgeDocument(entries=[public]))
+    local = new_entry(title="康医通", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [local]}))
+    matcher = KnowledgeMatcher(effective_entries(root, ws.root))
+
+    a = _write_digest(ws, "r1", "胡博说康医通要上线。")
+    ingest_candidates(
+        ws.root,
+        source_kind="digest",
+        path=a,
+        source_text="胡博说康医通要上线。",
+        drafts=[
+            {"title": "胡博", "quote": "胡博说", "aliases": ["胡值彬"]},
+            {"title": "康医通", "quote": "康医通要上线"},
+            # alias proposal: the entry does not know this ASR mishearing yet -> reviewable
+            {"title": "西端", "quote": "胡博说", "aliases": ["C 端"]},
+        ],
+        matcher=matcher,
+        serve_root=root,
+    )
+    review = load_review(ws.root)
+    by_title = {c.title: c for c in review.candidates}
+    assert by_title["胡博"].status == "merged" and by_title["胡博"].merged_into == public.id
+    assert by_title["康医通"].status == "merged" and by_title["康医通"].merged_into == local.id
+    assert by_title["西端"].status in {"sighted", "pending"}
+    assert todo_count(ws.root) == 0
+
+    g_entry = next(e for e in load_global(root)[0].entries if e.id == public.id)
+    assert [s.path for s in g_entry.sources] == [a] and g_entry.sources[0].quote == "胡博说"
+    w_entry = next(e for e in load_workspace(ws.root)[0].entries if e.id == local.id)
+    assert [s.path for s in w_entry.sources] == [a]
+
+    # Idempotent re-ingest of the same digest: no duplicate provenance.
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="胡博说康医通要上线。",
+        drafts=[{"title": "胡博", "quote": "胡博说"}], matcher=matcher, serve_root=root,
+    )
+    assert len(next(e for e in load_global(root)[0].entries if e.id == public.id).sources) == 1
+
+    # A later digest re-sighting the already-merged candidate still feeds provenance.
+    b = _write_digest(ws, "r2", "胡博拍板。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=b, source_text="胡博拍板。",
+        drafts=[{"title": "胡博", "quote": "胡博拍板"}], matcher=matcher, serve_root=root,
+    )
+    g_entry = next(e for e in load_global(root)[0].entries if e.id == public.id)
+    assert [s.path for s in g_entry.sources] == [a, b]
+    assert load_review(ws.root).candidates and all(c.title != "胡博" or c.status == "merged" for c in load_review(ws.root).candidates)
+
+
+def test_ingest_closes_open_candidate_once_its_term_is_confirmed(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = _write_digest(ws, "r1", "胡博到场。")
+    ingest_candidates(ws.root, source_kind="digest", path=a, source_text="胡博到场。", drafts=[{"title": "胡博", "quote": "胡博到场"}])
+    assert load_review(ws.root).candidates[0].status == "sighted"
+    public = new_entry(title="胡值彬", scope="global", aliases=[KnowledgeAlias(value="胡博")])
+    save_global(root, KnowledgeDocument(entries=[public]))
+    b = _write_digest(ws, "r2", "胡博发言。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=b, source_text="胡博发言。",
+        drafts=[{"title": "胡博", "quote": "胡博发言"}],
+        matcher=KnowledgeMatcher(effective_entries(root, ws.root)), serve_root=root,
+    )
+    item = load_review(ws.root).candidates[0]
+    assert item.status == "merged" and item.merged_into == public.id
+    assert todo_count(ws.root) == 0
+
+
+def test_knowledge_context_treats_confirmed_terms_as_verified_spellings():
+    entry = _entry("胡值彬", aliases=("胡博",), description="产品负责人")
+    text = format_knowledge_context(KnowledgeMatcher([entry]).match("胡博说要上线"))
+    assert "不必再标 ⚠️" in text
+    assert "- 胡值彬（命中：胡博；别名：胡博；产品负责人）" not in text  # hit term is not repeated as alias
+    assert "- 胡值彬（命中：胡博；产品负责人）" in text
+    assert "无出处" not in text and "global" not in text

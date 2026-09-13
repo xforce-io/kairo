@@ -591,6 +591,100 @@ def timeline(
     typer.echo(format_cli_timeline(items, recent=recent, day=parsed), nl=False)
 
 
+@app.command(name="brief")
+def brief_cmd(
+    ref_id: str = typer.Argument(None, help="reference id;省略时处理 serve root 内全部"),
+    home: str = typer.Option(None, "--home", help="Ref 所属 home(global 或 Topic slug)"),
+    root: Path = typer.Option(None, "--root", help="serve root;默认 KAIRO_SERVE_ROOT 或 cwd"),
+    force: bool = typer.Option(False, "--force", help="忽略 brief_hash 一致性,强制重算"),
+    limit: int = typer.Option(0, "--limit", help="最多处理多少条(0=不限);用于控成本"),
+    as_json: bool = typer.Option(False, "--json", help="每条一行 JSON 记账"),
+) -> None:
+    """为有 digest 的 Ref 补一句话 brief(#362);已有且未过期的跳过。"""
+    from kairo.brief import BriefError, brief_stale, digest_path, generate_brief
+    from kairo.refs import list_all_refs, resolve_open
+
+    serve = _serve_root(root)
+    if not serve.is_dir():
+        typer.secho(f"目录不存在:{serve}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    recs = list_all_refs(serve)
+    if ref_id:
+        recs = [r for r in recs if r.id == ref_id]
+    if home is not None:
+        recs = [r for r in recs if (r.home or "global") == home]
+    if ref_id:
+        if not recs:
+            typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(1)
+        if len(recs) > 1:
+            typer.secho(
+                f"reference 不唯一:{ref_id};请加 --home", fg=typer.colors.RED, err=True
+            )
+            raise typer.Exit(1)
+
+    # 批量按发生日新→旧,与 Timeline 列表同序,使 --limit 先补最近的资料。
+    import datetime as dt
+
+    from kairo.timeline import effective_occurred
+
+    def _occurred_key(rec):
+        try:
+            ws, rid = resolve_open(serve, rec.home, rec.id)
+            occ, _ = effective_occurred(rid, ws.read_manifest(rid).occurred_at)
+        except Exception:
+            occ = None
+        return (occ is not None, occ or dt.date.min)
+
+    recs = sorted(recs, key=_occurred_key, reverse=True)
+
+    provider = select_provider()
+    counts = {"ok": 0, "skipped": 0, "no-digest": 0, "failed": 0}
+
+    def report(rec_home: str, rid: str, status: str, detail: str) -> None:
+        counts[status] += 1
+        if as_json:
+            typer.echo(
+                json.dumps(
+                    {"home": rec_home, "id": rid, "status": status, "detail": detail},
+                    ensure_ascii=False,
+                )
+            )
+        elif status == "ok":
+            typer.echo(f"brief {rec_home}/{rid} → {detail}")
+        elif status == "failed":
+            typer.secho(f"failed {rec_home}/{rid}: {detail}", fg=typer.colors.RED, err=True)
+
+    for rec in recs:
+        if limit and counts["ok"] >= limit:
+            break
+        rec_home = rec.home or "global"
+        try:
+            ws, rid = resolve_open(serve, rec.home, rec.id)
+        except Exception as exc:
+            report(rec_home, rec.id, "failed", str(exc))
+            continue
+        path = digest_path(ws, rid)
+        if not path.is_file():
+            report(rec_home, rid, "no-digest", "")
+            continue
+        if not force and not brief_stale(ws.read_manifest(rid), path.read_text(encoding="utf-8")):
+            report(rec_home, rid, "skipped", "")
+            continue
+        try:
+            report(rec_home, rid, "ok", generate_brief(ws, rid, provider=provider))
+        except BriefError as exc:
+            report(rec_home, rid, "failed", str(exc))
+
+    if not as_json:
+        typer.echo(
+            f"ok={counts['ok']} skipped={counts['skipped']} "
+            f"no-digest={counts['no-digest']} failed={counts['failed']}"
+        )
+    if counts["failed"]:
+        raise typer.Exit(1)
+
+
 @app.command()
 def review(
     from_day: str = typer.Option(..., "--from", help="区间起"),

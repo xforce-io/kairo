@@ -9,6 +9,18 @@ from kairo.refs import create_tag
 runner = CliRunner()
 
 
+@pytest.fixture
+def topic_dir(tmp_path):
+    """A Topic directory under a serve root whose vocabulary already has the `main` Tag.
+
+    `kairo init` / `kairo add` require the Topic name Tag to exist (#269, #350).
+    """
+    create_tag(tmp_path, "main")
+    d = tmp_path / "main"
+    d.mkdir()
+    return d
+
+
 def test_cli_help_shows_quickstart():
     """#22 ①:顶层 --help 带「快速上手」happy-path + 两层产出 + 心智 SSOT 指向。"""
     out = runner.invoke(app, ["--help"]).output
@@ -33,14 +45,14 @@ def test_cli_friendly_error_outside_workspace(tmp_path, monkeypatch, cmd):
     assert result.exception is None or isinstance(result.exception, SystemExit)
 
 
-def test_cli_status_warns_on_corpus_drift(tmp_path, monkeypatch):
+def test_cli_status_warns_on_corpus_drift(topic_dir, monkeypatch):
     """#13 v2:改 corpus 后 status 给 advisory(不自动重算,提示 re-step)。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
-    meeting = tmp_path / "m.txt"
+    meeting = topic_dir / "m.txt"
     meeting.write_text("会议")
-    wp = tmp_path / "wp.md"
+    wp = topic_dir / "wp.md"
     wp.write_text("基线v1")
     runner.invoke(app, ["add", str(meeting)])
     runner.invoke(app, ["add", str(wp), "--corpus"])
@@ -52,33 +64,34 @@ def test_cli_status_warns_on_corpus_drift(tmp_path, monkeypatch):
     assert "corpus" in out and "re-step" in out  # advisory
 
 
-def test_cli_run_empty_workspace_up_to_date(tmp_path, monkeypatch):
+def test_cli_run_empty_workspace_up_to_date(topic_dir, monkeypatch):
     """#134 S2:空 workspace `kairo run` 输出 up to date,不写 target。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
     result = runner.invoke(app, ["run"])
     assert result.exit_code == 0
     assert "up to date" in result.output
-    assert not (tmp_path / "understanding.md").exists()
-    assert not (tmp_path / "assessment.md").exists()
+    assert not (topic_dir / "understanding.md").exists()
+    assert not (topic_dir / "assessment.md").exists()
 
 
-def test_cli_init_creates_workspace(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_cli_init_creates_workspace(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
+    create_tag(topic_dir.parent, "kidney")
     result = runner.invoke(app, ["init", "kidney"])
     assert result.exit_code == 0
-    assert (tmp_path / "constitution.yaml").is_file()
-    assert (tmp_path / ".kairo" / "state.json").is_file()
+    assert (topic_dir / "constitution.yaml").is_file()
+    assert (topic_dir / ".kairo" / "state.json").is_file()
 
 
-def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_cli_end_to_end_domino_audio_and_text(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")  # 强制 stub,端到端不触真 API
     runner.invoke(app, ["init"])
-    audio = tmp_path / "rec.m4a"
+    audio = topic_dir / "rec.m4a"
     audio.write_bytes(b"fake audio")
-    text = tmp_path / "wangqiang.txt"
+    text = topic_dir / "wangqiang.txt"
     text.write_text("王强会议:三智能体定位与落地优先级")
     runner.invoke(app, ["add", str(audio)])
     runner.invoke(app, ["add", str(text)])
@@ -86,80 +99,80 @@ def test_cli_end_to_end_domino_audio_and_text(tmp_path, monkeypatch):
     result = runner.invoke(app, ["step"])
     assert result.exit_code == 0
 
-    understanding = (tmp_path / "understanding.md").read_text()
+    understanding = (topic_dir / "understanding.md").read_text()
     # 音频链:ASR→Digest→Compose
     assert "STUB TRANSCRIPT" in understanding
     # 文本链:Digest→Compose
     assert "三智能体定位与落地优先级" in understanding
-    assert not (tmp_path / "assessment.md").exists()
+    assert not (topic_dir / "assessment.md").exists()
     targets = json.loads(
-        (tmp_path / ".kairo" / "history" / "0000" / "state.targets.json").read_text()
+        (topic_dir / ".kairo" / "history" / "0000" / "state.targets.json").read_text()
     )
     assert len(targets["understanding.md"]["folded"]) == 2
 
 
-def test_cli_prose_generates_readable_archive(tmp_path, monkeypatch):
+def test_cli_prose_generates_readable_archive(topic_dir, monkeypatch):
     """#60:kairo prose <id> 在 normalize 默认关时仍可按需产 prose,不改 constitution。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
-    audio = tmp_path / "rec.m4a"
+    audio = topic_dir / "rec.m4a"
     audio.write_bytes(b"fake audio")
     runner.invoke(app, ["add", str(audio)])
     runner.invoke(app, ["step"])  # ASR + digest;默认无 prose
-    rid = next(p.name for p in (tmp_path / "references").iterdir() if p.is_dir())
-    assert not (tmp_path / "references" / rid / "prose.md").exists()
+    rid = next(p.name for p in (topic_dir / "references").iterdir() if p.is_dir())
+    assert not (topic_dir / "references" / rid / "prose.md").exists()
 
     result = runner.invoke(app, ["prose", rid])
     assert result.exit_code == 0
     assert f"references/{rid}/prose.md" in result.output
-    assert (tmp_path / "references" / rid / "prose.md").is_file()
-    assert "STUB TRANSCRIPT" in (tmp_path / "references" / rid / "prose.md").read_text()
+    assert (topic_dir / "references" / rid / "prose.md").is_file()
+    assert "STUB TRANSCRIPT" in (topic_dir / "references" / rid / "prose.md").read_text()
     # constitution 仍关
     import yaml
 
-    con = yaml.safe_load((tmp_path / "constitution.yaml").read_text())
+    con = yaml.safe_load((topic_dir / "constitution.yaml").read_text())
     assert not (con.get("pipeline") or {}).get("normalize", {}).get("enabled", False)
     # 再跑失败
     again = runner.invoke(app, ["prose", rid])
     assert again.exit_code != 0
 
 
-def test_cli_re_step_discards_manual_edit(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_cli_re_step_discards_manual_edit(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
-    t = tmp_path / "m.txt"
+    t = topic_dir / "m.txt"
     t.write_text("内容")
     runner.invoke(app, ["add", str(t)])
     runner.invoke(app, ["step"])
-    canonical = (tmp_path / "understanding.md").read_text()
-    (tmp_path / "understanding.md").write_text("乱改")
+    canonical = (topic_dir / "understanding.md").read_text()
+    (topic_dir / "understanding.md").write_text("乱改")
     result = runner.invoke(app, ["re-step", "understanding.md"])
     assert result.exit_code == 0
-    assert (tmp_path / "understanding.md").read_text() == canonical
+    assert (topic_dir / "understanding.md").read_text() == canonical
 
 
-def test_cli_history_and_diff(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_cli_history_and_diff(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
-    t = tmp_path / "m.txt"
+    t = topic_dir / "m.txt"
     t.write_text("内容")
     runner.invoke(app, ["add", str(t)])
     runner.invoke(app, ["step"])
     h = runner.invoke(app, ["history"])
     assert h.exit_code == 0 and "0000" in h.stdout
-    (tmp_path / "understanding.md").write_text("手改")
+    (topic_dir / "understanding.md").write_text("手改")
     d = runner.invoke(app, ["diff"])
     assert d.exit_code == 0 and "understanding.md" in d.stdout
 
 
-def test_cli_status_shows_drift_counter(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_cli_status_shows_drift_counter(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
-    t = tmp_path / "m.txt"
+    t = topic_dir / "m.txt"
     t.write_text("内容")
     runner.invoke(app, ["add", str(t)])
     runner.invoke(app, ["step"])
@@ -167,10 +180,10 @@ def test_cli_status_shows_drift_counter(tmp_path, monkeypatch):
     assert s.exit_code == 0 and "距上次 A" in s.stdout
 
 
-def test_cli_status_lists_references(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_cli_status_lists_references(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    text = tmp_path / "meeting.txt"
+    text = topic_dir / "meeting.txt"
     text.write_text("内容")
     runner.invoke(app, ["add", str(text)])
     result = runner.invoke(app, ["status"])
@@ -178,76 +191,76 @@ def test_cli_status_lists_references(tmp_path, monkeypatch):
     assert "meeting" in result.stdout
 
 
-def test_cli_index_command_writes_meetings(tmp_path, monkeypatch):
+def test_cli_index_command_writes_meetings(topic_dir, monkeypatch):
     """#16:kairo index 手动重建 stream 导航索引(无需 step)。"""
     import re
 
     from kairo.workspace import Workspace
 
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    meeting = tmp_path / "会议实录.txt"
+    meeting = topic_dir / "会议实录.txt"
     meeting.write_text("会议")
     runner.invoke(app, ["add", str(meeting)])
 
     result = runner.invoke(app, ["index"])
 
     assert result.exit_code == 0
-    index = tmp_path / "references" / "MEETINGS.md"
+    index = topic_dir / "references" / "MEETINGS.md"
     assert index.is_file()
-    ws = Workspace.open(tmp_path)
+    ws = Workspace.open(topic_dir)
     rid = ws.list_reference_ids()[0]
     title = ws.read_manifest(rid).title
     assert title == "会议实录"
     assert title in index.read_text()
 
 
-def test_cli_add_dir_stream_multiform(tmp_path, monkeypatch):
+def test_cli_add_dir_stream_multiform(topic_dir, monkeypatch):
     """#67:add <dir> 无 --corpus → 一条 stream 多形态 ref。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    d = tmp_path / "docs"
+    d = topic_dir / "docs"
     d.mkdir()
     (d / "a.md").write_text("a")
     (d / "b.m4a").write_bytes(b"x")
     result = runner.invoke(app, ["add", str(d)])
     assert result.exit_code == 0
     assert "added" in result.output
-    mans = list((tmp_path / "references").glob("*/manifest.yaml"))
+    mans = list((topic_dir / "references").glob("*/manifest.yaml"))
     assert len(mans) == 1
     text = mans[0].read_text()
     assert "class: stream" in text
     assert text.count("role:") >= 2
 
 
-def test_cli_add_copy_materializes(tmp_path, monkeypatch):
+def test_cli_add_copy_materializes(topic_dir, monkeypatch):
     """#64:kairo add --copy 物化到 .kairo/uploads。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    src = tmp_path / "out.txt"
+    src = topic_dir / "out.txt"
     src.write_text("外部文件")
     result = runner.invoke(app, ["add", str(src), "--copy"])
     assert result.exit_code == 0
-    uploads = tmp_path / ".kairo" / "uploads"
+    uploads = topic_dir / ".kairo" / "uploads"
     assert uploads.is_dir()
     assert any(uploads.iterdir())
 
 
-def test_cli_add_copy_dir_stream_ok(tmp_path, monkeypatch):
+def test_cli_add_copy_dir_stream_ok(topic_dir, monkeypatch):
     """#67:add <dir> --copy → stream 多形态并物化。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    d = tmp_path / "lib"
+    d = topic_dir / "lib"
     d.mkdir()
     (d / "a.md").write_text("a")
     result = runner.invoke(app, ["add", str(d), "--copy"])
     assert result.exit_code == 0
 
 
-def test_cli_add_copy_corpus_dir_friendly_error(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+def test_cli_add_copy_corpus_dir_friendly_error(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    d = tmp_path / "lib"
+    d = topic_dir / "lib"
     d.mkdir()
     (d / "a.md").write_text("a")
     result = runner.invoke(app, ["add", str(d), "--corpus", "--copy"])
@@ -255,39 +268,39 @@ def test_cli_add_copy_corpus_dir_friendly_error(tmp_path, monkeypatch):
     assert "基线" in result.output or "copy" in result.output.lower() or "目录" in result.output
 
 
-def test_cli_add_dir_corpus_ok(tmp_path, monkeypatch):
+def test_cli_add_dir_corpus_ok(topic_dir, monkeypatch):
     """#24:add <dir> --corpus → 建一条 corpus_tree 引用。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    d = tmp_path / "corpus_docs"
+    d = topic_dir / "corpus_docs"
     (d / "sub").mkdir(parents=True)
     (d / "sub" / "b.md").write_text("b")
     result = runner.invoke(app, ["add", str(d), "--corpus"])
     assert result.exit_code == 0
-    man = (tmp_path / "references").glob("*/manifest.yaml")
+    man = (topic_dir / "references").glob("*/manifest.yaml")
     assert any("corpus_tree" in p.read_text() for p in man)
 
 
-def test_cli_e2e_corpus_dir_not_digested(tmp_path, monkeypatch):
+def test_cli_e2e_corpus_dir_not_digested(topic_dir, monkeypatch):
     """#24 e2e:corpus 目录不产 digest;stream 正常折叠出两层文档。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
     # corpus 目录
-    cdir = tmp_path / "corpus_docs"
+    cdir = topic_dir / "corpus_docs"
     (cdir / "平台").mkdir(parents=True)
     (cdir / "平台" / "术语表.md").write_text("灵犀系统=正式名")
     # stream 文件
-    s = tmp_path / "会议.txt"
+    s = topic_dir / "会议.txt"
     s.write_text("王强会议:落地优先级")
     runner.invoke(app, ["add", str(cdir), "--corpus"])
     runner.invoke(app, ["add", str(s)])
     result = runner.invoke(app, ["step"])
     assert result.exit_code == 0
-    assert (tmp_path / "understanding.md").is_file()
-    assert not (tmp_path / "assessment.md").exists()
+    assert (topic_dir / "understanding.md").is_file()
+    assert not (topic_dir / "assessment.md").exists()
     # corpus 目录引用没有 digest.md(不被 digest)
-    refs = tmp_path / "references"
+    refs = topic_dir / "references"
     corpus_ref = next(p for p in refs.iterdir() if "corpus_docs" in p.name)
     assert not (corpus_ref / "digest.md").exists()
 
@@ -335,6 +348,8 @@ def test_cli_list_scans_serve_root(tmp_path, monkeypatch):
         "corpus",
         "stale",
         "blocked",
+        "include_tags",  # #269
+        "member_count",  # #269
     }
 
 
@@ -375,33 +390,33 @@ def test_cli_rm_ws_rejects_missing(tmp_path, monkeypatch):
     assert "不存在" in result.output
 
 
-def test_cli_add_to_attaches_form(tmp_path, monkeypatch):
+def test_cli_add_to_attaches_form(topic_dir, monkeypatch):
     """#95:add --to <id> 向既有参考追加形态(Web attach)。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    a = tmp_path / "a.txt"
+    a = topic_dir / "a.txt"
     a.write_text("主材料")
-    b = tmp_path / "b.png"
+    b = topic_dir / "b.png"
     b.write_bytes(b"\x89PNG")
     runner.invoke(app, ["add", str(a)])
-    rid = next(p.name for p in (tmp_path / "references").iterdir() if p.is_dir())
+    rid = next(p.name for p in (topic_dir / "references").iterdir() if p.is_dir())
     result = runner.invoke(app, ["add", str(b), "--to", rid, "--copy"])
     assert result.exit_code == 0
-    man = (tmp_path / "references" / rid / "manifest.yaml").read_text()
+    man = (topic_dir / "references" / rid / "manifest.yaml").read_text()
     assert man.count("role:") >= 2
 
 
-def test_cli_title_renames_display_name(tmp_path, monkeypatch):
+def test_cli_title_renames_display_name(topic_dir, monkeypatch):
     """#95:title 只改展示名,不动 id。"""
-    monkeypatch.chdir(tmp_path)
+    monkeypatch.chdir(topic_dir)
     runner.invoke(app, ["init"])
-    t = tmp_path / "meeting.txt"
+    t = topic_dir / "meeting.txt"
     t.write_text("x")
     runner.invoke(app, ["add", str(t)])
-    rid = next(p.name for p in (tmp_path / "references").iterdir() if p.is_dir())
+    rid = next(p.name for p in (topic_dir / "references").iterdir() if p.is_dir())
     result = runner.invoke(app, ["title", rid, "王强会"])
     assert result.exit_code == 0
-    assert "王强会" in (tmp_path / "references" / rid / "manifest.yaml").read_text()
+    assert "王强会" in (topic_dir / "references" / rid / "manifest.yaml").read_text()
     st = runner.invoke(app, ["status"])
     assert st.exit_code == 0
     assert "plan=" in st.output and "王强会" in st.output

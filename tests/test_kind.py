@@ -3,7 +3,14 @@
 import datetime as dt
 
 from kairo.engine import pending, workspace_run_plan
-from kairo.kind import KIND_JOURNAL, KIND_TOPIC, effective_kind, resolve_kind, stage_enabled
+from kairo.kind import (
+    KIND_JOURNAL,
+    PRESET_JOURNAL,
+    PRESET_STANDARD,
+    effective_kind,
+    resolve_kind,
+    stage_enabled,
+)
 from kairo.provider import AgentConfig, AgentResult
 from kairo.review import produce_review
 from kairo.workspace import Workspace
@@ -13,17 +20,25 @@ def test_resolve_kind_summary_topic_is_journal():
     assert resolve_kind(None, "总结") == KIND_JOURNAL
     assert resolve_kind("topic", "总结") == KIND_JOURNAL
     assert resolve_kind("journal", "能源梳理") == KIND_JOURNAL
-    assert resolve_kind(None, "能源梳理") == KIND_TOPIC
+    assert resolve_kind(None, "能源梳理") == PRESET_STANDARD
+    # Legacy `kind: topic` was the default in every old yaml; it must not hide the alias.
+    assert resolve_kind("topic", "能源梳理") == PRESET_STANDARD
+    # An explicit preset always wins.
+    from kairo.kind import resolve_preset
+
+    assert resolve_preset("standard", None, "总结") == PRESET_STANDARD
+    assert resolve_preset(None, "journal", "能源梳理") == PRESET_JOURNAL
 
 
 def test_init_summary_workspace_has_no_ua_targets(tmp_path):
     journal = Workspace.init(tmp_path / "总结", topic="总结")
-    assert journal.constitution.kind == KIND_JOURNAL
+    assert journal.constitution.preset == PRESET_JOURNAL
+    assert journal.constitution.kind is None
     assert journal.constitution.targets == []
     assert journal.constitution.review_input is False
     assert journal.constitution.pipeline.digest.enabled is True
     topic = Workspace.init(tmp_path / "能源", topic="能源梳理")
-    assert topic.constitution.kind == KIND_TOPIC
+    assert topic.constitution.preset == PRESET_STANDARD
     assert [t.path for t in topic.constitution.targets] == ["understanding.md"]
 
 
@@ -33,6 +48,7 @@ def test_open_existing_总结_is_journal_without_kind_field(tmp_path, monkeypatc
     con = ws.constitution
     con.topic = "总结"
     con.kind = "topic"
+    con.preset = None  # legacy yaml predates the preset key
     ws.write_constitution(con)
     opened = Workspace.open(ws.root)
     assert effective_kind(opened) == KIND_JOURNAL
@@ -46,12 +62,33 @@ def test_open_existing_总结_is_journal_without_kind_field(tmp_path, monkeypatc
     assert pending(opened) == []
 
 
+def test_legacy_kind_journal_yaml_without_preset_key_stays_journal(tmp_path):
+    """#264 regression: a pre-preset yaml (`kind: journal`, no `preset`) must not be forced standard."""
+    import yaml
+
+    ws = Workspace.init(tmp_path / "回顾仓", topic="回顾仓")
+    data = yaml.safe_load((ws.root / "constitution.yaml").read_text())
+    data.pop("preset", None)
+    data["kind"] = "journal"
+    data["pipeline"]["digest"]["enabled"] = False  # live 总结 yaml carries this leftover
+    (ws.root / "constitution.yaml").write_text(
+        yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"
+    )
+    opened = Workspace.open(ws.root)
+    assert opened.constitution.preset is None
+    assert effective_kind(opened) == KIND_JOURNAL
+    assert opened.constitution.live_targets() == []
+    assert stage_enabled(opened, "digest")
+    assert not stage_enabled(opened, "compose")
+
+
 def test_open_leftover_总结_yaml_without_kind_key_has_empty_live_targets(tmp_path):
     import yaml
 
     ws = Workspace.init(tmp_path / "总结", topic="能源梳理")
     data = yaml.safe_load((ws.root / "constitution.yaml").read_text())
     data.pop("kind", None)
+    data.pop("preset", None)
     data["topic"] = "总结"
     (ws.root / "constitution.yaml").write_text(
         yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8"

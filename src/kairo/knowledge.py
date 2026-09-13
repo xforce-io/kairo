@@ -307,8 +307,8 @@ def semantic_hash(entries: list[KnowledgeEntry]) -> str:
             "aliases": [{"value": a.value, "auto_match": a.auto_match} for a in entry.aliases],
             "description": entry.description,
             "scope": entry.scope,
-            # renderer 仅展示路径概览；quote/hash/workspace_slug 不进入 Prompt。
-            "source_paths": [source.path for source in entry.sources],
+            # sources are provenance only: the renderer no longer injects them and
+            # auto-attached provenance must not read as knowledge drift.
         }
         for entry in entries
         if entry.status == "confirmed"

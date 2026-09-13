@@ -137,7 +137,7 @@ def test_get_pages_bound_full_catalog_scans(tmp_path, monkeypatch):
     home = pages["home"].text
     assert "Topic 0" in home
     assert "1 Ref" in home
-    assert "Needs attention" in home
+    assert "to step" in home  # #283 stale badge replaced "Needs attention"
     assert "New or changed materials are ready to be processed." in home
 
     topic = pages["topic"].text

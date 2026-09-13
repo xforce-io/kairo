@@ -738,8 +738,11 @@ class DigestRule:
             )
             ref_id = key.split("/")[1] if key.count("/") >= 2 else ""
             if ref_id:
+                from kairo.brief import brief_after_digest
                 from kairo.refs import serve_root_of
 
+                # #362:brief 与知识候选提取同为旁路,失败都不反噬已落盘的 digest。
+                brief_after_digest(self.ws, ref_id, provider=self.provider)
                 extract_after_success(
                     self.ws.root,
                     serve_root_of(self.ws),
