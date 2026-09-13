@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Callable
@@ -820,6 +821,8 @@ def parse_extract_yaml(text: str) -> list[dict]:
     return [item for item in data if isinstance(item, dict)]
 
 
+_EXTRACT_IO = threading.Lock()
+
 _PERSONA = """从已完成产物中提取值得人工审核的领域知识候选。
 只提专名:人名、组织/团队、系统/产品/项目名、以及本领域固定的口径或代号。
 不提:议题词、状态或现象描述(如「三相不平衡」「进度延误」)、待办、口号、会议流程、一次性数字。
@@ -854,27 +857,28 @@ def extract_after_success(
     provider=None,
     extractor: Extractor | None = None,
 ) -> None:
-    try:
-        matcher = KnowledgeMatcher(effective_entries(serve_root, workspace_root))
-        drafts = (extractor or provider_extractor(provider))(text, list(matcher.entries), path) if (extractor or provider) else []
-        ingest_candidates(
-            workspace_root, source_kind=source_kind, path=path, source_text=text, drafts=drafts,
-            matcher=matcher, serve_root=serve_root, provider_name=str(getattr(provider, "name", "")),
-        )
-    except Exception as exc:
-        # 提取永远是旁路：即使审核 YAML 损坏或写诊断也失败，也不能反噬 digest/compose。
+    with _EXTRACT_IO:
         try:
-            from kairo.rules import safe_provider_summary
-
-            mark_extract_error(
-                workspace_root,
-                path,
-                safe_provider_summary(exc),
-                source_kind=source_kind,
-                provider_name=str(getattr(provider, "name", "")),
+            matcher = KnowledgeMatcher(effective_entries(serve_root, workspace_root))
+            drafts = (extractor or provider_extractor(provider))(text, list(matcher.entries), path) if (extractor or provider) else []
+            ingest_candidates(
+                workspace_root, source_kind=source_kind, path=path, source_text=text, drafts=drafts,
+                matcher=matcher, serve_root=serve_root, provider_name=str(getattr(provider, "name", "")),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            # 提取永远是旁路：即使审核 YAML 损坏或写诊断也失败，也不能反噬 digest/compose。
+            try:
+                from kairo.rules import safe_provider_summary
+
+                mark_extract_error(
+                    workspace_root,
+                    path,
+                    safe_provider_summary(exc),
+                    source_kind=source_kind,
+                    provider_name=str(getattr(provider, "name", "")),
+                )
+            except Exception:
+                pass
 
 
 def _candidate(workspace_root: Path, candidate_id: str) -> tuple[KnowledgeReview, int, KnowledgeCandidate]:
