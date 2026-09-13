@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>kairo console · timeline list brief (second line)</title>
+  <link rel="stylesheet" href="../../../src/kairo/web/static/app.css">
+  <link rel="stylesheet" href="mock.css">
+</head>
+<body class="brief-2line">
+  <header class="top">
+    <a class="brand" href="#"><b>kairo</b><span class="dot-sep">·</span><span class="sub">console</span></a>
+    <nav class="console-nav">
+      <a href="#">Topics</a>
+      <a href="#">Projects</a>
+      <a class="on" href="#">Timeline</a>
+      <a href="#">Knowledge</a>
+      <a href="#">Settings</a>
+    </nav>
+    <span class="crumb">September 2026</span>
+    <span class="top-end">
+      <span class="lang-switch">
+        <a href="#" class="on">EN</a>
+        <a href="#">中</a>
+      </span>
+    </span>
+  </header>
+
+  <div class="page-toolbar">
+    <div class="page-toolbar-find">
+      <div class="tl-modes">
+        <a href="#">Calendar</a>
+        <a class="on" href="#">List</a>
+      </div>
+      <form class="tl-tags" onsubmit="return false">
+        <input id="tl-tag" name="tag" placeholder="Existing tags">
+        <button type="submit" class="btn btn-ghost btn-inline">Apply</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="timeline cal-page">
+    <div class="timeline-list">
+
+      <section class="tl-day">
+        <div class="tl-day-head"><h2>2026-09-12</h2><span class="count">1</span></div>
+        <!-- No digest yet, so no brief: the row keeps its current single-line height. -->
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">2026-09-07～2026-09-11 回顾</span>
+          <span class="tl-ref-tags"><span>总结</span></span>
+          <span class="tl-meta">总结 · added 08:10 · occurred 09-12</span>
+        </a>
+      </section>
+
+      <section class="tl-day">
+        <div class="tl-day-head"><h2>2026-09-11</h2><span class="count">4</span></div>
+
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">算法例会-260911</span>
+          <span class="tl-brief">扫门分流已跑通，设备类型解析旧 bug 未定改期；A/B 两组按 1:1 分流</span>
+          <span class="tl-ref-tags"><span>算法例会</span></span>
+          <span class="tl-meta">Global · added 14:02 · occurred 09-11</span>
+        </a>
+
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">能源现场问题沟通-260911</span>
+          <span class="tl-brief">数据质量工具已能定位，但事情停在现场，要接到可跟踪的内部流程</span>
+          <span class="tl-ref-tags"><span>能源梳理</span></span>
+          <span class="tl-meta">Global · added 16:35 · occurred 09-11</span>
+        </a>
+
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">能源后续产品计划-260911</span>
+          <span class="tl-brief">收敛实体／实例口径，复用对方平台六大模块，群控产品按边界切分</span>
+          <span class="tl-ref-tags"><span>能源梳理</span></span>
+          <span class="tl-meta">Global · added 16:35 · occurred 09-11</span>
+        </a>
+
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">智能体中台进展沟通-260911</span>
+          <span class="tl-brief">场景方／中台／基础架构三方对齐，中台定位为接口方，本场只解进度与关键路径</span>
+          <span class="tl-ref-tags"><span>生态平台</span></span>
+          <span class="tl-meta">Global · added 14:02 · occurred 09-11</span>
+        </a>
+      </section>
+
+      <section class="tl-day">
+        <div class="tl-day-head"><h2>2026-09-10</h2><span class="count">3</span></div>
+
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">数仓技术评审-260910</span>
+          <span class="tl-brief">TiDB OOM 已缓解，OLAP 在 Doris／ClickHouse 间未选定</span>
+          <span class="tl-ref-tags"><span>生态平台</span></span>
+          <span class="tl-meta">Global · added 12:09 · occurred 09-10</span>
+        </a>
+
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">C 端菜品制作流程讨论-260910</span>
+          <span class="tl-brief">自烹与工业出品是同一个营养核算问题，AI 辅助设计要落到克重与烧法</span>
+          <span class="tl-ref-tags"><span>康医通产品逻辑</span></span>
+          <span class="tl-meta">Global · added 12:09 · occurred 09-10</span>
+        </a>
+
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">能源场景进度 review-260910</span>
+          <span class="tl-brief">烟囱系统互不可访问，先落一层可迁中台的语义／本体并以此打样</span>
+          <span class="tl-ref-tags"><span>能源梳理</span></span>
+          <span class="tl-meta">能源梳理 · added 20:42 · occurred 09-10</span>
+        </a>
+      </section>
+
+      <section class="tl-day">
+        <div class="tl-day-head"><h2>2026-09-09</h2><span class="count">1</span></div>
+        <!-- Longest brief in the sample (51 chars): fits without truncation here. -->
+        <a class="tl-row tl-kind-ref" href="#">
+          <span class="tl-kind">Ref</span>
+          <span class="tl-title">群控方向讨论-260909</span>
+          <span class="tl-brief">三份设计稿已收敛为一条主线，群控与单机的职责边界、下发通道、失败重试与灰度节奏都在本场拍板，后续只补接口细节</span>
+          <span class="tl-ref-tags"><span class="untagged">Untagged</span></span>
+          <span class="tl-meta">Global · added 09:41 · occurred 09-09</span>
+        </a>
+      </section>
+
+    </div>
+  </div>
+
+  <div class="mock-switch">
+    <span>布局：</span>
+    <a href="list-brief.html">A · 同行 inline</a>
+    <a class="on" href="list-brief-2line.html">B · 第二行</a>
+  </div>
+  <div class="mock-note">
+    <h2>B 稿：brief 独占第二行（定稿）</h2>
+    <ul>
+      <li>行改成两行网格（<code>grid-template-areas</code>）：第一行还是 <code>REF / 标题 / tags / meta</code>，第二行让 brief 从标题列一直跨到行尾。</li>
+      <li>标题不再和 brief 争空间。1010px 窗口实测：brief 拿到 905px，9 行里标题与 brief 各 0 条截断（最长那条 54 字也放得下）；A 稿同宽度下 brief 只有 301–433px，8 条里截了 6 条。</li>
+      <li>代价是行高从 49px 涨到 68px，一屏能看的条数少约三分之一。</li>
+      <li>09-12 那条回顾没有 digest，第二行不占位，行高与今天一致（49px）。已拍板接受这种高矮不齐：有信息就高，没信息就矮，不留空占位、不写占位提示。</li>
+      <li>brief 写作契约：一句话、≤50 字、结论放前半句。905px 在 13px 下约容 65 个汉字，留足余量。</li>
+    </ul>
+  </div>
+</body>
+</html>
