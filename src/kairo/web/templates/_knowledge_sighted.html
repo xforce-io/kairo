@@ -1,0 +1,4 @@
+    <p class="meta-hint">{{ t('knowledge.sighted_hint') }}</p>
+    {% with rows = sighted_candidates, heading = t('knowledge.sighted').format(n=sighted_candidates|length), empty_text = t('knowledge.sighted_empty') %}
+    {% include '_knowledge_candidates.html' %}
+    {% endwith %}

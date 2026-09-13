@@ -2308,6 +2308,7 @@ def _knowledge_page(
     global_entries = []
     local_entries = []
     candidates = []
+    sighted: list[dict] = []
     extract_errors: list[dict[str, str]] = []
     promotions = []
     drift: list[dict[str, str]] = []
@@ -2368,7 +2369,7 @@ def _knowledge_page(
             )
             review = invalidate_stale(serve / selected)
             for candidate in review.candidates:
-                if candidate.status not in {"pending", "pending_global", "rejected_global"}:
+                if candidate.status not in {"pending", "pending_global", "rejected_global", "sighted"}:
                     continue
                 row = candidate.model_dump()
                 row["available"] = (serve / selected / candidate.path).is_file()
@@ -2394,7 +2395,7 @@ def _knowledge_page(
                     candidate.path, *candidate.tags,
                 ]).lower()
                 if not filter_text or filter_text in haystack:
-                    candidates.append(row)
+                    (sighted if candidate.status == "sighted" else candidates).append(row)
             extract_errors = [
                 {
                     "key": key,
@@ -2416,11 +2417,11 @@ def _knowledge_page(
     if filter_text:
         drift = [row for row in drift if filter_text in " ".join(str(value) for value in row.values()).lower()]
         extract_errors = [row for row in extract_errors if filter_text in " ".join(str(value) for value in row.values()).lower()]
-    queue_keys = ["candidates", "drift", "errors", "local", "global"] if selected else ["global"]
+    queue_keys = ["candidates", "sighted", "drift", "errors", "local", "global"] if selected else ["global"]
     queue = request.query_params.get("queue", queue_keys[0])
     if queue not in queue_keys:
         queue = queue_keys[0]
-    queue_counts = {"candidates": len(candidates), "drift": len(drift), "errors": len(extract_errors),
+    queue_counts = {"candidates": len(candidates), "sighted": len(sighted), "drift": len(drift), "errors": len(extract_errors),
                     "local": len(local_entries), "global": len(global_entries) + len(promotions)}
     return _render(
         request,
@@ -2438,6 +2439,7 @@ def _knowledge_page(
             "local_entries": local_entries,
             "candidates": candidates,
             "candidate_open_count": len(candidates),
+            "sighted_candidates": sighted,
             "promotions": promotions,
             "extract_errors": extract_errors,
             "knowledge_drift": drift,

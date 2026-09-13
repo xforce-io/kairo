@@ -29,6 +29,8 @@ from kairo.knowledge_matcher import KnowledgeMatcher
 
 
 OPEN = frozenset({"pending", "pending_global"})
+# Statuses a human may accept/ignore/merge from the review page (#370: sighted too).
+_REVIEWABLE = frozenset({"pending", "sighted"})
 _LOCKED = frozenset({"ignored", "accepted", "merged", "pending_global", "rejected_global"})
 _CANDIDATE_STATUSES = frozenset({"sighted", "pending", "pending_global", "accepted", "merged", "ignored", "stale", "rejected_global"})
 MAX_DRAFTS_PER_SOURCE = 12
@@ -433,6 +435,18 @@ def _primary_source(candidate: KnowledgeCandidate, workspace_root: Path) -> Know
     return next((source for source in sources if _source_alive(workspace_root, source)), sources[0] if sources else None)
 
 
+def _purge_stale(review: KnowledgeReview) -> bool:
+    """Drop candidates whose every source is gone.
+
+    Their id is a pure function of the title, so a later extraction recreates the
+    same candidate; keeping a `stale` tombstone only made the file grow (#370).
+    """
+    kept = [candidate for candidate in review.candidates if candidate.status != "stale"]
+    changed = len(kept) != len(review.candidates)
+    review.candidates = kept
+    return changed
+
+
 def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
     review = load_review(workspace_root)
     changed = False
@@ -446,10 +460,8 @@ def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
         if not sources:
             if candidate.path == "review/manual":
                 continue
-            nxt = candidate.model_copy(update={"status": "stale", "updated_at": _now()})
-            if nxt.status != candidate.status:
-                review.candidates[index] = nxt
-                changed = True
+            review.candidates[index] = candidate.model_copy(update={"status": "stale", "updated_at": _now()})
+            changed = True
             continue
         alive = [source for source in sources if _source_alive(root, source)]
         if not alive:
@@ -472,6 +484,7 @@ def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
         ] != [(item.path, item.quote) for item in candidate.sources]:
             review.candidates[index] = nxt
             changed = True
+    changed = _purge_stale(review) or changed
     if changed:
         save_review(workspace_root, review)
     return review
@@ -685,6 +698,7 @@ def ingest_candidates(
         review.candidates[index] = apply_review_threshold(
             _drop_path(current, path), workspace_root
         )
+    _purge_stale(review)
     save_review(workspace_root, review)
     return review
 
@@ -740,10 +754,11 @@ def parse_extract_yaml(text: str) -> list[dict]:
 
 
 _PERSONA = """从已完成产物中提取值得人工审核的领域知识候选。
-只能提出原文有直接证据的标题、简短说明和别名；quote 必须逐字出现在原文。
-最多 12 条：只提跨材料仍有用的领域专名、系统名或稳定口径。
-不要把一次性口号、待办事项、会议流程拆成词条。
-输出 YAML 列表，每项仅含 title、description、aliases、tags、quote；无候选时输出 []。
+只提专名:人名、组织/团队、系统/产品/项目名、以及本领域固定的口径或代号。
+不提:议题词、状态或现象描述(如「三相不平衡」「进度延误」)、待办、口号、会议流程、一次性数字。
+每条 title 写规范全称;同一实体的口语简称、职务代称、ASR 误听变体全部放进 aliases,不要拆成多条。
+只能提出原文有直接证据的标题、简短说明和别名;quote 必须逐字出现在原文。
+最多 12 条。输出 YAML 列表,每项仅含 title、description、aliases、tags、quote;无候选时输出 []。
 不要自动确认、不要猜测、不要输出 Markdown 围栏。"""
 
 
@@ -962,7 +977,7 @@ def accept_workspace(workspace_root: Path, candidate_id: str) -> KnowledgeEntry:
         prior = next((entry for entry in document.entries if entry.id == candidate.merged_into), None)
         if prior is not None:
             return prior
-    if candidate.status != "pending":
+    if candidate.status not in _REVIEWABLE:
         raise KnowledgeError(f"候选不可采纳:{candidate.status}")
     document, _ = load_workspace(workspace_root)
     # 重试收敛：权威文件已写而 review 未落盘时，按 merged_into 补齐状态。
@@ -996,7 +1011,7 @@ def accept_workspace(workspace_root: Path, candidate_id: str) -> KnowledgeEntry:
 
 def ignore(workspace_root: Path, candidate_id: str) -> None:
     review, index, candidate = _candidate(workspace_root, candidate_id)
-    if candidate.status != "pending":
+    if candidate.status not in _REVIEWABLE:
         raise KnowledgeError(f"候选不可忽略:{candidate.status}")
     _set_candidate(review, index, candidate, status="ignored")
     save_review(workspace_root, review)
