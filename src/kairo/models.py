@@ -50,9 +50,7 @@ DEFAULT_UNDERSTANDING_FOLD = (
     "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。"
 )
 
-# Verbatim default that #371 replaced. Topics created before then carry it in
-# their constitution.yaml; `resolve_fold_protocol` maps it to the current default
-# at read time so no file rewrite is needed. Never edit this string.
+# Verbatim default that #371 replaced (the generation right before this one).
 LEGACY_UNDERSTANDING_FOLD_371 = (
     "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
     "维持一张去重的术语表;未确认的挂 ⚠️;只放中立事实,不写立场判断。\n"
@@ -62,14 +60,41 @@ LEGACY_UNDERSTANDING_FOLD_371 = (
     "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。"
 )
 
+# Every default text ever shipped for understanding.md, byte-for-byte, oldest
+# first (git: b37462f, 72b958e, 6053a3f, 3b23efb, then LEGACY_..._371). A Topic
+# whose constitution.yaml still carries one of them was never edited by the user,
+# so `resolve_fold_protocol` feeds the current default instead without rewriting
+# the file. Never edit these strings; append a new one when the default changes.
+_SUPERSEDED_UNDERSTANDING_FOLDS: frozenset[str] = frozenset(
+    {
+        "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
+        "维持一张去重的术语表;未确认的挂 ⚠️;每段标来源。只放中立事实。\n"
+        "仅对确实无关的部分不动。",
+        "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
+        "维持一张去重的术语表;未确认的挂 ⚠️;每段标来源。只放中立事实,判断进 assessment。\n"
+        "仅对确实无关的部分不动。",
+        "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
+        "维持一张去重的术语表;未确认的挂 ⚠️;每段标来源。只放中立事实,判断进 assessment。\n"
+        "仅对确实无关的部分不动。\n"
+        "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。",
+        "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
+        "维持一张去重的术语表;未确认的挂 ⚠️;只放中立事实,判断进 assessment。\n"
+        "仅对确实无关的部分不动。\n"
+        "溯源(#99):章节证据范围〔S-…〕+ 关键声明短 ID;文末「来源索引」映射到 digest;"
+        "正文不重复完整 references/.../digest.md 路径;关键事实可加 F-… 锚点供判断层引用。\n"
+        "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。",
+        LEGACY_UNDERSTANDING_FOLD_371,
+    }
+)
+
 
 def resolve_fold_protocol(text: str) -> str:
     """Return the fold protocol to feed compose.
 
-    A protocol equal to a superseded default is treated as the current default;
+    A protocol equal to any superseded default is treated as the current default;
     anything the user edited is returned untouched (#371).
     """
-    if text == LEGACY_UNDERSTANDING_FOLD_371:
+    if text in _SUPERSEDED_UNDERSTANDING_FOLDS:
         return DEFAULT_UNDERSTANDING_FOLD
     return text
 

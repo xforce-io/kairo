@@ -53,7 +53,15 @@ def test_new_topic_fold_protocol_scopes_glossary_to_concepts(tmp_path):
 
 def test_resolve_fold_protocol_replaces_only_verbatim_legacy_default():
     """S2 unit: legacy default → new default; anything edited stays byte-identical."""
+    from kairo.models import _SUPERSEDED_UNDERSTANDING_FOLDS
+
     assert resolve_fold_protocol(LEGACY_UNDERSTANDING_FOLD_371) == DEFAULT_UNDERSTANDING_FOLD
+    # Older generations shipped before #371 (still present on live Topics) migrate too.
+    assert len(_SUPERSEDED_UNDERSTANDING_FOLDS) == 5
+    for old in _SUPERSEDED_UNDERSTANDING_FOLDS:
+        assert "未确认的挂 ⚠️" in old
+        assert resolve_fold_protocol(old) == DEFAULT_UNDERSTANDING_FOLD
+    assert DEFAULT_UNDERSTANDING_FOLD not in _SUPERSEDED_UNDERSTANDING_FOLDS
     assert resolve_fold_protocol(DEFAULT_UNDERSTANDING_FOLD) == DEFAULT_UNDERSTANDING_FOLD
     edited = LEGACY_UNDERSTANDING_FOLD_371 + "\n只写中文。"
     assert resolve_fold_protocol(edited) == edited
