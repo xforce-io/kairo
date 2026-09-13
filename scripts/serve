@@ -2,7 +2,10 @@
 # kairo 本地 Web Console 启停（本仓约定入口）
 #
 # 用法:
-#   ./scripts/serve start|stop|status|logs|restart
+#   ./scripts/serve start|stop|status|logs|restart|deploy
+#
+# deploy: 把独立的生产 checkout（默认 ../kairo-prod，detached 在 origin/main）
+# 快进到 origin/main、同步依赖，然后 restart。现网永远不跑开发工作树的代码。
 #
 # 若本机已安装 LaunchAgent（默认 com.kairo.web），启停走 launchctl；
 # 否则 nohup 前台二进制。
@@ -12,6 +15,8 @@
 #   KAIRO_SERVE_PORT    端口，默认 8787
 #   KAIRO_BIN           可执行文件；默认优先本仓 .venv/bin/kairo
 #   KAIRO_LAUNCHD       LaunchAgent label，默认 com.kairo.web；设空禁用 launchd
+#   KAIRO_PROD_DIR      生产 checkout 路径，默认 <repo>/../kairo-prod
+#   KAIRO_DEPLOY_REF    deploy 检出的引用，默认 origin/main
 set -euo pipefail
 
 NAME=kairo
@@ -20,6 +25,8 @@ DEFAULT_ROOT="${HOME}/kairo"
 PORT="${KAIRO_SERVE_PORT:-$DEFAULT_PORT}"
 ROOT="${KAIRO_SERVE_ROOT:-$DEFAULT_ROOT}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+PROD_DIR="${KAIRO_PROD_DIR:-$(dirname "$REPO_ROOT")/kairo-prod}"
+DEPLOY_REF="${KAIRO_DEPLOY_REF:-origin/main}"
 if [[ -z "${KAIRO_BIN:-}" ]]; then
   if [[ -x "$REPO_ROOT/.venv/bin/kairo" ]]; then
     BIN="$REPO_ROOT/.venv/bin/kairo"
@@ -234,15 +241,37 @@ cmd_restart() {
   cmd_start
 }
 
+cmd_deploy() {
+  if [[ ! -d "$PROD_DIR/.git" && ! -f "$PROD_DIR/.git" ]]; then
+    echo "error: prod checkout not found: $PROD_DIR" >&2
+    echo "  create it once: git worktree add --detach $PROD_DIR origin/main" >&2
+    return 1
+  fi
+  if [[ -n "$(git -C "$PROD_DIR" status --porcelain)" ]]; then
+    echo "error: prod checkout is dirty; refusing to deploy over local edits: $PROD_DIR" >&2
+    return 1
+  fi
+  git -C "$PROD_DIR" fetch -q origin
+  git -C "$PROD_DIR" checkout -q --detach "$DEPLOY_REF"
+  (cd "$PROD_DIR" && uv sync --all-extras -q)
+  printf '✓ deployed %s @ %s\n' "$DEPLOY_REF" "$(git -C "$PROD_DIR" log --oneline -1)"
+  if _use_launchd && ! grep -q "$PROD_DIR" "$PLIST"; then
+    echo "warning: $PLIST does not reference $PROD_DIR; the restarted service will not run the deployed code" >&2
+  fi
+  cmd_restart
+}
+
 usage() {
   cat <<EOF
 $NAME web console control (repo-local)
 
-  $(basename "$0") start|stop|status|logs|restart
+  $(basename "$0") start|stop|status|logs|restart|deploy
 
   KAIRO_SERVE_ROOT  (default: $DEFAULT_ROOT)
   KAIRO_SERVE_PORT  (default: $DEFAULT_PORT)
   KAIRO_LAUNCHD     (default: com.kairo.web; set empty to force nohup)
+  KAIRO_PROD_DIR    (default: $(dirname "$REPO_ROOT")/kairo-prod; used by deploy)
+  KAIRO_DEPLOY_REF  (default: origin/main; used by deploy)
 EOF
 }
 
@@ -255,6 +284,7 @@ main() {
     status)  cmd_status ;;
     logs)    cmd_logs "${1:-40}" ;;
     restart) cmd_restart ;;
+    deploy)  cmd_deploy ;;
     -h|--help|help) usage ;;
     *) echo "unknown: $cmd" >&2; usage >&2; exit 1 ;;
   esac
