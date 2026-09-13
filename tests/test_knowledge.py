@@ -141,7 +141,8 @@ def test_review_accept_global_and_stale_source(tmp_path):
     )
     digest.unlink()
     review = invalidate_stale(ws.root)
-    assert any(c.status == "stale" for c in review.candidates)
+    # #370: a candidate whose every source is gone is removed, not kept as `stale`.
+    assert not any(c.title == "待失效" for c in review.candidates)
     assert load_workspace(ws.root)[0].entries[0].title == "锚点"
 
 
@@ -341,12 +342,15 @@ def test_knowledge_confirm_card_lists_each_source_quote(tmp_path):
     ingest_candidates(ws.root, source_kind="digest", path=b, source_text="出处乙摘录", drafts=[{"title": "多源名", "quote": "出处乙摘录"}])
     ingest_candidates(ws.root, source_kind="digest", path=only, source_text="偶尔出现", drafts=[{"title": "偶尔词", "quote": "偶尔出现"}])
     html = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"}).text
-    queue = html.split("Knowledge candidates to review", 1)[1]
+    queue = html.split("Knowledge candidates to review", 1)[1].split("Sighted once", 1)[0]
     assert "多源名" in queue
     assert "出处甲摘录" in queue and "出处乙摘录" in queue
     assert 'href="/w/ws?ref=a"' in queue and 'href="/w/ws?ref=b"' in queue
     assert "偶尔词" not in queue
     assert "Knowledge candidates to review · 1" in html
+    # #370: single sightings live in their own queue, with the same actions.
+    sighted = html.split("Sighted once · 1", 1)[1]
+    assert "偶尔词" in sighted and "Accept to this Topic" in sighted
 
 
 def test_knowledge_web_add_and_candidate_actions(tmp_path):
@@ -443,7 +447,7 @@ def test_knowledge_review_queue_omits_stale_candidates(tmp_path):
     )
     (ws.root / expired).write_text("rewritten without the excerpt")
     invalidate_stale(ws.root)
-    assert any(c.status == "stale" and c.title == "ExpiredTerm" for c in load_review(ws.root).candidates)
+    assert not any(c.title == "ExpiredTerm" for c in load_review(ws.root).candidates)
 
     page = TestClient(create_app(root)).get(
         "/knowledge?workspace=ws", headers={"accept-language": "en"}
@@ -454,7 +458,7 @@ def test_knowledge_review_queue_omits_stale_candidates(tmp_path):
     assert "ExpiredTerm" not in queue
     assert "Completed: stale" not in page.text
     assert "Knowledge candidates to review · 1" in page.text
-    assert load_review(ws.root).candidates  # 档案仍在磁盘
+    assert [c.title for c in load_review(ws.root).candidates] == ["LiveTerm"]
 
 
 def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
@@ -1019,8 +1023,7 @@ def test_ingest_replaces_pending_for_same_path_and_caps_drafts(tmp_path):
     pending = [c for c in review.candidates if c.status == "pending"]
     assert all(c.title.startswith("新") for c in pending)
     assert len(pending) == MAX_DRAFTS_PER_SOURCE
-    dropped = next(c for c in review.candidates if c.title == "旧乙")
-    assert dropped.status == "stale" and dropped.sources == []
+    assert not any(c.title == "旧乙" for c in review.candidates)  # #370: purged, not `stale`
     assert any(c.status == "accepted" and c.title == "旧甲" for c in review.candidates)
     assert kept.id in {c.merged_into for c in review.candidates if c.status == "accepted"}
 
@@ -1520,3 +1523,99 @@ def test_knowledge_context_treats_confirmed_terms_as_verified_spellings():
     assert "- 胡值彬（命中：胡博；别名：胡博；产品负责人）" not in text  # hit term is not repeated as alias
     assert "- 胡值彬（命中：胡博；产品负责人）" in text
     assert "无出处" not in text and "global" not in text
+
+
+def test_extract_persona_targets_proper_nouns_with_canonical_title_and_aliases():
+    """#370 S1: the extractor is told to propose named entities only, never topic words."""
+    from kairo.knowledge_review import _PERSONA
+
+    assert "只提专名" in _PERSONA
+    assert "规范全称" in _PERSONA and "aliases" in _PERSONA
+    assert "议题词" in _PERSONA and "不提" in _PERSONA
+    assert "稳定口径" not in _PERSONA  # the old catch-all wording invited topic words
+
+
+def test_sighted_queue_lists_single_sightings_and_accept_ignore_work(tmp_path):
+    """#370 S2: sighted candidates are visible in their own queue and actionable."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = _write_digest(ws, "a", "高希彬提出方案。李四也在。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="高希彬提出方案。李四也在。",
+        drafts=[{"title": "高希彬", "quote": "高希彬提出"}, {"title": "李四", "quote": "李四也在"}],
+    )
+    assert todo_count(ws.root) == 0  # single sightings are not "to do"
+    client = TestClient(create_app(root))
+    page = client.get("/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"})
+    assert page.status_code == 200
+    assert "目击 · 2" in page.text and "高希彬" in page.text and "李四" in page.text
+    section = page.text.split("目击 · 2", 1)[1]
+    assert "采纳到本工作区" in section and "忽略" in section
+
+    by_title = {c.title: c for c in load_review(ws.root).candidates}
+    page = client.post(f"/w/ws/knowledge/candidates/{by_title['高希彬'].id}/accept?queue=sighted", headers={"accept-language": "zh"})
+    assert page.status_code == 200
+    assert any(e.title == "高希彬" and e.status == "confirmed" for e in load_workspace(ws.root)[0].entries)
+    page = client.post(f"/w/ws/knowledge/candidates/{by_title['李四'].id}/ignore?queue=sighted", headers={"accept-language": "zh"})
+    assert page.status_code == 200
+    statuses = {c.title: c.status for c in load_review(ws.root).candidates}
+    assert statuses == {"高希彬": "accepted", "李四": "ignored"}
+    assert "目击 · 0" in client.get("/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"}).text
+
+
+def test_sighted_candidate_can_be_edited_and_merged(tmp_path):
+    """#370 review: every action the sighted queue renders must be accepted by the backend."""
+    from kairo.knowledge_review import merge_workspace, update_candidate
+
+    ws = Workspace.init(tmp_path / "ws")
+    a = _write_digest(ws, "a", "静脱发言,内验跟进")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="静脱发言,内验跟进",
+        drafts=[{"title": "静脱", "quote": "静脱发言"}, {"title": "内验", "quote": "内验跟进"}],
+    )
+    by_title = {c.title: c for c in load_review(ws.root).candidates}
+    assert {c.status for c in by_title.values()} == {"sighted"}
+    updated = update_candidate(ws.root, by_title["静脱"].id, title="净托", description="", aliases=[], tags=[])
+    assert updated.title == "净托" and updated.status == "sighted"
+    target = new_entry(title="内验系统", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [target]}))
+    merge_workspace(ws.root, by_title["内验"].id, target.id)
+    assert next(c for c in load_review(ws.root).candidates if c.id == by_title["内验"].id).status == "merged"
+
+
+def test_page_load_replays_journal_before_purging_stale(tmp_path, monkeypatch):
+    """#370 review: a GET between a half-finished accept and its retry must not purge the row."""
+    import kairo.knowledge_review as module
+    from kairo.knowledge_review import invalidate_stale
+
+    ws = Workspace.init(tmp_path / "ws")
+    digest = ws.root / "references/r/digest.md"
+    digest.parent.mkdir(parents=True)
+    digest.write_text("证据")
+    _ingest_pending(ws, "半程", "证据")
+    candidate = load_review(ws.root).candidates[0]
+    original = module.save_review
+    monkeypatch.setattr(module, "save_review", lambda *_: (_ for _ in ()).throw(OSError("review")))
+    with pytest.raises(OSError):
+        accept_workspace(ws.root, candidate.id)
+    monkeypatch.setattr(module, "save_review", original)
+    digest.unlink()
+    # Simulates the knowledge page GET: no explicit recovery call.
+    review = invalidate_stale(ws.root)
+    row = next(c for c in review.candidates if c.id == candidate.id)
+    assert row.status == "accepted"
+    assert not (ws.root / ".kairo/knowledge_transaction.yaml").exists()
+    assert any(e.title == "半程" for e in load_workspace(ws.root)[0].entries)
+
+
+def test_ignored_candidate_cannot_be_accepted(tmp_path):
+    ws = Workspace.init(tmp_path / "ws")
+    a = _write_digest(ws, "a", "王五发言")
+    ingest_candidates(ws.root, source_kind="digest", path=a, source_text="王五发言", drafts=[{"title": "王五", "quote": "王五发言"}])
+    cid = load_review(ws.root).candidates[0].id
+    ignore(ws.root, cid)
+    from kairo.knowledge import KnowledgeError
+
+    with pytest.raises(KnowledgeError):
+        accept_workspace(ws.root, cid)

@@ -1,5 +1,8 @@
-    <div class="meta-label" style="margin-top:18px">{{ t('knowledge.candidates').format(n=candidate_open_count) }}</div>
-    {% if candidates %}<ul class="dlg-bullets knowledge-queue">{% for candidate in candidates %}<li>
+    {% set rows = rows if rows is defined else candidates %}
+    {% set heading = heading if heading is defined else t('knowledge.candidates').format(n=candidate_open_count) %}
+    {% set empty_text = empty_text if empty_text is defined else t('knowledge.candidates_empty') %}
+    <div class="meta-label" style="margin-top:18px">{{ heading }}</div>
+    {% if rows %}<ul class="dlg-bullets knowledge-queue">{% for candidate in rows %}<li>
       <strong>{{ candidate.title }}</strong>
       <span class="gl-aka">{{ t('knowledge.candidate_from').format(kind=t('knowledge.source_kind_' ~ candidate.source_kind),status=t('knowledge.status_' ~ candidate.status)) }}</span>
       {% if candidate.sources and candidate.sources|length > 1 %}
@@ -20,7 +23,7 @@
       <div class="gl-note">{{ candidate.quote[:240] }}</div>{% if candidate.quote|length > 240 %}<details><summary>{{ t('knowledge.sources').format(n=1) }}</summary><div class="gl-note-full">{{ candidate.quote }}</div></details>{% endif %}
       <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}?ref={{ candidate.path.split('/')[1] if candidate.path.startswith('references/') else '' }}">{{ candidate.path }}</a>{% if not candidate.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
       {% endif %}
-      {% if candidate.status == 'pending' %}
+      {% if candidate.status in ('pending', 'sighted') %}
         {% if candidate.suggestion_text %}<div class="gl-aka">{{ t('knowledge.suggestion').format(value=candidate.suggestion_text) }}</div>{% endif %}
         <form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/candidates/{{ candidate.id }}/accept?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}" style="display:inline"><button class="btn btn-ghost btn-regen">{{ t('knowledge.accept_workspace') }}</button></form>
         <form method="post" action="/w/{{ selected_slug|urlencode }}/knowledge/candidates/{{ candidate.id }}/ignore?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}" style="display:inline"><button class="btn btn-ghost btn-regen">{{ t('knowledge.ignore') }}</button></form>
@@ -38,4 +41,4 @@
       {% elif candidate.status == 'rejected_global' %}<span class="gl-aka">{{ t('knowledge.global_rejected').format(reason=candidate.reject_reason) }}</span>
       {% else %}<span class="gl-aka">{{ t('knowledge.completed').format(status=t('knowledge.status_' ~ candidate.status)) }}</span>
       {% endif %}
-    </li>{% endfor %}</ul>{% else %}<p class="panel-hint">{{ t('knowledge.candidates_empty') }}</p>{% endif %}
+    </li>{% endfor %}</ul>{% else %}<p class="panel-hint">{{ empty_text }}</p>{% endif %}
