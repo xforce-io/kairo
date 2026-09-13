@@ -77,19 +77,40 @@ def test_foreign_provider_errors_are_purged_and_current_ones_kept(tmp_path, monk
     assert review.extract_errors[extract_error_key("compose", "references/r/digest.md")] == "stub boom"
 
 
-def test_errors_are_kept_until_the_topic_has_provider_evidence(tmp_path, monkeypatch):
-    """A Topic that never composed carries no provider evidence: nothing is purged yet."""
+def test_errors_are_kept_until_another_provider_acts_on_the_topic(tmp_path, monkeypatch):
+    """Only provider evidence purges: a pre-field record on a never-composed Topic stays until a real run."""
     monkeypatch.setenv("KAIRO_STUB", "1")
     ws = _ws(tmp_path, produced_by=None)
     mark_extract_error(ws.root, "references/r/digest.md", "codex timeout", source_kind="digest", provider_name="codex")
-    assert len(invalidate_stale(ws.root).extract_errors) == 1
-    # First compose by another provider is the evidence; the codex error is then noise.
-    from kairo.models import TargetState
+    review = load_review(ws.root)
+    review.last_extract_provider = ""  # simulate a record written before the field existed
+    review.extract_error_meta[extract_error_key("digest", "references/r/digest.md")].pop("provider")
+    from kairo.knowledge_review import save_review
 
-    state = ws.read_state()
-    state.targets["understanding.md"] = TargetState(produced_by={"provider": "grok", "model": "m"})
-    ws.write_state(state)
-    assert invalidate_stale(ws.root).extract_errors == {}
+    save_review(ws.root, review)
+    assert len(invalidate_stale(ws.root).extract_errors) == 1
+    # The next extraction by any provider is the evidence; the orphan record is then noise.
+    from kairo.knowledge_review import ingest_candidates
+
+    ingest_candidates(ws.root, source_kind="compose", path="understanding.md", source_text="正文", drafts=[], provider_name="grok")
+    assert load_review(ws.root).extract_errors == {}
+
+
+def test_fresh_error_from_manual_retry_survives_until_provider_changes_again(tmp_path, monkeypatch):
+    """Manual retry under a newly configured provider is evidence: its error stays, older ones go."""
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    ws = _ws(tmp_path, produced_by="codex")
+    mark_extract_error(ws.root, "references/r/digest.md", "codex 无 last-message 输出", source_kind="digest", provider_name="codex")
+    assert len(invalidate_stale(ws.root).extract_errors) == 1
+    mark_extract_error(ws.root, "references/r/digest.md", "grok: yaml 不是列表", source_kind="compose", provider_name="grok")
+    review = invalidate_stale(ws.root)
+    assert review.last_extract_provider == "grok"
+    assert set(review.extract_errors) == {extract_error_key("compose", "references/r/digest.md")}
+    # A later successful extraction by grok keeps the grok error keyed elsewhere; ingest clears its own key only.
+    from kairo.knowledge_review import ingest_candidates
+
+    ingest_candidates(ws.root, source_kind="digest", path="references/r/digest.md", source_text="正文", drafts=[], provider_name="grok")
+    assert set(load_review(ws.root).extract_errors) == {extract_error_key("compose", "references/r/digest.md")}
 
 
 def test_extract_after_success_records_provider_of_failure(tmp_path, monkeypatch):

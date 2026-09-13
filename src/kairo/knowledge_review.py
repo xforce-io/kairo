@@ -72,6 +72,8 @@ class KnowledgeReview(BaseModel):
     extract_errors: dict[str, str] = Field(default_factory=dict)
     extract_error_versions: dict[str, int] = Field(default_factory=dict)
     extract_error_meta: dict[str, dict[str, str]] = Field(default_factory=dict)
+    # Provider that most recently ran an extraction on this Topic (#373); "" = unknown.
+    last_extract_provider: str = ""
 
 
 Extractor = Callable[[str, list[KnowledgeEntry], str], list[dict]]
@@ -447,14 +449,17 @@ def _purge_stale(review: KnowledgeReview) -> bool:
     return changed
 
 
-def workspace_provider_name(workspace_root: Path) -> str | None:
-    """Provider that last produced this Topic's live targets, from state alone.
+def topic_provider_name(workspace_root: Path, review: KnowledgeReview) -> str | None:
+    """Provider that most recently acted on this Topic, from data alone.
 
-    Read from `produced_by` so no provider probing (subprocess / config) happens
-    on page loads. None when the Topic has never composed.
+    The latest extraction wins (a manual retry under a newly configured provider
+    is evidence too); otherwise `produced_by` of the live target. No provider
+    probing (subprocess / config) on page loads. None when nothing ran yet.
     """
     from kairo.workspace import Workspace, WorkspaceNotFound
 
+    if review.last_extract_provider:
+        return review.last_extract_provider
     try:
         ws = Workspace.open(workspace_root)
     except WorkspaceNotFound:
@@ -497,7 +502,7 @@ def invalidate_stale(workspace_root: Path) -> KnowledgeReview:
     # the journal is replayed would orphan the authority entry (#370 review).
     _recover_transaction(workspace_root)
     review = load_review(workspace_root)
-    changed = _purge_foreign_extract_errors(review, workspace_provider_name(workspace_root))
+    changed = _purge_foreign_extract_errors(review, topic_provider_name(workspace_root, review))
     root = Path(workspace_root)
     for index, candidate in enumerate(review.candidates):
         if candidate.status in _LOCKED:
@@ -599,11 +604,15 @@ def ingest_candidates(
     drafts: list[dict],
     matcher: KnowledgeMatcher | None = None,
     serve_root: Path | None = None,
+    provider_name: str = "",
 ) -> KnowledgeReview:
     if source_kind not in {"digest", "compose"}:
         raise KnowledgeError(f"未知候选来源:{source_kind}")
     _safe_path(path)
     review = invalidate_stale(workspace_root)
+    if provider_name:
+        review.last_extract_provider = provider_name
+        _purge_foreign_extract_errors(review, provider_name)
     error_key = _error_key(source_kind, path)
     review.extract_errors.pop(error_key, None)
     review.extract_error_versions.pop(error_key, None)
@@ -764,6 +773,9 @@ def mark_extract_error(
         "version": str(review.extract_error_versions[key]),
         "provider": provider_name,
     }
+    if provider_name:
+        review.last_extract_provider = provider_name
+        _purge_foreign_extract_errors(review, provider_name)
     save_review(workspace_root, review)
 
 
@@ -845,7 +857,10 @@ def extract_after_success(
     try:
         matcher = KnowledgeMatcher(effective_entries(serve_root, workspace_root))
         drafts = (extractor or provider_extractor(provider))(text, list(matcher.entries), path) if (extractor or provider) else []
-        ingest_candidates(workspace_root, source_kind=source_kind, path=path, source_text=text, drafts=drafts, matcher=matcher, serve_root=serve_root)
+        ingest_candidates(
+            workspace_root, source_kind=source_kind, path=path, source_text=text, drafts=drafts,
+            matcher=matcher, serve_root=serve_root, provider_name=str(getattr(provider, "name", "")),
+        )
     except Exception as exc:
         # 提取永远是旁路：即使审核 YAML 损坏或写诊断也失败，也不能反噬 digest/compose。
         try:
