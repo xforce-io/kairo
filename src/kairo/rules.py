@@ -86,7 +86,7 @@ def _hash(text: str) -> str:
 def _knowledge_context(ws, text: str) -> tuple[str, str | None, KnowledgeDiagnostic]:
     """#182：调用方决定扫描范围；局部歧义不会关闭整个知识上下文。"""
     try:
-        from kairo.knowledge import current_hash, effective_entries, load_global, load_workspace
+        from kairo.knowledge import current_hash, effective_entries, entry_semantic_hash, load_global, load_workspace
         from kairo.knowledge_matcher import format_knowledge_context, matcher_for
 
         from kairo.refs import serve_root_of
@@ -101,6 +101,7 @@ def _knowledge_context(ws, text: str) -> tuple[str, str | None, KnowledgeDiagnos
             current_hash(ws.root.parent, ws.root),
             KnowledgeDiagnostic(
                 matched_entry_ids=[hit.entry.id for hit in result.matches],
+                matched_entry_hashes={hit.entry.id: entry_semantic_hash(hit.entry) for hit in result.matches},
                 ambiguities=len(result.ambiguities),
                 truncated=result.truncated_count,
                 skipped=len(result.skipped_terms),
@@ -113,6 +114,20 @@ def _knowledge_context(ws, text: str) -> tuple[str, str | None, KnowledgeDiagnos
             error_code="knowledge-unavailable",
             safe_summary=safe_provider_summary(exc),
         )
+
+
+def _merge_knowledge_diagnostic(previous: KnowledgeDiagnostic, current: KnowledgeDiagnostic) -> KnowledgeDiagnostic:
+    """Union of matched entries across incremental composes; counters and availability are this run's."""
+    if not current.available:
+        return current
+    ids = list(previous.matched_entry_ids)
+    ids.extend(entry_id for entry_id in current.matched_entry_ids if entry_id not in ids)
+    hashes: dict[str, str] | None
+    if previous.matched_entry_hashes is None and current.matched_entry_hashes is None:
+        hashes = None
+    else:
+        hashes = {**(previous.matched_entry_hashes or {}), **(current.matched_entry_hashes or {})}
+    return current.model_copy(update={"matched_entry_ids": ids, "matched_entry_hashes": hashes})
 
 
 def _legacy_glossary_hash(ws) -> str | None:
@@ -1272,7 +1287,13 @@ class ComposeRule:
             # 空 delta 不会伪造一次“知识重新校正”。
             if use_delta:
                 ts.knowledge_hash = knowledge_hash
-                ts.knowledge_diagnostic = knowledge_diagnostic
+                # 增量 compose 只对 Δdigest 匹配知识,而文档累积了此前每次注入的专名;
+                # 漂移基线(#372)因此是自上次全量重综合以来的并集,全量重综合则重置。
+                ts.knowledge_diagnostic = (
+                    knowledge_diagnostic
+                    if full_recompose or ts0 is None or ts0.knowledge_diagnostic is None
+                    else _merge_knowledge_diagnostic(ts0.knowledge_diagnostic, knowledge_diagnostic)
+                )
                 ts.knowledge_generation = uuid.uuid4().hex
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:

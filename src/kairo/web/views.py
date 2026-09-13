@@ -1136,6 +1136,7 @@ def workspace_view(
             ),
             **_run_button_ctx(request, ws, slug, catalog=catalog),
             "glossary_todo_n": _glossary_todo_n(ws, serve),
+            "knowledge_drift_n": _knowledge_drift_n(ws, serve),
         },
     )
 
@@ -1785,69 +1786,45 @@ def _knowledge_drift_ref_title(workspace: Workspace | None, ref_id: str) -> str:
     return title
 
 
-def _knowledge_drift_rows(
-    state: State,
-    current_hash: str,
-    *,
-    live_targets: set[str],
-    slug: str = "",
-    workspace: Workspace | None = None,
-) -> list[dict[str, str]]:
-    """仅报告实际消费知识上下文的产物，避免把原料/证据误报为待重算。"""
-    rows: list[dict[str, str]] = []
+def _knowledge_drift_rows(workspace: Workspace, serve_root: Path, *, slug: str = "") -> list[dict[str, str]]:
+    """只列真受影响的产物（#372）：匹配过的条目变了，或新条目在其正文命中。"""
+    from kairo.knowledge_drift import drift_rows
+
     ws_href = f"/w/{quote(slug)}" if slug else ""
-    for path, product in state.products.items():
-        parts = path.split("/")
-        consumes_knowledge = (
-            len(parts) == 3
-            and parts[0] == "references"
-            and parts[2] in {"digest.md", "prose.md"}
+    rows: list[dict[str, str]] = []
+    for row in drift_rows(workspace, serve_root):
+        if row.kind == "live":
+            title, href = row.path, ws_href
+        else:
+            title = _knowledge_drift_ref_title(workspace, row.target)
+            href = f"{ws_href}?ref={quote(row.target)}" if ws_href else ""
+        rows.append(
+            {
+                "path": row.path,
+                "target": row.target,
+                "kind": row.kind,
+                "title": title,
+                "href": href,
+                "changed": "、".join(row.changed),
+                "new": "、".join(row.new),
+            }
         )
-        if consumes_knowledge and product.knowledge_hash != current_hash:
-            ref_id = parts[1]
-            kind = "digest" if parts[2] == "digest.md" else "prose"
-            # re-step 的 reference 契约接收 ref_id，而不是产物路径。
-            rows.append(
-                {
-                    "path": path,
-                    "target": ref_id,
-                    "kind": kind,
-                    "title": _knowledge_drift_ref_title(workspace, ref_id),
-                    "href": f"{ws_href}?ref={quote(ref_id)}" if ws_href else "",
-                }
-            )
-    for path, target_state in state.targets.items():
-        if path in live_targets and target_state.knowledge_hash != current_hash:
-            rows.append(
-                {
-                    "path": path,
-                    "target": path,
-                    "kind": "live",
-                    "title": path,
-                    "href": ws_href,
-                }
-            )
     return rows
+
+
+def _knowledge_drift_n(ws: Workspace, serve_root: Path) -> int:
+    try:
+        return len(_knowledge_drift_rows(ws, serve_root, slug=ws.root.name))
+    except ValueError:
+        return 0
 
 
 def _glossary_todo_n(ws: Workspace, serve_root: Path) -> int:
     try:
         from kairo.knowledge_review import todo_count as knowledge_todo_count
-        from kairo.knowledge import current_hash
 
         knowledge_todos = knowledge_todo_count(ws.root)
-        current = current_hash(serve_root, ws.root)
-        state = ws.read_state()
-        live_targets = {target.path for target in ws.constitution.live_targets()}
-        knowledge_todos += len(
-            _knowledge_drift_rows(
-                state,
-                current,
-                live_targets=live_targets,
-                slug=ws.root.name,
-                workspace=ws,
-            )
-        )
+        knowledge_todos += len(_knowledge_drift_rows(ws, serve_root, slug=ws.root.name))
         return knowledge_todos
     except ValueError:
         return 1
@@ -2350,23 +2327,8 @@ def _knowledge_page(
             local_entries = load_workspace(serve / selected)[0].entries
             if filter_text:
                 local_entries = [entry for entry in local_entries if filter_text in " ".join([entry.title, entry.description, entry.status, *entry.tags, *(source.path for source in entry.sources)]).lower()]
-            from kairo.knowledge import current_hash
-
-            current = current_hash(serve, serve / selected)
             workspace = _open(request, selected)
-            state = workspace.read_state()
-            live_targets = {
-                target.path for target in workspace.constitution.live_targets()
-            }
-            drift.extend(
-                _knowledge_drift_rows(
-                    state,
-                    current,
-                    live_targets=live_targets,
-                    slug=selected,
-                    workspace=workspace,
-                )
-            )
+            drift.extend(_knowledge_drift_rows(workspace, serve, slug=selected))
             review = invalidate_stale(serve / selected)
             for candidate in review.candidates:
                 if candidate.status not in {"pending", "pending_global", "rejected_global", "sighted"}:
@@ -2524,6 +2486,26 @@ def knowledge_entry_promote(request: Request, slug: str, entry_id: str) -> HTMLR
     except KnowledgeError as exc:
         return _knowledge_page(request, selected_slug=slug, error=str(exc))
     return _knowledge_page(request, selected_slug=slug, success=True)
+
+
+@router.post("/w/{slug}/knowledge/recompute-drift", response_class=HTMLResponse)
+def start_recompute_drift(request: Request, slug: str) -> HTMLResponse:
+    """#372:只重算基于旧知识的产物;复用单 workspace 串行任务与 SSE 进度。"""
+    ws = _open(request, slug)
+    reg = request.app.state.registry
+    existing = reg.current(slug)
+    if existing is not None:
+        return _step_response(request, ws, slug, existing)
+    argv = [sys.executable, "-m", "kairo", "re-step", "--knowledge-drift"]
+    try:
+        boundary = _knowledge_run_boundary(ws)
+        task = reg.start(slug, ws.root, argv, job_kind="reconcile")
+        _apply_knowledge_run_boundary(task, boundary)
+    except RuntimeError:
+        task = reg.current(slug)
+        if task is None:
+            raise
+    return _step_response(request, ws, slug, task)
 
 
 @router.post("/w/{slug}/knowledge/extract", response_class=HTMLResponse)

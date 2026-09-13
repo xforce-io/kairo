@@ -146,6 +146,13 @@
     </div>
     <div id="processing-status">{% include "_processing_status.html" %}</div>
     <div id="step-area">{% if run_task_id %}{% with task_id=run_task_id %}{% include "_step.html" %}{% endwith %}{% endif %}</div>
+    {% if knowledge_drift_n %}
+    <div class="knowledge-drift-topic" id="knowledge-drift-topic">
+      <a href="/knowledge?workspace={{ slug | urlencode }}&amp;queue=drift">{{ t('knowledge.drift_topic').format(n=knowledge_drift_n) }}</a>
+      <button type="button" class="btn btn-ghost btn-inline" id="recompute-drift-btn"{% if run_mode == 'running' %} disabled{% else %}
+              hx-post="/w/{{ slug | urlencode }}/knowledge/recompute-drift" hx-target="#step-area" hx-swap="innerHTML"{% endif %}>{{ t('knowledge.drift_recompute') }}</button>
+    </div>
+    {% endif %}
     {% if glossary_todo_n %}
     <a class="gl-todo-hint" href="/knowledge?workspace={{ slug | urlencode }}">{{ t('knowledge.todo_hint').format(n=glossary_todo_n) }}</a>
     {% endif %}

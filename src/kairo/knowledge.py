@@ -298,23 +298,29 @@ def effective_entries(serve_root: Path, workspace_root: Path) -> list[KnowledgeE
     return entries
 
 
+def _semantic_payload(entry: KnowledgeEntry) -> dict:
+    # sources are provenance only: the renderer no longer injects them and
+    # auto-attached provenance must not read as knowledge drift.
+    return {
+        "id": entry.id,
+        "title": entry.title,
+        "aliases": [{"value": a.value, "auto_match": a.auto_match} for a in entry.aliases],
+        "description": entry.description,
+        "scope": entry.scope,
+    }
+
+
 def semantic_hash(entries: list[KnowledgeEntry]) -> str:
     """仅哈希实际可注入/匹配语义，避免 tags 与未渲染出处细节制造假漂移。"""
-    payload = [
-        {
-            "id": entry.id,
-            "title": entry.title,
-            "aliases": [{"value": a.value, "auto_match": a.auto_match} for a in entry.aliases],
-            "description": entry.description,
-            "scope": entry.scope,
-            # sources are provenance only: the renderer no longer injects them and
-            # auto-attached provenance must not read as knowledge drift.
-        }
-        for entry in entries
-        if entry.status == "confirmed"
-    ]
+    payload = [_semantic_payload(entry) for entry in entries if entry.status == "confirmed"]
     raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def entry_semantic_hash(entry: KnowledgeEntry) -> str:
+    """Per-entry version of `semantic_hash`; lets a product record exactly what it consumed (#372)."""
+    raw = json.dumps(_semantic_payload(entry), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
 
 
 def current_hash(serve_root: Path, workspace_root: Path) -> str:

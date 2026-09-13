@@ -11,6 +11,8 @@
         <li>
           <a href="{{ item.href }}">{{ item.title }}</a>
           <span class="gl-aka">{{ t('knowledge.drift_kind_digest') }}</span>
+          {% if item.changed %}<span class="gl-aka">{{ t('knowledge.drift_why_changed').format(titles=item.changed) }}</span>{% endif %}
+          {% if item.new %}<span class="gl-aka">{{ t('knowledge.drift_why_new').format(titles=item.new) }}</span>{% endif %}
           <form method="post" action="/w/{{ selected_slug | urlencode }}/step?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}">
             <input type="hidden" name="target" value="{{ item.target }}">
             <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_digest') }}</button>
@@ -35,6 +37,8 @@
         <li>
           <a href="{{ item.href }}">{{ item.title }}</a>
           <span class="gl-aka">{{ t('knowledge.drift_kind_live') }}</span>
+          {% if item.changed %}<span class="gl-aka">{{ t('knowledge.drift_why_changed').format(titles=item.changed) }}</span>{% endif %}
+          {% if item.new %}<span class="gl-aka">{{ t('knowledge.drift_why_new').format(titles=item.new) }}</span>{% endif %}
           <form method="post" action="/w/{{ selected_slug | urlencode }}/step?queue={{ knowledge_queue }}&amp;filter={{ knowledge_filter|urlencode }}">
             <input type="hidden" name="target" value="{{ item.target }}">
             <button class="btn btn-ghost btn-regen">{{ t('knowledge.restep_live') }}</button>
