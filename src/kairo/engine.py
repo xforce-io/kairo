@@ -20,6 +20,7 @@ from kairo.rules import (
     ReviewFoldRule,
     TransformRule,
     _hash,
+    clear_digest_transport_halt,
     effective_compose_block_reason,
     leftover_degraded_requires_migration,
 )
@@ -162,17 +163,21 @@ def step(ws, provider) -> bool:
     state = promote_oversized_degraded(ws)
     rules = _build_rules(ws, provider)
     any_progress = False
-    for _ in range(MAX_ITER):
-        progressed = False
-        for rule in rules:
-            for item in rule.discover(state):
-                if item.is_stale(state):
-                    item.run(state)
-                    progressed = True
-                    ws.write_state(state)  # #105 中途落盘
-        if not progressed:
-            break
-        any_progress = True
+    clear_digest_transport_halt()
+    try:
+        for _ in range(MAX_ITER):
+            progressed = False
+            for rule in rules:
+                for item in rule.discover(state):
+                    if item.is_stale(state):
+                        item.run(state)
+                        progressed = True
+                        ws.write_state(state)  # #105 中途落盘
+            if not progressed:
+                break
+            any_progress = True
+    finally:
+        clear_digest_transport_halt()
     ws.write_state(state)
     write_stream_index(ws)  # 派生导航索引(#16);不进调和循环,每次 step 后刷新
     if any_progress:

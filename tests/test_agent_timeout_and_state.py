@@ -18,8 +18,10 @@ from kairo.provider import (
     AgentResult,
     _default_cli_runner,
     _scan_artifacts,
+    reset_cli_proxy_snapshot,
     resolve_agent_timeout_s,
     resolve_cli_timeout,
+    snapshot_cli_proxy_env,
 )
 from kairo.rules import _run_agent
 from kairo.web.tasks import StepTask, classify_task, is_fatal_agent_line
@@ -68,6 +70,93 @@ def test_default_cli_runner_timeout_kills_and_raises(tmp_path):
                 break
         else:
             pytest.fail(f"child pid {pid} still alive after timeout kill")
+
+
+_PROXY_KEYS = (
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "NO_PROXY",
+    "no_proxy",
+)
+
+
+def _unset_proxy_env(monkeypatch) -> None:
+    for key in _PROXY_KEYS:
+        monkeypatch.delenv(key, raising=False)
+
+
+def _child_writes_proxy_env(out: Path) -> str:
+    return (
+        "import os\n"
+        f"p = {str(out)!r}\n"
+        "open(p, 'w').write("
+        "os.environ.get('HTTPS_PROXY', '') + '\\n'"
+        "+ os.environ.get('https_proxy', '') + '\\n'"
+        "+ os.environ.get('NO_PROXY', '') + '\\n'"
+        "+ os.environ.get('no_proxy', '')"
+        ")\n"
+    )
+
+
+def test_cli_runner_child_sees_proxy_from_agent_config_when_parent_unset(
+    tmp_path, monkeypatch
+):
+    """父进程 unset 代理时,shipped runner 仍把 [agent] https_proxy 注入子进程。"""
+    reset_cli_proxy_snapshot()
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text(
+        "[agent]\n"
+        'https_proxy = "http://127.0.0.1:6478"\n'
+        'no_proxy = "localhost,127.0.0.1"\n'
+    )
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    _unset_proxy_env(monkeypatch)
+    cwd = tmp_path / "art"
+    cwd.mkdir()
+    out = cwd / "env.txt"
+    _default_cli_runner(
+        sys.executable,
+        ["-c", _child_writes_proxy_env(out)],
+        cwd=cwd,
+        input=None,
+        timeout=10,
+    )
+    text = out.read_text()
+    assert "http://127.0.0.1:6478" in text
+    assert "localhost" in text
+    lines = text.splitlines()
+    assert lines[0] == "http://127.0.0.1:6478"
+    assert lines[1] == "http://127.0.0.1:6478"
+
+
+def test_cli_runner_child_sees_snapshot_after_parent_unset(tmp_path, monkeypatch):
+    """serve 启动时拍到的代理,父进程随后 unset,子进程仍能读到。"""
+    reset_cli_proxy_snapshot()
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "empty-xdg"))
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:6478")
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:6478")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+    monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
+    snapshot_cli_proxy_env()
+    _unset_proxy_env(monkeypatch)
+    cwd = tmp_path / "art"
+    cwd.mkdir()
+    out = cwd / "env.txt"
+    _default_cli_runner(
+        sys.executable,
+        ["-c", _child_writes_proxy_env(out)],
+        cwd=cwd,
+        input=None,
+        timeout=10,
+    )
+    text = out.read_text()
+    assert "http://127.0.0.1:6478" in text
+    assert "localhost" in text
 
 
 def test_resolve_cli_timeout_uses_agent_config(tmp_path, monkeypatch):
