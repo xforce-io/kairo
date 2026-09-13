@@ -1307,3 +1307,13 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 @media (min-width: 521px) {
   .knowledge-queue > li > form .btn { width: auto; padding: 7px 12px; margin: 6px 8px 6px 0; }
 }
+
+.knowledge-drift-topic {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+.knowledge-drift-topic a { color: var(--pine); text-decoration: none; }
+.knowledge-drift-topic a:hover { color: var(--pine-deep); }

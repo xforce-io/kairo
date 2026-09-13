@@ -808,9 +808,23 @@ def run_cmd(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;�
 def re_step(
     target: str = typer.Argument(None, help="文档 / reference id;省略=全量"),
     topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+    knowledge_drift: bool = typer.Option(
+        False, "--knowledge-drift", help="只重算基于旧知识的产物(#372);与 target 互斥"
+    ),
 ) -> None:
     """强制重算(文档级=整篇重综合;reference=清派生产物含 blocked 后重跑)。"""
     ws = _open_ws(topic)
+    if knowledge_drift:
+        if target:
+            typer.secho("--knowledge-drift 与 target 互斥", fg=typer.colors.RED, err=True)
+            raise typer.Exit(2)
+        from kairo.knowledge_drift import recompute_drifted
+        from kairo.refs import serve_root_of
+
+        done = recompute_drifted(ws, select_provider(require_read_dirs=True), serve_root_of(ws))
+        _exit_if_run_failed(ws)
+        typer.echo(f"re-stepped {len(done)} drifted: {', '.join(done) if done else '(none)'}")
+        return
     engine_re_step(ws, select_provider(require_read_dirs=True), target)
     _exit_if_run_failed(ws)
     typer.echo(f"re-stepped {target or '(all)'}")
