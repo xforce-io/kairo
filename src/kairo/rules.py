@@ -756,18 +756,22 @@ class DigestRule:
             if ref_id:
                 from kairo.brief import brief_after_digest
                 from kairo.refs import serve_root_of
+                from kairo.sidecars import defer
 
-                # #362:brief 与知识候选提取同为旁路,失败都不反噬已落盘的 digest。
-                brief_after_digest(self.ws, ref_id, provider=self.provider)
-                extract_after_success(
-                    self.ws.root,
-                    serve_root_of(self.ws),
-                    source_kind="digest",
-                    path=product_key,
-                    text=content,
-                    provider=self.provider,
+                # #378: do not block compose on brief / digest extract.
+                sidecar_ws, sidecar_provider = self.ws, self.provider
+                sidecar_path, sidecar_text, sidecar_ref = product_key, content, ref_id
+                defer(lambda: brief_after_digest(sidecar_ws, sidecar_ref, provider=sidecar_provider))
+                defer(
+                    lambda: extract_after_success(
+                        sidecar_ws.root,
+                        serve_root_of(sidecar_ws),
+                        source_kind="digest",
+                        path=sidecar_path,
+                        text=sidecar_text,
+                        provider=sidecar_provider,
+                    )
                 )
-                # glossary_review 在首次读取时原子迁移，此后只保留 knowledge_review 单一路径。
 
         def is_stale(state: State) -> bool:
             # input_hash 匹配即收敛(含 provider-failed / digest-degraded 终态);hash 变才重试
@@ -1300,28 +1304,18 @@ class ComposeRule:
                 ts.last_major_folded = dict(all_digests)
             state.targets[key] = ts
             from kairo.knowledge_review import extract_after_success
+            from kairo.sidecars import join
 
-            # 每个 delta digest 独立保留可定位出处；成功 target 也可提出跨材料变化。
-            for digest_path in sorted(use_delta):
-                digest_file = self._member_digests[digest_path].digest_path
-                if digest_file.is_file():
-                    extract_after_success(
-                        self.ws.root,
-                        self.ws.root.parent,
-                        source_kind="compose",
-                        path=digest_path,
-                        text=digest_file.read_text(),
-                        provider=self.provider,
-                    )
-            if key == "understanding.md":
-                extract_after_success(
-                    self.ws.root,
-                    self.ws.root.parent,
-                    source_kind="compose",
-                    path=key,
-                    text=content,
-                    provider=self.provider,
-                )
+            # #378: same digest text is extracted once after digest; only the live target remains.
+            join()
+            extract_after_success(
+                self.ws.root,
+                self.ws.root.parent,
+                source_kind="compose",
+                path=key,
+                text=content,
+                provider=self.provider,
+            )
 
         def is_stale(state: State) -> bool:
             ts = state.targets.get(key)

@@ -160,10 +160,13 @@ def step(ws, provider) -> bool:
     #105:每个 WorkItem 执行后立刻 write_state,使 provider-failed 等 blocked
     诊断在后续 item 挂起/进程被杀时仍已落盘。
     """
+    from kairo.sidecars import begin, end, join, kick
+
     state = promote_oversized_degraded(ws)
     rules = _build_rules(ws, provider)
     any_progress = False
     clear_digest_transport_halt()
+    begin()
     try:
         for _ in range(MAX_ITER):
             progressed = False
@@ -173,10 +176,13 @@ def step(ws, provider) -> bool:
                         item.run(state)
                         progressed = True
                         ws.write_state(state)  # #105 中途落盘
+                        kick()  # #378: brief / digest extract overlap the next rule
+            join()
             if not progressed:
                 break
             any_progress = True
     finally:
+        end()
         clear_digest_transport_halt()
     ws.write_state(state)
     write_stream_index(ws)  # 派生导航索引(#16);不进调和循环,每次 step 后刷新
