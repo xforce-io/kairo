@@ -41,12 +41,38 @@ DEFAULT_NORMALIZE_PROMPT = (
 
 DEFAULT_UNDERSTANDING_FOLD = (
     "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
+    "术语表只收本 topic 特有的概念与口径;人名/组织/系统/产品等专名以〔领域知识上下文〕为准按条目标题书写,"
+    "不进术语表、不标 ⚠️;未被知识上下文覆盖的专名首次出现时标 ⚠️ 待核。\n"
+    "只放中立事实,不写立场判断。\n"
+    "仅对确实无关的部分不动。\n"
+    "溯源(#99):章节证据范围〔S-…〕+ 关键声明短 ID;文末「来源索引」映射到 digest;"
+    "正文不重复完整 references/.../digest.md 路径。\n"
+    "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。"
+)
+
+# Verbatim default that #371 replaced. Topics created before then carry it in
+# their constitution.yaml; `resolve_fold_protocol` maps it to the current default
+# at read time so no file rewrite is needed. Never edit this string.
+LEGACY_UNDERSTANDING_FOLD_371 = (
+    "把新材料融进对本 topic 的事实理解;凡改变图景处就重组/修正/推翻,而非末尾追加。\n"
     "维持一张去重的术语表;未确认的挂 ⚠️;只放中立事实,不写立场判断。\n"
     "仅对确实无关的部分不动。\n"
     "溯源(#99):章节证据范围〔S-…〕+ 关键声明短 ID;文末「来源索引」映射到 digest;"
     "正文不重复完整 references/.../digest.md 路径。\n"
     "文末维护一节『未来待办』:汇总待核事实、数据缺口与需补充/待获取的材料,随确认进度增删。"
 )
+
+
+def resolve_fold_protocol(text: str) -> str:
+    """Return the fold protocol to feed compose.
+
+    A protocol equal to a superseded default is treated as the current default;
+    anything the user edited is returned untouched (#371).
+    """
+    if text == LEGACY_UNDERSTANDING_FOLD_371:
+        return DEFAULT_UNDERSTANDING_FOLD
+    return text
+
 
 DEFAULT_ASSESSMENT_FOLD = (
     "沉淀立场与判断,引用上游 understanding 的事实;随新材料演进、可推翻旧判断。\n"

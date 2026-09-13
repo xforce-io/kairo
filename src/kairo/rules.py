@@ -28,6 +28,7 @@ from kairo.models import (
     ProductState,
     State,
     TargetState,
+    resolve_fold_protocol,
 )
 from kairo.provenance import (
     REASON_PROVENANCE_INVALID,
@@ -1178,7 +1179,7 @@ class ComposeRule:
             try:
                 content = _run_agent(
                     self.provider,
-                    target.fold_protocol
+                    resolve_fold_protocol(target.fold_protocol)
                     + provenance_protocol_for(layer)
                     + knowledge_context
                     + reference_section
