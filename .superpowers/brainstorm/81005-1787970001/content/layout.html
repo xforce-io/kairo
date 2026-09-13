@@ -1,0 +1,174 @@
+<style>
+  .k {
+    --paper: #faf8f3; --card: #fffdf9; --ink: #1f1b16; --ink-soft: #4a443b;
+    --muted: #8d8475; --line: #e6ded0; --pine: #2f5d50; --pine-soft: #e7efe9;
+    --amber: #9c7211; --amber-soft: #f5ecd5; --clay: #a8412a;
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+    background: var(--paper); color: var(--ink); font-size: 11px; line-height: 1.45;
+    border-radius: 8px; overflow: hidden; border: 1px solid #e6ded0;
+    min-height: 420px;
+  }
+  .k-top {
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 8px 10px; border-bottom: 1px solid var(--line);
+    background: rgba(250,248,243,.95); font-size: 10.5px;
+  }
+  .k-brand { font-weight: 700; }
+  .k-brand span { color: var(--pine); font-weight: 500; }
+  .k-nav { display: flex; gap: 4px; }
+  .k-nav i { font-style: normal; padding: 2px 7px; border-radius: 99px; color: var(--ink-soft); }
+  .k-end { margin-left: auto; color: var(--muted); }
+  .k-end b { color: var(--pine); font-weight: 600; }
+  .k-body { padding: 10px 12px 14px; }
+  .k-hint { color: var(--muted); font-size: 10px; margin-bottom: 10px; }
+  .k-sec { margin-bottom: 10px; }
+  .k-lab { font-size: 9.5px; color: var(--muted); letter-spacing: .04em; margin-bottom: 4px; }
+  .k-row {
+    display: flex; justify-content: space-between; align-items: baseline;
+    padding: 4px 0; border-bottom: 1px solid var(--line);
+  }
+  .k-row strong { font-weight: 600; }
+  .k-aka { color: var(--muted); font-size: 10px; }
+  .k-btn { color: var(--muted); font-size: 10px; }
+  .k-add { margin-top: 6px; display: flex; gap: 4px; }
+  .k-add span {
+    flex: 1; border: 1px solid var(--line); border-radius: 4px;
+    padding: 3px 6px; color: #b5ad9f; background: var(--card);
+  }
+  .k-pill {
+    display: inline-block; padding: 2px 8px; border-radius: 99px;
+    border: 1px solid var(--line); color: var(--ink-soft); margin: 0 3px 4px 0; font-size: 10px;
+  }
+  .k-pill.on { background: var(--pine-soft); border-color: #cfe0d6; color: var(--pine); }
+  .k-warn { background: var(--amber-soft); color: var(--amber); border-radius: 4px; padding: 4px 6px; font-size: 10px; }
+  .k-todo { color: var(--clay); font-size: 10px; }
+  .k-fade { opacity: .45; }
+  .k-ov { font-size: 9.5px; color: var(--amber); }
+</style>
+
+<h2>统一维护页怎么排？</h2>
+<p class="subtitle">公共层始终在；workspace 本地覆盖、待审核、尚未重新校正也在这一页。点一张选布局。</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="k">
+        <div class="k-top">
+          <div class="k-brand">kairo<span>·</span></div>
+          <div class="k-nav"><i>工作区</i><i>时间轴</i></div>
+          <div class="k-end"><b>真名册</b> · 中</div>
+        </div>
+        <div class="k-body">
+          <div class="k-hint">影响 5 个工作区 · 2 个有本地覆盖</div>
+          <div class="k-sec">
+            <div class="k-lab">公共 · 8</div>
+            <div class="k-row"><span><strong>天溯</strong> <span class="k-aka">公司主体</span></span><span class="k-btn">删</span></div>
+            <div class="k-row"><span><strong>猎聘</strong> <span class="k-aka">招聘平台</span></span><span class="k-btn">删</span></div>
+            <div class="k-add"><span>规范名</span><span>说明</span></div>
+          </div>
+          <div class="k-sec">
+            <div class="k-lab">待提升 · 2</div>
+            <div class="k-row"><span><strong>职级序列</strong> ← 招聘</span><span class="k-btn">接受</span></div>
+          </div>
+          <div class="k-sec">
+            <div class="k-lab">招聘 · 本地 2 · 待审核 1</div>
+            <div class="k-row"><span><strong>天溯</strong> <span class="k-ov">覆盖</span></span><span class="k-btn">删</span></div>
+            <div class="k-todo">待审核 · 职级序列</div>
+          </div>
+          <div class="k-sec k-fade">
+            <div class="k-lab">会议纪要 · 本地 1</div>
+            <div class="k-row"><span><strong>纪要模板</strong></span><span class="k-btn">删</span></div>
+          </div>
+          <div class="k-fade" style="font-size:10px;color:#8d8475">↓ 还有 3 个工作区</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A. 一页纵向堆叠</h3>
+      <p>公共 → 待提升 → 每个 workspace 依次展开。不用切换，工作区一多就要一直滚。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="k">
+        <div class="k-top">
+          <div class="k-brand">kairo<span>·</span></div>
+          <div class="k-nav"><i>工作区</i><i>时间轴</i></div>
+          <div class="k-end"><b>真名册</b> · 中</div>
+        </div>
+        <div class="k-body">
+          <div class="k-hint">影响 5 个工作区 · 2 个有本地覆盖</div>
+          <div class="k-sec">
+            <div class="k-lab">公共 · 8</div>
+            <div class="k-row"><span><strong>天溯</strong> <span class="k-aka">公司主体</span></span><span class="k-btn">删</span></div>
+            <div class="k-row"><span><strong>猎聘</strong> <span class="k-aka">招聘平台</span></span><span class="k-btn">删</span></div>
+            <div class="k-add"><span>规范名</span><span>说明</span></div>
+          </div>
+          <div class="k-sec">
+            <div class="k-lab">待提升 · 2</div>
+            <div class="k-row"><span><strong>职级序列</strong> ← 招聘</span><span class="k-btn">接受</span></div>
+          </div>
+          <div class="k-sec">
+            <div class="k-lab">工作区</div>
+            <span class="k-pill on">招聘 ·2</span>
+            <span class="k-pill">会议纪要</span>
+            <span class="k-pill">kairo</span>
+            <span class="k-pill">文档权限</span>
+          </div>
+          <div class="k-sec">
+            <div class="k-lab">招聘 · 本地 2</div>
+            <div class="k-row"><span><strong>天溯</strong> <span class="k-ov">覆盖</span></span><span class="k-btn">删</span></div>
+            <div class="k-row"><span><strong>HC</strong> <span class="k-aka">编制</span></span><span class="k-btn">删</span></div>
+            <div class="k-todo" style="margin:6px 0 4px">待审核 · 1 · 职级序列</div>
+            <div class="k-warn">2 条产物尚未重新校正</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B. 公共固定 + 选工作区</h3>
+      <p>上半永远是公共册和待提升。下半用标签选一个 workspace，只看该区本地、待审核、校正。从课题页那一行点进来时，自动选中该区。</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="k">
+        <div class="k-top">
+          <div class="k-brand">kairo<span>·</span></div>
+          <div class="k-nav"><i>工作区</i><i>时间轴</i></div>
+          <div class="k-end"><b>真名册</b> · 中</div>
+        </div>
+        <div class="k-body">
+          <div class="k-hint">
+            <span class="k-pill on">全部 12</span>
+            <span class="k-pill">公共</span>
+            <span class="k-pill">覆盖</span>
+            <span class="k-pill">待办 ·3</span>
+          </div>
+          <div class="k-sec">
+            <div class="k-lab">条目</div>
+            <div class="k-row"><span><strong>天溯</strong> <span class="k-aka">公共</span></span><span class="k-btn">删</span></div>
+            <div class="k-row"><span><strong>天溯</strong> <span class="k-ov">招聘 · 覆盖</span></span><span class="k-btn">删</span></div>
+            <div class="k-row"><span><strong>猎聘</strong> <span class="k-aka">公共</span></span><span class="k-btn">删</span></div>
+            <div class="k-row"><span><strong>HC</strong> <span class="k-aka">招聘 · 本地</span></span><span class="k-btn">删</span></div>
+            <div class="k-row"><span><strong>纪要模板</strong> <span class="k-aka">会议纪要</span></span><span class="k-btn">删</span></div>
+            <div class="k-add"><span>规范名</span><span>层：公共 ▾</span></div>
+          </div>
+          <div class="k-sec">
+            <div class="k-lab">待办</div>
+            <div class="k-todo">待提升 · 职级序列 ← 招聘</div>
+            <div class="k-warn" style="margin-top:6px">招聘 · 2 条尚未重新校正</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C. 一张总表</h3>
+      <p>所有条目混在一表，用层标记（公共 / 某 workspace）。筛选「待办」才能看到审核和校正。层边界不如 B 清楚。</p>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top:1.5rem">倾向 B：公共层始终可见、可改；本地层按 workspace 收口，从课题页提示点进来不会落到一张长清单中间。</p>
