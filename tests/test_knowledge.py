@@ -481,8 +481,24 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
 
 
 def _candidate_card(html: str, title: str) -> str:
-    start = html.index(f"<strong>{title}</strong>")
-    return html[start : start + html[start:].index("</li>")]
+    marker = f"<strong>{title}</strong>"
+    at = html.index(marker)
+    start = html.rfind("<li>", 0, at + 1)
+    depth = 0
+    index = start
+    while index < len(html):
+        if html.startswith("<li", index):
+            depth += 1
+            index += 3
+            continue
+        if html.startswith("</li>", index):
+            depth -= 1
+            index += 5
+            if depth == 0:
+                return html[start:index]
+            continue
+        index += 1
+    raise AssertionError(f"candidate card not closed: {title}")
 
 
 def test_candidate_card_main_body_is_description_not_quote(tmp_path):
