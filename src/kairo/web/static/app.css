@@ -510,6 +510,8 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
   color: var(--ink-soft);
   background: var(--paper-2);
 }
+/* mermaid leftover parse-error overlay; our .doc-mermaid-error is the only visible failure */
+.error-icon, .error-text, svg:has(.error-icon) { display: none !important; }
 /* 纯文本形态(.txt 转写等):非代码,保留换行、可读字体 */
 .doc pre.doc-plain { background: none; color: var(--ink); padding: 0; margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.78; white-space: pre-wrap; word-break: break-word; }
 /* 原始 ASR:时间点退到边栏，正文按片段呼吸；不改动原文。 */

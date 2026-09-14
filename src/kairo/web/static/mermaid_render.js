@@ -27,7 +27,8 @@
         window.mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          theme: "neutral"
+          theme: "neutral",
+          suppressErrorRendering: true
         });
         resolve(window.mermaid);
       };
@@ -63,7 +64,10 @@
           return mermaid.render(id, src).then(function (out) {
             el.replaceChildren(svgFrom(out.svg));
             el.setAttribute("data-done", "1");
-          }).catch(function () { fail(el); });
+          }).catch(function () {
+            document.querySelectorAll("#d" + id + ", #" + id).forEach(function (n) { n.remove(); });
+            fail(el);
+          });
         });
       });
       return chain;
@@ -74,8 +78,8 @@
     });
   }
 
-  function onSwap(e) {
-    kairoRenderMermaid((e.detail && e.detail.target) || document);
+  function onSwap() {
+    kairoRenderMermaid(document);
   }
 
   function bind() {
