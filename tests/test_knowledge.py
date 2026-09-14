@@ -470,12 +470,181 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     _ingest_pending(ws, "candidate", "evidence")
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
     assert "Merge target" in page.text and "aliases and source" in page.text
+    assert "Merge into an existing entry" in page.text and "Choose an existing entry" in page.text
     # 顶栏语言切换按钮固定显示“中”；知识功能区域本身的英文页不得漏出中文。
     knowledge_region = page.text.split('<main class="knowledge-work">', 1)[1]
     assert not re.search(r"[\u4e00-\u9fff]", knowledge_region)
     chinese = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "zh"})
     assert "待审核知识候选" in chinese.text and "采纳到本工作区" in chinese.text
+    assert "合并到已有条目" in chinese.text and "选择已有条目" in chinese.text
     assert "confirmed ·" not in chinese.text and "digest · pending" not in chinese.text
+
+
+def _candidate_card(html: str, title: str) -> str:
+    start = -1
+    for marker in (f"<li><strong>{title}</strong>", f"<li>\n      <strong>{title}</strong>"):
+        start = html.find(marker)
+        if start != -1:
+            break
+    if start == -1:
+        at = html.index(f"<strong>{title}</strong>")
+        start = html.rfind("<li>", 0, at + 1)
+    depth = 0
+    index = start
+    while index < len(html):
+        if html.startswith("<li", index):
+            depth += 1
+            index += 3
+            continue
+        if html.startswith("</li>", index):
+            depth -= 1
+            index += 5
+            if depth == 0:
+                return html[start:index]
+            continue
+        index += 1
+    raise AssertionError(f"candidate card not closed: {title}")
+
+
+def test_candidate_card_main_body_is_description_not_quote(tmp_path):
+    """#384 S1: unexpanded main body is proposed description; quote stays in sources."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = _write_digest(ws, "a", "康医通要上线。")
+    b = _write_digest(ws, "b", "康医通下周演示。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="康医通要上线。",
+        drafts=[{"title": "康医通", "quote": "康医通要上线", "description": "待上线业务系统"}],
+    )
+    ingest_candidates(
+        ws.root, source_kind="digest", path=b, source_text="康医通下周演示。",
+        drafts=[{"title": "康医通", "quote": "康医通下周演示", "description": "待上线业务系统"}],
+    )
+    html = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "zh"}).text
+    card = _candidate_card(html, "康医通")
+    main, _, sources = card.partition("<details")
+    assert "待上线业务系统" in main
+    assert "康医通要上线" not in main and "康医通下周演示" not in main
+    assert "康医通要上线" in sources and "康医通下周演示" in sources
+
+
+def test_candidate_card_empty_description_does_not_fall_back_to_quote(tmp_path):
+    """#384 S1: empty description shows a muted hint; quote is not the main body."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = _write_digest(ws, "a", "出处甲摘录")
+    b = _write_digest(ws, "b", "出处乙摘录")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="出处甲摘录",
+        drafts=[{"title": "多源名", "quote": "出处甲摘录"}],
+    )
+    ingest_candidates(
+        ws.root, source_kind="digest", path=b, source_text="出处乙摘录",
+        drafts=[{"title": "多源名", "quote": "出处乙摘录"}],
+    )
+    html = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"}).text
+    card = _candidate_card(html, "多源名")
+    main, _, sources = card.partition("<details")
+    assert "No proposed description yet." in main
+    assert "出处甲摘录" not in main and "出处乙摘录" not in main
+    assert "出处甲摘录" in sources and "出处乙摘录" in sources
+
+
+def test_sighted_single_source_card_hides_quote_until_sources_expanded(tmp_path):
+    """#384 S1: single-source/sighted unexpanded main is description only; quote is in details."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = _write_digest(ws, "a", "高希彬提出方案。李四也在。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="高希彬提出方案。李四也在。",
+        drafts=[
+            {"title": "高希彬", "quote": "高希彬提出", "description": "项目提出人"},
+            {"title": "李四", "quote": "李四也在"},
+        ],
+    )
+    html = TestClient(create_app(root)).get(
+        "/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"}
+    ).text
+    gaoxi = _candidate_card(html, "高希彬")
+    main, _, sources = gaoxi.partition("<details")
+    assert "项目提出人" in main
+    assert "高希彬提出" not in main
+    assert "高希彬提出" in sources
+    lisi = _candidate_card(html, "李四")
+    empty_main, _, empty_sources = lisi.partition("<details")
+    assert "尚无拟议说明" in empty_main
+    assert "李四也在" not in empty_main
+    assert "李四也在" in empty_sources
+
+
+def test_merge_is_separated_and_empty_entry_id_is_rejected(tmp_path):
+    """#384 S2: merge lives in details; default is empty; blank entry_id does not merge."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    entry = new_entry(title="无关条目", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
+    a = _write_digest(ws, "a", "康医通要上线。")
+    b = _write_digest(ws, "b", "康医通下周演示。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="康医通要上线。",
+        drafts=[{"title": "康医通", "quote": "康医通要上线", "description": "待上线业务系统"}],
+    )
+    ingest_candidates(
+        ws.root, source_kind="digest", path=b, source_text="康医通下周演示。",
+        drafts=[{"title": "康医通", "quote": "康医通下周演示", "description": "待上线业务系统"}],
+    )
+    client = TestClient(create_app(root))
+    html = client.get("/knowledge?workspace=ws", headers={"accept-language": "zh"}).text
+    card = _candidate_card(html, "康医通")
+    actions, _, merge = card.partition("合并到已有条目")
+    assert "采纳到本工作区" in actions and "忽略" in actions
+    assert 'name="entry_id"' not in actions
+    assert re.search(r'<select name="entry_id"[^>]*required', merge)
+    assert re.search(r'<option value="">选择已有条目</option>', merge)
+    assert f'value="{entry.id}" selected' not in merge
+    assert not re.search(rf'<option value="{entry.id}"[^>]*selected', merge)
+    candidate = load_review(ws.root).candidates[0]
+    page = client.post(
+        f"/w/ws/knowledge/candidates/{candidate.id}/merge?queue=candidates&filter=康",
+        data={"entry_id": ""},
+        headers={"accept-language": "zh"},
+    )
+    assert page.status_code == 200
+    assert "请选择要合并到的已有条目" in page.text
+    assert load_review(ws.root).candidates[0].status == "pending"
+    assert 'name="filter" value="康"' in page.text
+    assert "queue=candidates" in page.text
+    page = client.post(
+        f"/w/ws/knowledge/candidates/{candidate.id}/merge",
+        data={"entry_id": "   "},
+        headers={"accept-language": "en"},
+    )
+    assert "Choose an existing entry to merge into" in page.text
+    assert load_review(ws.root).candidates[0].status == "pending"
+
+
+def test_global_merge_rejects_empty_entry_id(tmp_path):
+    """#384 S2: global promotion merge also rejects a blank target at the web boundary."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    _ingest_pending(ws, "待提升", "提升证据")
+    local = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
+    promote(ws.root, local.id)
+    save_global(root, load_global(root)[0].model_copy(update={"entries": [new_entry(title="已有公共", scope="global")]}))
+    promoted = next(c for c in load_review(ws.root).candidates if c.status == "pending_global")
+    page = TestClient(create_app(root)).post(
+        f"/knowledge/candidates/ws/{promoted.id}/merge?queue=global",
+        data={"entry_id": ""},
+        headers={"accept-language": "en"},
+    )
+    assert page.status_code == 200
+    assert "Choose an existing entry to merge into" in page.text
+    assert next(c for c in load_review(ws.root).candidates if c.id == promoted.id).status == "pending_global"
 
 
 def _drift_region(html: str) -> str:
@@ -1376,6 +1545,11 @@ def test_promotion_card_renders_entry_fields_and_all_source_links(tmp_path):
     for value in ("完整说明", "能源", "审核", "别名关闭", "not auto-matched", "references/a/digest.md", "references/b/digest.md"):
         assert value in page.text
     assert '/w/ws?ref=a' in page.text and '/w/ws?ref=b' in page.text
+    card = _candidate_card(page.text, "待提升完整")
+    main, _, sources = card.partition("<details")
+    assert "完整说明" in main
+    assert "甲来源" not in main and "乙来源" not in main
+    assert "甲来源" in sources and "乙来源" in sources
 
 
 def test_knowledge_web_errors_are_localized_without_exception_chinese(tmp_path, monkeypatch):
@@ -1393,6 +1567,7 @@ def test_knowledge_web_errors_are_localized_without_exception_chinese(tmp_path, 
     from kairo.web.views import _knowledge_error_text
     scope_request = Request({"type": "http", "headers": [(b"accept-language", b"en")]})
     assert _knowledge_error_text(scope_request, "未知 scope 'shared'") == "This action is not permitted in the selected knowledge scope."
+    assert _knowledge_error_text(scope_request, "合并未选择目标") == "Choose an existing entry to merge into."
     stale = client.post("/w/ws/knowledge/candidates/kc-00000000000000000000/accept", headers=headers)
     assert "no longer available" in stale.text
     import kairo.knowledge as knowledge_module
