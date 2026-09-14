@@ -117,6 +117,7 @@ def render_markdown(
       索引表 ID 列加 ``id="source-S-…"``
     - #111:传入 ``slug`` 时,``references/<ref>/digest.md`` 重写为 console
       ``/w/{slug}/ref/{ref}/form/digest``(无 slug 则保留相对路径)
+    - #380:info 恰好为 mermaid 的 fence 收成 ``.doc-mermaid`` 占位
     """
     if not text:
         return _md.render(text)
@@ -140,7 +141,27 @@ def render_markdown(
     # 4) Web console:相对 digest → 预览路由
     if slug:
         html = _rewrite_digest_links(html, slug, ref_home)
-    return html
+    return _wrap_mermaid_fences(html)
+
+
+# markdown-it 对 info=mermaid 的 fence 只出这一类 class,不吃 mermaid.json。
+_MERMAID_BLOCK_RE = re.compile(
+    r'<pre><code class="language-mermaid">([\s\S]*?)</code></pre>',
+    re.IGNORECASE,
+)
+
+
+def _wrap_mermaid_fences(html: str) -> str:
+    """把 mermaid 代码块换成占位;源码保持 markdown-it 已转义文本。"""
+
+    def _repl(match: re.Match[str]) -> str:
+        return (
+            f'<div class="doc-mermaid">'
+            f'<pre class="doc-mermaid-src">{match.group(1)}</pre>'
+            f"</div>"
+        )
+
+    return _MERMAID_BLOCK_RE.sub(_repl, html)
 
 
 _SECTION_HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$", re.M)

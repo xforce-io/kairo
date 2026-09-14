@@ -499,6 +499,17 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .doc code { font-family: var(--mono); font-size: .86em; background: #f0ebdf; padding: 1px 6px; border-radius: 5px; }
 .doc pre { background: #2a2620; color: #ece4d3; padding: 16px; border-radius: 10px; overflow: auto; }
 .doc pre code { background: none; padding: 0; color: inherit; }
+.doc .doc-mermaid { margin: 18px 0; overflow-x: auto; background: none; padding: 0; }
+.doc .doc-mermaid-src { display: none; }
+.doc .doc-mermaid svg { max-width: 100%; height: auto; }
+.doc .doc-mermaid-error {
+  margin: 18px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  color: var(--ink-soft);
+  background: var(--paper-2);
+}
 /* 纯文本形态(.txt 转写等):非代码,保留换行、可读字体 */
 .doc pre.doc-plain { background: none; color: var(--ink); padding: 0; margin: 0; font-family: var(--serif); font-size: 16px; line-height: 1.78; white-space: pre-wrap; word-break: break-word; }
 /* 原始 ASR:时间点退到边栏，正文按片段呼吸；不改动原文。 */
