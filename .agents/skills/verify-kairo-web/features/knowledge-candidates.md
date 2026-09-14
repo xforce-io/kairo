@@ -4,7 +4,7 @@
 
 1. 顶部导航 Knowledge → 选 Topic → 队列导航 `候选审核 · n`
 2. 队列导航 `目击 · m`（直接 URL：`/knowledge?workspace=<slug>&queue=sighted`）
-3. 每条候选的 `采纳到本工作区` / `忽略` 按钮；有本地 confirmed 条目时的 `合并到` 下拉
+3. 每条候选的 `采纳到本工作区` / `忽略` 按钮；有本地 confirmed 条目时展开 `合并到已有条目`，再看下拉与 `合并`
 
 ## Fixture
 
@@ -14,6 +14,7 @@
 import sys
 from pathlib import Path
 from kairo.workspace import Workspace
+from kairo.knowledge import load_workspace, new_entry, save_workspace
 from kairo.knowledge_review import ingest_candidates
 
 root = Path(sys.argv[1])
@@ -31,15 +32,21 @@ a = digest("a", "高希彬提出方案。康医通要上线。")
 b = digest("b", "康医通下周演示。")
 ingest_candidates(
     ws.root, source_kind="digest", path=a, source_text="高希彬提出方案。康医通要上线。",
-    drafts=[{"title": "高希彬", "quote": "高希彬提出"}, {"title": "康医通", "quote": "康医通要上线"}],
+    drafts=[
+        {"title": "高希彬", "quote": "高希彬提出", "description": "项目提出人"},
+        {"title": "康医通", "quote": "康医通要上线", "description": "待上线业务系统"},
+    ],
 )
 ingest_candidates(
     ws.root, source_kind="digest", path=b, source_text="康医通下周演示。",
-    drafts=[{"title": "康医通", "quote": "康医通下周演示"}],
+    drafts=[{"title": "康医通", "quote": "康医通下周演示", "description": "待上线业务系统"}],
 )
+doc, _ = load_workspace(ws.root)
+doc.entries.append(new_entry(title="无关条目", scope="workspace", description="本地已确认但不匹配候选"))
+save_workspace(ws.root, doc)
 ```
 
-期望初态：`候选审核 · 1`（康医通，两篇 digest）、`目击 · 1`（高希彬，一篇）。
+期望初态：`候选审核 · 1`（康医通，两篇 digest，拟议说明「待上线业务系统」与出处摘录不同）、`目击 · 1`（高希彬，一篇，拟议说明「项目提出人」）、本地 confirmed「无关条目」1 条。
 
 ## 路径 → 可判定结果
 
@@ -50,6 +57,8 @@ ingest_candidates(
 | C | 目击区「高希彬」点 `采纳到本工作区`，再 GET 页面 | `目击 · 0`；`本地知识` 队列出现「高希彬」confirmed |
 | D | 候选区「康医通」点 `忽略`，再 GET 页面 | `候选审核 · 0`；review yaml 中该条 `status: ignored` |
 | E | 空态 | 两个队列都空时分别显示 `没有待审核的知识候选。` / `没有目击中的专名。` |
+| S1 | GET `/knowledge?workspace=demo`，读「康医通」未展开主文，再展开出处 | 未展开主文是「待上线业务系统」；出处摘录「康医通要上线」「康医通下周演示」只在出处区。目击「高希彬」未展开主文是「项目提出人」，「高希彬提出」只在出处/路径区 |
+| S2 | GET `/knowledge?workspace=demo`，看「康医通」主操作行，展开「合并到已有条目」，不选目标点合并 | 主行只有 `采纳到本工作区` 与 `忽略`；下拉第一项是空值「选择已有条目」，默认不是「无关条目」；未选目标不合并且候选仍 pending |
 
 ## 已知不做
 

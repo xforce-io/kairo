@@ -146,7 +146,9 @@ def _render(request: Request, name: str, ctx: dict) -> HTMLResponse:
 def _knowledge_error_text(request: Request, raw: str) -> str:
     """知识域错误在 Web 边界按稳定类别本地化，绝不把中文异常原文带入英文页。"""
     value = str(raw)
-    if any(token in value for token in ("YAML", "无法解析", "严格", "时间", "content_hash")):
+    if any(token in value for token in ("合并未选择", "未选择目标")):
+        key = "knowledge.error_merge_target_required"
+    elif any(token in value for token in ("YAML", "无法解析", "严格", "时间", "content_hash")):
         key = "knowledge.error_invalid_document"
     elif "scope" in value or "范围" in value:
         key = "knowledge.error_scope"
@@ -2558,7 +2560,10 @@ def knowledge_candidate_action(request: Request, slug: str, candidate_id: str, a
         elif action == "ignore":
             ignore(root, candidate_id)
         elif action == "merge":
-            merge_workspace(root, candidate_id, entry_id)
+            target_id = (entry_id or "").strip()
+            if not target_id:
+                raise KnowledgeError("合并未选择目标")
+            merge_workspace(root, candidate_id, target_id)
         else:
             raise KnowledgeError(f"未知候选动作:{action}")
     except KnowledgeError as exc:
@@ -2621,7 +2626,10 @@ def knowledge_global_action(
         if action == "accept":
             accept_global(Path(request.app.state.root), root, candidate_id)
         elif action == "merge":
-            merge_global(Path(request.app.state.root), root, candidate_id, entry_id)
+            target_id = (entry_id or "").strip()
+            if not target_id:
+                raise KnowledgeError("合并未选择目标")
+            merge_global(Path(request.app.state.root), root, candidate_id, target_id)
         elif action == "reject":
             reject_global(root, candidate_id, reason)
         else:
