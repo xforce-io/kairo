@@ -4,7 +4,7 @@
 
 1. 顶部导航 Knowledge → 选 Topic → 队列导航 `候选审核 · n`
 2. 队列导航 `目击 · m`（直接 URL：`/knowledge?workspace=<slug>&queue=sighted`）
-3. 每条候选的 `采纳到本工作区` / `忽略` 按钮；有本地 confirmed 条目时的 `合并到` 下拉
+3. 每条候选的 `采纳到本工作区` / `忽略` 按钮；有本地 confirmed 条目时展开 `合并到已有条目` 再选目标
 
 ## Fixture
 

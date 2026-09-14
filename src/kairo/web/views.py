@@ -2330,6 +2330,7 @@ def _knowledge_page(
             workspace = _open(request, selected)
             drift.extend(_knowledge_drift_rows(workspace, serve, slug=selected))
             review = invalidate_stale(serve / selected)
+            confirmed_ids = {entry.id for entry in local_entries if entry.status == "confirmed"}
             for candidate in review.candidates:
                 if candidate.status not in {"pending", "pending_global", "rejected_global", "sighted"}:
                     continue
@@ -2352,6 +2353,13 @@ def _knowledge_page(
                         if title:
                             parts.append(f"{term} → {title}")
                     row["suggestion_text"] = "；".join(parts)
+                    for value in candidate.suggestion.values():
+                        if not str(value).startswith("merge:"):
+                            continue
+                        entry_id = str(value).removeprefix("merge:")
+                        if entry_id in confirmed_ids:
+                            row["suggested_entry_id"] = entry_id
+                            break
                 haystack = " ".join([
                     candidate.title, candidate.description, candidate.status,
                     candidate.path, *candidate.tags,

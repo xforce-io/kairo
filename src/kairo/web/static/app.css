@@ -817,6 +817,30 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .gl-ws-chip .n { margin-left: 4px; color: var(--amber); }
 .gl-console { max-width: 640px; margin: 16px 24px; }
 .gl-ws-panel { margin-top: 22px; }
+.knowledge-queue .knowledge-candidate-def {
+  display: block;
+  font-size: 13.5px;
+  color: var(--ink-soft);
+  margin: 6px 0 4px;
+  line-height: 1.45;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+.knowledge-candidate-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 8px; }
+.knowledge-candidate-actions form { display: inline; }
+.knowledge-candidate-actions .btn { width: auto; }
+.knowledge-candidate-actions .btn-regen { margin: 0; }
+.knowledge-candidate-merge { margin-top: 8px; }
+.knowledge-candidate-merge summary { cursor: pointer; color: var(--muted, #666); }
+.knowledge-candidate-merge-form {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  max-width: 36rem;
+  margin-top: 8px;
+}
+.knowledge-candidate-merge-form .btn { width: auto; }
+.knowledge-candidate-merge-form .btn-regen { margin: 0; }
 .knowledge-candidate-edit { margin-top: 8px; }
 .knowledge-candidate-edit summary { cursor: pointer; color: var(--muted, #666); }
 .knowledge-candidate-edit form {
@@ -1318,7 +1342,7 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 .input-line.selected { background: #fff0b0; color: #312a12; }
 .line-number { opacity: .65; user-select: none; }
 @media (min-width: 521px) {
-  .knowledge-queue > li > form .btn { width: auto; padding: 7px 12px; margin: 6px 8px 6px 0; }
+  .knowledge-queue .knowledge-candidate-actions .btn { width: auto; padding: 7px 12px; }
 }
 
 .knowledge-drift-topic {

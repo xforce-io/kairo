@@ -469,12 +469,15 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
     _ingest_pending(ws, "candidate", "evidence")
     page = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "en"})
-    assert "Merge target" in page.text and "aliases and source" in page.text
+    assert "Merge into existing entry" in page.text
+    assert "Choose an existing entry" in page.text
+    assert "knowledge-candidate-merge" in page.text
     # 顶栏语言切换按钮固定显示“中”；知识功能区域本身的英文页不得漏出中文。
     knowledge_region = page.text.split('<main class="knowledge-work">', 1)[1]
     assert not re.search(r"[\u4e00-\u9fff]", knowledge_region)
     chinese = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "zh"})
     assert "待审核知识候选" in chinese.text and "采纳到本工作区" in chinese.text
+    assert "合并到已有条目" in chinese.text
     assert "confirmed ·" not in chinese.text and "digest · pending" not in chinese.text
 
 
@@ -1046,6 +1049,64 @@ def test_ingest_replaces_pending_for_same_path_and_caps_drafts(tmp_path):
     assert not any(c.title == "旧乙" for c in review.candidates)  # #370: purged, not `stale`
     assert any(c.status == "accepted" and c.title == "旧甲" for c in review.candidates)
     assert kept.id in {c.merged_into for c in review.candidates if c.status == "accepted"}
+
+
+def test_candidate_card_shows_description_and_keeps_merge_off_primary_row(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    energy = new_entry(title="管理节能", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [energy]}))
+    path = ws.root / "understanding.md"
+    path.write_text("历史策略效果可用COPP等效率指标评价。")
+    ingest_candidates(
+        ws.root,
+        source_kind="compose",
+        path="understanding.md",
+        source_text=path.read_text(),
+        drafts=[{
+            "title": "COPP",
+            "description": "综合厂用电效率指标。",
+            "quote": "历史策略效果可用COPP等效率指标评价。",
+        }],
+    )
+    html = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "zh"}).text
+    hero, _, after = html.partition("<details")
+    assert "综合厂用电效率指标。" in hero
+    assert "历史策略效果可用COPP等效率指标评价。" not in hero
+    assert "历史策略效果可用COPP等效率指标评价。" in after
+    actions, _, merge = after.partition("knowledge-candidate-merge")
+    assert "采纳到本工作区" in actions and "忽略" in actions
+    assert "合并目标" not in actions and 'name="entry_id"' not in actions
+    assert f'value="{energy.id}" selected' not in merge
+    assert "选择已有条目" in merge
+
+
+def test_merge_preselects_suggested_local_entry(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    target = new_entry(title="COPP指标", scope="workspace", aliases=[KnowledgeAlias(value="COPP")])
+    other = new_entry(title="管理节能", scope="workspace")
+    save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [other, target]}))
+    path = ws.root / "understanding.md"
+    path.write_text("历史策略效果可用COPP等效率指标评价。")
+    ingest_candidates(
+        ws.root,
+        source_kind="compose",
+        path="understanding.md",
+        source_text=path.read_text(),
+        matcher=KnowledgeMatcher(load_workspace(ws.root)[0].entries),
+        drafts=[{
+            "title": "综合厂用电效率",
+            "aliases": ["COPP"],
+            "description": "效率指标",
+            "quote": "历史策略效果可用COPP等效率指标评价。",
+        }],
+    )
+    html = TestClient(create_app(root)).get("/knowledge?workspace=ws").text
+    assert f'value="{target.id}" selected' in html
+    assert f'value="{other.id}" selected' not in html
 
 
 def test_knowledge_queue_is_compact_without_merge_when_empty(tmp_path):
