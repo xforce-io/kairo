@@ -230,3 +230,51 @@ def test_digest_link_rejects_encoded_path_separators_and_traversal():
     for ref_id in ("%2e%2e", "foo%2fbar", "foo%5cbar", "%252e%252e"):
         html = render_markdown(f"[digest](references/{ref_id}/digest.md)", slug="alpha")
         assert 'hx-get=' not in html
+
+
+def test_render_mermaid_fence_becomes_placeholder():
+    """#380: mermaid fence 收成占位,不再是 language-mermaid 代码块。"""
+    html = render_markdown(
+        "# 架构\n\n```mermaid\nflowchart LR\nA[现场] --> B[IOT]\n```\n\n完。\n"
+    )
+    assert 'class="doc-mermaid"' in html
+    assert "doc-mermaid-src" in html
+    assert "flowchart LR" in html
+    assert "language-mermaid" not in html
+    assert "<h1>" in html and "架构" in html
+    assert "完。" in html
+
+
+def test_render_other_fence_stays_code_block():
+    html = render_markdown("```python\nprint(1)\n```\n")
+    assert "language-python" in html
+    assert "doc-mermaid" not in html
+
+
+def test_render_mermaid_source_script_is_escaped():
+    html = render_markdown("```mermaid\nflowchart LR\nA[</pre><script>alert(1)</script>]\n```\n")
+    assert "<script" not in html
+    assert "</pre><script>" not in html
+    assert "doc-mermaid" in html
+
+
+def test_render_empty_mermaid_fence_is_still_placeholder():
+    html = render_markdown("```mermaid\n```\n")
+    assert "doc-mermaid" in html
+    assert "language-mermaid" not in html
+
+
+def test_render_bad_mermaid_keeps_surrounding_markdown():
+    """#380 S2:非法 mermaid 仍是占位,前后标题/段落还在。"""
+    html = render_markdown(
+        "# 架构\n\n```mermaid\nthis is not a diagram\n```\n\n结尾段。\n"
+    )
+    assert html.count('class="doc-mermaid"') == 1
+    assert "<h1>" in html and "架构" in html
+    assert "结尾段" in html
+    assert "language-mermaid" not in html
+
+
+def test_render_mermaid_json_fence_is_not_diagram():
+    html = render_markdown("```mermaid.json\n{}\n```\n")
+    assert "doc-mermaid" not in html
