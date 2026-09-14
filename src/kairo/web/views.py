@@ -164,29 +164,32 @@ def _knowledge_error_text(request: Request, raw: str) -> str:
 
 
 def _open(request: Request, slug: str) -> Workspace:
+    t = _t(request)
     if _is_public_read(request):
         bounds = _public_bounds(request)
         if bounds is None or slug not in bounds[0]:
-            raise HTTPException(status_code=404, detail="workspace not found")
+            raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
     try:
         return Workspace.open(Path(request.app.state.root) / slug)
     except WorkspaceNotFound:
-        raise HTTPException(status_code=404, detail="workspace not found")
+        raise HTTPException(status_code=404, detail=t("err.ws_not_found"))
 
 
-def _safe_doc(ws: Workspace, relpath: str) -> Path:
+def _safe_doc(ws: Workspace, relpath: str, t) -> Path:
     """把 workspace 相对路径解析为 .md 绝对路径;越界/非 md/不存在 → 404。"""
     target = (ws.root / relpath).resolve()
     root = ws.root.resolve()
     if root not in target.parents or target.suffix != ".md" or not target.is_file():
-        raise HTTPException(status_code=404, detail="doc not found")
+        raise HTTPException(status_code=404, detail=t("err.doc_not_found"))
     return target
 
 
-def _preview_html(ws: Workspace, location: str, slug: str | None = None) -> str | None:
+def _preview_html(ws: Workspace, location: str, slug: str | None = None, t=None) -> str | None:
     """把 workspace 内的 .md 渲染成 HTML;越界/缺失 → None(右栏给提示,不报错)。"""
+    if t is None:
+        t = lambda k: k
     try:
-        return render_markdown(_safe_doc(ws, location).read_text(), slug=slug)
+        return render_markdown(_safe_doc(ws, location, t).read_text(), slug=slug)
     except HTTPException:
         return None
 
@@ -213,11 +216,11 @@ def _is_image_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
 
 
-def _open_local_path(path: Path) -> None:
+def _open_local_path(path: Path, t) -> None:
     """用本机默认应用打开文件(本地 console;路径须已由 manifest 解析出)。"""
     path = path.resolve()
     if not path.is_file():
-        raise HTTPException(status_code=404, detail="file not found")
+        raise HTTPException(status_code=404, detail=t("err.file_not_found"))
     if sys.platform == "darwin":
         subprocess.Popen(["open", str(path)], start_new_session=True)
     elif sys.platform.startswith("linux"):
@@ -225,23 +228,23 @@ def _open_local_path(path: Path) -> None:
     elif sys.platform == "win32":
         os.startfile(str(path))  # type: ignore[attr-defined]
     else:
-        raise HTTPException(status_code=501, detail="open not supported on this OS")
+        raise HTTPException(status_code=501, detail=t("err.open_os_unsupported"))
 
 
-def _manifest_form_path(ws: Workspace, ref_id: str, key: str) -> Path:
+def _manifest_form_path(ws: Workspace, ref_id: str, key: str, t) -> Path:
     """从 manifest 解析 form 绝对路径(digest 或 forms[i]);key 非法 → 404。"""
     if key == "digest":
         p = (ws.references_dir() / ref_id / "digest.md").resolve()
         if not p.is_file():
-            raise HTTPException(status_code=404, detail="form not found")
+            raise HTTPException(status_code=404, detail=t("err.form_not_found"))
         return p
     man = ws.read_manifest(ref_id)
     try:
         idx = int(key)
     except ValueError:
-        raise HTTPException(status_code=404, detail="form not found")
+        raise HTTPException(status_code=404, detail=t("err.form_not_found"))
     if not 0 <= idx < len(man.forms):
-        raise HTTPException(status_code=404, detail="form not found")
+        raise HTTPException(status_code=404, detail=t("err.form_not_found"))
     return _form_path(ws, man.forms[idx].location).resolve()
 
 
@@ -304,11 +307,12 @@ def _num_attr(n: float | None) -> str:
     return str(int(n)) if float(n).is_integer() else str(n)
 
 
-def _form_index(man, form) -> str:
+def _form_index(man, form, t=None) -> str:
     for i, f in enumerate(man.forms):
         if f is form:
             return str(i)
-    raise HTTPException(status_code=404, detail="form not found")
+    msg = t("err.form_not_found") if t else "err.form_not_found"
+    raise HTTPException(status_code=404, detail=msg)
 
 
 def _listen_read_html(
@@ -803,16 +807,17 @@ def _open_topic_ref(
     from kairo.refs import RefError, resolve_open, topic_members
 
     _open(request, slug)
+    t = _t(request)
     source = _topic_ref_home(slug, home)
     try:
         members = topic_members(_serve(request), slug)
         if source is None or not any(r.home == source and r.id == ref_id for r in members):
-            raise HTTPException(status_code=404, detail="reference not found")
+            raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
         _require_public_ref(request, source, ref_id)
         ws, _ = resolve_open(_serve(request), source, ref_id)
         return ws, source
     except (RefError, OSError, ValueError):
-        raise HTTPException(status_code=404, detail="reference not found") from None
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found")) from None
 
 
 def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
@@ -969,11 +974,12 @@ def global_ref_view(
         resolve_open,
     )
 
+    t = _t(request)
     home = "" if home == "global" else home
     try:
         ws, rid = resolve_open(_serve(request), home, ref_id)
     except RefError:
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     _require_public_ref(request, home, rid)
     man = ws.read_manifest(rid)
     serve = _serve(request)
@@ -1018,11 +1024,12 @@ def global_ref_view(
 def _named_ref(request: Request, ref_id: str, home: str) -> tuple[Workspace, str, str]:
     from kairo.refs import RefError, resolve_open
 
+    t = _t(request)
     home = "" if home == "global" else home
     try:
         ws, rid = resolve_open(_serve(request), home, ref_id)
     except RefError:
-        raise HTTPException(status_code=404, detail="reference not found") from None
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found")) from None
     _require_public_ref(request, home, rid)
     return ws, rid, home
 
@@ -1050,7 +1057,8 @@ def global_ref_form_view(
 @router.get("/refs/{ref_id}/file/{key}")
 def global_ref_file(request: Request, ref_id: str, key: str, home: str = "") -> FileResponse:
     ws, rid, _home = _named_ref(request, ref_id, home)
-    return _form_file_response(ws, rid, key)
+    t = _t(request)
+    return _form_file_response(ws, rid, key, t)
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)
@@ -1063,6 +1071,7 @@ def workspace_view(
     home: str | None = None,
 ) -> HTMLResponse:
     ws = _open(request, slug)
+    tr = _t(request)
     from kairo.refs import include_tags_of, list_all_refs, list_tags
 
     serve = Path(request.app.state.root)
@@ -1101,7 +1110,7 @@ def workspace_view(
             if path not in declared:
                 continue
             try:
-                _safe_doc(ws, path)
+                _safe_doc(ws, path, tr)
                 target_meta = _target_meta_vars(request, ws, slug, path, include_reader=False)
             except (HTTPException, OSError, UnicodeError):
                 continue
@@ -1214,7 +1223,8 @@ def global_ref_attach_view(
     """Append forms on the independent Ref page; write the Ref's own home (#357)."""
     _console_only(request)
     ws, rid, home = _named_ref(request, ref_id, home)
-    _attach_forms(ws, rid, path, files)
+    t = _t(request)
+    _attach_forms(ws, rid, path, files, t)
     suffix = f"?home={quote(home)}" if home else ""
     if back.startswith("/timeline"):
         suffix += ("&" if suffix else "?") + "back=" + quote(back, safe="/")
@@ -1225,7 +1235,8 @@ def global_ref_attach_view(
 def doc_view(request: Request, slug: str, path: str) -> HTMLResponse:
     ws = _open(request, slug)
     _require_public_target(request, slug, path)
-    target = _safe_doc(ws, path)
+    tr = _t(request)
+    target = _safe_doc(ws, path, tr)
     exportable = path in {t.path for t in ws.constitution.targets}
     return _render(
         request,
@@ -1387,8 +1398,9 @@ def ref_public_view(
     if _is_public_read(request):
         raise HTTPException(status_code=404)
     ws = _open(request, slug)
+    t = _t(request)
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     want = (public or "").strip() in {"1", "true", "on"}
     try:
         set_reference_public(Path(request.app.state.root), ws, ref_id, public=want)
@@ -1409,7 +1421,7 @@ def ref_occurred_view(
     ws = _open(request, slug)
     t = _t(request)
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     raw = (occurred_at or "").strip()
     try:
         if not raw:
@@ -1424,16 +1436,16 @@ def ref_occurred_view(
     return ref_view(request, slug, ref_id)
 
 
-def _resolve_ref_form(ws: Workspace, ref_id: str, key: str):
+def _resolve_ref_form(ws: Workspace, ref_id: str, key: str, t):
     man = ws.read_manifest(ref_id)
     if key == "digest":
         return man, ws.references_dir() / ref_id / "digest.md", "digest", None
     try:
         idx = int(key)
     except ValueError:
-        raise HTTPException(status_code=404, detail="form not found") from None
+        raise HTTPException(status_code=404, detail=t("err.form_not_found")) from None
     if not 0 <= idx < len(man.forms):
-        raise HTTPException(status_code=404, detail="form not found")
+        raise HTTPException(status_code=404, detail=t("err.form_not_found"))
     form = man.forms[idx]
     return man, _form_path(ws, form.location), form.role, form
 
@@ -1456,8 +1468,8 @@ def _form_preview_response(
         listen_slug: workspace slug for /w/{slug}/... URLs (None for global refs)
         home: home parameter for global ref URLs (empty for workspace refs)
     """
-    man, path, role, form = _resolve_ref_form(ws, ref_id, key)
     t = _t(request)
+    man, path, role, form = _resolve_ref_form(ws, ref_id, key, t)
     title = f"{man.title} · {_role_label(role, t)}"
     if role == "audio" and form is not None and path.is_file():
         if listen_slug:
@@ -1511,17 +1523,17 @@ def _form_preview_response(
     )
 
 
-def _form_file_response(ws: Workspace, ref_id: str, key: str) -> FileResponse:
+def _form_file_response(ws: Workspace, ref_id: str, key: str, t) -> FileResponse:
     man = ws.read_manifest(ref_id)
     try:
         idx = int(key)
     except ValueError:
-        raise HTTPException(status_code=404, detail="form not found") from None
+        raise HTTPException(status_code=404, detail=t("err.form_not_found")) from None
     if not 0 <= idx < len(man.forms):
-        raise HTTPException(status_code=404, detail="form not found")
+        raise HTTPException(status_code=404, detail=t("err.form_not_found"))
     path = _form_path(ws, man.forms[idx].location).resolve()
     if ws.root.resolve() not in path.parents or not path.is_file():
-        raise HTTPException(status_code=404, detail="file not found")
+        raise HTTPException(status_code=404, detail=t("err.file_not_found"))
     return FileResponse(path)
 
 
@@ -1552,17 +1564,19 @@ def ref_form_file(
     """直供某 form 的原始文件字节(图片预览用)。路径由服务端从 manifest 解析(可信),
     再校验落在 workspace 内,杜绝越界。"""
     ws, _ = _open_topic_ref(request, slug, ref_id, home)
-    return _form_file_response(ws, ref_id, key)
+    t = _t(request)
+    return _form_file_response(ws, ref_id, key, t)
 
 
 @router.post("/w/{slug}/ref/{ref_id}/form/{key}/open")
 def ref_form_open(request: Request, slug: str, ref_id: str, key: str) -> JSONResponse:
     """#88:用系统默认应用打开 form 路径(本地 console;路径仅来自 manifest)。"""
     ws = _open(request, slug)
+    t = _t(request)
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
-    path = _manifest_form_path(ws, ref_id, key)
-    _open_local_path(path)
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
+    path = _manifest_form_path(ws, ref_id, key, t)
+    _open_local_path(path, t)
     return JSONResponse({"ok": True, "path": str(path)})
 
 
@@ -1603,11 +1617,12 @@ def _target_meta_vars(
 def target_view(request: Request, slug: str, path: str) -> HTMLResponse:
     """右栏产物元信息(状态/blocked 原因) + (OOB)中间预览正文。"""
     ws = _open(request, slug)
+    tr = _t(request)
     if path not in {t.path for t in ws.constitution.targets}:
-        raise HTTPException(status_code=404, detail="target not found")
+        raise HTTPException(status_code=404, detail=tr("err.target_not_found"))
     _require_public_target(request, slug, path)
     if (ws.root / path).is_file():
-        _safe_doc(ws, path)
+        _safe_doc(ws, path, tr)
     response = _render(
         request,
         "_target_meta.html",
@@ -1645,10 +1660,11 @@ def _attach_forms(
     ref_id: str,
     path: str | None,
     files: list[UploadFile] | None,
+    t,
 ) -> None:
     """Copy path/uploads into the Ref directory and append forms. 404/400 on bad input."""
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     ref_dir = ws.references_dir() / ref_id
     uploads = [f for f in (files or []) if f.filename]
     try:
@@ -1732,7 +1748,8 @@ def attach_to_ref(
     files: list[UploadFile] = File(None),
 ) -> HTMLResponse:
     ws = _open(request, slug)
-    _attach_forms(ws, ref_id, path, files)
+    t = _t(request)
+    _attach_forms(ws, ref_id, path, files, t)
     return ref_view(request, slug, ref_id)
 
 
@@ -1742,8 +1759,9 @@ def rename_ref(
 ) -> HTMLResponse:
     """重命名一条 reference 的展示名。title 仅供人读,不动 id/目录/产物溯源。"""
     ws = _open(request, slug)
+    t = _t(request)
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     try:
         ws.set_title(ref_id, title)
     except ValueError as e:
@@ -2952,8 +2970,9 @@ def retry_ref(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     #114:运行中则附着当前 task。
     """
     ws = _open(request, slug)
+    t = _t(request)
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     reg = request.app.state.registry
     existing = reg.current(slug)
     if existing is not None:
@@ -2981,8 +3000,9 @@ def delete_ref(
 ) -> HTMLResponse:
     """#77:删除参考。默认保留产物正文;可选立即整篇 re-step。"""
     ws = _open(request, slug)
+    t = _t(request)
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     reg = request.app.state.registry
     want_recompose = recompose in ("1", "true", "on", "yes")
     if want_recompose and reg.is_running(slug):
@@ -3023,8 +3043,9 @@ def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
     #114:运行中则附着当前 task。
     """
     ws = _open(request, slug)
+    t = _t(request)
     if ref_id not in ws.list_reference_ids():
-        raise HTTPException(status_code=404, detail="reference not found")
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
     try:
         prose_precheck(ws, ref_id)
     except ProseError as e:
@@ -3052,11 +3073,11 @@ def start_prose(request: Request, slug: str, ref_id: str) -> HTMLResponse:
 
 @router.get("/w/{slug}/step/{task_id}/stream")
 def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
+    t = _t(request)
     task = request.app.state.registry.get(task_id)
     if task is None or task.slug != slug:
-        raise HTTPException(status_code=404, detail="task not found")
+        raise HTTPException(status_code=404, detail=t("err.task_not_found"))
     ws = _open(request, slug)
-    t = _t(request)
     from kairo.engine import pending
 
     def _pending():
@@ -3075,11 +3096,11 @@ def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
 
 @router.post("/w/{slug}/step/{task_id}/cancel", response_class=HTMLResponse)
 def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
+    t = _t(request)
     task = request.app.state.registry.get(task_id)
     if task is None or task.slug != slug:
-        raise HTTPException(status_code=404, detail="task not found")
+        raise HTTPException(status_code=404, detail=t("err.task_not_found"))
     ok = request.app.state.registry.cancel(task_id)
-    t = _t(request)
     if ok:
         # 只替换按钮，保留 SSE 与 done hook；终态摘要负责刷新主按钮和状态圆点。
         return HTMLResponse(f'<button class="btn btn-ghost" disabled>{t("step.canceling")}</button>')
