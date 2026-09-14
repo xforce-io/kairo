@@ -6,7 +6,7 @@
       <strong>{{ candidate.title }}</strong>
       <span class="gl-aka">{{ t('knowledge.candidate_from').format(kind=t('knowledge.source_kind_' ~ candidate.source_kind),status=t('knowledge.status_' ~ candidate.status)) }}</span>
       {% if candidate.description %}<div class="gl-note">{{ candidate.description }}</div>{% else %}<div class="gl-aka">{{ t('knowledge.no_description') }}</div>{% endif %}
-      {% if candidate.sources and candidate.sources|length > 1 %}
+      {% if candidate.sources %}
       <details><summary>{{ t('knowledge.sources').format(n=candidate.sources|length) }}</summary><ul class="knowledge-source-list">
         {% for source in candidate.sources %}
         <li>
@@ -20,8 +20,10 @@
         {% endfor %}
       </ul></details>
       {% else %}
-      {% if candidate.quote %}<div class="gl-note">{{ candidate.quote[:240] }}</div>{% if candidate.quote|length > 240 %}<details><summary>{{ t('knowledge.sources').format(n=1) }}</summary><div class="gl-note-full">{{ candidate.quote }}</div></details>{% endif %}{% endif %}
+      <details><summary>{{ t('knowledge.sources').format(n=1) }}</summary>
+      {% if candidate.quote %}<div class="gl-note">{{ candidate.quote }}</div>{% endif %}
       <div class="gl-aka"><a href="/w/{{ selected_slug|urlencode }}?ref={{ candidate.path.split('/')[1] if candidate.path.startswith('references/') else '' }}">{{ candidate.path }}</a>{% if not candidate.available %} · {{ t('knowledge.source_missing') }}{% endif %}</div>
+      </details>
       {% endif %}
       {% if candidate.status in ('pending', 'sighted') %}
         {% if candidate.suggestion_text %}<div class="gl-aka">{{ t('knowledge.suggestion').format(value=candidate.suggestion_text) }}</div>{% endif %}

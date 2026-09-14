@@ -481,9 +481,14 @@ def test_knowledge_page_en_uses_catalog_and_exposes_merge_preview(tmp_path):
 
 
 def _candidate_card(html: str, title: str) -> str:
-    marker = f"<strong>{title}</strong>"
-    at = html.index(marker)
-    start = html.rfind("<li>", 0, at + 1)
+    start = -1
+    for marker in (f"<li><strong>{title}</strong>", f"<li>\n      <strong>{title}</strong>"):
+        start = html.find(marker)
+        if start != -1:
+            break
+    if start == -1:
+        at = html.index(f"<strong>{title}</strong>")
+        start = html.rfind("<li>", 0, at + 1)
     depth = 0
     index = start
     while index < len(html):
@@ -545,6 +550,34 @@ def test_candidate_card_empty_description_does_not_fall_back_to_quote(tmp_path):
     assert "No proposed description yet." in main
     assert "出处甲摘录" not in main and "出处乙摘录" not in main
     assert "出处甲摘录" in sources and "出处乙摘录" in sources
+
+
+def test_sighted_single_source_card_hides_quote_until_sources_expanded(tmp_path):
+    """#384 S1: single-source/sighted unexpanded main is description only; quote is in details."""
+    root = tmp_path / "root"
+    root.mkdir()
+    ws = Workspace.init(root / "ws")
+    a = _write_digest(ws, "a", "高希彬提出方案。李四也在。")
+    ingest_candidates(
+        ws.root, source_kind="digest", path=a, source_text="高希彬提出方案。李四也在。",
+        drafts=[
+            {"title": "高希彬", "quote": "高希彬提出", "description": "项目提出人"},
+            {"title": "李四", "quote": "李四也在"},
+        ],
+    )
+    html = TestClient(create_app(root)).get(
+        "/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"}
+    ).text
+    gaoxi = _candidate_card(html, "高希彬")
+    main, _, sources = gaoxi.partition("<details")
+    assert "项目提出人" in main
+    assert "高希彬提出" not in main
+    assert "高希彬提出" in sources
+    lisi = _candidate_card(html, "李四")
+    empty_main, _, empty_sources = lisi.partition("<details")
+    assert "尚无拟议说明" in empty_main
+    assert "李四也在" not in empty_main
+    assert "李四也在" in empty_sources
 
 
 def test_merge_is_separated_and_empty_entry_id_is_rejected(tmp_path):
@@ -1512,6 +1545,11 @@ def test_promotion_card_renders_entry_fields_and_all_source_links(tmp_path):
     for value in ("完整说明", "能源", "审核", "别名关闭", "not auto-matched", "references/a/digest.md", "references/b/digest.md"):
         assert value in page.text
     assert '/w/ws?ref=a' in page.text and '/w/ws?ref=b' in page.text
+    card = _candidate_card(page.text, "待提升完整")
+    main, _, sources = card.partition("<details")
+    assert "完整说明" in main
+    assert "甲来源" not in main and "乙来源" not in main
+    assert "甲来源" in sources and "乙来源" in sources
 
 
 def test_knowledge_web_errors_are_localized_without_exception_chinese(tmp_path, monkeypatch):
