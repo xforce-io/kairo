@@ -35,7 +35,7 @@
 | 常量 | 提案值 | 说明 |
 |---|---:|---|
 | `UNDERSTANDING_MAX_CHARS` | `20_000` | **不变**（#161） |
-| `UNDERSTANDING_NEAR_LIMIT` | `19_000` | 近上限带下沿；见 §5 |
+| `UNDERSTANDING_NEAR_LIMIT` | `12_000` | 近上限带下沿；见 §5（peng 评审：需足够余量，不得剩 1k 才拦） |
 | `COMPOSE_NEAR_LIMIT_TIMEOUT_S` | `120` | 近上限仍可能调 provider 的边沿路径超时帽；见 §4.3 |
 
 计数一律 Python `len(content)`（Unicode code point），与 #161 一致。
@@ -134,13 +134,13 @@
 ## 5. 思路与折衷
 
 **选定 A（主路径）— 近上限前置门禁。**  
-在 `len(old) >= 19_000` 且有 Δ 时，普通增量不再赌「模型能在 1k 字符 headroom 内硬折入数 k 的 Δ」。直接 `compose-migration-required`、0 provider。覆盖现场 19,999 + ~8.5k Δ：属于近上限带，墙钟接近 0，满足 S1/S3。
+在 `len(old) >= 12_000` 且有 Δ 时，普通增量不再赌「模型能在不足一条大 digest 的 headroom 内硬折入」。直接 `compose-migration-required`、0 provider。覆盖现场 19,999 + ~8.5k Δ：属于近上限带，墙钟接近 0，满足 S1/S3。
 
-**为何 19_000 而非更贴 19_999：**  
-- 现场 19,999 只剩 1 字符 headroom，任何真实 Δ 都不可能合法 fold。  
-- 19_000 → 最多约 1,000 字符余量，仍远小于典型会议 digest（现场 ~8.5k），硬折入成功率极低却仍可能烧满 timeout。  
-- 把带下沿放在 19_000，给产品一条清晰的「余量不足以增量 fold → 请显式全量压缩」线；阈值本身是 L1 产品旋钮，实现不得静默改写。
-
+**为何 `12_000`（约 8k 余量）：**  
+- 现场 19,999 只剩 1 字符 headroom，任何真实 Δ 都不可能合法 fold；若下沿贴在 19_000，也只剩约 1k，仍远小于典型会议 digest（~8.5k），等于「快撞墙才拦」。  
+- peng 评审要求：近上限线要有**足够空间**，不能剩 1k 才开始考虑。  
+- `12_000` → 最多约 8,000 字符余量，与现场大 Δ 同量级：余量不够装下一条典型大 digest 时，请显式全量压缩，而不是空耗 timeout。  
+- 数值是 L1 产品旋钮；实现不得静默改写。
 **选定 B — 超时安全网改分类。**  
 前置门禁漏网或竞态（读长与调用间文件变长等）时，近上限超时不得再写成可重试 `provider-failed`，否则 S3 失败。写入 `compose-migration-required` 与 #161 迁移语义对齐。
 
@@ -162,11 +162,11 @@ flowchart TD
   B -->|否| Z[既有首次 Compose 路径]
   B -->|是| C{len old > 20k?}
   C -->|是且非 explicit-recompose| M1[blocked: compose-migration-required\n0 provider]
-  C -->|否或 explicit| D{普通增量且 len old >= 19k 且有 Δ?}
+  C -->|否或 explicit| D{普通增量且 len old >= 12k 且有 Δ?}
   D -->|是| M2[blocked: compose-migration-required\n0 provider]
   D -->|否| E[材料目录 + provider]
   E --> F{成功?}
-  F -->|超时且 len old >= 19k| M3[blocked: compose-migration-required\n保留旧文]
+  F -->|超时且 len old >= 12k| M3[blocked: compose-migration-required\n保留旧文]
   F -->|其它失败| P[既有 provider-failed 等]
   F -->|是| G{len 候选 > 20k?}
   G -->|是| O[blocked: compose-over-budget]
@@ -199,7 +199,7 @@ flowchart TD
 
 ## 9. 开放问题
 
-1. **`UNDERSTANDING_NEAR_LIMIT` 最终值**：本 Draft 提案 `19_000`。若希望更保守（更早拦）或更激进（例如 `19_500`），由 peng L1 拍板后改本文件常量表，不另开票。
+1. **`UNDERSTANDING_NEAR_LIMIT` 最终值**：经 peng 评审修订为 **`12_000`**（约 8k headroom）。若还需微调，改本文件常量表，不另开票。
 2. **`COMPOSE_NEAR_LIMIT_TIMEOUT_S`**：提案 `120`。若前置门禁被确认为完备覆盖「近上限 + Δ」普通增量，实现可将该帽标为仅测/边沿；数值仍建议保留在代码常量中便于回归。
 3. **显式 recompose 是否套短帽**：本 Draft 默认否。若全量重综合也需防 1800s 空耗，另批。
 
