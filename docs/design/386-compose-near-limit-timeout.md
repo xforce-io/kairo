@@ -1,7 +1,7 @@
 # #386 — 近 20k 上限增量 Compose 超时与可恢复门禁
 
 - Issue: [#386](https://github.com/xforce-io/kairo/issues/386)
-- L1: TBD（待 Issue 评论；本文件为 Draft）
+- L1: [提案](https://github.com/xforce-io/kairo/issues/386#issuecomment-5673260112)（Draft）
 - 分支: `bugfix/386-compose-near-limit-timeout`
 - 状态: Draft / 待 L1 审批
 - 日期: 2026-09-15
