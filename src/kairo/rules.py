@@ -192,12 +192,14 @@ def _run_agent(
     catalog_items=None,
     *,
     timeout_s: int | None = None,
+    timeout_cap: int | None = None,
 ) -> str:
     """跑 agent,从隔离 artifact_dir 取回产物内容。写沙箱:artifact-only;
     材料目录的必读项复制进工作集;read_dirs 授按需 Read。
 
     #105:timeout_s 默认 `[agent] timeout_s` 或 DEFAULT_CLI_TIMEOUT_S;传入显式值可覆盖。
     #153:需要授读但 provider 不支持时失败,不回退倾倒全文。
+    #386:timeout_cap 只收窄本次有效 CLI timeout,不改 `[agent] timeout_s` 配置键。
     """
     from kairo.provider import resolve_cli_timeout
 
@@ -212,6 +214,8 @@ def _run_agent(
         raise RuntimeError(f"{name} 不支持授读(read_dirs),无法按目录引用运行")
     # None → `[agent] timeout_s` 或 600s；显式值用于测试或长任务。
     effective = resolve_cli_timeout(timeout_s)
+    if timeout_cap is not None:
+        effective = min(effective, int(timeout_cap))
     with tempfile.TemporaryDirectory() as d:
         dpath = Path(d)
         stage_files(items, dpath)
@@ -412,10 +416,25 @@ _CATALOG_DISCIPLINE = (
 _COMPOSE_MIN_PRIOR_LEN = 2000
 _COMPOSE_DEGRADE_RATIO = 0.5
 UNDERSTANDING_MAX_CHARS = 20_000
+UNDERSTANDING_NEAR_LIMIT = 12_000
+COMPOSE_NEAR_LIMIT_TIMEOUT_S = 120
 REASON_COMPOSE_MIGRATION_REQUIRED = "compose-migration-required"
 REASON_COMPOSE_OVER_BUDGET = "compose-over-budget"
 REASON_EXPLICIT_RECOMPOSE = "explicit-recompose"
 REASON_DIGEST_DEGRADED = "digest-degraded"
+
+
+def is_understanding_near_limit(content: str) -> bool:
+    """#386:已存在正文落在近上限带(含恰好 20_000;硬门禁仍是 >20_000)。"""
+    return len(content) >= UNDERSTANDING_NEAR_LIMIT
+
+
+def is_cli_agent_timeout(exc: BaseException) -> bool:
+    """#386:Compose provider 的 CLI / 等价超时,不是普通 provider-failed。"""
+    if type(exc).__name__ in {"TimeoutExpired", "TimeoutError"}:
+        return True
+    text = str(exc).lower()
+    return "cli agent timeout" in text or "timeout after" in text or "超时" in text
 
 
 def is_catastrophic_shrink(prior: str, candidate: str) -> bool:
@@ -1061,6 +1080,24 @@ class ComposeRule:
                 ts.retry_reason = None
                 state.targets[key] = ts
                 return
+            if (
+                key == "understanding.md"
+                and not explicit_recompose
+                and old_content
+                and is_understanding_near_limit(old_content)
+                and delta
+            ):
+                # #386:近上限 + Δ 的普通增量,0 次 provider;恢复入口仍是 explicit-recompose。
+                ts = ts0 or TargetState(
+                    depends_on=list(target.depends_on),
+                    output_hash=_hash(old_content),
+                )
+                ts.status = "blocked"
+                ts.reason = REASON_COMPOSE_MIGRATION_REQUIRED
+                ts.diagnostic = None
+                ts.retry_reason = None
+                state.targets[key] = ts
+                return
             current = "" if full_recompose else old_content
             use_delta = dict(all_digests) if full_recompose else delta
             # #153:材料目录 + 授读;当前文档与 Δdigest 必读,corpus 按需。不内联正文。
@@ -1195,6 +1232,11 @@ class ComposeRule:
                 )
                 state.targets[key] = ts
                 return
+            apply_near_limit_cap = (
+                key == "understanding.md"
+                and is_understanding_near_limit(old_content)
+                and not explicit_recompose
+            )
             try:
                 content = _run_agent(
                     self.provider,
@@ -1209,6 +1251,9 @@ class ComposeRule:
                     context,
                     "doc.md",
                     catalog_items=materials,
+                    timeout_cap=(
+                        COMPOSE_NEAR_LIMIT_TIMEOUT_S if apply_near_limit_cap else None
+                    ),
                 )
             except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
                 import sys
@@ -1220,13 +1265,23 @@ class ComposeRule:
                 )
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
-                ts.reason = REASON_PROVIDER_FAILED
-                ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
-                ts.retry_reason = (
-                    REASON_EXPLICIT_RECOMPOSE
-                    if explicit_recompose
-                    else "materials-changed" if materials_changed else None
+                near_limit_timeout = (
+                    key == "understanding.md"
+                    and is_understanding_near_limit(old_content)
+                    and is_cli_agent_timeout(exc)
                 )
+                if near_limit_timeout:
+                    # #386:近上限超时安全网 — 非 retryable,避免 clear-and-retry 空耗。
+                    ts.reason = REASON_COMPOSE_MIGRATION_REQUIRED
+                    ts.retry_reason = None
+                else:
+                    ts.reason = REASON_PROVIDER_FAILED
+                    ts.retry_reason = (
+                        REASON_EXPLICIT_RECOMPOSE
+                        if explicit_recompose
+                        else "materials-changed" if materials_changed else None
+                    )
+                ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
                 state.targets[key] = ts
                 return
             if (

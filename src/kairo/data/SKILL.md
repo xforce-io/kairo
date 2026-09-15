@@ -105,7 +105,7 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 | `manual-edit` | 文档被手改，待接受 | 确认后 `kairo accept <doc>`；或放弃手改再 `re-step`（会丢手改，必须讲清） |
 | `compose-degraded` | 综合输出骤缩，已拒绝覆盖以保护旧文档 | 终态；确认后 `re-step` 重算。若 `understanding.md` 已超过 20,000 字符，按 `compose-migration-required` 观察与恢复 |
 | `digest-degraded` | 纪要输出骤缩，已拒绝覆盖以保护旧 digest | 终态；普通 Run 不会清掉该 digest。确认后 `kairo re-step <id>` / `retry-ref` |
-| `compose-migration-required` | 旧 `understanding.md` 超过 20,000 字符，普通 run 不静默压缩（含超长 leftover `compose-degraded`） | 说明“全量重综合会压缩历史正文，失败保留旧版”；确认后 `kairo re-step understanding.md` |
+| `compose-migration-required` | 旧 `understanding.md` 超过 20,000 字符，或近上限（≥12,000）普通增量有未折 Δ / 近上限超时，普通 run 不静默压缩（含超长 leftover `compose-degraded`） | 说明“全量重综合会压缩历史正文，失败保留旧版”；确认后 `kairo re-step understanding.md` |
 | `compose-over-budget` | 候选 `understanding.md` 超过 20,000 字符，已拒绝覆盖 | 终态；确认压缩代价后 `kairo re-step understanding.md` |
 | `compose-provenance-invalid` | 候选溯源结构无效，已拒绝覆盖 | 终态；检查来源后确认 `re-step` |
 | `provider-failed` | provider 调用或材料读取能力失败 | 查安全诊断；恢复后可 Run，或确认后 `re-step` |
