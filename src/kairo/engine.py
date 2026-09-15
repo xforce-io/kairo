@@ -215,6 +215,7 @@ def clear_provider_failed_targets(ws) -> int:
     """清除 target 上的 provider-failed 终态(保留正文),返回清除条数。
 
     #98:run 等显式恢复入口用;不删 understanding/assessment 已有内容。
+    #386:不得清除 compose-migration-required(非 retryable)。
     """
     state = ws.read_state()
     n = 0

@@ -23,7 +23,7 @@ from kairo.provider import (
     resolve_cli_timeout,
     snapshot_cli_proxy_env,
 )
-from kairo.rules import _run_agent
+from kairo.rules import COMPOSE_NEAR_LIMIT_TIMEOUT_S, _run_agent
 from kairo.web.tasks import StepTask, classify_task, is_fatal_agent_line
 from kairo.workspace import Workspace
 
@@ -240,6 +240,41 @@ def test_run_agent_preserves_explicit_timeout():
     text = _run_agent(p, "p", "c", "out.md", timeout_s=42)
     assert text == "ok"
     assert p.timeout_s == 42
+
+
+def test_run_agent_near_limit_cap_does_not_change_agent_timeout_key(
+    tmp_path, monkeypatch
+):
+    """#386:近上限帽只收窄本次 CLI timeout,不改 [agent] timeout_s。"""
+    cfg = tmp_path / "kairo" / "config.toml"
+    cfg.parent.mkdir()
+    cfg.write_text("[agent]\ntimeout_s = 1800\n")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    seen: dict = {}
+
+    class CapturingProvider:
+        name = "cap"
+        model = "m"
+        supports_read_dirs = False
+
+        def run(self, config: AgentConfig, signal=None):
+            seen["timeout_s"] = config.timeout_s
+            (config.artifact_dir / "out.md").write_text("ok")
+            return AgentResult(
+                artifacts=_scan_artifacts(config.artifact_dir), result_text="ok"
+            )
+
+    text = _run_agent(
+        CapturingProvider(),
+        "persona",
+        "ctx",
+        "out.md",
+        timeout_cap=COMPOSE_NEAR_LIMIT_TIMEOUT_S,
+    )
+    assert text == "ok"
+    assert seen["timeout_s"] == COMPOSE_NEAR_LIMIT_TIMEOUT_S
+    assert resolve_agent_timeout_s() == 1800
+    assert resolve_cli_timeout(None) == 1800
 
 
 def test_cli_timeout_surfaces_as_provider_failed(tmp_path):

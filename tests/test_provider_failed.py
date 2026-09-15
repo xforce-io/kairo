@@ -19,7 +19,10 @@ from kairo.models import (
 )
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import (
+    REASON_COMPOSE_MIGRATION_REQUIRED,
     REASON_EXPLICIT_RECOMPOSE,
+    UNDERSTANDING_NEAR_LIMIT,
+    _hash,
     make_provider_diagnostic,
     safe_provider_summary,
 )
@@ -320,6 +323,37 @@ def test_provider_retry_restores_full_recompose_origin(tmp_path):
         assert restored.status == "ok"
         assert restored.reason == retry_reason
         assert restored.retry_reason is None
+
+
+def test_clear_provider_failed_targets_skips_compose_migration_required(tmp_path):
+    """#386:clear 不得把近上限迁移门禁当成可重试 provider-failed。"""
+    ws = Workspace.init(tmp_path)
+    old = "旧" * UNDERSTANDING_NEAR_LIMIT
+    (ws.root / "understanding.md").write_text(old)
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(
+        status="blocked",
+        reason=REASON_COMPOSE_MIGRATION_REQUIRED,
+        output_hash=_hash(old),
+        folded={},
+    )
+    ws.write_state(state)
+
+    assert clear_provider_failed_targets(ws) == 0
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.status == "blocked"
+    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert (ws.root / "understanding.md").read_text() == old
+
+    plan = workspace_run_plan(ws)
+    assert plan["mode"] == "attention"
+    assert plan["retryable_blocked_count"] == 0
+    assert plan["blocked_targets"][0]["retryable"] is False
+
+    run_workspace(ws, StubProvider())
+    ts = ws.read_state().targets["understanding.md"]
+    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert ts.status == "blocked"
 
 
 def test_re_step_target_recovers_compose_failed(tmp_path):
