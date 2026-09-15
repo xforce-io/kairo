@@ -1,12 +1,12 @@
 # #386 — 近 20k 上限增量 Compose 超时与可恢复门禁
 
 - Issue: [#386](https://github.com/xforce-io/kairo/issues/386)
-- L1: [提案](https://github.com/xforce-io/kairo/issues/386#issuecomment-5673260112)（Draft）
+- L1: [提案](https://github.com/xforce-io/kairo/issues/386#issuecomment-5673260112)（Approved）
 - 分支: `bugfix/386-compose-near-limit-timeout`
-- 状态: Draft / 待 L1 审批
+- 状态: Approved
 - 日期: 2026-09-15
 
-本文件是 #386 的详细设计唯一事实源。Issue 只保留摘要与本链接。不自批。
+本文件是 #386 的详细设计唯一事实源。Issue 只保留摘要与本链接。L1 已由 peng 批准（2026-09-15）；实现按本文件。
 
 ## 1. 背景
 
@@ -30,7 +30,7 @@
 | Δ digest | 相对当前 folded 账本未折入的 stream digest（≥1） |
 | 近上限迁移门禁 | 在近上限带上对普通增量 Compose **provider 调用前**给出的 `blocked:compose-migration-required` |
 
-常量提案（待 L1 拍板，本 Draft 选用具体值）：
+已批准常量：
 
 | 常量 | 提案值 | 说明 |
 |---|---:|---|
