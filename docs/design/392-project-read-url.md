@@ -257,7 +257,7 @@ S1/S2 只认 kairo CLI（及适用的 agent Run）。L1 已批（peng；defaults
 
 ## 11. 验收表
 
-Frozen SHA: `45e3210ff7c7f05e7bc17794729a29031c14bd9b`（CLI / Skill / 记账）+ 本分支 tip（S2 夹具）。实现归 Forge；无 Console。
+Frozen SHA: `9fc269c9a87c1d17644846d67829b738c6d36f0f`。实现归 Forge；无 Console。 focused pytest：`tests/test_project_read_url.py` + `tests/test_skill_kairo.py` 22 passed。
 
 | Story | 结果 | 证据 |
 |---|---|---|
