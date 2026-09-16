@@ -15,7 +15,7 @@
       </form>
     </details>
   </header>
-  {% if error %}<p class="ws-error" role="alert">{{ error }}</p>{% endif %}
+  {% if error %}<p class="ws-error" role="alert"{% if error_code %} data-error-code="{{ error_code }}"{% endif %}>{{ error }}</p>{% endif %}
   {% if notice %}<p class="meta-hint" role="status">{{ notice }}</p>{% endif %}
 
   <div id="project-primary">
@@ -161,7 +161,7 @@
       <li class="obj-row">
         <div class="obj-copy">
           <strong>{{ ds_labels.get(ds.id, ds.purpose or ds.reader) }}</strong>
-          <span class="meta-hint"> · {% if ds.kind == 'mail-search' and ds.reader == 'wecom' %}{{ t('proj.reader_wecom_mail') }}{% elif ds.reader == 'imap' %}{{ t('proj.reader_imap') }}{% elif ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% else %}{{ ds.reader }}{% endif %}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</span>
+          <span class="meta-hint"> · {% if ds.kind == 'mail-search' and ds.reader == 'wecom' %}{{ t('proj.reader_wecom_mail') }}{% elif ds.reader == 'imap' %}{{ t('proj.reader_imap') }}{% elif ds.reader == 'tencent-docs' %}{{ t('proj.reader_tencent') }}{% elif ds.reader == 'wecom' %}{{ t('proj.reader_wecom') }}{% elif ds.reader == 'notion' %}{{ t('proj.reader_notion') }}{% else %}{{ ds.reader }}{% endif %}{% if ds.purpose %} · {{ ds.purpose }}{% endif %}</span>
           {% if ds.url.startswith(('https://', 'http://')) %}<a class="source-link" href="{{ ds.url }}" target="_blank" rel="noopener noreferrer">{{ t('proj.open_original') }}</a>{% endif %}
           {% set st = ds_status.get(ds.id) if ds_status is defined else None %}
           <div class="meta-hint">

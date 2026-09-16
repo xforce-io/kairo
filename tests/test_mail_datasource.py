@@ -205,7 +205,8 @@ def test_api_and_html_accept_mail_query_string(tmp_path):
     page = client.get(f"/projects/{project.id}")
     assert page.status_code == 200
     assert 'type="text"' in page.text
-    assert "mail://" in page.text or "imap://" in page.text
+    assert "app.notion.com" in page.text and "/p/{id}" in page.text
+    assert "mail:// / imap://" not in page.text
     assert "WeCom mail" in page.text or "企微邮件" in page.text
     html = page.text
     assert 'class="obj-actions"' in html

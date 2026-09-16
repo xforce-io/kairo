@@ -18,6 +18,12 @@
       <li class="conn-card">
         <div class="conn-name">{{ conn.label or name }}</div>
         <p class="chooser-id">{{ t('set.health') }} · {{ conn.health }}</p>
+        {% if name == 'notion' %}
+        <p class="panel-hint">{{ t('set.notion_token') }}</p>
+        {% endif %}
+        {% if conn.health == 'missing_token' %}
+        <p class="ws-error" role="alert">{{ t('set.missing_token') }}</p>
+        {% endif %}
         {% if conn.live %}
         <div class="obj-actions">
           <form method="post" action="/settings">
