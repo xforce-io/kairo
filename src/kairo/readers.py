@@ -5,6 +5,7 @@ from __future__ import annotations
 import imaplib
 import json
 import os
+import re
 import shlex
 import subprocess
 from dataclasses import dataclass
@@ -12,9 +13,11 @@ from datetime import datetime, timedelta
 from email import policy
 from email.parser import BytesParser
 from pathlib import Path
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from urllib.parse import parse_qs, unquote, urlparse
 
-from kairo.settings import CONNECTION_IMAP, CONNECTION_TENCENT, Connection
+from kairo.settings import CONNECTION_IMAP, CONNECTION_NOTION, CONNECTION_TENCENT, Connection
 
 PERMISSION = "permission"
 INVALID_LINK = "invalid_link"
@@ -23,12 +26,20 @@ UNSUPPORTED = "unsupported_reader"
 
 READER_TENCENT = CONNECTION_TENCENT
 READER_WECOM = "wecom"
-READER_NOTION = "notion"
+READER_NOTION = CONNECTION_NOTION
 READER_IMAP = CONNECTION_IMAP
 KIND_MAIL = "mail-search"
+KIND_PAGE = "page"
 
 _WECOM_HOSTS = ("work.weixin.qq.com", "doc.weixin.qq.com", "page.weixin.qq.com")
 _TENCENT_DOCS_HOST = "docs.qq.com"
+_NOTION_API = "https://api.notion.com"
+_NOTION_VERSION = "2022-06-28"
+_NOTION_ID_RE = re.compile(
+    r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{32})",
+    re.IGNORECASE,
+)
+_NOTION_CHILD_DEPTH = 4
 _WECOM_KINDS = ("document", "spreadsheet", "smartsheet", "smartpage")
 _MAIL_LIMIT_DEFAULT = 20
 _MAIL_LIMIT_MAX = 50
@@ -93,15 +104,45 @@ def infer_source(url: str) -> InferredSource:
         raise ReadError(INVALID_LINK, "不是有效链接")
     if host == _TENCENT_DOCS_HOST:
         if path.startswith("/smartsheet/"):
-            return InferredSource(READER_TENCENT, READER_TENCENT, "smartsheet", "腾讯文档", True)
+            return InferredSource(READER_TENCENT, READER_TENCENT, "smartsheet", "腾讯文档", False)
         if path.startswith("/sheet/"):
-            return InferredSource(READER_TENCENT, READER_TENCENT, "spreadsheet", "腾讯文档", True)
+            return InferredSource(READER_TENCENT, READER_TENCENT, "spreadsheet", "腾讯文档", False)
         raise ReadError(INVALID_LINK, "不是腾讯文档表格或智能表格链接")
-    if host == "notion.so" or host.endswith(".notion.so") or host == "notion.site" or host.endswith(".notion.site"):
-        raise ReadError(UNSUPPORTED, "Notion Reader 尚未接入")
+    if _is_notion_host(host):
+        parse_notion_page_id(text)
+        return InferredSource(READER_NOTION, READER_NOTION, KIND_PAGE, "Notion", True)
     if any(host == h or host.endswith("." + h) for h in _WECOM_HOSTS):
         return _infer_wecom(path)
     raise ReadError(INVALID_LINK, "无法识别的资料平台")
+
+
+def _is_notion_host(host: str) -> bool:
+    return host in ("notion.so", "notion.site", "app.notion.com") or host.endswith(
+        (".notion.so", ".notion.site")
+    )
+
+
+def parse_notion_page_id(url: str) -> str:
+    """Extract a Notion page id from a recognized page URL. No network."""
+    text = (url or "").strip()
+    parsed = urlparse(text)
+    host = (parsed.hostname or "").lower()
+    if not _is_notion_host(host):
+        raise ReadError(INVALID_LINK, "不是有效的 Notion 页面链接")
+    candidates = list(parse_qs(parsed.query).get("p") or [])
+    candidates.append(unquote(parsed.path or ""))
+    for raw in candidates:
+        matches = list(_NOTION_ID_RE.finditer(raw))
+        if matches:
+            return _normalize_notion_id(matches[-1].group(1))
+    raise ReadError(INVALID_LINK, "不是有效的 Notion 页面链接")
+
+
+def _normalize_notion_id(raw: str) -> str:
+    hex_only = raw.replace("-", "").lower()
+    if len(hex_only) != 32 or any(ch not in "0123456789abcdef" for ch in hex_only):
+        raise ReadError(INVALID_LINK, "不是有效的 Notion 页面链接")
+    return f"{hex_only[:8]}-{hex_only[8:12]}-{hex_only[12:16]}-{hex_only[16:20]}-{hex_only[20:]}"
 
 
 def _infer_wecom(path: str) -> InferredSource:
@@ -115,7 +156,7 @@ def _infer_wecom(path: str) -> InferredSource:
         kind = "smartpage"
     else:
         raise ReadError(INVALID_LINK, "不是企微文档链接")
-    return InferredSource(READER_WECOM, READER_WECOM, kind, "企微文档", True)
+    return InferredSource(READER_WECOM, READER_WECOM, kind, "企微文档", False)
 
 
 def _reject_url_credentials(parsed, *, allow_username: bool = False) -> None:
@@ -219,8 +260,8 @@ def parse_mail_query(url: str) -> MailQuery:
 def _infer_mail(url: str) -> InferredSource:
     spec = parse_mail_query(url)
     if spec.reader == READER_WECOM:
-        return InferredSource(READER_WECOM, READER_WECOM, KIND_MAIL, "企微邮件", True)
-    return InferredSource(READER_IMAP, READER_IMAP, KIND_MAIL, "IMAP 邮件", True)
+        return InferredSource(READER_WECOM, READER_WECOM, KIND_MAIL, "企微邮件", False)
+    return InferredSource(READER_IMAP, READER_IMAP, KIND_MAIL, "IMAP 邮件", False)
 
 
 def validate_tencent_url(url: str, kind: str) -> None:
@@ -787,6 +828,212 @@ def read_imap_mail(
                 pass
 
 
+def _notion_token(connection: Connection) -> str:
+    return (os.environ.get(connection.token_env or "NOTION_TOKEN") or "").strip()
+
+
+def _notion_api_error(status: int, payload: dict | str) -> ReadError:
+    if isinstance(payload, dict):
+        message = str(payload.get("message") or "").strip()
+        code = str(payload.get("code") or "").strip()
+        text = message or f"Notion HTTP {status}"
+    else:
+        code = ""
+        text = str(payload or "").strip() or f"Notion HTTP {status}"
+    if status in (401, 403) or code in ("unauthorized", "restricted_resource"):
+        return ReadError(PERMISSION, text)
+    if status == 404 or code in ("object_not_found", "invalid_request"):
+        return ReadError(INVALID_LINK, text)
+    return ReadError(_classify_failure(text), text)
+
+
+def _notion_http_error(exc: urllib_error.HTTPError) -> ReadError:
+    body = ""
+    try:
+        body = exc.read().decode("utf-8", errors="replace")
+    except Exception:
+        body = ""
+    try:
+        payload = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        payload = body
+    return _notion_api_error(exc.code, payload if isinstance(payload, dict) else str(payload))
+
+
+def _notion_get(path: str, token: str, *, timeout: float, transport=None) -> dict:
+    if transport is not None:
+        payload = transport("GET", path)
+        if not isinstance(payload, dict):
+            raise ReadError(READ_FAILED, "Notion 响应不是对象")
+        if payload.get("object") == "error":
+            raise _notion_api_error(int(payload.get("status") or 400), payload)
+        return payload
+    req = urllib_request.Request(
+        f"{_NOTION_API}{path}",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Notion-Version": _NOTION_VERSION,
+            "Content-Type": "application/json",
+        },
+        method="GET",
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        raise _notion_http_error(exc) from exc
+    except (urllib_error.URLError, TimeoutError, OSError) as exc:
+        raise ReadError(READ_FAILED, f"Notion 请求失败:{exc}") from exc
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as exc:
+        raise ReadError(READ_FAILED, "Notion 响应不是 JSON") from exc
+    if not isinstance(payload, dict):
+        raise ReadError(READ_FAILED, "Notion 响应不是对象")
+    if payload.get("object") == "error":
+        raise _notion_api_error(int(payload.get("status") or 400), payload)
+    return payload
+
+
+def _notion_rich_text(items) -> str:
+    parts: list[str] = []
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("plain_text") or "")
+        if not text:
+            continue
+        ann = item.get("annotations") if isinstance(item.get("annotations"), dict) else {}
+        href = item.get("href")
+        if ann.get("code"):
+            text = f"`{text}`"
+        if ann.get("bold"):
+            text = f"**{text}**"
+        if ann.get("italic"):
+            text = f"*{text}*"
+        if ann.get("strikethrough"):
+            text = f"~~{text}~~"
+        if href:
+            text = f"[{text}]({href})"
+        parts.append(text)
+    return "".join(parts)
+
+
+def _notion_page_title(page: dict) -> str:
+    props = page.get("properties") if isinstance(page.get("properties"), dict) else {}
+    for value in props.values():
+        if isinstance(value, dict) and value.get("type") == "title":
+            title = _notion_rich_text(value.get("title") or [])
+            if title:
+                return title
+    return ""
+
+
+def _notion_block_text(block: dict) -> str:
+    btype = str(block.get("type") or "")
+    payload = block.get(btype) if isinstance(block.get(btype), dict) else {}
+    rich = _notion_rich_text(payload.get("rich_text") or payload.get("text") or [])
+    caption = _notion_rich_text(payload.get("caption") or [])
+    if btype == "heading_1":
+        return f"# {rich}" if rich else ""
+    if btype == "heading_2":
+        return f"## {rich}" if rich else ""
+    if btype == "heading_3":
+        return f"### {rich}" if rich else ""
+    if btype == "bulleted_list_item":
+        return f"- {rich}" if rich else "-"
+    if btype == "numbered_list_item":
+        return f"1. {rich}" if rich else "1."
+    if btype == "to_do":
+        mark = "x" if payload.get("checked") else " "
+        return f"- [{mark}] {rich}".rstrip()
+    if btype == "quote":
+        return f"> {rich}" if rich else ""
+    if btype == "code":
+        lang = str(payload.get("language") or "").strip()
+        return f"```{lang}\n{rich}\n```" if rich else ""
+    if btype == "divider":
+        return "---"
+    if btype in ("child_page", "child_database"):
+        title = str(payload.get("title") or rich or "").strip()
+        return f"## {title}" if title else ""
+    if btype == "bookmark":
+        url = str(payload.get("url") or "").strip()
+        label = caption or rich or url
+        return f"[{label}]({url})" if url else label
+    if btype in ("image", "file", "pdf", "video"):
+        file_info = payload.get("file") if isinstance(payload.get("file"), dict) else {}
+        external = payload.get("external") if isinstance(payload.get("external"), dict) else {}
+        url = str(file_info.get("url") or external.get("url") or "").strip()
+        label = caption or rich or "file"
+        return f"[{label}]({url})" if url else label
+    if btype == "equation":
+        expr = str(payload.get("expression") or rich or "").strip()
+        return f"${expr}$" if expr else ""
+    if rich:
+        return rich
+    if caption:
+        return caption
+    return ""
+
+
+def _notion_children(block_id: str, token: str, *, timeout: float, transport, depth: int) -> list[str]:
+    if depth > _NOTION_CHILD_DEPTH:
+        return []
+    lines: list[str] = []
+    cursor = ""
+    while True:
+        path = f"/v1/blocks/{block_id}/children?page_size=100"
+        if cursor:
+            path += f"&start_cursor={cursor}"
+        payload = _notion_get(path, token, timeout=timeout, transport=transport)
+        results = payload.get("results") if isinstance(payload.get("results"), list) else []
+        for block in results:
+            if not isinstance(block, dict):
+                continue
+            text = _notion_block_text(block)
+            if text:
+                lines.append(text)
+            if block.get("has_children") and block.get("id"):
+                nested = _notion_children(
+                    str(block["id"]), token, timeout=timeout, transport=transport, depth=depth + 1
+                )
+                lines.extend(nested)
+        if not payload.get("has_more"):
+            break
+        cursor = str(payload.get("next_cursor") or "").strip()
+        if not cursor:
+            break
+    return lines
+
+
+def read_notion_page(
+    url: str,
+    connection: Connection,
+    *,
+    transport=None,
+    timeout: float = READER_TIMEOUT_SECONDS,
+) -> str:
+    """Official Notion API page reader. Credentials come from NOTION_TOKEN only."""
+    if connection.authorized is False:
+        raise ReadError(PERMISSION, "连接未授权")
+    token = _notion_token(connection)
+    if not token:
+        raise ReadError(PERMISSION, "缺少 NOTION_TOKEN")
+    page_id = parse_notion_page_id(url)
+    page = _notion_get(f"/v1/pages/{page_id}", token, timeout=timeout, transport=transport)
+    title = _notion_page_title(page)
+    lines = _notion_children(page_id, token, timeout=timeout, transport=transport, depth=0)
+    if title:
+        body = f"# {title}\n\n" + "\n\n".join(lines)
+    else:
+        body = "\n\n".join(lines)
+    body = body.strip()
+    if not body:
+        raise ReadError(READ_FAILED, "读取结果为空")
+    return body
+
+
 def read_datasource(url: str, kind: str, reader: str, connection: Connection, **kwargs) -> str:
     if reader == CONNECTION_TENCENT or reader == "tencent-docs":
         return read_tencent_docs(url, kind, connection, **kwargs)
@@ -794,4 +1041,6 @@ def read_datasource(url: str, kind: str, reader: str, connection: Connection, **
         return read_wecom_docs(url, kind, connection, **kwargs)
     if reader == READER_IMAP:
         return read_imap_mail(url, connection, **kwargs)
+    if reader == READER_NOTION:
+        return read_notion_page(url, connection, **kwargs)
     raise ReadError(READ_FAILED, f"未知 Reader:{reader}")

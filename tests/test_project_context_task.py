@@ -29,6 +29,7 @@ from kairo.project_materials import (
     scratch_dir,
 )
 from kairo.projects import ProjectError, get_project
+from tests.conftest import seed_existing_datasource
 from kairo.provider import AgentConfig, AgentResult
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
@@ -210,14 +211,15 @@ def _prepare(tmp_path, monkeypatch, *, with_topic_body: bool = True):
     created = _load(_cli(["project", "create", "综合能源"], serve, monkeypatch))
     pid = created["id"]
     _load(_cli(["project", "link", pid, "alpha-ws"], serve, monkeypatch))
-    ds = _load(
-        _cli(
-            ["datasource", "add", pid, "--url", "https://docs.qq.com/sheet/Denergy", "--purpose", "装机"],
-            serve,
-            monkeypatch,
-        )
+    ds = seed_existing_datasource(
+        serve,
+        pid,
+        url="https://docs.qq.com/sheet/Denergy",
+        reader="tencent-docs",
+        kind="spreadsheet",
+        purpose="装机",
     )
-    return serve, pid, ds["id"], counter, ws
+    return serve, pid, ds.id, counter, ws
 
 
 def test_s1_s4_cache_ttl_refresh_and_web(tmp_path, monkeypatch):
@@ -635,12 +637,13 @@ def test_frozen_empty_scope_stays_empty_after_link(tmp_path, monkeypatch):
     _running_record(serve, pid, "run-empty", topics=[], datasources=[])
     before = list_context(serve, pid, run_id="run-empty")
     assert before["items"] == []
-    _load(
-        _cli(
-            ["datasource", "add", pid, "--url", "https://docs.qq.com/sheet/Dlater", "--purpose", "后来"],
-            serve,
-            monkeypatch,
-        )
+    seed_existing_datasource(
+        serve,
+        pid,
+        url="https://docs.qq.com/sheet/Dlater",
+        reader="tencent-docs",
+        kind="spreadsheet",
+        purpose="后来",
     )
     after = list_context(serve, pid, run_id="run-empty")
     assert after["items"] == []
@@ -1060,10 +1063,11 @@ def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monke
     assert primary < materials
     assert 'class="task-create"' in html[primary:materials]
     assert 'id="material-filter"' in html
+    named_url = "https://www.notion.so/Named-" + "c" * 32
     named = client.post(
         f"/projects/{pid}/datasources",
         data={
-            "url": "https://docs.qq.com/sheet/Dnamed",
+            "url": named_url,
             "name": "需求池",
             "purpose": "周报输入",
         },
@@ -1071,7 +1075,7 @@ def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monke
     )
     assert named.status_code == 200
     assert "需求池" in named.text
-    assert named.text.find("需求池") < named.text.find("https://docs.qq.com/sheet/Dnamed")
+    assert named.text.find("需求池") < named.text.find(named_url)
     created = client.post(
         f"/projects/{pid}/tasks",
         data={"name": "周报", "prompt": "整理风险", "schedule": "once"},
@@ -1088,7 +1092,7 @@ def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monke
                 "add",
                 pid,
                 "--url",
-                "https://docs.qq.com/sheet/Dcli-name",
+                "https://www.notion.so/Cli-" + "d" * 32,
                 "--name",
                 "CLI名称",
                 "--purpose",
@@ -1102,7 +1106,7 @@ def test_project_primary_precedes_materials_and_names_datasource(tmp_path, monke
     api_ds = client.post(
         f"/api/projects/{pid}/datasources",
         json={
-            "url": "https://docs.qq.com/sheet/Dapi-name",
+            "url": "https://www.notion.so/Api-" + "e" * 32,
             "name": "API名称",
             "purpose": "接口",
         },

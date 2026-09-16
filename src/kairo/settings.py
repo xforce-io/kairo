@@ -18,10 +18,10 @@ CONNECTION_IMAP = "imap"
 
 # id, label, token_env, live
 READER_CATALOG: tuple[tuple[str, str, str, bool], ...] = (
-    (CONNECTION_TENCENT, "腾讯文档", "TENCENT_DOCS_TOKEN", True),
-    (CONNECTION_WECOM, "企微文档", "", True),
-    (CONNECTION_IMAP, "IMAP 邮件", "IMAP_PASSWORD", True),
-    (CONNECTION_NOTION, "Notion", "NOTION_TOKEN", False),
+    (CONNECTION_TENCENT, "腾讯文档", "TENCENT_DOCS_TOKEN", False),
+    (CONNECTION_WECOM, "企微文档", "", False),
+    (CONNECTION_IMAP, "IMAP 邮件", "IMAP_PASSWORD", False),
+    (CONNECTION_NOTION, "Notion", "NOTION_TOKEN", True),
 )
 
 

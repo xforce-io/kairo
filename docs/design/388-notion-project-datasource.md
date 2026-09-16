@@ -2,9 +2,9 @@
 
 - Issue: [#388](https://github.com/xforce-io/kairo/issues/388)
 - 分支: `feat/388-notion-project-datasource`
-- 状态: Draft
-- 最后更新: 2026-09-15（折入 Forge pre-L1 spike / Jenny）
-- L1: Draft（本文件 + Issue 评论；待 peng 批准；不自批）
+- 状态: Approved
+- 最后更新: 2026-09-16（L1 Approved · peng via Jenny；keel-dev 实现）
+- L1: Approved（peng via Jenny；范围仍以本文件 §§5.1–5.4 为准，不扩产品范围）
 
 本文件是 #388 的 L1 提案事实源。Issue 只保留摘要与本链接。不自批。
 
