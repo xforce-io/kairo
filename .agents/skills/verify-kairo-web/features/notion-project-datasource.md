@@ -23,11 +23,12 @@ from kairo.projects import DataSource, create_project, save_project
 
 root = Path(sys.argv[1])
 project = create_project(root, "能源项目")
+PAGE_HEX = "a" * 32
 ds = DataSource(
     id="ds-notion-1",
     connection_id="notion",
-    url="https://app.notion.com/p/abc123def456",
-    kind="document",
+    url=f"https://app.notion.com/p/{PAGE_HEX}",
+    kind="page",
     purpose="项目材料",
     name="材料清单",
     reader="notion",
@@ -44,13 +45,13 @@ print(project.id)
 
 | # | 路径 | 可判定结果 | 依赖 |
 |---|---|---|---|
-| S1-a | GET `/settings`（en / zh） | 连接目录有 Notion 卡片；文案含 `NOTION_TOKEN`；不出现 token 值 | Console |
+| S1-a | GET `/settings`（en / zh） | 连接目录有 Notion 卡片；文案含 `NOTION_TOKEN`；可授权/撤销（live）；不出现 token 值 | Console |
 | S1-b | GET `/projects/<id>`（en / zh） | 添加框 placeholder 是 Notion 页面 URL，含 `app.notion.com` 与 `/p/{id}`；**没有** `mail:// / imap://` | Console |
 | S1-c | 同上，看已落盘「材料清单」行 | Reader 标签是 `Notion`（不是内部 id 当主文案） | Console + fixture |
 | S1-d | GET `/projects/<id>/datasources/ds-notion-1` | 缓存正文可见「材料清单」「现场装机 80 MW」；不是假成功空页 | Console + fixture |
-| S1-e | Settings 授权 Notion 且进程有 `NOTION_TOKEN` 后，粘贴合法 Notion URL 添加并读取 | add+read live；非空正文 | **Forge + token**（本手册不 Drive） |
-| S2-a | POST 添加 `https://example.com/not-docs`、`file:///tmp/a.md`、裸 `notes.md` 后再 GET 项目页 | `role="alert"` 且 `data-error-code="invalid_link"`；列表无对应新行；无成功提示 | Console（现网 infer 已拒） |
-| S2-b | POST 添加企微文档 / 腾讯表格 / `mail://` / `imap://` 后再 GET | 添加失败；`unsupported_reader` 或 `invalid_link`；列表无新行 | **Forge 白名单**（今日这三条仍会 add 成功，不得把成功当成过线） |
+| S1-e | 粘贴合法 Notion URL（含 `app.notion.com/p/{32hex}`）添加 | 成功一行；`reader` 标签 Notion；`kind=page`；无假成功 | Console + 现网 infer（读正文仍需授权 + `NOTION_TOKEN`，本手册不 Drive live read） |
+| S2-a | POST 添加 `https://example.com/not-docs`、`file:///tmp/a.md`、裸 `notes.md` 后再 GET 项目页 | `role="alert"` 且 `data-error-code="invalid_link"`；列表无对应新行；无成功提示 | Console |
+| S2-b | POST 添加企微文档 / 腾讯表格 / `mail://` / `imap://` 后再 GET | 添加失败；`data-error-code="unsupported_reader"`；列表无新行 | Console（白名单已在引擎） |
 | S3 | 仅绑定该 Notion 源的 agent Task → Run → 打开 Artifact | succeeded Artifact 来源含该 Notion 源 | **skip**：需 CLI/provider；verify-kairo-web 不触发 LLM Run |
 
 ## 已知不做
