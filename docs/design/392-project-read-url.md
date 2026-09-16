@@ -254,3 +254,17 @@ S1/S2 只认 kairo CLI（及适用的 agent Run）。L1 已批（peng；defaults
 - [#315](315-run-input-evidence-bound.md) `_source_in_scope` / 证据路径
 - [#343](343-artifact-input-location.md) `input:ID#L…`
 - 发现现场：能源 Notion 索引 E2E（#388 / #390）
+
+## 11. 验收表
+
+Frozen SHA: `45e3210ff7c7f05e7bc17794729a29031c14bd9b`（CLI / Skill / 记账）+ 本分支 tip（S2 夹具）。实现归 Forge；无 Console。
+
+| Story | 结果 | 证据 |
+|---|---|---|
+| S1 CLI 企微 stub：成功 JSON、`type=url`、`input_id`、四种 kind；`live=False` 不是 `unsupported_reader` | **PASS** | `tests/test_project_read_url.py::test_cli_wecom_read_url_success_and_datasources_unchanged`、`test_cli_wecom_four_kinds_live_false_is_not_unsupported` |
+| S1 不 `add_datasource` / `datasources` 不变 / 不写 `cache/{ds_id}` | **PASS** | 同上；`read_url_material` 源码无 `add_datasource` / `write_cache` / `save_project` |
+| S1 `finalize_inputs` 承认 `type=url`；邮件拒绝；墨刀/ShowDoc `invalid_link`；失败无 `input_id`、无 scratch 正文 | **PASS** | `test_finalize_inputs_accepts_type_url`、`test_mail_and_modao_rejected_without_scratch_body` |
+| S1 门：只跟读、不读登记 DS → 仍 `datasource_unread` | **PASS** | `test_datasource_unread_still_fails_if_only_url_inputs` |
+| S2 Skill / `_execute_agent_run` prompt 含 `read-url`、一跳、跳过无 Reader、单条失败不翻 Run | **PASS** | `src/kairo/data/SKILL.md`；`test_skill_and_prompt_contain_read_url`；`tests/test_skill_kairo.py::test_skill_covers_project_run_cli` |
+| S2 夹具 Artifact 含跟读 `input:`（`type=url`、企微 URL） | **PASS** | `test_s2_fixture_artifact_cites_url_input`（stub Reader + 确定性 provider） |
+| S2 产品 live 企微 | **SKIP（CI）** | §8.5 A：默认 CI 不打真企微网。本环境无已授权 `wecom-cli` 会话，不能声称产品 live 过线。 |

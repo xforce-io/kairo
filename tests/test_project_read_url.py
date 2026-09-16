@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
+import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -156,6 +159,51 @@ class _CiteProvider:
         dest = config.artifact_dir / "artifact.md"
         dest.write_text(f"[t](input:{self._input_id})\n", encoding="utf-8")
         return AgentResult(artifacts=[dest], result_text=dest.read_text())
+
+
+class FollowUrlProvider:
+    """Deterministic S2 fixture: read registered DS, then follow a WeCom URL."""
+
+    name = "follow-url"
+    model = "test"
+    supports_read_dirs = True
+    supports_project_cli = True
+
+    def run(self, config, signal=None):
+        ctx = config.context
+        serve = re.search(r"serve_root: (.+)", ctx).group(1).strip()
+        pid = re.search(r"project_id: (.+)", ctx).group(1).strip()
+        rid = re.search(r"run_id: (.+)", ctx).group(1).strip()
+        env = os.environ.copy()
+        env["KAIRO_SERVE_ROOT"] = serve
+
+        def kairo(*args: str) -> dict:
+            proc = subprocess.run(
+                [sys.executable, "-m", "kairo", *args],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stdout + proc.stderr)
+            return json.loads(proc.stdout)
+
+        catalog = kairo("project", "context", pid, "--run", rid, "--root", serve)
+        ds = next(item for item in catalog["items"] if item["type"] == "datasource")
+        registered = kairo("project", "read", pid, ds["source_id"], "--run", rid, "--root", serve)
+        followed = kairo(
+            "project", "read-url", pid, "--run", rid, "--root", serve, SHEET_URL
+        )
+        assert followed["type"] == "url"
+        body = (
+            f"# 跟读\n\n"
+            f"[{ds['title']}](input:{registered['input_id']})\n\n"
+            f"[{followed['title']}](input:{followed['input_id']})\n"
+        )
+        dest = config.artifact_dir / "artifact.md"
+        dest.write_text(body, encoding="utf-8")
+        return AgentResult(artifacts=[dest], result_text=body)
 
 
 def test_parse_source_id_accepts_url_materials():
@@ -358,6 +406,35 @@ def test_skill_and_prompt_contain_read_url():
     assert "add_datasource" not in impl
     assert "write_cache" not in impl
     assert "save_project" not in impl
+
+
+def test_s2_fixture_artifact_cites_url_input(tmp_path, monkeypatch):
+    from kairo.project_materials import load_run_inputs
+    from kairo.projects import _execute_agent_run, read_artifact
+
+    serve, pid, _notion = _prepare(tmp_path, monkeypatch)
+    ds = seed_existing_datasource(
+        serve,
+        pid,
+        url=SHEET_URL,
+        reader="wecom",
+        kind="spreadsheet",
+        connection_id="wecom",
+        name="企微表",
+    )
+    run_id = "run-s2"
+    _running_record(serve, pid, run_id, datasources=[ds.id])
+    before = [item.id for item in get_project(serve, pid).datasources]
+    out = _execute_agent_run(serve, pid, run_id, FollowUrlProvider())
+    assert out.status == "succeeded", out.reason
+    after = [item.id for item in get_project(serve, pid).datasources]
+    assert after == before
+    body = read_artifact(serve, pid, run_id)
+    inputs = load_run_inputs(serve, pid, run_id)
+    url_item = next(item for item in inputs if item.get("type") == "url")
+    assert url_item["url"] == SHEET_URL
+    assert f"(input:{url_item['input_id']})" in body
+    assert any(item.get("type") == "datasource" for item in inputs)
 
 
 def test_datasource_unread_still_fails_if_only_url_inputs(tmp_path, monkeypatch):
