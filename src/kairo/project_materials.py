@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Iterator
+from urllib.parse import unquote, urlparse
 
 from kairo.projects import (
     DataSource,
@@ -34,6 +35,7 @@ MATERIAL_MAX_BYTES = 2 * 1024 * 1024
 SOURCE_UNDERSTANDING = "understanding"
 SOURCE_DIGEST = "digest"
 SOURCE_DATASOURCE = "datasource"
+SOURCE_URL = "url"
 STATE_AVAILABLE = "available"
 STATE_UNAVAILABLE = "unavailable"
 STATE_UNCACHED = "uncached"
@@ -43,6 +45,7 @@ STATE_EXPIRED = "expired"
 _SOURCE_UNDERSTANDING_RE = re.compile(r"^topic:([^:]+):understanding$")
 _SOURCE_DIGEST_RE = re.compile(r"^topic:([^:]+):digest:([^:]*):(.+)$")
 _SOURCE_DS_RE = re.compile(r"^datasource:(.+)$")
+_SOURCE_URL_RE = re.compile(r"^url:(https?://.+)$", re.IGNORECASE)
 
 _clock: Callable[[], datetime] | None = None
 
@@ -90,6 +93,9 @@ def parse_source_id(source_id: str) -> dict[str, str]:
     m = _SOURCE_DS_RE.fullmatch(text)
     if m:
         return {"kind": SOURCE_DATASOURCE, "ds_id": m.group(1), "source_id": text}
+    m = _SOURCE_URL_RE.fullmatch(text)
+    if m:
+        return {"kind": SOURCE_URL, "url": m.group(1), "source_id": text}
     raise ProjectError("无法识别的材料标识", code="not_found")
 
 
@@ -288,6 +294,9 @@ class MaterialRead:
     state: str
     title: str = ""
     type: str = SOURCE_DATASOURCE
+    url: str | None = None
+    reader: str = ""
+    kind: str = ""
 
 
 def read_cached_datasource(
@@ -497,6 +506,8 @@ def read_material(
     refresh: bool = False,
 ) -> MaterialRead:
     parsed = parse_source_id(source_id)
+    if parsed["kind"] == SOURCE_URL:
+        raise ProjectError("目录外 URL 请使用 project read-url", code="invalid_request")
     project = get_project(serve, project_id)
     topics, datasources = _scope(serve, project, run_id)
     if parsed["kind"] == SOURCE_DATASOURCE:
@@ -514,6 +525,63 @@ def read_material(
         raise ProjectError("材料超过 2 MiB", code="material_too_large")
     if run_id:
         result.input_id = record_run_input(serve, project_id, run_id, result)
+    return result
+
+
+def _url_material_title(content: str, label: str, url: str) -> str:
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            heading = stripped.lstrip("#").strip()
+            if heading:
+                return heading
+    path = urlparse(url).path.rstrip("/")
+    tail = unquote(path.rsplit("/", 1)[-1]) if path else ""
+    return f"{label} {tail or url}".strip()
+
+
+def read_url_material(
+    serve: Path,
+    project_id: str,
+    url: str,
+    *,
+    run_id: str,
+) -> MaterialRead:
+    from kairo.readers import infer_source
+
+    text = (url or "").strip()
+    if not text:
+        raise ReadError("invalid_link", "链接为空")
+    if not (run_id or "").strip():
+        raise ProjectError("read-url 需要 --run", code="invalid_request")
+    _running_run(serve, project_id, run_id)
+    parsed = urlparse(text)
+    if parsed.scheme in ("mail", "imap"):
+        raise ReadError("unsupported_reader", "不是页外链")
+    inferred = infer_source(text)
+    if inferred.kind == "mail-search":
+        raise ReadError("unsupported_reader", "不是页外链")
+    conn = get_connection(inferred.connection_id)
+    content = read_datasource(text, inferred.kind, inferred.reader, conn)
+    if not isinstance(content, str):
+        raise ReadError("read_failed", "Reader 返回不是正文")
+    if len(content.encode("utf-8")) > MATERIAL_MAX_BYTES:
+        raise ProjectError("材料超过 2 MiB", code="material_too_large")
+    result = MaterialRead(
+        source_id=f"url:{text}",
+        content=content,
+        version=content_version(content),
+        fetched_at=_dt_to_iso(utcnow()),
+        expires_at=None,
+        input_id=None,
+        state=STATE_AVAILABLE,
+        title=_url_material_title(content, inferred.label, text),
+        type=SOURCE_URL,
+        url=text,
+        reader=inferred.reader,
+        kind=inferred.kind,
+    )
+    result.input_id = record_run_input(serve, project_id, run_id, result)
     return result
 
 
@@ -598,13 +666,19 @@ def record_run_input(serve: Path, project_id: str, run_id: str, result: Material
             raise
         except OSError as exc:
             raise ProjectError(f"读取记录保存失败:{exc}", code="evidence_failed") from exc
+        if result.type == SOURCE_URL:
+            url_field = result.url
+        elif result.type == SOURCE_DATASOURCE:
+            url_field = result.source_id
+        else:
+            url_field = None
         items.append(
             {
                 "input_id": input_id,
                 "source_id": result.source_id,
                 "type": result.type,
                 "title": result.title,
-                "url": None if result.type != SOURCE_DATASOURCE else result.source_id,
+                "url": url_field,
                 "version": result.version,
                 "read_at": _dt_to_iso(utcnow()),
                 "read_count": 1,
@@ -657,6 +731,8 @@ def _source_in_scope(
         return False
     if parsed["kind"] == SOURCE_DATASOURCE:
         return parsed["ds_id"] in datasource_ids
+    if parsed["kind"] == SOURCE_URL:
+        return True
     slug = parsed.get("slug") or ""
     if slug not in topics:
         return False
@@ -719,8 +795,17 @@ def validate_recorded_inputs(
         actual = body.read_text(encoding="utf-8")
         if content_version(actual) != item.get("version"):
             raise ProjectError("输入证据校验失败", code="evidence_failed")
-        if not _source_in_scope(
-            str(item.get("source_id") or ""), topics, allowed_ds, serve=serve
+        source_id = str(item.get("source_id") or "")
+        item_type = str(item.get("type") or "")
+        try:
+            parsed = parse_source_id(source_id)
+        except ProjectError:
+            raise ProjectError("输入来源越界", code="evidence_failed") from None
+        if parsed["kind"] == SOURCE_URL:
+            if item_type != SOURCE_URL:
+                raise ProjectError("输入来源越界", code="evidence_failed")
+        elif item_type == SOURCE_URL or not _source_in_scope(
+            source_id, topics, allowed_ds, serve=serve
         ):
             raise ProjectError("输入来源越界", code="evidence_failed")
 

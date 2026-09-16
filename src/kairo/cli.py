@@ -2024,6 +2024,43 @@ def project_read_cmd(
     )
 
 
+@project_app.command("read-url")
+def project_read_url_cmd(
+    project_id: str = typer.Argument(...),
+    url: str = typer.Argument(...),
+    run_id: str = typer.Option(..., "--run"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_materials import read_url_material
+    from kairo.input_citations import numbered_content
+    from kairo.projects import ProjectError
+    from kairo.readers import ReadError
+
+    try:
+        result = read_url_material(_cli_root(root), project_id, url, run_id=run_id)
+    except (ProjectError, ReadError) as e:
+        _cli_fail(as_json, e)
+    _dump(
+        as_json,
+        {
+            "ok": True,
+            "input_id": result.input_id,
+            "title": result.title,
+            "source_id": result.source_id,
+            "type": result.type,
+            "url": result.url,
+            "reader": result.reader,
+            "kind": result.kind,
+            "content": result.content,
+            "version": result.version,
+            "fetched_at": result.fetched_at,
+            "numbered_content": numbered_content(result.content),
+            "line_count": len(result.content.splitlines()),
+        },
+    )
+
+
 @project_app.command("input")
 def project_input_cmd(
     project_id: str = typer.Argument(...),

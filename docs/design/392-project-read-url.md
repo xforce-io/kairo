@@ -2,11 +2,11 @@
 
 - Issue: [#392](https://github.com/xforce-io/kairo/issues/392)
 - 分支: `feat/392-project-read-url`
-- 状态: Draft
-- 最后更新: 2026-09-16（L1 Draft · 待 peng 批；不自批）
-- L1: Draft（本文件是提案事实源；范围以 §§5.1–5.6 为准，不扩产品范围）
+- 状态: Approved
+- 最后更新: 2026-09-16（L1 Approved · peng；§8.1–8.5 全部默认 A 已锁定）
+- L1: Approved（peng 2026-09-16；defaults A locked；范围仍以 §§5.1–5.6 为准，不扩产品范围）
 
-本文件是 #392 的 L1 事实源。Issue 只保留摘要与本链接。不自批、不实现、不合并。
+本文件是 #392 的 L1 事实源。Issue 只保留摘要与本链接。不自批、不合并。
 
 ## 1. 背景
 
@@ -200,7 +200,7 @@ S2 定量：夹具或 live 的能源小样 Artifact 至少一处 `input:` 的 `i
 | B | `url:` + URL 的 SHA-256；`url` 字段存原文 | 更不透明，对齐 #299「原样回传」；调试要对照 `url` 字段 |
 | C | 复用 `datasource:{合成id}` 或把跟读写进 `datasources` | 破坏 #388 与 `datasource_unread`。禁止 |
 
-**请批 A 或 B。C 已否。**
+**已锁定：A。** C 已否。
 
 ### 8.2 一跳是否引擎强制
 
@@ -209,7 +209,7 @@ S2 定量：夹具或 live 的能源小样 Artifact 至少一处 `input:` 的 `i
 | **A（L1 默认假说）** | 引擎不解析「该 URL 是否出现在已读登记源正文」。Skill 写死一跳。引擎只保证单次 `read-url` 不展开 |
 | B | 引擎维护本 Run「已读登记源正文」URL 白名单，`read-url` 不在名单则 `invalid_request` |
 
-B 更严，但要在材料层解析 Markdown / 裸 URL，漏链则假失败。**请批 A 或 B。**
+B 更严，但要在材料层解析 Markdown / 裸 URL，漏链则假失败。**已锁定：A。**
 
 ### 8.3 每 Run 跟读条数上限
 
@@ -218,13 +218,13 @@ B 更严，但要在材料层解析 Markdown / 裸 URL，漏链则假失败。**
 | **A（L1 默认假说）** | 无条数硬顶；靠 2 MiB / Run 超时。Skill 一跳通常远小于超时 |
 | B | 硬顶 N（例如 20）；超出 `invalid_request`，已成功的跟读保留 |
 
-**请批 A 或 B；若 B，钉 N。** 不要默默截断。
+**已锁定：A。** 不要默默截断。
 
 ### 8.4 腾讯 / Notion / 邮件是否同一 CLI
 
 §5.2 默认：企微 = S1；腾讯与 Notion 页 = 同一命令可走、非 S1 定量；`mail://` / `imap://` = 拒绝。
 
-**请确认或改口**（例如 S1 也要一条腾讯；或允许邮件检索串）。
+**已锁定：A（确认默认）。** 企微 = S1；腾讯与 Notion 页 = 同一命令可走、非 S1 定量；`mail://` / `imap://` = 拒绝。
 
 ### 8.5 S2 证明：live 企微 vs 夹具
 
@@ -233,7 +233,7 @@ B 更严，但要在材料层解析 Markdown / 裸 URL，漏链则假失败。**
 | **A（L1 默认假说）** | CI：stub Reader + 确定性 provider，锁 CLI JSON、`datasources` 不变、`type=url` 过 `finalize_inputs`、Skill 字面量含 `read-url`、Artifact 含跟读 `input:`。产品 S2：本机企微已授权时至少 1 次 live（或能源小样等价）。默认 CI **不**打真企微网 |
 | B | 只靠夹具声称 S2 产品过线 |
 
-**请批 A 或 B。**
+**已锁定：A。** CI stub；产品 live 企微可在无会话的 CI 中跳过并写明原因。
 
 ## 9. 验收映射
 
@@ -242,7 +242,7 @@ B 更严，但要在材料层解析 Markdown / 裸 URL，漏链则假失败。**
 
 `datasource_unread` 回归（只读跟读、不读登记 Notion → 仍失败）是 S1/S2 的门，不是第三条 Story。
 
-S1/S2 只认 kairo CLI（及适用的 agent Run）。L1 未批；本文件 Draft。实现归 Forge engine / CLI / Skill；无 Atlas Console。无 keel-dev。
+S1/S2 只认 kairo CLI（及适用的 agent Run）。L1 已批（peng；defaults A）。实现归 Forge engine / CLI / Skill；无 Atlas Console。无 keel-dev。
 
 ## 10. 关联
 

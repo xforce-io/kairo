@@ -179,6 +179,13 @@ description: Use when the user wants to operate kairo Topics in a session — ph
    先不要加 `--refresh`；仅当该源 `uncached` 或读取失败时才刷新。单个源失败时继续读其它源，不要整篇放弃。
 4. 成功 JSON 含 `content`、`version`、`input_id`。引用材料必须写成 `[标题](input:INPUT_ID)`，只用本次返回的 `input_id`。
 5. `state=unavailable` 表示尚未生成；空目录就是没有材料。不要为了读取去 step。
-6. 未出现在该 Project 目录里的来源不可读。把最终 Markdown 写到约定的 `output_file`（默认 `artifact.md`）。
+6. 未出现在该 Project 目录里的来源不可用 `project read`。
+7. **跟读外链（仅此一口）：** 已读登记 datasource（及若已读的 Topic 材料）正文里的外链，用
+   `kairo project read-url PROJECT_ID --run RUN_ID --root SERVE_ROOT URL`
+   不要对目录外 URL 调用 `project read`。不要为跟读去 `datasource add` 或 step。
+8. 对每个外链：可识别且有 Reader（至少企微四种：文档 / 表格 / 智能表格 / 智能文档）→ 调用 `read-url`，引用返回的 `input_id`。墨刀 / ShowDoc / `invalid_link` / 无 Reader → **跳过**，在 Artifact 用一句话注明平台与 URL，不要编造正文。
+9. 单条 `read-url` 失败（`permission` / `read_failed` / `invalid_link` / `material_too_large` 等）只使该次 CLI 失败。继续其它链，把失败码与 URL 写进 Artifact。不要因此放弃整篇。
+10. **一跳：** 只跟读已读登记源（及已读 Topic 材料）正文中的链接。禁止跟读 `type=url` 材料里的再链。
+11. 把最终 Markdown 写到约定的 `output_file`（默认 `artifact.md`）。
 
 目录与读取失败时按 JSON `code` 如实处理，不要编造成功正文。
