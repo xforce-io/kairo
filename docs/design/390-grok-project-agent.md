@@ -2,11 +2,11 @@
 
 - Issue: [#390](https://github.com/xforce-io/kairo/issues/390)
 - 分支: `feat/390-grok-project-agent`
-- 状态: Draft
-- 最后更新: 2026-09-16（L1 Draft · 待 peng 批准 · 不自批）
-- L1: Draft（未批不开 keel-dev；不自批；不合入）
+- 状态: Approved
+- 最后更新: 2026-09-16（L1 Approved · peng via Grok Bot widget；defaults A / override-only / fake+live）
+- L1: Approved（peng 2026-09-16；§8.1 A、§8.2 override-only、§8.3 fake+live）
 
-本文件是 #390 的 L1 提案事实源。Issue 只保留摘要与本链接。不自批。
+本文件是 #390 的 L1 事实源。Issue 只保留摘要与本链接。不自批。
 
 ## 1. 背景
 
@@ -75,12 +75,13 @@ S1 只要求能力位与选择门接受 Grok。S1 单独翻旗而不接线 `writ
 
 宿主已把 `write_dirs=[cache_root, scratch]` 传入，且两目录在 grok cwd（临时 `artifact_dir`）之外。Codex 用 `--add-dir` 表达该边界。Grok **没有** `--add-dir`（#61/#350；xAI CLI reference 亦无此旗标）。
 
-**Forge 假说（待 L1 批，不自批）：**
+**已锁定（peng 2026-09-16 · §8.1 A）：**
 
 1. `GrokProvider.supports_project_cli=True`。
-2. **仅当** `write_dirs` 非空：在现有 args 上增加**最小**额外权限，使 headless grok 能 (a) 跑 `python -m kairo`（Shell / Bash），(b) 让该子进程与 agent 写 `write_dirs` + cwd 内 `artifact.md`。候选形态见 §8.1，**不在本 Draft 钉死具体 argv**。
+2. **仅当** `write_dirs` 非空：在现有 args 上增加 `--allow Bash` + `--allow Write`，使 headless grok 能 (a) 跑 `python -m kairo`，(b) 让该子进程与 agent 写 `write_dirs` + cwd 内 `artifact.md`。
+   - 实现环境无 `grok` on PATH，无法 `grok --help`。xAI permissions 认可名：`Bash`（不是 `Shell`）、`Write`（`Edit` 别名）。单测锁这两项字面量。
 3. 禁止：伪造 `--add-dir`；Project 默认 `--always-approve` / `--yolo` / `--dangerously-skip-permissions`；把 serve root 或 Topic 塞进可写范围；为迁就 grok 改 `write_dirs` 语义。
-4. 不把「关沙箱」当默认绕过（#299）。Grok 文档中 sandbox **默认 `off`**（与现网 Topic 调用一致：今日也不传 `--sandbox`）。本票不主动加 `--sandbox off` 去扩大权限。若现场 `GROK_SANDBOX` / config 把 profile 钉成 `workspace`（只写 CWD / `~/.grok/` / temp），cwd 外 cache/scratch 会失败——这是 §8.1，不是实现时偷偷 symlink 或关沙箱。
+4. 不把「关沙箱」当默认绕过（#299）。不传 `--sandbox`（保持与 Topic 相同的默认 `off`）。不主动加 `--sandbox off`。`GROK_SANDBOX` 非空且非 `off` 时 **fail-closed**（`RuntimeError`，不调用 grok）：不静默改 profile、不 symlink `write_dirs` 进 cwd、不关沙箱。
 
 ### 5.3 Grok CLI · `write_dirs` 为空（Topic 路径）
 
@@ -88,7 +89,7 @@ S1 只要求能力位与选择门接受 Grok。S1 单独翻旗而不接线 `writ
 
 - `read_dirs` 非空 → `--allow Read`；否则不加 `--allow`。
 - 不含 `--add-dir`、`--always-approve`、`--yolo`、`--dangerously-skip-permissions`。
-- 不因本票给 Topic 预授 Shell / Write。
+- 不因本票给 Topic 预授 Bash / Write。
 
 单测须继续锁这条（现有 `test_grok_provider_allows_read_dirs_with_allow_read`）。
 
@@ -119,7 +120,7 @@ S1 只要求能力位与选择门接受 Grok。S1 单独翻旗而不接线 `writ
 | auto 顺序不变（Codex 仍先于 Grok） | 放弃逼用户改 `KAIRO_PROVIDER`；放弃把默认改成 Grok |
 | 写边界仍由宿主 `write_dirs` 闭集 + Skill/CLI 范围表达 | 放弃 symlink-into-cwd 当默认（多一层移动部件，且 #299 要的是 provider 能表达边界，不是宿主改布局） |
 
-代价：Grok 没有路径级 `--add-dir`，OS 写边界弱于 Codex。#299 已承认「通用 shell ≠ OS 隔离」；本票把「最小 `--allow`」限制在 Project 路径，并把精确旗标留给 peng（§8.1）。只翻旗、不接线 `write_dirs`，S2 失败。
+代价：Grok 没有路径级 `--add-dir`，OS 写边界弱于 Codex。#299 已承认「通用 shell ≠ OS 隔离」；本票把「最小 `--allow Bash` + `--allow Write`」限制在 Project 路径（§8.1 A）。只翻旗、不接线 `write_dirs`，S2 失败。
 
 **证明边界：** 产品 S1/S2 只认 kairo CLI / Console 触发的 Project agent Run。MCP 或手工 `grok -p` 演示不算过线。
 
@@ -133,7 +134,7 @@ S1 只要求能力位与选择门接受 Grok。S1 单独翻旗而不接线 `writ
 | Console 文案 / i18n | Atlas | 无新文案。能力位修复后 `proj.reason_unsupported` 不再出现在 Grok 主路径 |
 | verify-kairo-web | Atlas | 本票无新 Console Story；勿在 scratch 对 live root 触发 LLM Run |
 
-## 8. 开放问题（待 peng）
+## 8. 已锁定（peng 2026-09-16）
 
 ### 8.1 cwd 外 `write_dirs` 的精确 grok 旗标
 
@@ -148,11 +149,11 @@ S1 只要求能力位与选择门接受 Grok。S1 单独翻旗而不接线 `writ
 | C | Project 路径 `--always-approve` / `--dangerously-skip-permissions` | #350/#160 已否全局绕过；即使用 `write_dirs` 门控，仍无路径边界 |
 | D | 自定义 sandbox profile 把 `write_dirs` 加成可写根 | 要写用户 `sandbox.toml`，超出本票、且本机未验证 |
 
-**L1 默认：A。** 实现前须在已登录 grok 上对「cwd 外写 cache/scratch + `python -m kairo project read`」做一次非交互核对；旗标与文档不一致则以现场 `grok --help` 为准，回写本文件后再 keel-dev。不得用 B/C/D 当暗默认。
+**已锁定：A。** 实现 argv：`--allow Bash` + `--allow Write`。本环境无 `grok --help`；`Bash` 为 xAI 认可的 Shell 等价名（`Shell` 不是 filter）。不得用 B/C/D。`GROK_SANDBOX=workspace`（或任何非 `off`）→ fail-closed。
 
 ### 8.2 `KAIRO_PROJECT_AGENT` 是否仍只做 override
 
-今日：仅当 env 有值才走该名字；否则 `select_provider()`。L1 默认：**保持 override-only**。`KAIRO_PROVIDER=grok` 已足够 S1。不把 `KAIRO_PROJECT_AGENT` 提升为第二默认，也不在未设时改 auto 顺序。
+今日：仅当 env 有值才走该名字；否则 `select_provider()`。**已锁定：保持 override-only。** `KAIRO_PROVIDER=grok` 已足够 S1。不把 `KAIRO_PROJECT_AGENT` 提升为第二默认，也不在未设时改 auto 顺序。
 
 ### 8.3 S2 证明：live Grok vs fake-runner
 
@@ -161,7 +162,7 @@ S1 只要求能力位与选择门接受 Grok。S1 单独翻旗而不接线 `writ
 | **A（L1 默认假说）** | CI：fake-runner 单测锁 argv（`write_dirs` 非空含最小 `--allow`；空则 #350；永不 `--add-dir` / `--always-approve`）+ 既有 `ProjectCliTestProvider` 协议回归。S2 产品验收：本机已登录 grok 至少 1 次 live Run（读 scope 内 Data Source，Artifact 含已登记 `input_id`）。默认 CI **不**跑真实 grok（同 #61/#350） |
 | B | 只靠 fake-runner「等价集成」，无 live | 证明不了 cwd 外写与 Shell 预授 |
 
-**L1 默认：A。** 无 grok 登录的环境不得声称 S2 产品过线。
+**已锁定：A。** CI fake-runner 锁 argv + 既有协议回归。无 grok 登录的环境不得声称 S2 产品过线；默认 CI **不**跑真实 grok。
 
 ## 9. 验收映射
 
@@ -169,7 +170,7 @@ S1 只要求能力位与选择门接受 Grok。S1 单独翻旗而不接线 `writ
 - S2 ← §5.2 + §5.4（Project CLI + cache/scratch + 合法 Artifact；失败非能力门闩）
 - Topic 不回退 ← §5.3（不是新 Story，是 S1/S2 的回归门；破则本票失败）
 
-S1/S2 只认 kairo CLI（及适用的 Console）。未批 L1 不开 keel-dev。
+S1/S2 只认 kairo CLI（及适用的 Console）。L1 已批；本分支实现 Forge engine/CLI only。
 
 ## 10. 关联
 

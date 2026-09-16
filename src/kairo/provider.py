@@ -815,13 +815,14 @@ class GrokProvider:
     """驱动 grok CLI。agent 在 artifact_dir(cwd)里写文件。runner 可注入便于测试。
 
     #350:Grok 读 cwd 工作集;read_dirs 非空时预授 Read,不倾倒全文,不加 --add-dir。
+    #390:write_dirs 非空时预授 Bash+Write(Project CLI / cache / scratch);Topic 路径不加。
     #145:prompt 走 --prompt-file,不把正文塞进 argv。
     JSON 成功字段为 text;错误为 {"type":"error","message":...},写产物前拦截(#8)。
     """
 
     name = "grok"
     supports_read_dirs = True
-    supports_project_cli = False
+    supports_project_cli = True
 
     def __init__(self, model: str = "", runner=None) -> None:
         self.model = model
@@ -844,6 +845,18 @@ class GrokProvider:
         ]
         if config.read_dirs:
             args += ["--allow", "Read"]
+        if config.write_dirs:
+            # #390 §8.1 A: Project path only. grok was not on PATH here;
+            # xAI recognized names are Bash (not Shell) and Write (Edit alias).
+            # Do not pass --sandbox / --always-approve / --add-dir.
+            sandbox = (os.environ.get("GROK_SANDBOX") or "").strip()
+            if sandbox and sandbox.lower() != "off":
+                raise RuntimeError(
+                    f"GROK_SANDBOX={sandbox!r} would block writes outside cwd; "
+                    "Project write_dirs require default sandbox off. "
+                    "Fail-closed: not passing --sandbox, not symlinking write_dirs."
+                )
+            args += ["--allow", "Bash", "--allow", "Write"]
         if self.model.strip():
             args += ["-m", self.model]
         self._runner(

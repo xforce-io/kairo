@@ -1,4 +1,5 @@
 from kairo import provider
+from kairo.projects import select_project_agent
 from kairo.provider import (
     ClaudeCodeProvider,
     CodexProvider,
@@ -348,3 +349,63 @@ def test_select_provider_codex_without_model_stays_empty(tmp_path, monkeypatch):
     selected = _auto(monkeypatch, available={"codex"})
     assert isinstance(selected, CodexProvider)
     assert selected.model == ""
+
+
+# ---- #390 select_project_agent accepts Grok; KAIRO_PROJECT_AGENT stays override-only ----
+
+
+def test_select_project_agent_accepts_explicit_grok(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.delenv("KAIRO_PROJECT_AGENT", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "grok")
+    selected = select_project_agent()
+    assert isinstance(selected, GrokProvider)
+    assert selected.supports_project_cli is True
+
+
+def test_select_project_agent_override_grok(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "codex")
+    monkeypatch.setenv("KAIRO_PROJECT_AGENT", "grok")
+    selected = select_project_agent()
+    assert isinstance(selected, GrokProvider)
+    assert selected.supports_project_cli is True
+
+
+def test_select_project_agent_auto_prefers_codex(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
+    monkeypatch.delenv("KAIRO_PROJECT_AGENT", raising=False)
+    monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: None)
+    monkeypatch.setattr(provider, "_cli_available", lambda cmd: cmd in {"codex", "grok"})
+    selected = select_project_agent()
+    assert isinstance(selected, CodexProvider)
+
+
+def test_select_project_agent_auto_accepts_grok_when_only_grok(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.delenv("KAIRO_PROVIDER", raising=False)
+    monkeypatch.delenv("KAIRO_PROJECT_AGENT", raising=False)
+    monkeypatch.setattr(provider, "resolve_openai_provider_config", lambda: None)
+    monkeypatch.setattr(provider, "_cli_available", lambda cmd: cmd == "grok")
+    selected = select_project_agent()
+    assert isinstance(selected, GrokProvider)
+
+
+def test_select_project_agent_override_only_rejects_claude(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.setenv("KAIRO_PROJECT_AGENT", "claude-code")
+    assert select_project_agent() is None
+
+
+def test_select_project_agent_explicit_claude_still_unsupported(monkeypatch):
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    monkeypatch.delenv("KAIRO_PROJECT_AGENT", raising=False)
+    monkeypatch.setenv("KAIRO_PROVIDER", "claude-code")
+    assert select_project_agent() is None
+
+
+def test_select_project_agent_kairo_stub_without_override_is_none(monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    monkeypatch.delenv("KAIRO_PROJECT_AGENT", raising=False)
+    assert select_project_agent() is None
