@@ -70,6 +70,7 @@ def test_skill_covers_project_run_cli():
     for needle in (
         "kairo project context",
         "kairo project read",
+        "kairo project read-url",
         "input:",
         "不要等待交互确认",
         "Project 运行",

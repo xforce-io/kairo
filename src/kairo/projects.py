@@ -751,7 +751,12 @@ def _execute_agent_run(serve: Path, project_id: str, run_id: str, agent) -> RunR
             f"先 `{cli} project context {record.project_id} --run {record.id} --root {root}` "
             f"获取目录。type=datasource 在最前，必须先读这些源（不要一上来 --refresh；仅 uncached 才刷新）。"
             f"再 `{cli} project read PROJECT SOURCE --run {record.id} --root {root}` 按需读取。"
-            f"禁止 step / re-step / accept / 写 Topic。"
+            f"已读登记源正文里的外链用 `{cli} project read-url {record.project_id} --run {record.id} --root {root} URL` 跟读；"
+            f"不要对目录外 URL 调用 project read。可识别且有 Reader（至少企微四种）则跟读并引用返回的 input_id；"
+            f"墨刀 / ShowDoc / invalid_link / 无 Reader 则跳过并在 Artifact 注明平台与 URL，不要编造正文。"
+            f"单条 read-url 失败不放弃整篇，把失败码与 URL 写进 Artifact。"
+            f"只跟读一跳：不要跟读 type=url 材料里的再链。"
+            f"禁止 datasource add / step / re-step / accept / 写 Topic。"
             f"读取结果 numbered_content 提供归档原文行号（从 1 开始），content 保持原文。引用具体片段使用 [标题](input:INPUT_ID#L起始-L结束)，例如 #L3-L5；仅引用完整材料时使用 [标题](input:INPUT_ID)。位置只标识原文，不证明语义支撑。把最终 Markdown 写入 artifact.md。\n\n"
             f"## Task\n{record.task_snapshot.get('prompt') or ''}\n"
         )
