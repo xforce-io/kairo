@@ -6,7 +6,34 @@ import json
 from email.message import EmailMessage
 
 from kairo.project_materials import list_context
-from kairo.projects import ProjectError, add_datasource, create_project, get_project
+from kairo.projects import DataSource, ProjectError, add_datasource, create_project, get_project, save_project
+
+
+def seed_existing_datasource(
+    serve,
+    project_id: str,
+    *,
+    url: str,
+    reader: str,
+    kind: str,
+    connection_id: str | None = None,
+    purpose: str = "",
+    name: str = "",
+    ds_id: str | None = None,
+):
+    project = get_project(serve, project_id)
+    ds = DataSource(
+        id=ds_id or f"ds-seed-{len(project.datasources):04d}",
+        connection_id=connection_id or reader,
+        url=url,
+        kind=kind,
+        purpose=purpose,
+        name=name,
+        reader=reader,
+    )
+    project.datasources.append(ds)
+    save_project(serve, project)
+    return ds
 from kairo.readers import (
     INVALID_LINK,
     KIND_MAIL,
@@ -35,10 +62,11 @@ class Proc:
 
 def test_infer_mail_and_imap_queries():
     wecom = infer_source(WECOM_MAIL)
-    assert wecom.reader == "wecom" and wecom.kind == KIND_MAIL and wecom.live
+    assert wecom.reader == "wecom" and wecom.kind == KIND_MAIL and wecom.live is False
     assert wecom.connection_id == "wecom"
     imap = infer_source(IMAP_MAIL)
     assert imap.reader == "imap" and imap.kind == KIND_MAIL and imap.connection_id == "imap"
+    assert imap.live is False
     spec = parse_mail_query(WECOM_MAIL)
     assert spec.keywords == ("评审会", "TR1")
     assert spec.begin == "2026-08-24" and spec.limit == 10
@@ -67,9 +95,23 @@ def test_mail_url_with_password_is_invalid_and_not_stored(tmp_path):
 
 def test_add_mail_datasource_records_mail_search_kind(tmp_path):
     project = create_project(tmp_path, "P")
-    wecom = add_datasource(tmp_path, project.id, url=WECOM_MAIL, name="评审会邮件")
+    try:
+        add_datasource(tmp_path, project.id, url=WECOM_MAIL, name="评审会邮件")
+        raise AssertionError("expected unsupported mail add")
+    except ProjectError as exc:
+        assert exc.code == "unsupported_reader"
+    wecom = seed_existing_datasource(
+        tmp_path, project.id, url=WECOM_MAIL, reader="wecom", kind=KIND_MAIL, name="评审会邮件"
+    )
     assert wecom.kind == KIND_MAIL and wecom.reader == "wecom"
-    imap = add_datasource(tmp_path, project.id, url=IMAP_MAIL, purpose="普通邮箱")
+    try:
+        add_datasource(tmp_path, project.id, url=IMAP_MAIL, purpose="普通邮箱")
+        raise AssertionError("expected unsupported imap add")
+    except ProjectError as exc:
+        assert exc.code == "unsupported_reader"
+    imap = seed_existing_datasource(
+        tmp_path, project.id, url=IMAP_MAIL, reader="imap", kind=KIND_MAIL, purpose="普通邮箱"
+    )
     assert imap.kind == KIND_MAIL and imap.reader == "imap"
     saved = get_project(tmp_path, project.id)
     assert [ds.kind for ds in saved.datasources] == [KIND_MAIL, KIND_MAIL]
@@ -196,17 +238,18 @@ def test_api_and_html_accept_mail_query_string(tmp_path):
         f"/api/projects/{project.id}/datasources",
         json={"url": WECOM_MAIL, "name": "评审会邮件"},
     )
-    assert added.status_code == 200, added.text
     body = added.json()
-    assert body["ok"] is True
-    ds = body["datasource"]
-    assert ds["kind"] == KIND_MAIL
-    assert ds["reader"] == "wecom"
+    assert body["ok"] is False
+    assert body["code"] == "unsupported_reader"
+    seed_existing_datasource(
+        tmp_path, project.id, url=WECOM_MAIL, reader="wecom", kind=KIND_MAIL, name="评审会邮件"
+    )
     page = client.get(f"/projects/{project.id}")
     assert page.status_code == 200
     assert 'type="text"' in page.text
-    assert "mail://" in page.text or "imap://" in page.text
-    assert "WeCom mail" in page.text or "企微邮件" in page.text
+    assert "app.notion.com" in page.text and "/p/{id}" in page.text
+    assert "mail:// / imap://" not in page.text
+    assert "WeCom mail" in page.text or "企微邮件" in page.text or "评审会邮件" in page.text
     html = page.text
     assert 'class="obj-actions"' in html
     settings = client.get("/settings")
@@ -218,7 +261,7 @@ def test_imap_connection_is_live_in_settings_catalog():
     from kairo.settings import SettingsDoc, as_public_dict
 
     public = as_public_dict(SettingsDoc())
-    assert public["connections"]["imap"]["live"] is True
+    assert public["connections"]["imap"]["live"] is False
     assert public["connections"]["imap"]["token_env"] == "IMAP_PASSWORD"
 
 
@@ -234,7 +277,9 @@ def test_imap_criteria_english_month_and_inclusive_end():
 
 def test_mail_datasource_is_agent_material(tmp_path):
     project = create_project(tmp_path, "P")
-    ds = add_datasource(tmp_path, project.id, url=WECOM_MAIL, name="评审会邮件")
+    ds = seed_existing_datasource(
+        tmp_path, project.id, url=WECOM_MAIL, reader="wecom", kind=KIND_MAIL, name="评审会邮件"
+    )
     catalog = list_context(tmp_path, project.id)
     item = next(row for row in catalog["items"] if row["source_id"] == f"datasource:{ds.id}")
     assert item["type"] == "datasource"

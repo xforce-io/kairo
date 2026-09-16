@@ -11,8 +11,36 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from kairo.cli import app
+from kairo.projects import DataSource, get_project, save_project
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
+
+
+def seed_existing_datasource(
+    serve,
+    project_id: str,
+    *,
+    url: str,
+    reader: str,
+    kind: str,
+    connection_id: str | None = None,
+    purpose: str = "",
+    name: str = "",
+    ds_id: str | None = None,
+):
+    project = get_project(serve, project_id)
+    ds = DataSource(
+        id=ds_id or f"ds-seed-{len(project.datasources):04d}",
+        connection_id=connection_id or reader,
+        url=url,
+        kind=kind,
+        purpose=purpose,
+        name=name,
+        reader=reader,
+    )
+    project.datasources.append(ds)
+    save_project(serve, project)
+    return ds
 
 runner = CliRunner()
 
@@ -62,6 +90,8 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert "general" in shown and "projects" in shown
     assert "workspaces" in shown and "timeline" in shown
     assert shown["connections"]["tencent-docs"]["authorized"] is False
+    assert shown["connections"]["tencent-docs"]["live"] is False
+    assert shown["connections"]["notion"]["live"] is True
     assert "token" not in json.dumps(shown).lower() or shown["connections"]["tencent-docs"]["token_env"]
 
     auth = _load(
@@ -72,7 +102,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
         )
     )
     assert auth["connections"]["tencent-docs"]["authorized"] is True
-    assert auth["connections"]["tencent-docs"]["health"] == "authorized"
+    assert auth["connections"]["tencent-docs"]["health"] == "unavailable"
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", ok_cmd], serve, monkeypatch))
     _load(_cli(["settings", "set", "general.locale", "zh"], serve, monkeypatch))
 
@@ -94,24 +124,39 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     other = _load(_cli(["project", "create", "其它项目"], serve, monkeypatch))
     _load(_cli(["project", "link", other["id"], "alpha-ws"], serve, monkeypatch))
 
-    ds = _load(
+    seeded = seed_existing_datasource(
+        serve,
+        pid,
+        url="https://docs.qq.com/sheet/Denergy",
+        reader="tencent-docs",
+        kind="spreadsheet",
+        purpose="装机",
+    )
+    ds_id = seeded.id
+    tencent_add = _cli(
+        ["datasource", "add", pid, "--url", "https://docs.qq.com/sheet/Denergy-new"],
+        serve,
+        monkeypatch,
+    )
+    assert tencent_add.exit_code != 0
+    assert "unsupported" in tencent_add.output or "尚未接入" in tencent_add.output
+    notion_ok = _load(
         _cli(
             [
                 "datasource",
                 "add",
                 pid,
                 "--url",
-                "https://docs.qq.com/sheet/Denergy",
-                "--purpose",
-                "装机",
+                "https://app.notion.com/p/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "--name",
+                "材料页",
             ],
             serve,
             monkeypatch,
         )
     )
-    ds_id = ds["id"]
-    assert ds["connection_id"] == "tencent-docs"
-    assert ds["reader"] == "tencent-docs"
+    assert notion_ok["reader"] == "notion"
+    assert notion_ok["kind"] == "page"
     read_ok = _load(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch))
     assert read_ok["ok"] is True
     assert "solar,80" in read_ok["content"]
@@ -131,13 +176,13 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     )
     assert bad_add.exit_code != 0
     assert "invalid_link" in bad_add.output or "无法识别" in bad_add.output
-    notion_add = _cli(
+    stale_notion = _cli(
         ["datasource", "add", pid, "--url", "https://www.notion.so/page"],
         serve,
         monkeypatch,
     )
-    assert notion_add.exit_code != 0
-    assert "unsupported" in notion_add.output or "尚未接入" in notion_add.output
+    assert stale_notion.exit_code != 0
+    assert "invalid_link" in stale_notion.output or "不是有效" in stale_notion.output or "无法识别" in stale_notion.output
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", deny_cmd], serve, monkeypatch))
     perm2 = json.loads(_cli(["datasource", "read", pid, ds_id, "--refresh"], serve, monkeypatch).output)
@@ -212,8 +257,8 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert settings_api["settings"]["general"]["locale"] == "zh"
     assert settings_api["settings"]["connections"]["tencent-docs"]["authorized"] is True
     assert settings_api["settings"]["connections"]["tencent-docs"]["label"] == "腾讯文档"
-    assert settings_api["settings"]["connections"]["wecom"]["live"] is True
-    assert settings_api["settings"]["connections"]["notion"]["live"] is False
+    assert settings_api["settings"]["connections"]["wecom"]["live"] is False
+    assert settings_api["settings"]["connections"]["notion"]["live"] is True
     assert "test-token-not-for-project" not in json.dumps(settings_api)
 
     patched = client.patch("/api/settings", json={"path": "general.locale", "value": "en"}).json()
@@ -252,16 +297,20 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
         follow_redirects=True,
     )
     assert sheet.status_code == 200
-    assert "Tencent Docs" in sheet.text or "腾讯文档" in sheet.text
+    assert "尚未接入" in sheet.text or "unsupported" in sheet.text.lower()
     assert "Create task" in sheet.text
     assert 'class="task-create"' in sheet.text
     assert 'name="kind"' not in sheet.text
-    smart = client.post(
+    notion_form = client.post(
         f"/projects/{pid}/datasources",
-        data={"url": "https://docs.qq.com/smartsheet/Senergy"},
+        data={
+            "url": "https://www.notion.so/Extra-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "purpose": "补充",
+        },
         follow_redirects=True,
     )
-    assert smart.status_code == 200
+    assert notion_form.status_code == 200
+    assert "Notion" in notion_form.text
     silent = client.post(
         f"/projects/{pid}/datasources",
         data={"url": "https://example.com/not-docs"},
@@ -312,19 +361,28 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert public.get("/timeline").status_code == 200
 
     _load(_cli(["settings", "set", "connections.tencent-docs.cmd", ok_cmd], serve, monkeypatch))
-    ds2 = client.post(
+    ds2_fail = client.post(
         f"/api/projects/{pid}/datasources",
         json={
             "url": "https://docs.qq.com/smartsheet/Senergy-api",
             "purpose": "风险",
         },
     ).json()
-    assert ds2["ok"] is True
-    read_api = client.post(f"/api/projects/{pid}/datasources/{ds2['datasource']['id']}/read").json()
+    assert ds2_fail["ok"] is False
+    assert ds2_fail["code"] == "unsupported_reader"
+    seeded_api = seed_existing_datasource(
+        serve,
+        pid,
+        url="https://docs.qq.com/smartsheet/Senergy-api",
+        reader="tencent-docs",
+        kind="smartsheet",
+        purpose="风险",
+    )
+    read_api = client.post(f"/api/projects/{pid}/datasources/{seeded_api.id}/read").json()
     assert read_api["ok"] is True
     task_api = client.post(
         f"/api/projects/{pid}/tasks",
-        json={"name": "风险清单", "datasource_id": ds2["datasource"]["id"], "schedule": "once"},
+        json={"name": "风险清单", "datasource_id": seeded_api.id, "schedule": "once"},
     ).json()
     run_api = client.post(
         f"/api/projects/{pid}/tasks/{task_api['task']['id']}/run"
@@ -332,7 +390,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert run_api["run"]["status"] == "succeeded"
     got = client.get(f"/api/projects/{pid}/runs/{run_api['run']['id']}").json()
     assert "Task version:" in got["artifact"]
-    assert "https://docs.qq.com/smartsheet/Senergy" in got["artifact"]
+    assert "https://docs.qq.com/smartsheet/Senergy-api" in got["artifact"]
     assert run_api["run"]["id"] in got["artifact"]
 
     enabled = _load(_cli(["task", "disable", pid, task_api["task"]["id"]], serve, monkeypatch))
@@ -415,32 +473,29 @@ def test_cli_multi_link_is_atomic(tmp_path, monkeypatch):
 
 
 def test_infer_source_classifies_platforms():
-    from kairo.readers import INVALID_LINK, UNSUPPORTED, ReadError, infer_source
+    from kairo.readers import INVALID_LINK, ReadError, infer_source
 
     sheet = infer_source("https://docs.qq.com/sheet/Denergy")
-    assert sheet.reader == "tencent-docs" and sheet.kind == "spreadsheet" and sheet.live
+    assert sheet.reader == "tencent-docs" and sheet.kind == "spreadsheet" and sheet.live is False
     smart = infer_source("https://docs.qq.com/smartsheet/Senergy")
-    assert smart.reader == "tencent-docs" and smart.kind == "smartsheet"
+    assert smart.reader == "tencent-docs" and smart.kind == "smartsheet" and smart.live is False
     try:
         infer_source("https://example.com/not-docs")
         raise AssertionError("expected invalid")
     except ReadError as exc:
         assert exc.code == INVALID_LINK
-    try:
-        infer_source("https://www.notion.so/abc")
-        raise AssertionError("expected unsupported")
-    except ReadError as exc:
-        assert exc.code == UNSUPPORTED
+    notion = infer_source("https://www.notion.so/" + "a" * 32)
+    assert notion.reader == "notion" and notion.live is True
     wecom_doc = infer_source("https://doc.weixin.qq.com/doc/e3doc")
-    assert wecom_doc.reader == "wecom" and wecom_doc.kind == "document" and wecom_doc.live
+    assert wecom_doc.reader == "wecom" and wecom_doc.kind == "document" and wecom_doc.live is False
     wecom_sheet = infer_source("https://doc.weixin.qq.com/sheet/e3sheet")
-    assert wecom_sheet.reader == "wecom" and wecom_sheet.kind == "spreadsheet" and wecom_sheet.live
+    assert wecom_sheet.reader == "wecom" and wecom_sheet.kind == "spreadsheet" and wecom_sheet.live is False
     wecom_smart = infer_source("https://doc.weixin.qq.com/smartsheet/s3sheet")
     assert wecom_smart.reader == "wecom" and wecom_smart.kind == "smartsheet"
     wecom_page = infer_source("https://doc.weixin.qq.com/smartpage/a1page")
     assert wecom_page.reader == "wecom" and wecom_page.kind == "smartpage"
     published = infer_source("https://page.weixin.qq.com/smartpage/p/b1page")
-    assert published.reader == "wecom" and published.kind == "smartpage" and published.live
+    assert published.reader == "wecom" and published.kind == "smartpage" and published.live is False
     work_host = infer_source("https://work.weixin.qq.com/sheet/e3work")
     assert work_host.reader == "wecom" and work_host.kind == "spreadsheet"
     try:
@@ -464,16 +519,17 @@ def test_datasource_kind_and_reader_follow_url_inference(tmp_path):
     from kairo.projects import ProjectError, add_datasource, create_project, get_project
 
     project = create_project(tmp_path, "P")
+    notion_url = "https://app.notion.com/p/" + "a" * 32
     inferred = add_datasource(
         tmp_path,
         project.id,
-        url="https://docs.qq.com/smartsheet/Senergy",
-        kind="smartsheet",
-        connection_id="tencent-docs",
-        reader="tencent-docs",
+        url=notion_url,
+        kind="page",
+        connection_id="notion",
+        reader="notion",
     )
-    assert inferred.kind == "smartsheet"
-    assert inferred.reader == "tencent-docs"
+    assert inferred.kind == "page"
+    assert inferred.reader == "notion"
     for kwargs in (
         {"kind": "spreadsheet"},
         {"connection_id": "wecom"},
@@ -483,16 +539,16 @@ def test_datasource_kind_and_reader_follow_url_inference(tmp_path):
             add_datasource(
                 tmp_path,
                 project.id,
-                url="https://docs.qq.com/smartsheet/Senergy",
+                url=notion_url,
                 **kwargs,
             )
             raise AssertionError(f"expected mismatch: {kwargs}")
         except ProjectError as exc:
             assert exc.code == "invalid_link"
     saved = get_project(tmp_path, project.id)
-    assert all(ds.kind == "smartsheet" for ds in saved.datasources)
-    assert all(ds.reader == "tencent-docs" for ds in saved.datasources)
-    assert all(ds.connection_id == "tencent-docs" for ds in saved.datasources)
+    assert all(ds.kind == "page" for ds in saved.datasources)
+    assert all(ds.reader == "notion" for ds in saved.datasources)
+    assert all(ds.connection_id == "notion" for ds in saved.datasources)
 
 
 def test_datasource_rejects_url_userinfo_and_does_not_store_secret(tmp_path):
@@ -514,12 +570,16 @@ def test_datasource_rejects_url_userinfo_and_does_not_store_secret(tmp_path):
     )
     assert secret not in disk
     assert get_project(tmp_path, project.id).datasources == []
-    ok = add_datasource(tmp_path, project.id, url="https://docs.qq.com/sheet/Denergy")
-    assert ok.url == "https://docs.qq.com/sheet/Denergy"
-    smart = add_datasource(
-        tmp_path, project.id, url="https://docs.qq.com/smartsheet/Senergy"
-    )
-    assert smart.url == "https://docs.qq.com/smartsheet/Senergy"
+    ok = add_datasource(tmp_path, project.id, url="https://www.notion.so/" + "a" * 32)
+    assert ok.url == "https://www.notion.so/" + "a" * 32
+    app_url = "https://app.notion.com/p/" + "b" * 32
+    smart = add_datasource(tmp_path, project.id, url=app_url)
+    assert smart.url == app_url
+    try:
+        add_datasource(tmp_path, project.id, url="https://docs.qq.com/sheet/Denergy")
+        raise AssertionError("expected unsupported tencent add")
+    except ProjectError as exc:
+        assert exc.code == "unsupported_reader"
 
 
 def test_list_projects_skips_corrupt_record_and_keeps_valid(tmp_path):
@@ -667,15 +727,15 @@ def test_wecom_datasource_add_read_task_and_settings(tmp_path, monkeypatch):
     )
 
     shown = _load(_cli(["settings", "show"], serve, monkeypatch))
-    assert shown["connections"]["wecom"]["live"] is True
-    assert shown["connections"]["notion"]["live"] is False
-    assert shown["connections"]["wecom"]["health"] == "unauthorized"
+    assert shown["connections"]["wecom"]["live"] is False
+    assert shown["connections"]["notion"]["live"] is True
+    assert shown["connections"]["wecom"]["health"] == "unavailable"
 
     auth = _load(
         _cli(["settings", "set", "connections.wecom.authorized", "true"], serve, monkeypatch)
     )
     assert auth["connections"]["wecom"]["authorized"] is True
-    assert auth["connections"]["wecom"]["health"] == "authorized"
+    assert auth["connections"]["wecom"]["health"] == "unavailable"
     _load(_cli(["settings", "set", "connections.wecom.cmd", ok_cmd], serve, monkeypatch))
 
     created = _load(_cli(["project", "create", "企微资料"], serve, monkeypatch))
@@ -684,24 +744,33 @@ def test_wecom_datasource_add_read_task_and_settings(tmp_path, monkeypatch):
 
     added = []
     for url, kind in _WECOM_URLS:
-        ds = _load(_cli(["datasource", "add", pid, "--url", url], serve, monkeypatch))
-        assert ds["reader"] == "wecom"
-        assert ds["connection_id"] == "wecom"
-        assert ds["kind"] == kind
+        blocked = _cli(["datasource", "add", pid, "--url", url], serve, monkeypatch)
+        assert blocked.exit_code != 0
+        assert "unsupported" in blocked.output or "尚未接入" in blocked.output
+        ds = seed_existing_datasource(
+            serve, pid, url=url, reader="wecom", kind=kind, connection_id="wecom"
+        )
         added.append(ds)
-        read_ok = _load(_cli(["datasource", "read", pid, ds["id"]], serve, monkeypatch))
+        read_ok = _load(_cli(["datasource", "read", pid, ds.id], serve, monkeypatch))
         assert read_ok["ok"] is True
         assert "wecom-body-ok" in read_ok["content"]
 
-    notion_add = _cli(
-        ["datasource", "add", pid, "--url", "https://www.notion.so/page"],
-        serve,
-        monkeypatch,
+    notion_add = _load(
+        _cli(
+            [
+                "datasource",
+                "add",
+                pid,
+                "--url",
+                "https://www.notion.so/" + "a" * 32,
+            ],
+            serve,
+            monkeypatch,
+        )
     )
-    assert notion_add.exit_code != 0
-    assert "unsupported" in notion_add.output or "尚未接入" in notion_add.output
+    assert notion_add["reader"] == "notion"
 
-    ds_id = added[1]["id"]
+    ds_id = added[1].id
     _load(_cli(["settings", "set", "connections.wecom.authorized", "false"], serve, monkeypatch))
     denied = json.loads(_cli(["datasource", "read", pid, ds_id], serve, monkeypatch).output)
     assert denied["code"] == "permission"
@@ -731,7 +800,7 @@ def test_wecom_datasource_add_read_task_and_settings(tmp_path, monkeypatch):
     assert run1["status"] == "succeeded"
     art = _load(_cli(["artifact", "show", pid, run1["id"]], serve, monkeypatch))
     assert "wecom-body-ok" in art["artifact"]
-    assert added[1]["url"] in art["artifact"]
+    assert added[1].url in art["artifact"]
     disk = json.loads((serve / ".kairo" / "projects" / pid / "project.json").read_text())
     assert "token" not in json.dumps(disk).lower()
     assert "secret" not in json.dumps(disk).lower()
@@ -747,16 +816,16 @@ def test_wecom_datasource_add_read_task_and_settings(tmp_path, monkeypatch):
     assert "本期未接入" in settings_html.text
     wecom_card = settings_html.text.split("企微文档", 1)[1].split("</li>", 1)[0]
     notion_card = settings_html.text.split("Notion", 1)[1].split("</li>", 1)[0]
-    assert "本期未接入" not in wecom_card
-    assert "授权" in wecom_card or "Authorize" in wecom_card
-    assert "本期未接入" in notion_card or "Not connected this phase" in notion_card
+    assert "本期未接入" in wecom_card or "Not connected this phase" in wecom_card
+    assert "授权" in notion_card or "Authorize" in notion_card
+    assert "本期未接入" not in notion_card
 
     api_add = client.post(
         f"/api/projects/{pid}/datasources",
         json={"url": "https://doc.weixin.qq.com/sheet/e3_ApiSheet"},
     ).json()
-    assert api_add["ok"] is True
-    assert api_add["datasource"]["reader"] == "wecom"
+    assert api_add["ok"] is False
+    assert api_add["code"] == "unsupported_reader"
 
 
 def test_wecom_default_adapter_reads_via_injected_runner():

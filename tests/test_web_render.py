@@ -215,6 +215,14 @@ def test_preview_datasource_html_spreadsheet_two_columns():
     assert "solar" in html
 
 
+def test_preview_datasource_html_notion_page_is_markdown():
+    for kind in ("page", "notion"):
+        html = preview_datasource_html("# 材料清单\n\n现场,并网。\n", kind=kind)
+        assert "<table>" not in html
+        assert "材料清单" in html
+        assert "现场" in html
+
+
 def test_digest_link_with_chinese_id_is_decoded_before_validation():
     from urllib.parse import quote
 

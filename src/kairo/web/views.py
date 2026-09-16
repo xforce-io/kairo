@@ -3174,6 +3174,27 @@ _RUN_REASON_KEYS = {
     "datasource_unread": "proj.reason_ds_unread",
 }
 
+_PROJECT_ERROR_KEYS = {
+    "unsupported_reader": "proj.err_unsupported_reader",
+    "invalid_link": "proj.err_invalid_link",
+    "permission": "proj.err_permission",
+    "read_failed": "proj.err_read_failed",
+}
+
+
+def _project_error_code(exc: Exception) -> str:
+    return getattr(exc, "code", None) or ""
+
+
+def _project_error_text(request: Request, exc: Exception) -> str:
+    """Map add/read ProjectError codes to Console copy. Never invent success."""
+    code = _project_error_code(exc)
+    key = _PROJECT_ERROR_KEYS.get(code)
+    if not key:
+        return str(exc)
+    label = _t(request)(key)
+    return f"{label} ({code})" if code else label
+
 
 def run_reason_label(t, reason: str | None) -> str:
     if not reason:
@@ -3271,6 +3292,7 @@ def project_page(
     error: str = "",
     notice: str = "",
     task_draft: dict | None = None,
+    error_code: str = "",
 ) -> HTMLResponse:
     _console_only(request)
     from kairo.projects import ProjectError, get_project, list_runs
@@ -3341,6 +3363,7 @@ def project_page(
             "ds_status": ds_status,
             "ds_labels": {ds.id: datasource_label(ds) for ds in project.datasources},
             "error": error,
+            "error_code": error_code,
             "notice": notice,
             "task_draft": task_draft or {},
         },
@@ -3399,7 +3422,12 @@ def project_ds_add_form(
     try:
         add_datasource(_serve(request), project_id, url=url, purpose=purpose, name=name)
     except ProjectError as e:
-        return project_page(request, project_id, error=str(e))
+        return project_page(
+            request,
+            project_id,
+            error=_project_error_text(request, e),
+            error_code=_project_error_code(e),
+        )
     return RedirectResponse(f"/projects/{project_id}", status_code=303)
 
 
@@ -3437,14 +3465,19 @@ def project_ds_read_form(
             _serve(request), project_id, ds_id, refresh=refresh in ("1", "true", "on")
         )
     except (ProjectError, ReadError) as e:
-        code = getattr(e, "code", None)
-        return datasource_page(request, project_id, ds_id, error=f"{code or 'error'}: {e}")
+        return datasource_page(
+            request,
+            project_id,
+            ds_id,
+            error=_project_error_text(request, e),
+            error_code=_project_error_code(e),
+        )
     return RedirectResponse(f"/projects/{project_id}/datasources/{ds_id}", status_code=303)
 
 
 @router.get("/projects/{project_id}/datasources/{ds_id}", response_class=HTMLResponse)
 def datasource_page(
-    request: Request, project_id: str, ds_id: str, error: str = ""
+    request: Request, project_id: str, ds_id: str, error: str = "", error_code: str = ""
 ) -> HTMLResponse:
     _console_only(request)
     from kairo.project_materials import peek_datasource_content
@@ -3478,6 +3511,7 @@ def datasource_page(
             "payload": payload,
             "body_html": body_html,
             "error": error,
+            "error_code": error_code,
         },
     )
 
