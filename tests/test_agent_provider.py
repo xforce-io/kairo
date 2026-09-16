@@ -373,8 +373,35 @@ def test_grok_provider_omits_model_flag_when_empty(tmp_path):
     assert "-m" not in calls[0]
 
 
+_FORBIDDEN_GROK_FLAGS = (
+    "--add-dir",
+    "--always-approve",
+    "--yolo",
+    "--dangerously-skip-permissions",
+    "--sandbox",
+)
+
+
+def _grok_allow_tools(args):
+    tools = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--allow":
+            assert i + 1 < len(args), args
+            tools.append(args[i + 1])
+            i += 2
+        else:
+            i += 1
+    return tools
+
+
+def _assert_no_forbidden_grok_flags(args):
+    for flag in _FORBIDDEN_GROK_FLAGS:
+        assert flag not in args
+
+
 def test_grok_provider_allows_read_dirs_with_allow_read(tmp_path):
-    """#350:Grok 读 cwd 工作集;read_dirs 非空时预授 Read,不倾倒、不加 --add-dir。"""
+    """#350/#390:Topic path (write_dirs empty) grants Read only; no Project allows."""
     ref = tmp_path / "corpus"
     ref.mkdir()
     calls = []
@@ -394,16 +421,157 @@ def test_grok_provider_allows_read_dirs_with_allow_read(tmp_path):
         )
     )
     args = calls[0]
-    assert "--allow" in args and "Read" in args
-    assert "--always-approve" not in args
-    assert "--add-dir" not in args
+    assert _grok_allow_tools(args) == ["Read"]
+    _assert_no_forbidden_grok_flags(args)
     assert str(ref) not in args
+    assert "Bash" not in args
+    assert "Write" not in args
+    assert "Shell" not in args
+
+
+def test_grok_provider_write_dirs_empty_omits_project_allows(tmp_path):
+    """#390:write_dirs empty (Topic) never grants Bash/Write even without read_dirs."""
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
+
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+        )
+    )
+    args = calls[0]
+    assert _grok_allow_tools(args) == []
+    _assert_no_forbidden_grok_flags(args)
+    assert "Bash" not in args
+    assert "Write" not in args
+    assert "Shell" not in args
+
+
+def test_grok_provider_write_dirs_grants_bash_and_write(tmp_path):
+    """#390 §8.1 A:write_dirs non-empty → --allow Bash + --allow Write.
+
+    grok CLI was not on PATH in the impl env. Tool names are the xAI-recognized
+    pair: Bash (not Shell) and Write (Edit alias). Paths are not passed as argv.
+    """
+    cache = tmp_path / "cache"
+    scratch = tmp_path / "scratch"
+    cache.mkdir()
+    scratch.mkdir()
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
+
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+            write_dirs=[cache, scratch],
+        )
+    )
+    args = calls[0]
+    assert _grok_allow_tools(args) == ["Bash", "Write"]
+    _assert_no_forbidden_grok_flags(args)
+    assert str(cache) not in args
+    assert str(scratch) not in args
+    assert "Shell" not in args
+    assert "Read" not in args
+
+
+def test_grok_provider_write_dirs_plus_read_dirs_keeps_both_allows(tmp_path):
+    ref = tmp_path / "corpus"
+    cache = tmp_path / "cache"
+    ref.mkdir()
+    cache.mkdir()
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
+
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+            read_dirs=[ref],
+            write_dirs=[cache],
+        )
+    )
+    assert _grok_allow_tools(calls[0]) == ["Read", "Bash", "Write"]
+    _assert_no_forbidden_grok_flags(calls[0])
+
+
+def test_grok_provider_write_dirs_fail_closed_on_workspace_sandbox(tmp_path, monkeypatch):
+    """#390:GROK_SANDBOX=workspace would block cwd-outside writes → fail-closed."""
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    monkeypatch.setenv("GROK_SANDBOX", "workspace")
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
+
+    with pytest.raises(RuntimeError, match="GROK_SANDBOX"):
+        GrokProvider(runner=fake_runner).run(
+            AgentConfig(
+                persona="P",
+                context="C",
+                artifact_dir=tmp_path,
+                model="",
+                artifact="out.md",
+                write_dirs=[cache],
+            )
+        )
+    assert calls == []
+    assert not (tmp_path / "out.md").exists()
+
+
+def test_grok_provider_topic_path_ignores_workspace_sandbox(tmp_path, monkeypatch):
+    """Topic path (write_dirs empty) is unchanged even if GROK_SANDBOX is pinned."""
+    ref = tmp_path / "corpus"
+    ref.mkdir()
+    monkeypatch.setenv("GROK_SANDBOX", "workspace")
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append(args)
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
+
+    GrokProvider(runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+            read_dirs=[ref],
+        )
+    )
+    assert _grok_allow_tools(calls[0]) == ["Read"]
+    _assert_no_forbidden_grok_flags(calls[0])
 
 
 def test_grok_provider_identity():
     p = GrokProvider(model="")
     assert p.name == "grok"
     assert p.model == ""
+    assert p.supports_project_cli is True
+    assert p.supports_read_dirs is True
 
 
 def test_grok_provider_raises_on_error_type(tmp_path):
