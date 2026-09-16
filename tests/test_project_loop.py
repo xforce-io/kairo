@@ -11,8 +11,36 @@ from fastapi.testclient import TestClient
 from typer.testing import CliRunner
 
 from kairo.cli import app
+from kairo.projects import DataSource, get_project, save_project
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
+
+
+def seed_existing_datasource(
+    serve,
+    project_id: str,
+    *,
+    url: str,
+    reader: str,
+    kind: str,
+    connection_id: str | None = None,
+    purpose: str = "",
+    name: str = "",
+    ds_id: str | None = None,
+):
+    project = get_project(serve, project_id)
+    ds = DataSource(
+        id=ds_id or f"ds-seed-{len(project.datasources):04d}",
+        connection_id=connection_id or reader,
+        url=url,
+        kind=kind,
+        purpose=purpose,
+        name=name,
+        reader=reader,
+    )
+    project.datasources.append(ds)
+    save_project(serve, project)
+    return ds
 
 runner = CliRunner()
 
@@ -95,8 +123,6 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
 
     other = _load(_cli(["project", "create", "其它项目"], serve, monkeypatch))
     _load(_cli(["project", "link", other["id"], "alpha-ws"], serve, monkeypatch))
-
-    from tests.conftest import seed_existing_datasource
 
     seeded = seed_existing_datasource(
         serve,
@@ -344,11 +370,19 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     ).json()
     assert ds2_fail["ok"] is False
     assert ds2_fail["code"] == "unsupported_reader"
-    read_api = client.post(f"/api/projects/{pid}/datasources/{ds_id}/read").json()
+    seeded_api = seed_existing_datasource(
+        serve,
+        pid,
+        url="https://docs.qq.com/smartsheet/Senergy-api",
+        reader="tencent-docs",
+        kind="smartsheet",
+        purpose="风险",
+    )
+    read_api = client.post(f"/api/projects/{pid}/datasources/{seeded_api.id}/read").json()
     assert read_api["ok"] is True
     task_api = client.post(
         f"/api/projects/{pid}/tasks",
-        json={"name": "风险清单", "datasource_id": ds_id, "schedule": "once"},
+        json={"name": "风险清单", "datasource_id": seeded_api.id, "schedule": "once"},
     ).json()
     run_api = client.post(
         f"/api/projects/{pid}/tasks/{task_api['task']['id']}/run"
@@ -356,7 +390,7 @@ def test_s1_cli_api_console_loop(tmp_path, monkeypatch):
     assert run_api["run"]["status"] == "succeeded"
     got = client.get(f"/api/projects/{pid}/runs/{run_api['run']['id']}").json()
     assert "Task version:" in got["artifact"]
-    assert "https://docs.qq.com/sheet/Denergy" in got["artifact"]
+    assert "https://docs.qq.com/smartsheet/Senergy-api" in got["artifact"]
     assert run_api["run"]["id"] in got["artifact"]
 
     enabled = _load(_cli(["task", "disable", pid, task_api["task"]["id"]], serve, monkeypatch))
@@ -707,8 +741,6 @@ def test_wecom_datasource_add_read_task_and_settings(tmp_path, monkeypatch):
     created = _load(_cli(["project", "create", "企微资料"], serve, monkeypatch))
     pid = created["id"]
     assert "token" not in json.dumps(created).lower()
-
-    from tests.conftest import seed_existing_datasource
 
     added = []
     for url, kind in _WECOM_URLS:

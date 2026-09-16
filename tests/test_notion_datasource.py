@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 from kairo.cli import app
 from kairo.project_materials import load_cache, read_cached_datasource, write_cache
 from kairo.projects import (
+    DataSource,
     ProjectError,
     add_datasource,
     create_project,
@@ -17,6 +18,7 @@ from kairo.projects import (
     get_project,
     read_artifact,
     run_task,
+    save_project,
 )
 from kairo.provider import AgentConfig, AgentResult
 from kairo.readers import (
@@ -31,7 +33,34 @@ from kairo.readers import (
     read_notion_page,
 )
 from kairo.settings import Connection, SettingsDoc, as_public_dict
-from tests.conftest import seed_existing_datasource
+
+
+def seed_existing_datasource(
+    serve,
+    project_id: str,
+    *,
+    url: str,
+    reader: str,
+    kind: str,
+    connection_id: str | None = None,
+    purpose: str = "",
+    name: str = "",
+    ds_id: str | None = None,
+):
+    """Write a pre-existing Data Source row, bypassing the new-add allowlist."""
+    project = get_project(serve, project_id)
+    ds = DataSource(
+        id=ds_id or f"ds-seed-{len(project.datasources):04d}",
+        connection_id=connection_id or reader,
+        url=url,
+        kind=kind,
+        purpose=purpose,
+        name=name,
+        reader=reader,
+    )
+    project.datasources.append(ds)
+    save_project(serve, project)
+    return ds
 
 
 runner = CliRunner()
@@ -219,7 +248,8 @@ def test_settings_catalog_notion_live_others_not():
     assert "ntn_" not in dumped
 
 
-def test_read_notion_page_uses_recorded_fixture():
+def test_read_notion_page_uses_recorded_fixture(monkeypatch):
+    monkeypatch.setenv("NOTION_TOKEN", "ntn_test_not_a_real_token")
     conn = Connection(authorized=True, token_env="NOTION_TOKEN")
     text = read_notion_page(
         NOTION_APP,

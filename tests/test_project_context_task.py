@@ -28,8 +28,34 @@ from kairo.project_materials import (
     set_clock,
     scratch_dir,
 )
-from kairo.projects import ProjectError, get_project
-from tests.conftest import seed_existing_datasource
+from kairo.projects import DataSource, ProjectError, get_project, save_project
+
+
+def seed_existing_datasource(
+    serve,
+    project_id: str,
+    *,
+    url: str,
+    reader: str,
+    kind: str,
+    connection_id: str | None = None,
+    purpose: str = "",
+    name: str = "",
+    ds_id: str | None = None,
+):
+    project = get_project(serve, project_id)
+    ds = DataSource(
+        id=ds_id or f"ds-seed-{len(project.datasources):04d}",
+        connection_id=connection_id or reader,
+        url=url,
+        kind=kind,
+        purpose=purpose,
+        name=name,
+        reader=reader,
+    )
+    project.datasources.append(ds)
+    save_project(serve, project)
+    return ds
 from kairo.provider import AgentConfig, AgentResult
 from kairo.web.server import create_app
 from kairo.workspace import Workspace

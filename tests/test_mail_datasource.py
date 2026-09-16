@@ -6,7 +6,34 @@ import json
 from email.message import EmailMessage
 
 from kairo.project_materials import list_context
-from kairo.projects import ProjectError, add_datasource, create_project, get_project
+from kairo.projects import DataSource, ProjectError, add_datasource, create_project, get_project, save_project
+
+
+def seed_existing_datasource(
+    serve,
+    project_id: str,
+    *,
+    url: str,
+    reader: str,
+    kind: str,
+    connection_id: str | None = None,
+    purpose: str = "",
+    name: str = "",
+    ds_id: str | None = None,
+):
+    project = get_project(serve, project_id)
+    ds = DataSource(
+        id=ds_id or f"ds-seed-{len(project.datasources):04d}",
+        connection_id=connection_id or reader,
+        url=url,
+        kind=kind,
+        purpose=purpose,
+        name=name,
+        reader=reader,
+    )
+    project.datasources.append(ds)
+    save_project(serve, project)
+    return ds
 from kairo.readers import (
     INVALID_LINK,
     KIND_MAIL,
@@ -67,8 +94,6 @@ def test_mail_url_with_password_is_invalid_and_not_stored(tmp_path):
 
 
 def test_add_mail_datasource_records_mail_search_kind(tmp_path):
-    from tests.conftest import seed_existing_datasource
-
     project = create_project(tmp_path, "P")
     try:
         add_datasource(tmp_path, project.id, url=WECOM_MAIL, name="评审会邮件")
@@ -216,8 +241,6 @@ def test_api_and_html_accept_mail_query_string(tmp_path):
     body = added.json()
     assert body["ok"] is False
     assert body["code"] == "unsupported_reader"
-    from tests.conftest import seed_existing_datasource
-
     seed_existing_datasource(
         tmp_path, project.id, url=WECOM_MAIL, reader="wecom", kind=KIND_MAIL, name="评审会邮件"
     )
@@ -253,8 +276,6 @@ def test_imap_criteria_english_month_and_inclusive_end():
 
 
 def test_mail_datasource_is_agent_material(tmp_path):
-    from tests.conftest import seed_existing_datasource
-
     project = create_project(tmp_path, "P")
     ds = seed_existing_datasource(
         tmp_path, project.id, url=WECOM_MAIL, reader="wecom", kind=KIND_MAIL, name="评审会邮件"
