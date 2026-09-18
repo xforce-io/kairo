@@ -610,6 +610,13 @@ def timeline_view(
         )
     else:
         day_items = [it for it in presented if it.occurred_at == q.day]
+    from kairo.view_run import annotate_undigested, count_visible_undigested
+
+    if q.view == "calendar":
+        day_items = annotate_undigested(request.app.state.root, day_items)
+    visible_undigested = (
+        count_visible_undigested(day_items) if q.view == "calendar" else 0
+    )
     range_groups: list[dict] = []
     if range_on and r0 != r1:
         buckets: dict[str, list] = {}
@@ -680,8 +687,82 @@ def timeline_view(
             "tag_filters": tag_filters,
             "tag_catalog": list_tags(_serve(request)),
             "timeline_back": timeline_back,
+            "visible_undigested": visible_undigested,
+            "preview_qs": _view_run_qs(r0, r1, tag_filters),
         },
     )
+
+
+def _view_run_qs(start, end, tag_filters: list[str]) -> str:
+    params: list[tuple[str, str]] = []
+    if start != end:
+        params.append(("from", start.isoformat()))
+        params.append(("to", end.isoformat()))
+    else:
+        params.append(("day", start.isoformat()))
+    for tag in tag_filters:
+        params.append(("tag", tag))
+    return urlencode(params)
+
+
+def _parse_view_run_range(
+    day: str | None, start: str | None, end: str | None
+):
+    day_s = (day or "").strip() or None
+    start_s = (start or "").strip() or None
+    end_s = (end or "").strip() or None
+    if day_s and (start_s or end_s):
+        raise TimelineQueryError("day and range exclusive")
+    if start_s or end_s:
+        if not start_s or not end_s:
+            raise TimelineQueryError("range needs from and to")
+        a = parse_calendar_date(start_s)
+        b = parse_calendar_date(end_s)
+        if a is None or b is None:
+            raise TimelineQueryError("illegal day")
+        if a > b:
+            a, b = b, a
+        return a, b
+    if not day_s:
+        raise TimelineQueryError("need day or range")
+    parsed = parse_calendar_date(day_s)
+    if parsed is None:
+        raise TimelineQueryError("illegal day")
+    return parsed, parsed
+
+
+@router.get("/timeline/run-preview")
+def timeline_run_preview(
+    request: Request,
+    day: str | None = None,
+    start: str | None = Query(None, alias="from"),
+    end: str | None = Query(None, alias="to"),
+    tag: list[str] | None = Query(None),
+):
+    t = _t(request)
+    if _is_public_read(request):
+        raise HTTPException(status_code=403, detail=t("tl.run_forbidden"))
+    try:
+        a, b = _parse_view_run_range(day, start, end)
+    except TimelineQueryError:
+        raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
+    tag_filters = []
+    for raw in tag or []:
+        tag_filters.extend(part for part in str(raw).split() if part)
+    from kairo.view_run import plan_view_run
+
+    plan = plan_view_run(
+        request.app.state.root, a, b, tags=tag_filters or None
+    )
+    hx = (request.headers.get("hx-request") or "").lower() == "true"
+    accept = request.headers.get("accept") or ""
+    if hx or ("text/html" in accept and "application/json" not in accept):
+        return _render(
+            request,
+            "_timeline_run_preview.html",
+            {"plan": plan, "tag_filters": tag_filters},
+        )
+    return JSONResponse(plan.as_json())
 
 
 @router.post("/timeline/review")
