@@ -565,6 +565,12 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.run_diff": "{v} undigested in this view; {d} more outside it.",
         "tl.run_attention": "Ordinary process cannot clear these.",
         "tl.run_forbidden": "This surface is read-only — cannot process.",
+        "tl.run_index": "{i} / {n}",
+        "tl.run_summary": "Done {done} · failed {failed} · skipped {skipped} · cancelled {cancelled}",
+        "tl.run_failed_list": "Failed topics",
+        "tl.run_cancelled_current": "Cancelled {name}. Remaining topics were not started.",
+        "tl.run_empty": "Nothing to process.",
+        "tl.run_mismatch": "A different view is already running.",
     },
     "zh": {
         "ref.added_open": "打开 Ref",
@@ -1123,6 +1129,12 @@ CATALOG: dict[str, dict[str, str]] = {
         "tl.run_diff": "当前视图可见未加工 {v} 条，另有 {d} 条在其它日期。",
         "tl.run_attention": "普通推进清不掉。",
         "tl.run_forbidden": "此面只读，不能推进。",
+        "tl.run_index": "第 {i} / {n} 个 Topic",
+        "tl.run_summary": "完成 {done} · 失败 {failed} · 跳过 {skipped} · 取消未跑 {cancelled}",
+        "tl.run_failed_list": "失败 Topic",
+        "tl.run_cancelled_current": "已取消 {name}。其余 Topic 未启动。",
+        "tl.run_empty": "没有可推进项。",
+        "tl.run_mismatch": "另一个视图正在推进。",
     },
 }
 

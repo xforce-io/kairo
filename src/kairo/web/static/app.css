@@ -1085,6 +1085,11 @@ header.top .root-gl.on { color: var(--pine-deep); }
   color: var(--amber); border: 1px solid #ead9ad; background: var(--amber-soft);
   border-radius: 999px; padding: 1px 7px; vertical-align: 1px; white-space: nowrap;
 }
+#tl-run-area { margin: 8px 0 12px; }
+#tl-run-area:empty { display: none; }
+.tl-run-summary { font-size: 13px; color: var(--ink-soft); line-height: 1.5; }
+.tl-run-summary p { margin: 0 0 6px; }
+.tl-run-summary ul { margin: 0; padding-left: 1.2rem; }
 .tl-run-preview { display: grid; gap: 10px; }
 .tl-run-preview ul { margin: 0; padding-left: 1.2rem; }
 .tl-run-preview .dlg-actions { display: flex; gap: 8px; margin-top: 6px; }

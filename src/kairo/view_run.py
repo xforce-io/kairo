@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import datetime as dt
 import re
-from dataclasses import dataclass, replace
+import threading
+import time
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from kairo.engine import pending, workspace_run_plan
@@ -57,6 +59,149 @@ class ViewRunPlan:
                 {"slug": t.slug, "title": t.title} for t in self.skipped_attention
             ],
         }
+
+
+@dataclass(frozen=True)
+class ViewRunSnap:
+    start: dt.date
+    end: dt.date
+    tags: tuple[str, ...]
+    started_at: float
+    finished: bool
+    index: int
+    topic_n: int
+    current_slug: str | None
+    current_task_id: str | None
+    current_title: str
+    ran: tuple[ViewTopic, ...]
+    failed: tuple[ViewTopic, ...]
+    skipped_attention: tuple[ViewTopic, ...]
+    cancelled_running: tuple[ViewTopic, ...]
+    cancelled_pending: tuple[ViewTopic, ...]
+
+
+@dataclass
+class ViewRunSession:
+    """进程内存中的一次 Timeline 视图推进。不写 state.json。"""
+
+    start: dt.date
+    end: dt.date
+    tags: tuple[str, ...]
+    topics: tuple[ViewTopic, ...]
+    skipped_attention: tuple[ViewTopic, ...]
+    started_at: float = field(default_factory=time.time)
+    lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    ready: threading.Event = field(default_factory=threading.Event, repr=False)
+    index: int = 0
+    current_slug: str | None = None
+    current_task_id: str | None = None
+    task_ids: list[str] = field(default_factory=list)
+    cancel_rest: bool = False
+    finished: bool = False
+    ran: list[ViewTopic] = field(default_factory=list)
+    failed: list[ViewTopic] = field(default_factory=list)
+    cancelled_running: list[ViewTopic] = field(default_factory=list)
+    cancelled_pending: list[ViewTopic] = field(default_factory=list)
+
+    @classmethod
+    def from_plan(
+        cls, plan: ViewRunPlan, tags: list[str] | None = None
+    ) -> ViewRunSession:
+        return cls(
+            start=plan.start,
+            end=plan.end,
+            tags=tuple(tags or ()),
+            topics=plan.topics,
+            skipped_attention=plan.skipped_attention,
+        )
+
+    def matches(
+        self, start: dt.date, end: dt.date, tags: list[str] | None
+    ) -> bool:
+        return (
+            self.start == start
+            and self.end == end
+            and self.tags == tuple(tags or ())
+        )
+
+    def topic(self, slug: str) -> ViewTopic | None:
+        for item in self.topics:
+            if item.slug == slug:
+                return item
+        return None
+
+    def snapshot(self) -> ViewRunSnap:
+        with self.lock:
+            title = ""
+            if self.current_slug:
+                for item in self.topics:
+                    if item.slug == self.current_slug:
+                        title = item.title
+                        break
+            return ViewRunSnap(
+                start=self.start,
+                end=self.end,
+                tags=self.tags,
+                started_at=self.started_at,
+                finished=self.finished,
+                index=self.index,
+                topic_n=len(self.topics),
+                current_slug=self.current_slug,
+                current_task_id=self.current_task_id,
+                current_title=title,
+                ran=tuple(self.ran),
+                failed=tuple(self.failed),
+                skipped_attention=self.skipped_attention,
+                cancelled_running=tuple(self.cancelled_running),
+                cancelled_pending=tuple(self.cancelled_pending),
+            )
+
+    def set_current(self, index: int, slug: str, task_id: str) -> None:
+        with self.lock:
+            self.index = index
+            self.current_slug = slug
+            self.current_task_id = task_id
+            if task_id not in self.task_ids:
+                self.task_ids.append(task_id)
+            self.ready.set()
+
+    def note_cancel(self, task_id: str) -> None:
+        with self.lock:
+            if self.finished:
+                return
+            if task_id == self.current_task_id or task_id in self.task_ids:
+                self.cancel_rest = True
+
+    def should_stop(self) -> bool:
+        with self.lock:
+            return self.cancel_rest or self.finished
+
+    def record(self, slug: str, kind: str) -> None:
+        topic = self.topic(slug)
+        if topic is None:
+            topic = ViewTopic(slug=slug, title=slug)
+        with self.lock:
+            if kind == "ran":
+                self.ran.append(topic)
+            elif kind == "failed":
+                self.failed.append(topic)
+            elif kind == "cancelled":
+                self.cancelled_running.append(topic)
+
+    def abort_remaining(self, slugs: list[str]) -> None:
+        with self.lock:
+            for slug in slugs:
+                topic = self.topic(slug)
+                if topic is None:
+                    topic = ViewTopic(slug=slug, title=slug)
+                self.cancelled_pending.append(topic)
+
+    def mark_finished(self) -> None:
+        with self.lock:
+            self.finished = True
+            self.current_slug = None
+            self.current_task_id = None
+            self.ready.set()
 
 
 def _home_of(it: TimelineItem) -> str:

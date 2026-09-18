@@ -15,7 +15,12 @@
   <p class="rev-hint">{{ t('tl.run_attention') }}</p>
   {% endif %}
   <div class="dlg-actions">
-    <form method="post" action="/timeline/run">
+    <form method="post" action="/timeline/run"
+          hx-post="/timeline/run"
+          hx-target="#tl-run-area"
+          hx-swap="innerHTML"
+          hx-disabled-elt="#tl-run-open"
+          hx-on::after-request="var d=document.getElementById('tl-run-dlg'); if(d) d.close();">
       {% if plan.start == plan.end %}
       <input type="hidden" name="day" value="{{ plan.start.isoformat() }}">
       {% else %}

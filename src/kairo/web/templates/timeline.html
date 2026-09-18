@@ -115,6 +115,7 @@
           <div class="tl-run-launch">
             <p class="rev-hint">{{ t('tl.run_visible').format(n=visible_undigested) }}</p>
             <button type="button" class="btn" id="tl-run-open"
+                    {% if view_run_busy %}disabled{% endif %}
                     hx-get="/timeline/run-preview?{{ preview_qs }}"
                     hx-target="#tl-run-dlg-body"
                     hx-swap="innerHTML"
@@ -161,6 +162,7 @@
           <div id="tl-run-dlg-body"></div>
         </dialog>
         {% endif %}
+        <div id="tl-run-area">{{ view_run_html | default('') | safe }}</div>
         {% if range_on %}
           {% for g in range_groups %}
           <div class="tl-range-day">{{ g.key }}</div>

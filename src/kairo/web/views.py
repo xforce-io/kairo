@@ -646,6 +646,11 @@ def timeline_view(
         if q.view == "recent"
         else []
     )
+    view_run_html = ""
+    view_run_busy = False
+    if q.view == "calendar" and getattr(request.app.state, "view_run", None) is not None:
+        view_run_html = _timeline_run_fragment(request)
+        view_run_busy = not request.app.state.view_run.snapshot().finished
     lang = resolve_lang(request)
     if lang == "zh":
         month_label = f"{q.month.year}年{q.month.month}月"
@@ -689,6 +694,8 @@ def timeline_view(
             "timeline_back": timeline_back,
             "visible_undigested": visible_undigested,
             "preview_qs": _view_run_qs(r0, r1, tag_filters),
+            "view_run_html": view_run_html,
+            "view_run_busy": view_run_busy,
         },
     )
 
@@ -763,6 +770,119 @@ def timeline_run_preview(
             {"plan": plan, "tag_filters": tag_filters},
         )
     return JSONResponse(plan.as_json())
+
+
+def _view_run_wrap(request: Request, snap) -> dict:
+    t = _t(request)
+    index_label = None
+    if snap.topic_n > 0 and snap.current_slug:
+        index_label = t("tl.run_index").format(i=snap.index + 1, n=snap.topic_n)
+    return {
+        "elapsed_from": snap.started_at,
+        "headline": snap.current_title or None,
+        "index_label": index_label,
+    }
+
+
+def _timeline_run_fragment(request: Request) -> str:
+    session = getattr(request.app.state, "view_run", None)
+    if session is None:
+        return ""
+    snap = session.snapshot()
+    if snap.finished:
+        return _render(
+            request, "_timeline_run_summary.html", {"snap": snap}
+        ).body.decode()
+    if snap.current_slug and snap.current_task_id:
+        task = request.app.state.registry.get(snap.current_task_id)
+        if task is not None and task.slug == snap.current_slug:
+            from kairo.engine import pending
+            from kairo.web.tasks import render_health_html, render_progress_html
+
+            t = _t(request)
+            wrap = _view_run_wrap(request, snap)
+            try:
+                ws = Workspace.open(Path(request.app.state.root) / snap.current_slug)
+            except WorkspaceNotFound:
+                ws = None
+
+            def _pending():
+                return pending(ws)
+
+            progress_html = render_progress_html(
+                task,
+                t,
+                pending_fn=_pending
+                if ws is not None and task.job_kind == "reconcile"
+                else None,
+                title_fn=(
+                    (lambda item: _title_for_work_item(ws, item))
+                    if ws is not None
+                    else None
+                ),
+                **wrap,
+            )
+            health_html = render_health_html(t) if task.transport_seen else ""
+            return _render(
+                request,
+                "_timeline_run.html",
+                {
+                    "slug": snap.current_slug,
+                    "task_id": snap.current_task_id,
+                    "progress_html": progress_html,
+                    "health_html": health_html,
+                },
+            ).body.decode()
+    return _render(request, "_timeline_run_wait.html", {}).body.decode()
+
+
+@router.post("/timeline/run", response_class=HTMLResponse)
+def timeline_run(
+    request: Request,
+    day: str = Form(""),
+    start: str = Form("", alias="from"),
+    end: str = Form("", alias="to"),
+    tag: list[str] = Form([]),
+) -> HTMLResponse:
+    t = _t(request)
+    if _is_public_read(request):
+        raise HTTPException(status_code=403, detail=t("tl.run_forbidden"))
+    try:
+        a, b = _parse_view_run_range(day or None, start or None, end or None)
+    except TimelineQueryError:
+        raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
+    tag_filters: list[str] = []
+    for raw in tag or []:
+        tag_filters.extend(part for part in str(raw).split() if part)
+    from kairo.view_run import ViewRunSession, plan_view_run
+    from kairo.web.view_run_exec import start_view_run_pump
+
+    plan = plan_view_run(
+        request.app.state.root, a, b, tags=tag_filters or None
+    )
+    if plan.topic_count == 0:
+        raise HTTPException(status_code=400, detail=t("tl.run_empty"))
+    with request.app.state.view_run_lock:
+        current = request.app.state.view_run
+        live = current is not None and not current.snapshot().finished
+        if live:
+            if not current.matches(a, b, tag_filters):
+                raise HTTPException(status_code=400, detail=t("tl.run_mismatch"))
+            session = current
+        else:
+            session = ViewRunSession.from_plan(plan, tag_filters)
+            request.app.state.view_run = session
+            start_view_run_pump(request.app, session)
+    session.ready.wait(timeout=15)
+    return HTMLResponse(_timeline_run_fragment(request))
+
+
+@router.get("/timeline/run-status", response_class=HTMLResponse)
+def timeline_run_status(request: Request) -> HTMLResponse:
+    t = _t(request)
+    if _is_public_read(request):
+        raise HTTPException(status_code=403, detail=t("tl.run_forbidden"))
+    return HTMLResponse(_timeline_run_fragment(request))
 
 
 @router.post("/timeline/review")
@@ -3172,12 +3292,19 @@ def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
     def _pending():
         return pending(ws)
 
+    wrap = {}
+    session = getattr(request.app.state, "view_run", None)
+    if session is not None:
+        snap = session.snapshot()
+        if snap.current_task_id == task_id:
+            wrap = _view_run_wrap(request, snap)
     return StreamingResponse(
         stream_events(
             task,
             t=t,
             pending_fn=_pending if task.job_kind == "reconcile" else None,
             title_fn=lambda item: _title_for_work_item(ws, item),
+            **wrap,
         ),
         media_type="text/event-stream",
     )
@@ -3189,6 +3316,9 @@ def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
     task = request.app.state.registry.get(task_id)
     if task is None or task.slug != slug:
         raise HTTPException(status_code=404, detail=t("err.task_not_found"))
+    session = getattr(request.app.state, "view_run", None)
+    if session is not None:
+        session.note_cancel(task_id)
     ok = request.app.state.registry.cancel(task_id)
     if ok:
         # 只替换按钮，保留 SSE 与 done hook；终态摘要负责刷新主按钮和状态圆点。

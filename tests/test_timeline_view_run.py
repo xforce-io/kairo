@@ -1,8 +1,11 @@
-"""#396 只读层：plan_view_run、列表未加工标记、GET /timeline/run-preview。"""
+"""#396：plan_view_run、列表未加工标记、预览，以及 Web 执行。"""
 
 from __future__ import annotations
 
 import datetime as dt
+import re
+import sys
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -10,7 +13,11 @@ from fastapi.testclient import TestClient
 from kairo.refs import add_global_ref, add_tag, create_tag
 from kairo.view_run import plan_view_run
 from kairo.web.server import create_app
+from kairo.web.tasks import TaskRegistry
 from kairo.workspace import Workspace
+
+_HX = {"HX-Request": "true"}
+_STREAM_RE = re.compile(r"/w/([^/\"']+)/step/([0-9a-f]+)/stream")
 
 
 def _client(root):
@@ -169,7 +176,7 @@ def test_run_preview_html_lists_counts_and_diff(tmp_path):
     assert "2 topics, 3 refs" in r.text
     assert "2 undigested in this view" in r.text
     assert "Confirm" in r.text
-    assert "disabled" not in r.text
+    assert 'class="btn" disabled' not in r.text
 
 
 def test_run_preview_missing_or_bad_date_400(tmp_path):
@@ -211,5 +218,212 @@ def test_run_preview_empty_set_disables_confirm(tmp_path):
     )
     assert prev.status_code == 200
     assert "0 topics, 0 refs" in prev.text
-    assert "disabled" in prev.text
+    assert 'class="btn" disabled' in prev.text
     assert "Ordinary process cannot clear these." in prev.text
+
+
+def _drain_view_run(client, html=None, timeout=60):
+    deadline = time.time() + timeout
+    seen: set[str] = set()
+    if html:
+        m = _STREAM_RE.search(html)
+        if m:
+            client.get(f"/w/{m.group(1)}/step/{m.group(2)}/stream")
+            seen.add(m.group(2))
+    last = None
+    while time.time() < deadline:
+        last = client.get("/timeline/run-status")
+        if "tl-run-summary" in last.text:
+            return last
+        m = _STREAM_RE.search(last.text)
+        if m and m.group(2) not in seen:
+            client.get(f"/w/{m.group(1)}/step/{m.group(2)}/stream")
+            seen.add(m.group(2))
+            continue
+        time.sleep(0.05)
+    raise AssertionError(last.text if last is not None else "no status")
+
+
+def test_view_run_progress_keeps_confirm_clock():
+    from kairo.web.i18n import translator
+    from kairo.web.tasks import StepTask, render_progress_html
+
+    t = translator("en")
+    now = 1_000_000.0
+    task = StepTask(task_id="t", slug="alpha", created_at=now - 1)
+    html = render_progress_html(
+        task,
+        t,
+        now=now,
+        elapsed_from=now - 70,
+        headline="能源梳理",
+        index_label="1 / 2",
+    )
+    assert "能源梳理" in html
+    assert "1 / 2" in html
+    assert "1 min" in html
+    assert "1s" not in html.split("run-progress-text", 1)[1]
+
+
+def test_timeline_run_public_read_forbidden(tmp_path):
+    root, _, _ = _fixture(tmp_path)
+    pub = TestClient(create_app(root, mode="public-read"))
+    r = pub.post("/timeline/run", data={"day": "2026-08-24"})
+    # #200 public-read 写操作统一 fail-closed 404；GET 预览仍由本片 403。
+    assert r.status_code == 404
+    assert pub.get("/timeline/run-status").status_code == 403
+    assert not (root / "alpha" / "references" / "in-a" / "digest.md").is_file()
+
+
+def test_timeline_run_empty_set_400(tmp_path):
+    root = tmp_path / "root"
+    root.mkdir()
+    add_global_ref(
+        root,
+        [_write(tmp_path / "g.txt", "孤儿")],
+        ref_id="orphan",
+        title="孤儿",
+        occurred_at="2026-08-24",
+    )
+    r = _client(root).post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    assert r.status_code == 400
+
+
+def test_timeline_run_missing_date_400(tmp_path):
+    root, _, _ = _fixture(tmp_path)
+    c = _client(root)
+    assert c.post("/timeline/run", data={}, headers=_HX).status_code == 400
+    assert c.post(
+        "/timeline/run", data={"from": "2026-08-24"}, headers=_HX
+    ).status_code == 400
+
+
+def test_timeline_run_processes_out_of_view_and_stays(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, wa, wb = _fixture(tmp_path)
+    wg = Workspace.init(root / "gamma", topic="旁路")
+    wg.add(
+        [_write(tmp_path / "g.txt", "旁路")],
+        ref_id="other-day",
+        title="旁路",
+        occurred_at="2026-08-11",
+    )
+    app = create_app(root)
+    c = TestClient(app)
+    r = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    assert r.status_code == 200
+    assert r.headers.get("location") is None
+    assert "/w/" in r.text  # sse-connect 指向当前 slug，不是整页跳转
+    assert "run-progress" in r.text
+    assert "能源梳理" in r.text or "招聘" in r.text
+    assert "Raw run log" in r.text
+    summary = _drain_view_run(c, r.text)
+    assert "Done 2" in summary.text
+    assert "failed 0" in summary.text
+    assert (wa.references_dir() / "in-a" / "digest.md").is_file()
+    assert (wa.references_dir() / "out-a" / "digest.md").is_file()
+    assert (wb.references_dir() / "in-b" / "digest.md").is_file()
+    assert not (wg.references_dir() / "other-day" / "digest.md").is_file()
+    page = c.get("/timeline", params={"day": "2026-08-24"})
+    assert page.status_code == 200
+    assert "tl-run-summary" in page.text
+    assert page.text.count("tl-undigested") == 0
+    assert "Process" not in page.text
+
+
+def test_timeline_run_partial_failure_continues(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, wa, wb = _fixture(tmp_path)
+    orig = TaskRegistry.start
+
+    def start(self, slug, cwd, argv, **kw):
+        if slug == "alpha":
+            argv = [sys.executable, "-c", "import sys; sys.exit(1)"]
+        return orig(self, slug, cwd, argv, **kw)
+
+    monkeypatch.setattr("kairo.web.tasks.TaskRegistry.start", start)
+    c = TestClient(create_app(root))
+    r = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    assert r.status_code == 200
+    summary = _drain_view_run(c, r.text)
+    assert "failed 1" in summary.text
+    assert "Done 1" in summary.text
+    assert "Failed topics" in summary.text
+    assert 'href="/w/alpha"' in summary.text
+    assert not (wa.references_dir() / "in-a" / "digest.md").is_file()
+    assert (wb.references_dir() / "in-b" / "digest.md").is_file()
+
+
+def test_timeline_run_same_view_attaches_mismatch_400(tmp_path, monkeypatch):
+    orig = TaskRegistry.start
+
+    def start(self, slug, cwd, argv, **kw):
+        argv = [sys.executable, "-c", "import time; time.sleep(30)"]
+        return orig(self, slug, cwd, argv, **kw)
+
+    monkeypatch.setattr("kairo.web.tasks.TaskRegistry.start", start)
+    root, _, _ = _fixture(tmp_path)
+    c = TestClient(create_app(root))
+    first = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    assert first.status_code == 200
+    tid = _STREAM_RE.search(first.text)
+    assert tid
+    again = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    assert again.status_code == 200
+    again_tid = _STREAM_RE.search(again.text)
+    assert again_tid and again_tid.group(2) == tid.group(2)
+    other = c.post(
+        "/timeline/run",
+        data={"from": "2026-08-10", "to": "2026-08-11"},
+        headers=_HX,
+    )
+    assert other.status_code == 400
+    page = c.get("/timeline", params={"day": "2026-08-24"})
+    assert 'id="tl-run-open"' in page.text
+    assert "disabled" in page.text.split('id="tl-run-open"', 1)[1].split(">", 1)[0]
+    assert "run-progress" in page.text
+    cancel = c.post(f"/w/{tid.group(1)}/step/{tid.group(2)}/cancel", headers=_HX)
+    assert cancel.status_code == 200
+    summary = _drain_view_run(c)
+    assert "tl-run-summary" in summary.text
+    assert "cancelled" in summary.text
+
+
+def test_timeline_run_attaches_existing_slug_job(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    from kairo.web.tasks import StepTask
+
+    root, _, _ = _fixture(tmp_path)
+    app = create_app(root)
+    fake = StepTask(task_id="attached", slug="alpha", done=False)
+    app.state.registry._tasks["attached"] = fake
+    app.state.registry._running_by_slug["alpha"] = "attached"
+    c = TestClient(app)
+    r = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    assert r.status_code == 200
+    assert "attached" in r.text
+    fake.done = True
+    fake.exit_code = 0
+    summary = _drain_view_run(c, r.text)
+    assert "tl-run-summary" in summary.text
+    assert (root / "beta" / "references" / "in-b" / "digest.md").is_file()
+
+
+def test_timeline_run_does_not_write_review(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, wa, _ = _fixture(tmp_path)
+    before = {
+        p.name
+        for p in wa.references_dir().iterdir()
+        if p.is_dir()
+    }
+    c = TestClient(create_app(root))
+    r = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    _drain_view_run(c, r.text)
+    after = {
+        p.name
+        for p in wa.references_dir().iterdir()
+        if p.is_dir()
+    }
+    assert after == before
+    assert not any("review" in p.name.lower() for p in wa.references_dir().iterdir())
