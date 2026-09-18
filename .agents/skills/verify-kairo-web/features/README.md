@@ -7,5 +7,6 @@
 | `ref-run-runtime.md` | 单 Ref 一次推进墙钟下降 ≥40%；digest 提取与 compose 重叠、同文只提取一次 | `KAIRO_STUB=1 kairo run`；`pytest tests/test_ref_run_runtime_378.py` |
 | `preview-mermaid.md` | Topic / Ref digest / Artifact 预览把 mermaid 画成图；非法 mermaid 可见失败 | `/w/<slug>`、`/w/<slug>/ref/<id>`、`/projects/<id>/runs/<run>` |
 | `notion-project-datasource.md` | #388 Project 新数据源只认 Notion 页：Settings 文案、粘贴提示、Reader 标签、添加/读取错误码 | `/settings`；`/projects/<id>` 添加框；`/projects/<id>/datasources/<ds>`。S3 agent Run **skip**（需 provider，不在此触发 LLM） |
+| `timeline-view-run.md` | #396 Timeline 当前视图一次确认推进：未加工标记、确认数字、Web/CLI `run-view` | `/timeline?day=`、`/timeline/run-preview`、`POST /timeline/run`、`kairo run-view`。真 ASR/LLM **skip** |
 
 新增用户可见功能时在此加一行并补功能文件；验收 Story 对不上任何一行即 BLOCKED。
