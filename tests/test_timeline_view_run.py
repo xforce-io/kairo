@@ -1,20 +1,25 @@
-"""#396：plan_view_run、列表未加工标记、预览，以及 Web 执行。"""
+"""#396：plan_view_run、列表未加工标记、预览、Web 执行，以及 CLI run-view。"""
 
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 import sys
 import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from typer.testing import CliRunner
 
+from kairo.cli import app as cli_app
 from kairo.refs import add_global_ref, add_tag, create_tag
 from kairo.view_run import plan_view_run
 from kairo.web.server import create_app
 from kairo.web.tasks import TaskRegistry
 from kairo.workspace import Workspace
+
+_cli = CliRunner()
 
 _HX = {"HX-Request": "true"}
 _STREAM_RE = re.compile(r"/w/([^/\"']+)/step/([0-9a-f]+)/stream")
@@ -508,3 +513,235 @@ def test_timeline_run_tag_narrows_started_topics(tmp_path, monkeypatch):
     summary = _drain_view_run(c, r.text)
     assert started == ["alpha"]
     assert "Done 1" in summary.text
+
+
+def _in_a(root):
+    return root / "alpha" / "references" / "in-a" / "digest.md"
+
+
+def _forbid_run(monkeypatch):
+    """Preview / usage paths must not call provider or run_workspace."""
+    import kairo.cli as cli
+
+    called: list[str] = []
+
+    def provider(**_kw):
+        called.append("provider")
+        raise AssertionError("select_provider")
+
+    def run(*_a, **_kw):
+        called.append("run")
+        raise AssertionError("run_workspace")
+
+    monkeypatch.setattr(cli, "select_provider", provider)
+    monkeypatch.setattr(cli, "engine_run_workspace", run)
+    return called
+
+
+def test_run_view_non_tty_without_yes_exits_2_zero_consume(tmp_path, monkeypatch):
+    root, _, _ = _fixture(tmp_path)
+    called = _forbid_run(monkeypatch)
+    result = _cli.invoke(cli_app, ["run-view", str(root), "--day", "2026-08-24"])
+    assert result.exit_code == 2, result.output
+    assert "2 topics, 3 refs" in result.output
+    assert "alpha" in result.output and "beta" in result.output
+    assert called == []
+    assert not _in_a(root).is_file()
+    assert not (root / "alpha" / "references" / "out-a" / "digest.md").is_file()
+    assert not (root / "beta" / "references" / "in-b" / "digest.md").is_file()
+
+
+def test_run_view_empty_set_exits_0(tmp_path, monkeypatch):
+    root = tmp_path / "root"
+    root.mkdir()
+    add_global_ref(
+        root,
+        [_write(tmp_path / "g.txt", "孤儿")],
+        ref_id="orphan",
+        title="孤儿",
+        occurred_at="2026-08-24",
+    )
+    called = _forbid_run(monkeypatch)
+    result = _cli.invoke(cli_app, ["run-view", str(root), "--day", "2026-08-24"])
+    assert result.exit_code == 0, result.output
+    assert "0 topics, 0 refs" in result.output
+    assert called == []
+
+
+def test_run_view_missing_or_partial_or_illegal_date_exits_2(tmp_path, monkeypatch):
+    root, _, _ = _fixture(tmp_path)
+    called = _forbid_run(monkeypatch)
+    missing = _cli.invoke(cli_app, ["run-view", str(root)])
+    assert missing.exit_code == 2
+    only_from = _cli.invoke(
+        cli_app, ["run-view", str(root), "--from", "2026-08-24"]
+    )
+    assert only_from.exit_code == 2
+    only_to = _cli.invoke(cli_app, ["run-view", str(root), "--to", "2026-08-24"])
+    assert only_to.exit_code == 2
+    bad = _cli.invoke(cli_app, ["run-view", str(root), "--day", "2026-02-31"])
+    assert bad.exit_code == 2
+    assert called == []
+    assert not _in_a(root).is_file()
+
+
+def test_run_view_day_and_range_are_mutex(tmp_path, monkeypatch):
+    root, _, _ = _fixture(tmp_path)
+    called = _forbid_run(monkeypatch)
+    result = _cli.invoke(
+        cli_app,
+        [
+            "run-view",
+            str(root),
+            "--day",
+            "2026-08-24",
+            "--from",
+            "2026-08-10",
+            "--to",
+            "2026-08-24",
+        ],
+    )
+    assert result.exit_code == 2
+    assert called == []
+    assert not _in_a(root).is_file()
+
+
+def test_run_view_yes_runs_in_set_including_out_of_view(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, wa, wb = _fixture(tmp_path)
+    wg = Workspace.init(root / "gamma", topic="旁路")
+    wg.add(
+        [_write(tmp_path / "g.txt", "旁路")],
+        ref_id="other-day",
+        title="旁路",
+        occurred_at="2026-08-11",
+    )
+    import kairo.cli as cli
+
+    called: list[str] = []
+    real = cli.engine_run_workspace
+
+    def wrap(ws, provider, **kw):
+        called.append(ws.root.name)
+        return real(ws, provider, **kw)
+
+    monkeypatch.setattr(cli, "engine_run_workspace", wrap)
+    result = _cli.invoke(
+        cli_app, ["run-view", str(root), "--day", "2026-08-24", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert called == ["alpha", "beta"]
+    assert (wa.references_dir() / "in-a" / "digest.md").is_file()
+    assert (wa.references_dir() / "out-a" / "digest.md").is_file()
+    assert (wb.references_dir() / "in-b" / "digest.md").is_file()
+    assert not (wg.references_dir() / "other-day" / "digest.md").is_file()
+
+
+def test_run_view_json_preview_matches_plan(tmp_path, monkeypatch):
+    root, _, _ = _fixture(tmp_path)
+    day = dt.date(2026, 8, 24)
+    plan = plan_view_run(root, day, day)
+    called = _forbid_run(monkeypatch)
+    result = _cli.invoke(
+        cli_app, ["run-view", str(root), "--day", "2026-08-24", "--json"]
+    )
+    assert result.exit_code == 2, result.output
+    body = json.loads(result.output)
+    assert body == plan.as_json()
+    assert called == []
+    assert not _in_a(root).is_file()
+
+
+def test_run_view_partial_failure_continues(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, _, _ = _fixture(tmp_path)
+    import kairo.cli as cli
+
+    called: list[str] = []
+    real = cli.engine_run_workspace
+
+    def wrap(ws, provider, **kw):
+        called.append(ws.root.name)
+        if ws.root.name == "alpha":
+            raise RuntimeError("boom")
+        return real(ws, provider, **kw)
+
+    monkeypatch.setattr(cli, "engine_run_workspace", wrap)
+    result = _cli.invoke(
+        cli_app, ["run-view", str(root), "--day", "2026-08-24", "--yes"]
+    )
+    assert result.exit_code == 1, result.output
+    assert called == ["alpha", "beta"]
+
+
+def test_run_view_help_has_no_tag_option():
+    result = _cli.invoke(cli_app, ["run-view", "--help"])
+    assert result.exit_code == 0, result.output
+    plain = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "--tag" not in plain
+    assert "run --all" in plain
+
+
+def test_run_view_yes_json_includes_ran_failed(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, _, _ = _fixture(tmp_path)
+    result = _cli.invoke(
+        cli_app, ["run-view", str(root), "--day", "2026-08-24", "--yes", "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    body = json.loads(result.output)
+    assert body["topic_count"] == 2
+    assert body["ref_count"] == 3
+    assert body["ran"] == ["alpha", "beta"]
+    assert body["failed"] == []
+    assert body["cancelled"] == []
+    assert body["skipped_attention"] == []
+
+
+def test_run_view_yes_all_attention_exits_0(tmp_path, monkeypatch):
+    root, _, _ = _fixture(tmp_path)
+    monkeypatch.setattr(
+        "kairo.view_run.workspace_run_plan",
+        lambda ws, catalog=None: {"mode": "attention"},
+    )
+    called = _forbid_run(monkeypatch)
+    result = _cli.invoke(
+        cli_app, ["run-view", str(root), "--day", "2026-08-24", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert "0 topics, 0 refs" in result.output
+    plan = plan_view_run(root, dt.date(2026, 8, 24), dt.date(2026, 8, 24))
+    assert plan.topic_count == 0
+    assert plan.skipped_attention
+    assert called == []
+
+
+def test_run_view_yes_does_not_use_task_registry(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, _, _ = _fixture(tmp_path)
+    hits: list[str] = []
+
+    def boom(*_a, **_k):
+        hits.append("start")
+        raise AssertionError("CLI run-view must not use TaskRegistry")
+
+    monkeypatch.setattr("kairo.web.tasks.TaskRegistry.start", boom)
+    result = _cli.invoke(
+        cli_app, ["run-view", str(root), "--day", "2026-08-24", "--yes"]
+    )
+    assert result.exit_code == 0, result.output
+    assert hits == []
+    assert _in_a(root).is_file()
+
+
+def test_run_view_tty_decline_exits_0_zero_consume(tmp_path, monkeypatch):
+    root, _, _ = _fixture(tmp_path)
+    called = _forbid_run(monkeypatch)
+    monkeypatch.setattr("kairo.cli._stdin_isatty", lambda: True)
+    result = _cli.invoke(
+        cli_app, ["run-view", str(root), "--day", "2026-08-24"], input="n\n"
+    )
+    assert result.exit_code == 0, result.output
+    assert "2 topics, 3 refs" in result.output
+    assert called == []
+    assert not _in_a(root).is_file()
