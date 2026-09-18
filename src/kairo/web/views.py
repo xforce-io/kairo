@@ -700,6 +700,25 @@ def timeline_view(
     )
 
 
+def _with_run_open_oob(request: Request, html: str, *, disabled: bool) -> str:
+    session = getattr(request.app.state, "view_run", None)
+    if session is None:
+        return html
+    snap = session.snapshot()
+    qs = _view_run_qs(snap.start, snap.end, list(snap.tags))
+    t = _t(request)
+    disabled_attr = " disabled" if disabled else ""
+    oob = (
+        f'<div id="tl-run-open-wrap" hx-swap-oob="true">'
+        f'<button type="button" class="btn" id="tl-run-open"{disabled_attr} '
+        f'hx-get="/timeline/run-preview?{qs}" hx-target="#tl-run-dlg-body" '
+        f'hx-swap="innerHTML" '
+        f"onclick=\"document.getElementById('tl-run-dlg').showModal()\">"
+        f"{t('tl.run_btn')}</button></div>"
+    )
+    return html + oob
+
+
 def _view_run_qs(start, end, tag_filters: list[str]) -> str:
     params: list[tuple[str, str]] = []
     if start != end:
@@ -823,17 +842,31 @@ def _timeline_run_fragment(request: Request) -> str:
                 **wrap,
             )
             health_html = render_health_html(t) if task.transport_seen else ""
-            return _render(
+            if task.done:
+                return _with_run_open_oob(
+                    request,
+                    _render(request, "_timeline_run_wait.html", {}).body.decode(),
+                    disabled=True,
+                )
+            return _with_run_open_oob(
                 request,
-                "_timeline_run.html",
-                {
-                    "slug": snap.current_slug,
-                    "task_id": snap.current_task_id,
-                    "progress_html": progress_html,
-                    "health_html": health_html,
-                },
-            ).body.decode()
-    return _render(request, "_timeline_run_wait.html", {}).body.decode()
+                _render(
+                    request,
+                    "_timeline_run.html",
+                    {
+                        "slug": snap.current_slug,
+                        "task_id": snap.current_task_id,
+                        "progress_html": progress_html,
+                        "health_html": health_html,
+                    },
+                ).body.decode(),
+                disabled=True,
+            )
+    return _with_run_open_oob(
+        request,
+        _render(request, "_timeline_run_wait.html", {}).body.decode(),
+        disabled=True,
+    )
 
 
 @router.post("/timeline/run", response_class=HTMLResponse)
@@ -3317,7 +3350,7 @@ def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
     if task is None or task.slug != slug:
         raise HTTPException(status_code=404, detail=t("err.task_not_found"))
     session = getattr(request.app.state, "view_run", None)
-    if session is not None:
+    if session is not None and not task.done:
         session.note_cancel(task_id)
     ok = request.app.state.registry.cancel(task_id)
     if ok:

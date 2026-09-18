@@ -427,6 +427,90 @@ def test_timeline_run_same_view_attaches_mismatch_400(tmp_path, monkeypatch):
                 app.state.registry.cancel(task.task_id)
 
 
+def test_view_run_post_oob_disables_launch(tmp_path, monkeypatch):
+    orig = TaskRegistry.start
+
+    def start(self, slug, cwd, argv, **kw):
+        argv = [sys.executable, "-c", "import time; time.sleep(30)"]
+        return orig(self, slug, cwd, argv, **kw)
+
+    monkeypatch.setattr("kairo.web.tasks.TaskRegistry.start", start)
+    root, _, _ = _fixture(tmp_path)
+    app = create_app(root)
+    c = TestClient(app)
+    try:
+        first = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+        assert first.status_code == 200
+        chunk = first.text.split('id="tl-run-open"', 1)
+        assert len(chunk) == 2
+        attrs = chunk[1].split(">", 1)[0]
+        assert "disabled" in attrs
+        assert 'hx-swap-oob="true"' in first.text
+        assert 'id="tl-run-open-wrap"' in first.text
+    finally:
+        sess = getattr(app.state, "view_run", None)
+        if sess is not None:
+            snap = sess.snapshot()
+            if snap.current_task_id:
+                sess.note_cancel(snap.current_task_id)
+                app.state.registry.cancel(snap.current_task_id)
+        for task in list(getattr(app.state.registry, "_tasks", {}).values()):
+            if not task.done:
+                app.state.registry.cancel(task.task_id)
+
+
+def test_cancel_finished_topic_does_not_abort_rest(tmp_path, monkeypatch):
+    orig = TaskRegistry.start
+
+    def start(self, slug, cwd, argv, **kw):
+        if slug == "alpha":
+            argv = [sys.executable, "-c", "import sys; sys.exit(0)"]
+        else:
+            argv = [sys.executable, "-c", "import time; time.sleep(0.4)"]
+        return orig(self, slug, cwd, argv, **kw)
+
+    monkeypatch.setattr("kairo.web.tasks.TaskRegistry.start", start)
+    root, _, wb = _fixture(tmp_path)
+    app = create_app(root)
+    c = TestClient(app)
+    try:
+        r = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+        assert r.status_code == 200
+        first = _STREAM_RE.search(r.text)
+        assert first
+        alpha_tid = first.group(2)
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            task = app.state.registry.get(alpha_tid)
+            if task is not None and task.done:
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError("alpha never finished")
+        cancel = c.post(f"/w/alpha/step/{alpha_tid}/cancel", headers=_HX)
+        assert cancel.status_code == 200
+        summary = _drain_view_run(c, r.text)
+        assert "tl-run-summary" in summary.text
+        snap = app.state.view_run.snapshot()
+        assert {t.slug for t in snap.cancelled_pending} == set()
+        assert "beta" in {t.slug for t in snap.ran} or (
+            wb.references_dir() / "in-b" / "digest.md"
+        ).is_file() or snap.current_slug == "beta" or any(
+            t.slug == "beta" for t in snap.ran + snap.failed
+        )
+        assert not snap.cancelled_pending
+    finally:
+        sess = getattr(app.state, "view_run", None)
+        if sess is not None:
+            snap = sess.snapshot()
+            if snap.current_task_id:
+                sess.note_cancel(snap.current_task_id)
+                app.state.registry.cancel(snap.current_task_id)
+        for task in list(getattr(app.state.registry, "_tasks", {}).values()):
+            if not task.done:
+                app.state.registry.cancel(task.task_id)
+
+
 def test_timeline_run_attaches_existing_slug_job(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     from kairo.web.tasks import StepTask

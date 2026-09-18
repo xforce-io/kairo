@@ -114,12 +114,14 @@
           {% if show_run %}
           <div class="tl-run-launch">
             <p class="rev-hint">{{ t('tl.run_visible').format(n=visible_undigested) }}</p>
+            <div id="tl-run-open-wrap">
             <button type="button" class="btn" id="tl-run-open"
                     {% if view_run_busy %}disabled{% endif %}
                     hx-get="/timeline/run-preview?{{ preview_qs }}"
                     hx-target="#tl-run-dlg-body"
                     hx-swap="innerHTML"
                     onclick="document.getElementById('tl-run-dlg').showModal()">{{ t('tl.run_btn') }}</button>
+            </div>
           </div>
           {% endif %}
           {% if show_rev %}

@@ -169,7 +169,7 @@ class ViewRunSession:
         with self.lock:
             if self.finished:
                 return
-            if task_id == self.current_task_id or task_id in self.task_ids:
+            if task_id == self.current_task_id:
                 self.cancel_rest = True
 
     def should_stop(self) -> bool:
