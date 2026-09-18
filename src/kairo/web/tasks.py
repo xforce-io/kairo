@@ -247,12 +247,21 @@ def render_progress_html(
     pending_fn: Callable[[], list] | None = None,
     title_fn: Callable[[object], str] | None = None,
     now: float | None = None,
+    elapsed_from: float | None = None,
+    headline: str | None = None,
+    index_label: str | None = None,
 ) -> str:
     phrase = resolve_progress_phrase(task, t, pending_fn=pending_fn, title_fn=title_fn)
-    elapsed = format_elapsed((now if now is not None else time.time()) - task.created_at, t)
-    return (
-        f'<span class="run-progress-text">{phrase} · {html.escape(elapsed, quote=True)}</span>'
-    )
+    origin = elapsed_from if elapsed_from is not None else task.created_at
+    elapsed = format_elapsed((now if now is not None else time.time()) - origin, t)
+    parts: list[str] = []
+    if headline:
+        parts.append(html.escape(headline, quote=True))
+    if index_label:
+        parts.append(html.escape(index_label, quote=True))
+    parts.append(phrase)
+    parts.append(html.escape(elapsed, quote=True))
+    return f'<span class="run-progress-text">{" · ".join(parts)}</span>'
 
 
 def render_health_html(t: Callable[[str], str]) -> str:
@@ -399,6 +408,9 @@ def stream_events(
     t: Callable[[str], str] | None = None,
     pending_fn: Callable[[], list] | None = None,
     title_fn: Callable[[object], str] | None = None,
+    elapsed_from: float | None = None,
+    headline: str | None = None,
+    index_label: str | None = None,
 ) -> Iterator[str]:
     """SSE:#157 连接后先 progress、(已锁存则) health,再回放 message;结束推 done。
 
@@ -412,7 +424,13 @@ def stream_events(
 
     def _progress() -> str:
         html_frag = render_progress_html(
-            task, t, pending_fn=pending_fn, title_fn=title_fn
+            task,
+            t,
+            pending_fn=pending_fn,
+            title_fn=title_fn,
+            elapsed_from=elapsed_from,
+            headline=headline,
+            index_label=index_label,
         )
         return f"event: progress\ndata: {html_frag}\n\n"
 

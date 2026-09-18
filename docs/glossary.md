@@ -9,6 +9,8 @@
 | 历史归属回填 | 一次性把历史 Ref 的 workspace home 映射为同名 Topic Tag，并为该 Topic 写入同名包含规则的受控迁移。 | home 成员兼容、自动打标 |
 | Tag | 打在 Ref 上的分类标签，可多选，不拥有资料。 | 文件夹、Inbox |
 | Timeline | serve root 上唯一的中立时间流，按发生日浏览 Ref、Project 事件与 Artifact。 | Inbox、排期、最近加入 |
+| 未加工 | Timeline 当前日历视图内尚无 digest 的 stream Ref；与缺 brief 无关。 | 待办、stale、Inbox 项 |
+| 入集 Topic | 当前日历视图中至少有一条未加工 stream 作为成员、且普通 `kairo run` 可推进的 Topic。 | 屏幕可见 Topic、home Topic |
 | 系统事件 | Timeline 按发生日列出的一条 Ref、Project 或 Artifact 记录；Timeline 不拥有该实体。 | 日程、Timeline 条目 |
 | 包含规则 | Topic 声明的 Tag 列表；Ref 命中其中任一即成为成员。 | 智能合集、AND 规则 |
 | constitution | workspace 里声明期望状态的 `constitution.yaml`，step 朝它调和。 | 宪法文件 |

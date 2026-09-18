@@ -87,6 +87,8 @@ class TimelineItem:
     task_id: str = ""
     folded: tuple["TimelineItem", ...] = ()
     display_time: str = ""
+    fold: bool = True  # source_class.fold; corpus 为 False
+    undigested: bool = False  # 仅日历 pane 标注；只看 digest 文件
 
 
 def scan_timeline(root: Path | str) -> list[TimelineItem]:
@@ -131,6 +133,7 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
                 brief=(man.brief or "").strip(),
                 kind="ref",
                 href=f"/refs/{ref_id}?home={home}",
+                fold=is_fold_class(ws, man.source_class),
             )
         )
     items.extend(_scan_project_events(root))

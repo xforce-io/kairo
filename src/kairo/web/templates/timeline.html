@@ -5,9 +5,9 @@
 {% macro row_href(it) %}{% if it.kind == 'project' or it.kind == 'artifact' %}{{ it.href }}{% else %}/refs/{{ it.id | urlencode }}?home={{ it.workspace | urlencode }}&back={{ timeline_back | urlencode }}{% endif %}{% endmacro %}
 {% macro tl_row(it, extra_meta='', show_brief=false) %}
       {% set brief = it.brief if show_brief else '' %}
-      <a class="tl-row tl-kind-{{ it.kind|default('ref') }}{% if brief %} has-brief{% endif %}" href="{{ row_href(it) }}">
+      <a class="tl-row tl-kind-{{ it.kind|default('ref') }}{% if brief %} has-brief{% endif %}{% if it.undigested %} undigested{% endif %}" href="{{ row_href(it) }}">
         <span class="tl-kind">{{ t('tl.kind_' ~ (it.kind|default('ref'))) }}</span>
-        <span class="tl-title">{{ it.title }}</span>
+        <span class="tl-title">{{ it.title }}{% if it.undigested %} <span class="tl-undigested">{{ t('tl.undigested') }}</span>{% endif %}</span>
         {% if brief %}<span class="tl-brief">{{ brief }}</span>{% endif %}
         {% if it.kind|default('ref') == 'ref' %}
         <span class="tl-ref-tags">{% for tag in it.tags %}<span>{{ tag }}</span>{% else %}<span class="untagged">{{ t('tl.untagged') }}</span>{% endfor %}</span>
@@ -107,8 +107,25 @@
           <h2>{% if range_on %}{{ range_label }}{% else %}{{ day_iso }}{% endif %}</h2>
           <span class="count">{{ day_items|length }}</span>
         </div>
-        {% if range_on and (too_long or day_items) %}
+        {% set show_run = visible_undigested > 0 and not public_read %}
+        {% set show_rev = range_on and (too_long or day_items) %}
+        {% if show_run or show_rev %}
         <div class="rev-actions">
+          {% if show_run %}
+          <div class="tl-run-launch">
+            <p class="rev-hint">{{ t('tl.run_visible').format(n=visible_undigested) }}</p>
+            <div id="tl-run-open-wrap">
+            <button type="button" class="btn" id="tl-run-open"
+                    {% if view_run_busy %}disabled{% endif %}
+                    hx-get="/timeline/run-preview?{{ preview_qs }}"
+                    hx-target="#tl-run-dlg-body"
+                    hx-swap="innerHTML"
+                    onclick="document.getElementById('tl-run-dlg').showModal()">{{ t('tl.run_btn') }}</button>
+            </div>
+          </div>
+          {% endif %}
+          {% if show_rev %}
+          <div class="tl-rev-launch">
           {% if too_long %}
           <p class="rev-hint">{{ t('tl.review_too_long').format(n=max_range_days) }}</p>
           <button type="button" class="btn" disabled>{{ t('tl.review_btn') }}</button>
@@ -134,8 +151,20 @@
           });
           </script>
           {% endif %}
+          </div>
+          {% endif %}
         </div>
         {% endif %}
+        {% if show_run %}
+        <dialog id="tl-run-dlg" class="ref-dialog" onclick="if(event.target===this)this.close()">
+          <div class="dlg-head">
+            <h3 class="dlg-title">{{ t('tl.run_confirm_title') }}</h3>
+            <button type="button" class="dlg-x" aria-label="close" onclick="this.closest('dialog').close()">×</button>
+          </div>
+          <div id="tl-run-dlg-body"></div>
+        </dialog>
+        {% endif %}
+        <div id="tl-run-area">{{ view_run_html | default('') | safe }}</div>
         {% if range_on %}
           {% for g in range_groups %}
           <div class="tl-range-day">{{ g.key }}</div>

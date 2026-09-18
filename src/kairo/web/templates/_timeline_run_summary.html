@@ -1,0 +1,14 @@
+<div class="tl-run-summary" role="status">
+  <p>{{ t('tl.run_summary').format(done=snap.ran|length, failed=snap.failed|length, skipped=snap.skipped_attention|length, cancelled=snap.cancelled_pending|length) }}</p>
+  {% if snap.failed %}
+  <p>{{ t('tl.run_failed_list') }}</p>
+  <ul>
+    {% for topic in snap.failed %}
+    <li><a href="/w/{{ topic.slug | urlencode }}">{{ topic.title }}</a></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if snap.cancelled_running %}
+  <p>{{ t('tl.run_cancelled_current').format(name=snap.cancelled_running[0].title) }}</p>
+  {% endif %}
+</div>

@@ -610,6 +610,13 @@ def timeline_view(
         )
     else:
         day_items = [it for it in presented if it.occurred_at == q.day]
+    from kairo.view_run import annotate_undigested, count_visible_undigested
+
+    if q.view == "calendar":
+        day_items = annotate_undigested(request.app.state.root, day_items)
+    visible_undigested = (
+        count_visible_undigested(day_items) if q.view == "calendar" else 0
+    )
     range_groups: list[dict] = []
     if range_on and r0 != r1:
         buckets: dict[str, list] = {}
@@ -639,6 +646,11 @@ def timeline_view(
         if q.view == "recent"
         else []
     )
+    view_run_html = ""
+    view_run_busy = False
+    if q.view == "calendar" and getattr(request.app.state, "view_run", None) is not None:
+        view_run_html = _timeline_run_fragment(request)
+        view_run_busy = not request.app.state.view_run.snapshot().finished
     lang = resolve_lang(request)
     if lang == "zh":
         month_label = f"{q.month.year}年{q.month.month}月"
@@ -680,8 +692,230 @@ def timeline_view(
             "tag_filters": tag_filters,
             "tag_catalog": list_tags(_serve(request)),
             "timeline_back": timeline_back,
+            "visible_undigested": visible_undigested,
+            "preview_qs": _view_run_qs(r0, r1, tag_filters),
+            "view_run_html": view_run_html,
+            "view_run_busy": view_run_busy,
         },
     )
+
+
+def _with_run_open_oob(request: Request, html: str, *, disabled: bool) -> str:
+    session = getattr(request.app.state, "view_run", None)
+    if session is None:
+        return html
+    snap = session.snapshot()
+    qs = _view_run_qs(snap.start, snap.end, list(snap.tags))
+    t = _t(request)
+    disabled_attr = " disabled" if disabled else ""
+    oob = (
+        f'<div id="tl-run-open-wrap" hx-swap-oob="true">'
+        f'<button type="button" class="btn" id="tl-run-open"{disabled_attr} '
+        f'hx-get="/timeline/run-preview?{qs}" hx-target="#tl-run-dlg-body" '
+        f'hx-swap="innerHTML" '
+        f"onclick=\"document.getElementById('tl-run-dlg').showModal()\">"
+        f"{t('tl.run_btn')}</button></div>"
+    )
+    return html + oob
+
+
+def _view_run_qs(start, end, tag_filters: list[str]) -> str:
+    params: list[tuple[str, str]] = []
+    if start != end:
+        params.append(("from", start.isoformat()))
+        params.append(("to", end.isoformat()))
+    else:
+        params.append(("day", start.isoformat()))
+    for tag in tag_filters:
+        params.append(("tag", tag))
+    return urlencode(params)
+
+
+def _parse_view_run_range(
+    day: str | None, start: str | None, end: str | None
+):
+    day_s = (day or "").strip() or None
+    start_s = (start or "").strip() or None
+    end_s = (end or "").strip() or None
+    if day_s and (start_s or end_s):
+        raise TimelineQueryError("day and range exclusive")
+    if start_s or end_s:
+        if not start_s or not end_s:
+            raise TimelineQueryError("range needs from and to")
+        a = parse_calendar_date(start_s)
+        b = parse_calendar_date(end_s)
+        if a is None or b is None:
+            raise TimelineQueryError("illegal day")
+        if a > b:
+            a, b = b, a
+        return a, b
+    if not day_s:
+        raise TimelineQueryError("need day or range")
+    parsed = parse_calendar_date(day_s)
+    if parsed is None:
+        raise TimelineQueryError("illegal day")
+    return parsed, parsed
+
+
+@router.get("/timeline/run-preview")
+def timeline_run_preview(
+    request: Request,
+    day: str | None = None,
+    start: str | None = Query(None, alias="from"),
+    end: str | None = Query(None, alias="to"),
+    tag: list[str] | None = Query(None),
+):
+    t = _t(request)
+    if _is_public_read(request):
+        raise HTTPException(status_code=403, detail=t("tl.run_forbidden"))
+    try:
+        a, b = _parse_view_run_range(day, start, end)
+    except TimelineQueryError:
+        raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
+    tag_filters = []
+    for raw in tag or []:
+        tag_filters.extend(part for part in str(raw).split() if part)
+    from kairo.view_run import plan_view_run
+
+    plan = plan_view_run(
+        request.app.state.root, a, b, tags=tag_filters or None
+    )
+    hx = (request.headers.get("hx-request") or "").lower() == "true"
+    accept = request.headers.get("accept") or ""
+    if hx or ("text/html" in accept and "application/json" not in accept):
+        return _render(
+            request,
+            "_timeline_run_preview.html",
+            {"plan": plan, "tag_filters": tag_filters},
+        )
+    return JSONResponse(plan.as_json())
+
+
+def _view_run_wrap(request: Request, snap) -> dict:
+    t = _t(request)
+    index_label = None
+    if snap.topic_n > 0 and snap.current_slug:
+        index_label = t("tl.run_index").format(i=snap.index + 1, n=snap.topic_n)
+    return {
+        "elapsed_from": snap.started_at,
+        "headline": snap.current_title or None,
+        "index_label": index_label,
+    }
+
+
+def _timeline_run_fragment(request: Request) -> str:
+    session = getattr(request.app.state, "view_run", None)
+    if session is None:
+        return ""
+    snap = session.snapshot()
+    if snap.finished:
+        return _render(
+            request, "_timeline_run_summary.html", {"snap": snap}
+        ).body.decode()
+    if snap.current_slug and snap.current_task_id:
+        task = request.app.state.registry.get(snap.current_task_id)
+        if task is not None and task.slug == snap.current_slug:
+            from kairo.engine import pending
+            from kairo.web.tasks import render_health_html, render_progress_html
+
+            t = _t(request)
+            wrap = _view_run_wrap(request, snap)
+            try:
+                ws = Workspace.open(Path(request.app.state.root) / snap.current_slug)
+            except WorkspaceNotFound:
+                ws = None
+
+            def _pending():
+                return pending(ws)
+
+            progress_html = render_progress_html(
+                task,
+                t,
+                pending_fn=_pending
+                if ws is not None and task.job_kind == "reconcile"
+                else None,
+                title_fn=(
+                    (lambda item: _title_for_work_item(ws, item))
+                    if ws is not None
+                    else None
+                ),
+                **wrap,
+            )
+            health_html = render_health_html(t) if task.transport_seen else ""
+            if task.done:
+                return _with_run_open_oob(
+                    request,
+                    _render(request, "_timeline_run_wait.html", {}).body.decode(),
+                    disabled=True,
+                )
+            return _with_run_open_oob(
+                request,
+                _render(
+                    request,
+                    "_timeline_run.html",
+                    {
+                        "slug": snap.current_slug,
+                        "task_id": snap.current_task_id,
+                        "progress_html": progress_html,
+                        "health_html": health_html,
+                    },
+                ).body.decode(),
+                disabled=True,
+            )
+    return _with_run_open_oob(
+        request,
+        _render(request, "_timeline_run_wait.html", {}).body.decode(),
+        disabled=True,
+    )
+
+
+@router.post("/timeline/run", response_class=HTMLResponse)
+def timeline_run(
+    request: Request,
+    day: str = Form(""),
+    start: str = Form("", alias="from"),
+    end: str = Form("", alias="to"),
+    tag: list[str] = Form([]),
+) -> HTMLResponse:
+    t = _t(request)
+    if _is_public_read(request):
+        raise HTTPException(status_code=403, detail=t("tl.run_forbidden"))
+    try:
+        a, b = _parse_view_run_range(day or None, start or None, end or None)
+    except TimelineQueryError:
+        raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
+    tag_filters: list[str] = []
+    for raw in tag or []:
+        tag_filters.extend(part for part in str(raw).split() if part)
+    from kairo.view_run import ViewRunSession, plan_view_run
+    from kairo.web.view_run_exec import start_view_run_pump
+
+    plan = plan_view_run(
+        request.app.state.root, a, b, tags=tag_filters or None
+    )
+    if plan.topic_count == 0:
+        raise HTTPException(status_code=400, detail=t("tl.run_empty"))
+    with request.app.state.view_run_lock:
+        current = request.app.state.view_run
+        live = current is not None and not current.snapshot().finished
+        if live:
+            if not current.matches(a, b, tag_filters):
+                raise HTTPException(status_code=400, detail=t("tl.run_mismatch"))
+            session = current
+        else:
+            session = ViewRunSession.from_plan(plan, tag_filters)
+            request.app.state.view_run = session
+            start_view_run_pump(request.app, session)
+    session.ready.wait(timeout=15)
+    return HTMLResponse(_timeline_run_fragment(request))
+
+
+@router.get("/timeline/run-status", response_class=HTMLResponse)
+def timeline_run_status(request: Request) -> HTMLResponse:
+    t = _t(request)
+    if _is_public_read(request):
+        raise HTTPException(status_code=403, detail=t("tl.run_forbidden"))
+    return HTMLResponse(_timeline_run_fragment(request))
 
 
 @router.post("/timeline/review")
@@ -3091,12 +3325,19 @@ def step_stream(request: Request, slug: str, task_id: str) -> StreamingResponse:
     def _pending():
         return pending(ws)
 
+    wrap = {}
+    session = getattr(request.app.state, "view_run", None)
+    if session is not None:
+        snap = session.snapshot()
+        if snap.current_task_id == task_id:
+            wrap = _view_run_wrap(request, snap)
     return StreamingResponse(
         stream_events(
             task,
             t=t,
             pending_fn=_pending if task.job_kind == "reconcile" else None,
             title_fn=lambda item: _title_for_work_item(ws, item),
+            **wrap,
         ),
         media_type="text/event-stream",
     )
@@ -3108,6 +3349,9 @@ def cancel_step(request: Request, slug: str, task_id: str) -> HTMLResponse:
     task = request.app.state.registry.get(task_id)
     if task is None or task.slug != slug:
         raise HTTPException(status_code=404, detail=t("err.task_not_found"))
+    session = getattr(request.app.state, "view_run", None)
+    if session is not None and not task.done:
+        session.note_cancel(task_id)
     ok = request.app.state.registry.cancel(task_id)
     if ok:
         # 只替换按钮，保留 SSE 与 done hook；终态摘要负责刷新主按钮和状态圆点。

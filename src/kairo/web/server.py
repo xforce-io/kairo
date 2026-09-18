@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Literal
 
@@ -49,6 +50,8 @@ def create_app(root: Path, *, mode: str = "console") -> FastAPI:
     app.state.public_read = public
     app.state.templates = Jinja2Templates(directory=str(_HERE / "templates"))
     app.state.registry = TaskRegistry()
+    app.state.view_run = None
+    app.state.view_run_lock = threading.Lock()
     app.mount("/static", StaticFiles(directory=str(_HERE / "static")), name="static")
     app.include_router(router)
     if not public:

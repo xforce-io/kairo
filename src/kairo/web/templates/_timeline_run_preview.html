@@ -1,0 +1,37 @@
+<div class="tl-run-preview">
+  <p class="rev-hint">{{ t('tl.run_counts').format(t=plan.topic_count, r=plan.ref_count) }}</p>
+  {% if plan.topics %}
+  <ul>
+    {% for topic in plan.topics %}
+    <li>{{ topic.title }} <span class="muted">({{ topic.slug }})</span></li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  <p class="rev-hint">{{ t('tl.run_counts_hint') }}</p>
+  {% if plan.ref_count > plan.visible_undigested %}
+  <p class="rev-hint">{{ t('tl.run_diff').format(v=plan.visible_undigested, d=plan.ref_count - plan.visible_undigested) }}</p>
+  {% endif %}
+  {% if plan.ref_count == 0 %}
+  <p class="rev-hint">{{ t('tl.run_attention') }}</p>
+  {% endif %}
+  <div class="dlg-actions">
+    <form method="post" action="/timeline/run"
+          hx-post="/timeline/run"
+          hx-target="#tl-run-area"
+          hx-swap="innerHTML"
+          hx-disabled-elt="#tl-run-open"
+          hx-on::after-request="var d=document.getElementById('tl-run-dlg'); if(d) d.close();">
+      {% if plan.start == plan.end %}
+      <input type="hidden" name="day" value="{{ plan.start.isoformat() }}">
+      {% else %}
+      <input type="hidden" name="from" value="{{ plan.start.isoformat() }}">
+      <input type="hidden" name="to" value="{{ plan.end.isoformat() }}">
+      {% endif %}
+      {% for tag in tag_filters %}
+      <input type="hidden" name="tag" value="{{ tag }}">
+      {% endfor %}
+      <button type="submit" class="btn"{% if plan.ref_count == 0 %} disabled{% endif %}>{{ t('tl.run_confirm') }}</button>
+    </form>
+    <button type="button" class="btn btn-ghost" onclick="this.closest('dialog').close()">{{ t('tl.run_cancel') }}</button>
+  </div>
+</div>

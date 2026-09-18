@@ -880,6 +880,167 @@ def _run_all_topics() -> None:
         raise typer.Exit(1)
 
 
+def _stdin_isatty() -> bool:
+    try:
+        return bool(sys.stdin.isatty())
+    except Exception:
+        return False
+
+
+def _view_run_range(
+    day: str | None, from_day: str | None, to_day: str | None
+):
+    """Parse --day or paired --from/--to. Usage errors exit 2 before any plan/run."""
+    if day and (from_day or to_day):
+        typer.secho("--day 与 --from/--to 互斥", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    if bool(from_day) != bool(to_day):
+        typer.secho("--from 与 --to 必须成对", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    if from_day and to_day:
+        start = parse_calendar_date(from_day)
+        end = parse_calendar_date(to_day)
+        if start is None or end is None:
+            typer.secho("非法发生时间", fg=typer.colors.RED, err=True)
+            raise typer.Exit(2)
+        if start > end:
+            start, end = end, start
+        return start, end
+    if day:
+        parsed = parse_calendar_date(day)
+        if parsed is None:
+            typer.secho(f"非法发生时间:{day}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(2)
+        return parsed, parsed
+    typer.secho("需要 --day 或成对 --from/--to", fg=typer.colors.RED, err=True)
+    raise typer.Exit(2)
+
+
+def _execute_view_run(
+    serve: Path, plan, *, quiet: bool
+) -> tuple[list[str], list[str], list[str]]:
+    """Serial in-process run of in-set slugs. Not TaskRegistry, not kairo run --all."""
+    provider = select_provider(require_read_dirs=True)
+    ran: list[str] = []
+    failed: list[str] = []
+    leftover_attention: list[str] = []
+    for topic in plan.topics:
+        try:
+            ws = Workspace.open(serve / topic.slug)
+            promote_oversized_degraded(ws)
+            mode = workspace_run_plan(ws)["mode"]
+        except Exception as exc:
+            failed.append(topic.slug)
+            if not quiet:
+                typer.secho(
+                    f"{topic.slug}: failed ({exc})",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+            continue
+        if mode == "clean":
+            ran.append(topic.slug)
+            if not quiet:
+                typer.echo(f"{topic.slug}: up to date")
+            continue
+        if mode == "attention":
+            leftover_attention.append(topic.slug)
+            if not quiet:
+                typer.secho(
+                    f"{topic.slug}: needs attention (non-retryable block)",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+            continue
+        try:
+            engine_run_workspace(ws, provider)
+        except Exception as exc:  # one Topic must not abort the pass
+            failed.append(topic.slug)
+            if not quiet:
+                typer.secho(
+                    f"{topic.slug}: failed ({exc})",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+            continue
+        if has_provider_failed(ws):
+            failed.append(topic.slug)
+            if not quiet:
+                typer.secho(
+                    f"{topic.slug}: failed (provider-failed)",
+                    fg=typer.colors.RED,
+                    err=True,
+                )
+        else:
+            ran.append(topic.slug)
+            if not quiet:
+                typer.echo(f"{topic.slug}: ran")
+    return ran, failed, leftover_attention
+
+
+@app.command(name="run-view")
+def run_view_cmd(
+    root: Path = typer.Argument(
+        None,
+        help="含多个 Topic 的根目录;默认 KAIRO_SERVE_ROOT 或 cwd",
+    ),
+    day: str = typer.Option(None, "--day", help="只推进该发生日的当前视图"),
+    from_day: str = typer.Option(None, "--from", help="区间起(发生日)"),
+    to_day: str = typer.Option(None, "--to", help="区间止(发生日)"),
+    yes: bool = typer.Option(
+        False,
+        "--yes",
+        help="打印预览后立刻按入集 Topic 串行 run，不问确认。不是 kairo run --all。",
+    ),
+    as_json: bool = typer.Option(False, "--json", help="JSON 输出"),
+) -> None:
+    """按日历当前视图入集 Topic 各完整 run 一次。不是 kairo run --all。"""
+    from kairo.view_run import plan_view_run
+
+    start, end = _view_run_range(day, from_day, to_day)
+    serve = _serve_root(root)
+    if not serve.is_dir():
+        typer.secho(f"目录不存在:{serve}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+    plan = plan_view_run(serve, start, end)
+    if not as_json:
+        typer.echo(f"{plan.topic_count} topics, {plan.ref_count} refs")
+        for topic in plan.topics:
+            typer.echo(topic.slug)
+
+    def emit_json(extra: dict | None = None) -> None:
+        payload = plan.as_json()
+        if extra:
+            payload.update(extra)
+        typer.echo(json.dumps(payload, ensure_ascii=False))
+
+    if plan.topic_count == 0:
+        if as_json:
+            emit_json(
+                {"ran": [], "failed": [], "cancelled": []} if yes else None
+            )
+        raise typer.Exit(0)
+
+    if not yes:
+        if as_json:
+            emit_json()
+        if not _stdin_isatty():
+            raise typer.Exit(2)
+        if not typer.confirm(
+            f"run {plan.topic_count} topics, {plan.ref_count} refs now?",
+            default=False,
+        ):
+            raise typer.Exit(0)
+
+    ran, failed, leftover_attention = _execute_view_run(
+        serve, plan, quiet=as_json
+    )
+    if as_json:
+        emit_json({"ran": ran, "failed": failed, "cancelled": []})
+    if failed or leftover_attention or plan.skipped_attention:
+        raise typer.Exit(1)
+
+
 @app.command(name="re-step")
 def re_step(
     target: str = typer.Argument(None, help="文档 / reference id;省略=全量"),
