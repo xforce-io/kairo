@@ -275,7 +275,15 @@ def test_timeline_run_public_read_forbidden(tmp_path):
     assert not (root / "alpha" / "references" / "in-a" / "digest.md").is_file()
 
 
-def test_timeline_run_empty_set_400(tmp_path):
+def test_timeline_run_empty_set_400(tmp_path, monkeypatch):
+    started: list[str] = []
+    real = TaskRegistry.start
+
+    def start(self, slug, cwd, argv, **kw):
+        started.append(slug)
+        return real(self, slug, cwd, argv, **kw)
+
+    monkeypatch.setattr(TaskRegistry, "start", start)
     root = tmp_path / "root"
     root.mkdir()
     add_global_ref(
@@ -285,8 +293,14 @@ def test_timeline_run_empty_set_400(tmp_path):
         title="孤儿",
         occurred_at="2026-08-24",
     )
-    r = _client(root).post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+    app = create_app(root)
+    r = TestClient(app).post(
+        "/timeline/run", data={"day": "2026-08-24"}, headers=_HX
+    )
     assert r.status_code == 400
+    assert "Nothing to process." in r.text
+    assert started == []
+    assert app.state.view_run is None
 
 
 def test_timeline_run_missing_date_400(tmp_path):
@@ -295,6 +309,9 @@ def test_timeline_run_missing_date_400(tmp_path):
     assert c.post("/timeline/run", data={}, headers=_HX).status_code == 400
     assert c.post(
         "/timeline/run", data={"from": "2026-08-24"}, headers=_HX
+    ).status_code == 400
+    assert c.post(
+        "/timeline/run", data={"day": "2026-02-31"}, headers=_HX
     ).status_code == 400
 
 
@@ -363,30 +380,46 @@ def test_timeline_run_same_view_attaches_mismatch_400(tmp_path, monkeypatch):
 
     monkeypatch.setattr("kairo.web.tasks.TaskRegistry.start", start)
     root, _, _ = _fixture(tmp_path)
-    c = TestClient(create_app(root))
-    first = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
-    assert first.status_code == 200
-    tid = _STREAM_RE.search(first.text)
-    assert tid
-    again = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
-    assert again.status_code == 200
-    again_tid = _STREAM_RE.search(again.text)
-    assert again_tid and again_tid.group(2) == tid.group(2)
-    other = c.post(
-        "/timeline/run",
-        data={"from": "2026-08-10", "to": "2026-08-11"},
-        headers=_HX,
-    )
-    assert other.status_code == 400
-    page = c.get("/timeline", params={"day": "2026-08-24"})
-    assert 'id="tl-run-open"' in page.text
-    assert "disabled" in page.text.split('id="tl-run-open"', 1)[1].split(">", 1)[0]
-    assert "run-progress" in page.text
-    cancel = c.post(f"/w/{tid.group(1)}/step/{tid.group(2)}/cancel", headers=_HX)
-    assert cancel.status_code == 200
-    summary = _drain_view_run(c)
-    assert "tl-run-summary" in summary.text
-    assert "cancelled" in summary.text
+    app = create_app(root)
+    c = TestClient(app)
+    try:
+        first = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+        assert first.status_code == 200
+        tid = _STREAM_RE.search(first.text)
+        assert tid
+        session = app.state.view_run
+        again = c.post("/timeline/run", data={"day": "2026-08-24"}, headers=_HX)
+        assert again.status_code == 200
+        again_tid = _STREAM_RE.search(again.text)
+        assert again_tid and again_tid.group(2) == tid.group(2)
+        assert app.state.view_run is session
+        other = c.post(
+            "/timeline/run",
+            data={"from": "2026-08-10", "to": "2026-08-11"},
+            headers=_HX,
+        )
+        assert other.status_code == 400
+        page = c.get("/timeline", params={"day": "2026-08-24"})
+        assert 'id="tl-run-open"' in page.text
+        assert "disabled" in page.text.split('id="tl-run-open"', 1)[1].split(">", 1)[0]
+        assert "run-progress" in page.text
+        cancel = c.post(f"/w/{tid.group(1)}/step/{tid.group(2)}/cancel", headers=_HX)
+        assert cancel.status_code == 200
+        summary = _drain_view_run(c)
+        assert "tl-run-summary" in summary.text
+        assert "cancelled" in summary.text
+        snap = app.state.view_run.snapshot()
+        assert {t.slug for t in snap.cancelled_pending} == {"beta"}
+    finally:
+        sess = getattr(app.state, "view_run", None)
+        if sess is not None:
+            snap = sess.snapshot()
+            if snap.current_task_id:
+                sess.note_cancel(snap.current_task_id)
+                app.state.registry.cancel(snap.current_task_id)
+        for task in list(getattr(app.state.registry, "_tasks", {}).values()):
+            if not task.done:
+                app.state.registry.cancel(task.task_id)
 
 
 def test_timeline_run_attaches_existing_slug_job(tmp_path, monkeypatch):
@@ -427,3 +460,51 @@ def test_timeline_run_does_not_write_review(tmp_path, monkeypatch):
     }
     assert after == before
     assert not any("review" in p.name.lower() for p in wa.references_dir().iterdir())
+
+
+def test_timeline_run_and_review_are_separate_forms(tmp_path):
+    root, wa, _ = _fixture(tmp_path)
+    (wa.references_dir() / "in-a" / "digest.md").write_text("纪要", encoding="utf-8")
+    c = _client(root)
+    page = c.get(
+        "/timeline", params={"from": "2026-08-10", "to": "2026-08-24"}
+    ).text
+    assert 'action="/timeline/review"' in page
+    assert "Process" in page
+    prev = c.get(
+        "/timeline/run-preview",
+        params={"from": "2026-08-10", "to": "2026-08-24"},
+        headers=_HX,
+    )
+    assert prev.status_code == 200
+    assert 'action="/timeline/run"' in prev.text
+    assert 'hx-post="/timeline/run"' in prev.text
+    assert 'hx-target="#tl-run-area"' in prev.text
+    assert "/timeline/review" not in prev.text
+
+
+def test_timeline_run_tag_narrows_started_topics(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    root, _, _ = _fixture(tmp_path)
+    create_tag(root, "能源")
+    add_tag(root, home="alpha", ref_id="in-a", tag="能源")
+    started: list[str] = []
+    orig = TaskRegistry.start
+
+    def start(self, slug, cwd, argv, **kw):
+        started.append(slug)
+        argv = [sys.executable, "-c", "print('ok')"]
+        return orig(self, slug, cwd, argv, **kw)
+
+    monkeypatch.setattr(TaskRegistry, "start", start)
+    app = create_app(root)
+    c = TestClient(app)
+    r = c.post(
+        "/timeline/run",
+        data={"day": "2026-08-24", "tag": "能源"},
+        headers=_HX,
+    )
+    assert r.status_code == 200
+    summary = _drain_view_run(c, r.text)
+    assert started == ["alpha"]
+    assert "Done 1" in summary.text
