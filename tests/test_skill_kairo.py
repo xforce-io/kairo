@@ -65,6 +65,22 @@ def test_claude_skill_is_symlink_to_canonical():
     assert (CLAUDE_SKILL_LINK / "SKILL.md").resolve() == PACKAGED_SKILL.resolve()
 
 
+def test_skill_covers_interactive_read_scenes():
+    text = _skill_text()
+    for needle in (
+        "交互式读取 Project",
+        "kairo project record create",
+        "kairo project record resume",
+        "kairo project record end",
+        "kairo project record show",
+        "--record",
+        "不要传 `--run` 或 `--record`",
+        "不要用引用记录替代该 Task Run",
+        "--run RUN_ID",
+    ):
+        assert needle in text, f"skill must mention {needle!r}"
+
+
 def test_skill_covers_project_run_cli():
     text = _skill_text()
     for needle in (

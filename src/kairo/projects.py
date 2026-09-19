@@ -21,8 +21,17 @@ _FORBIDDEN_KEYS = frozenset({"token", "api_key", "password", "secret", "credenti
 class ProjectError(ValueError):
     """Project 域操作非法。"""
 
-    def __init__(self, message: str, *, code: str | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        retryable: bool | None = None,
+        next: str | None = None,
+    ):
         self.code = code
+        self.retryable = retryable
+        self.next = next
         super().__init__(message)
 
 
