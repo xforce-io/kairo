@@ -409,9 +409,13 @@ def list_context(
     project_id: str,
     *,
     run_id: str | None = None,
+    record_id: str | None = None,
 ) -> dict[str, Any]:
+    from kairo.project_records import resolve_read_target
+
+    run_id, record_id = resolve_read_target(run_id, record_id)
     project = get_project(serve, project_id)
-    topics, datasources = _scope(serve, project, run_id)
+    topics, datasources = _scope(serve, project, run_id, record_id=record_id)
     items: list[dict[str, Any]] = []
     for ds in datasources:
         source_id = f"datasource:{ds.id}"
@@ -470,8 +474,19 @@ def list_context(
 
 
 def _scope(
-    serve: Path, project: Project, run_id: str | None
+    serve: Path,
+    project: Project,
+    run_id: str | None,
+    record_id: str | None = None,
 ) -> tuple[list[str], list[DataSource]]:
+    if record_id:
+        from kairo.project_records import load_open_record
+
+        rec = load_open_record(serve, project.id, record_id)
+        topics = list(rec.get("scope_topics") or [])
+        allowed = set(rec.get("scope_datasources") or [])
+        datasources = [d for d in project.datasources if d.id in allowed]
+        return topics, datasources
     if not run_id:
         return list(project.topics), list(project.datasources)
     run = _running_run(serve, project.id, run_id)
@@ -489,11 +504,27 @@ def _scope(
 
 
 def _running_run(serve: Path, project_id: str, run_id: str):
-    run = get_run(serve, project_id, run_id)
+    from kairo.project_records import NEXT_NOT_FOUND, NEXT_RUN_CLOSED
+
+    try:
+        run = get_run(serve, project_id, run_id)
+    except ProjectError as exc:
+        if getattr(exc, "code", None) == "not_found":
+            raise ProjectError(
+                str(exc), code="not_found", retryable=True, next=NEXT_NOT_FOUND
+            ) from exc
+        raise
     if run.project_id != project_id:
-        raise ProjectError("Run 不属于该 Project", code="not_found")
+        raise ProjectError(
+            "Run 不属于该 Project", code="not_found", retryable=True, next=NEXT_NOT_FOUND
+        )
     if run.status != "running":
-        raise ProjectError("Run 已结束，不能再读取", code="run_closed")
+        raise ProjectError(
+            "Run 已结束，不能再读取",
+            code="run_closed",
+            retryable=False,
+            next=NEXT_RUN_CLOSED,
+        )
     return run
 
 
@@ -503,28 +534,49 @@ def read_material(
     source_id: str,
     *,
     run_id: str | None = None,
+    record_id: str | None = None,
     refresh: bool = False,
 ) -> MaterialRead:
+    from kairo.project_records import NEXT_FIX_ARGS, NEXT_NOT_FOUND, resolve_read_target
+
+    run_id, record_id = resolve_read_target(run_id, record_id)
     parsed = parse_source_id(source_id)
     if parsed["kind"] == SOURCE_URL:
-        raise ProjectError("目录外 URL 请使用 project read-url", code="invalid_request")
+        raise ProjectError(
+            "目录外 URL 请使用 project read-url",
+            code="invalid_request",
+            retryable=True,
+            next=NEXT_FIX_ARGS,
+        )
     project = get_project(serve, project_id)
-    topics, datasources = _scope(serve, project, run_id)
+    topics, datasources = _scope(serve, project, run_id, record_id=record_id)
     if parsed["kind"] == SOURCE_DATASOURCE:
         if refresh is False:
             pass
         ds_ids = {d.id for d in datasources}
         if parsed["ds_id"] not in ds_ids:
-            raise ProjectError("数据源不在该 Project 范围内", code="not_found")
+            raise ProjectError(
+                "数据源不在该 Project 范围内",
+                code="not_found",
+                retryable=True,
+                next=NEXT_NOT_FOUND,
+            )
         result = read_cached_datasource(serve, project_id, parsed["ds_id"], refresh=refresh)
     else:
         if refresh:
-            raise ProjectError("仅 Data Source 支持刷新", code="invalid_request")
+            raise ProjectError(
+                "仅 Data Source 支持刷新",
+                code="invalid_request",
+                retryable=True,
+                next=NEXT_FIX_ARGS,
+            )
         result = _read_topic_material(serve, project, parsed, topics)
     if len(result.content.encode("utf-8")) > MATERIAL_MAX_BYTES:
         raise ProjectError("材料超过 2 MiB", code="material_too_large")
     if run_id:
         result.input_id = record_run_input(serve, project_id, run_id, result)
+    elif record_id:
+        result.input_id = record_citation_input(serve, project_id, record_id, result)
     return result
 
 
@@ -545,16 +597,21 @@ def read_url_material(
     project_id: str,
     url: str,
     *,
-    run_id: str,
+    run_id: str | None = None,
+    record_id: str | None = None,
 ) -> MaterialRead:
+    from kairo.project_records import load_open_record, resolve_read_target
     from kairo.readers import infer_source
 
+    run_id, record_id = resolve_read_target(run_id, record_id)
+    get_project(serve, project_id)
+    if run_id:
+        _running_run(serve, project_id, run_id)
+    elif record_id:
+        load_open_record(serve, project_id, record_id)
     text = (url or "").strip()
     if not text:
         raise ReadError("invalid_link", "链接为空")
-    if not (run_id or "").strip():
-        raise ProjectError("read-url 需要 --run", code="invalid_request")
-    _running_run(serve, project_id, run_id)
     parsed = urlparse(text)
     if parsed.scheme in ("mail", "imap"):
         raise ReadError("unsupported_reader", "不是页外链")
@@ -581,7 +638,12 @@ def read_url_material(
         reader=inferred.reader,
         kind=inferred.kind,
     )
-    result.input_id = record_run_input(serve, project_id, run_id, result)
+    if run_id:
+        result.input_id = record_run_input(serve, project_id, run_id, result)
+    elif record_id:
+        result.input_id = record_citation_input(serve, project_id, record_id, result)
+    else:
+        result.input_id = None
     return result
 
 
@@ -646,10 +708,7 @@ def _load_index(folder: Path) -> list[dict[str, Any]]:
     return []
 
 
-def record_run_input(serve: Path, project_id: str, run_id: str, result: MaterialRead) -> str:
-    run = _running_run(serve, project_id, run_id)
-    folder = Path(run.scratch_dir) if run.scratch_dir else scratch_dir(serve, project_id, run_id)
-    folder = folder if folder.is_absolute() else Path(serve) / folder
+def _append_input(folder: Path, result: MaterialRead) -> str:
     folder.mkdir(parents=True, exist_ok=True)
     with _exclusive_lock(folder / "lock"):
         items = _load_index(folder)
@@ -687,6 +746,22 @@ def record_run_input(serve: Path, project_id: str, run_id: str, result: Material
         )
         _atomic_json(_input_index_path(folder), items)
         return input_id
+
+
+def record_run_input(serve: Path, project_id: str, run_id: str, result: MaterialRead) -> str:
+    run = _running_run(serve, project_id, run_id)
+    folder = Path(run.scratch_dir) if run.scratch_dir else scratch_dir(serve, project_id, run_id)
+    folder = folder if folder.is_absolute() else Path(serve) / folder
+    return _append_input(folder, result)
+
+
+def record_citation_input(
+    serve: Path, project_id: str, record_id: str, result: MaterialRead
+) -> str:
+    from kairo.project_records import load_open_record, record_inputs_dir
+
+    load_open_record(serve, project_id, record_id)
+    return _append_input(record_inputs_dir(serve, project_id, record_id), result)
 
 
 def load_run_inputs(serve: Path, project_id: str, run_id: str, *, scratch: bool = False) -> list[dict[str, Any]]:

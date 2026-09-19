@@ -69,6 +69,10 @@ backup_app = typer.Typer(help="remote 完整备份:push / verify / restore")
 app.add_typer(backup_app, name="backup")
 project_app = typer.Typer(help="Project：创建、关联 Topic、查看")
 app.add_typer(project_app, name="project")
+record_app = typer.Typer(
+    help="引用记录：create / resume / end / show / input。与 Task Run 不是同一对象。"
+)
+project_app.add_typer(record_app, name="record")
 tag_app = typer.Typer(help="Ref Tag：add / rm / list")
 app.add_typer(tag_app, name="tag")
 include_app = typer.Typer(help="Topic 包含规则：set / clear / show")
@@ -1929,8 +1933,14 @@ def datasource_add(
     _dump(as_json, ds.model_dump())
 
 
-def _cli_fail(as_json: bool, exc: Exception) -> None:
+def _cli_fail(as_json: bool, exc: Exception, *, guide: bool = False) -> None:
     payload = {"ok": False, "code": getattr(exc, "code", "error"), "error": str(exc)}
+    if guide:
+        from kairo.project_records import failure_guide
+
+        retryable, nxt = failure_guide(exc)
+        payload["retryable"] = retryable
+        payload["next"] = nxt
     _dump(as_json, payload)
     raise typer.Exit(1) from None
 
@@ -2136,7 +2146,8 @@ def artifact_show(
 @project_app.command("context")
 def project_context_cmd(
     project_id: str = typer.Argument(...),
-    run_id: str = typer.Option(None, "--run"),
+    run_id: str = typer.Option(None, "--run", help="进行中的 Task Run（run- 前缀）"),
+    record_id: str = typer.Option(None, "--record", help="开放中的引用记录（rec- 前缀）"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
@@ -2144,9 +2155,11 @@ def project_context_cmd(
     from kairo.projects import ProjectError
 
     try:
-        payload = list_context(_cli_root(root), project_id, run_id=run_id)
+        payload = list_context(
+            _cli_root(root), project_id, run_id=run_id, record_id=record_id
+        )
     except ProjectError as e:
-        _cli_fail(as_json, e)
+        _cli_fail(as_json, e, guide=True)
     _dump(as_json, payload)
 
 
@@ -2154,7 +2167,8 @@ def project_context_cmd(
 def project_read_cmd(
     project_id: str = typer.Argument(...),
     source_id: str = typer.Argument(...),
-    run_id: str = typer.Option(None, "--run"),
+    run_id: str = typer.Option(None, "--run", help="进行中的 Task Run（run- 前缀）"),
+    record_id: str = typer.Option(None, "--record", help="开放中的引用记录（rec- 前缀）"),
     refresh: bool = typer.Option(False, "--refresh"),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
@@ -2166,10 +2180,16 @@ def project_read_cmd(
 
     try:
         result = read_material(
-            _cli_root(root), project_id, source_id, run_id=run_id, refresh=refresh
+            _cli_root(root),
+            project_id,
+            source_id,
+            run_id=run_id,
+            record_id=record_id,
+            refresh=refresh,
         )
     except (ProjectError, ReadError) as e:
-        _cli_fail(as_json, e)
+        _cli_fail(as_json, e, guide=True)
+    tracked = bool(run_id or record_id)
     _dump(
         as_json,
         {
@@ -2180,7 +2200,14 @@ def project_read_cmd(
             "fetched_at": result.fetched_at,
             "expires_at": result.expires_at,
             "input_id": result.input_id,
-            **({"numbered_content": numbered_content(result.content), "line_count": len(result.content.splitlines())} if run_id else {}),
+            **(
+                {
+                    "numbered_content": numbered_content(result.content),
+                    "line_count": len(result.content.splitlines()),
+                }
+                if tracked
+                else {}
+            ),
         },
     )
 
@@ -2189,7 +2216,12 @@ def project_read_cmd(
 def project_read_url_cmd(
     project_id: str = typer.Argument(...),
     url: str = typer.Argument(...),
-    run_id: str = typer.Option(..., "--run"),
+    run_id: str = typer.Option(
+        None, "--run", help="进行中的 Task Run（run- 前缀）。与 --record 互斥；皆可省略做临时读"
+    ),
+    record_id: str = typer.Option(
+        None, "--record", help="开放中的引用记录（rec- 前缀）。与 --run 互斥"
+    ),
     root: Path = typer.Option(None, "--root", "-r"),
     as_json: bool = typer.Option(True, "--json/--no-json"),
 ) -> None:
@@ -2199,27 +2231,29 @@ def project_read_url_cmd(
     from kairo.readers import ReadError
 
     try:
-        result = read_url_material(_cli_root(root), project_id, url, run_id=run_id)
+        result = read_url_material(
+            _cli_root(root), project_id, url, run_id=run_id, record_id=record_id
+        )
     except (ProjectError, ReadError) as e:
-        _cli_fail(as_json, e)
-    _dump(
-        as_json,
-        {
-            "ok": True,
-            "input_id": result.input_id,
-            "title": result.title,
-            "source_id": result.source_id,
-            "type": result.type,
-            "url": result.url,
-            "reader": result.reader,
-            "kind": result.kind,
-            "content": result.content,
-            "version": result.version,
-            "fetched_at": result.fetched_at,
-            "numbered_content": numbered_content(result.content),
-            "line_count": len(result.content.splitlines()),
-        },
-    )
+        _cli_fail(as_json, e, guide=True)
+    tracked = bool(run_id or record_id)
+    payload = {
+        "ok": True,
+        "input_id": result.input_id,
+        "title": result.title,
+        "source_id": result.source_id,
+        "type": result.type,
+        "url": result.url,
+        "reader": result.reader,
+        "kind": result.kind,
+        "content": result.content,
+        "version": result.version,
+        "fetched_at": result.fetched_at,
+    }
+    if tracked:
+        payload["numbered_content"] = numbered_content(result.content)
+        payload["line_count"] = len(result.content.splitlines())
+    _dump(as_json, payload)
 
 
 @project_app.command("input")
@@ -2236,5 +2270,90 @@ def project_input_cmd(
     try:
         payload = read_run_input(_cli_root(root), project_id, run_id, input_id)
     except ProjectError as e:
-        _cli_fail(as_json, e)
+        _cli_fail(as_json, e, guide=True)
+    _dump(as_json, payload)
+
+
+@record_app.command("create")
+def project_record_create_cmd(
+    project_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_records import create_record
+    from kairo.projects import ProjectError
+
+    try:
+        payload = create_record(_cli_root(root), project_id)
+    except ProjectError as e:
+        _cli_fail(as_json, e, guide=True)
+    _dump(as_json, payload)
+
+
+@record_app.command("resume")
+def project_record_resume_cmd(
+    project_id: str = typer.Argument(...),
+    record_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_records import resume_record
+    from kairo.projects import ProjectError
+
+    try:
+        payload = resume_record(_cli_root(root), project_id, record_id)
+    except ProjectError as e:
+        _cli_fail(as_json, e, guide=True)
+    _dump(as_json, payload)
+
+
+@record_app.command("end")
+def project_record_end_cmd(
+    project_id: str = typer.Argument(...),
+    record_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_records import end_record
+    from kairo.projects import ProjectError
+
+    try:
+        payload = end_record(_cli_root(root), project_id, record_id)
+    except ProjectError as e:
+        _cli_fail(as_json, e, guide=True)
+    _dump(as_json, payload)
+
+
+@record_app.command("show")
+def project_record_show_cmd(
+    project_id: str = typer.Argument(...),
+    record_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_records import show_record
+    from kairo.projects import ProjectError
+
+    try:
+        payload = show_record(_cli_root(root), project_id, record_id)
+    except ProjectError as e:
+        _cli_fail(as_json, e, guide=True)
+    _dump(as_json, payload)
+
+
+@record_app.command("input")
+def project_record_input_cmd(
+    project_id: str = typer.Argument(...),
+    record_id: str = typer.Argument(...),
+    input_id: str = typer.Argument(...),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(True, "--json/--no-json"),
+) -> None:
+    from kairo.project_records import read_record_input
+    from kairo.projects import ProjectError
+
+    try:
+        payload = read_record_input(_cli_root(root), project_id, record_id, input_id)
+    except ProjectError as e:
+        _cli_fail(as_json, e, guide=True)
     _dump(as_json, payload)

@@ -167,9 +167,52 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 5. **退出码 1**：转述 stderr，不编造已归档。
 6. 归档成功后**不**自动 `step`。要把该会话折进 understanding，须按铁律单独确认后再 `step`。
 
+## 交互式读取 Project（普通对话）
+
+普通对话读取 Project 材料有三类场景，不要混用标志。不要扫内部目录或调用私有 Reader。不要为了读材料调用 `step` / `run` / `re-step`。
+
+### A. 临时读（不需要 `input:` 引用）
+
+无预先 Task Run、用户只要正文时：
+
+```
+kairo project context PROJECT_ID --root SERVE_ROOT
+kairo project read PROJECT_ID SOURCE_ID --root SERVE_ROOT
+kairo project read-url PROJECT_ID --root SERVE_ROOT URL
+```
+
+不要传 `--run` 或 `--record`。成功 JSON 的 `input_id` 为 `null`，禁止写成 `[标题](input:…)`。不要为了读材料去 `record create`（那是场景 B）。
+
+### B. 引用记录（需要可核对引用）
+
+用户要求可追溯引用时，先取得合法标识，再读：
+
+```
+kairo project record create PROJECT_ID --root SERVE_ROOT
+kairo project read PROJECT_ID SOURCE_ID --record RECORD_ID --root SERVE_ROOT
+kairo project read-url PROJECT_ID --record RECORD_ID --root SERVE_ROOT URL
+```
+
+`record_id` 以 `rec-` 开头。中断后用同一标识恢复：
+
+```
+kairo project record resume PROJECT_ID RECORD_ID --root SERVE_ROOT
+```
+
+完成后结束并查询：
+
+```
+kairo project record end PROJECT_ID RECORD_ID --root SERVE_ROOT
+kairo project record show PROJECT_ID RECORD_ID --root SERVE_ROOT
+```
+
+禁止借用历史 Task Run。禁止把 `rec-` 传给 `--run`。禁止编造 `input_id`。
+
+一跳、无 Reader 跳过：场景 B 沿用下面「Project 运行」的跟读规则（只跟读已读登记源正文中的链接；墨刀 / ShowDoc / `invalid_link` 跳过）。场景 A 无 Artifact，失败只使该次 CLI 失败。
+
 ## Project 运行（无人值守 Task）
 
-当运行输入给出 **Project 标识、serve root、Run 标识与输出约定** 时，本节覆盖 Topic 铁律里的「先确认再写」：这是已授权的无人值守读取，**不要等待交互确认**，**不要**调用 `step` / `re-step` / `run` / `accept` / `rollback`，**不要写 Topic 或其它 Project**。
+当运行输入给出 **Project 标识、serve root、Run 标识与输出约定** 时，本节覆盖 Topic 铁律里的「先确认再写」：这是已授权的无人值守读取，**不要等待交互确认**，**不要**调用 `step` / `re-step` / `run` / `accept` / `rollback`，**不要写 Topic 或其它 Project**。`context` / `read` / `read-url` **必须**带 `--run RUN_ID`；不要省略 `--run`，不要用引用记录替代该 Task Run。
 
 1. 先取动态材料目录（不含正文、不拉外部、不触发 digest/fold）：
    `kairo project context PROJECT_ID --run RUN_ID --root SERVE_ROOT`

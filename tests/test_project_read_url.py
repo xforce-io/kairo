@@ -364,12 +364,16 @@ def test_project_read_rejects_url_source_id(tmp_path, monkeypatch):
 
 def test_read_url_requires_running_run(tmp_path, monkeypatch):
     serve, pid, ds = _prepare(tmp_path, monkeypatch)
-    missing = _cli(
-        ["project", "read-url", pid, "--root", str(serve), SHEET_URL],
-        serve,
-        monkeypatch,
+    ephemeral = _load(
+        _cli(
+            ["project", "read-url", pid, "--root", str(serve), SHEET_URL],
+            serve,
+            monkeypatch,
+        )
     )
-    assert missing.exit_code != 0
+    assert ephemeral["ok"] is True
+    assert ephemeral["input_id"] is None
+    assert "sheet-body" in ephemeral["content"]
     run_id = "run-closed"
     rec = _running_record(serve, pid, run_id, datasources=[ds.id])
     from kairo.projects import _save_run

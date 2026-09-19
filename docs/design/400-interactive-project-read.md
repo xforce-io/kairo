@@ -2,7 +2,7 @@
 
 - Issue: [#400](https://github.com/xforce-io/kairo/issues/400)
 - 分支: `feat/400-interactive-project-read`
-- 状态: Draft（L2 · 待批准 · 不自批）
+- 状态: Approved（L2 · 苏晴 2026-09-19）
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/400#issuecomment-5742840845)（苏晴 2026-09-19）
 - 本文件是 #400 的 **L2 事实源**。Issue 只保留摘要与本链接。未获 L2 批准前不实现产品代码。
 
