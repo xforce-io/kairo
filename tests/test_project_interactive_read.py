@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from kairo.project_materials import write_cache
 from kairo.projects import list_runs
 from test_project_read_url import (
@@ -38,6 +40,13 @@ def test_s1_ephemeral_read_and_read_url(tmp_path, monkeypatch):
     serve, pid, ds = _prepare(tmp_path, monkeypatch)
     source_id = _seed_cached(serve, pid, ds, f"# 能源\n\n{SHEET_URL}\n", monkeypatch)
     before_runs = len(list_runs(serve, pid))
+    catalog = _load(
+        _cli(["project", "context", pid, "--root", str(serve)], serve, monkeypatch)
+    )
+    assert catalog["ok"] is True
+    assert catalog["project_id"] == pid
+    assert any(item.get("source_id") == source_id for item in catalog["items"])
+    assert len(list_runs(serve, pid)) == before_runs
     registered = _load(
         _cli(["project", "read", pid, source_id, "--root", str(serve)], serve, monkeypatch)
     )
@@ -73,6 +82,10 @@ def test_s2_record_lifecycle_and_task_run_untouched(tmp_path, monkeypatch):
     assert rec_id.startswith("rec-")
     assert created["status"] == "open"
     assert ds.id in created["scope_datasources"]
+    empty_show = _load(
+        _cli(["project", "record", "show", pid, rec_id, "--root", str(serve)], serve, monkeypatch)
+    )
+    assert empty_show["inputs"] == []
 
     extra = seed_existing_datasource(
         serve,
@@ -132,6 +145,25 @@ def test_s2_record_lifecycle_and_task_run_untouched(tmp_path, monkeypatch):
         _cli(["project", "record", "show", pid, rec_id, "--root", str(serve)], serve, monkeypatch)
     )
     assert any(item["input_id"] == followed["input_id"] for item in shown["inputs"])
+    recorded = _load(
+        _cli(
+            [
+                "project",
+                "record",
+                "input",
+                pid,
+                rec_id,
+                followed["input_id"],
+                "--root",
+                str(serve),
+            ],
+            serve,
+            monkeypatch,
+        )
+    )
+    assert recorded["ok"] is True
+    assert recorded["input_id"] == followed["input_id"]
+    assert recorded["content"] == followed["content"]
 
     ended = _load(
         _cli(["project", "record", "end", pid, rec_id, "--root", str(serve)], serve, monkeypatch)
@@ -145,6 +177,23 @@ def test_s2_record_lifecycle_and_task_run_untouched(tmp_path, monkeypatch):
         _cli(["project", "record", "show", pid, rec_id, "--root", str(serve)], serve, monkeypatch)
     )
     assert closed_show["inputs"]
+    closed_input = _load(
+        _cli(
+            [
+                "project",
+                "record",
+                "input",
+                pid,
+                rec_id,
+                followed["input_id"],
+                "--root",
+                str(serve),
+            ],
+            serve,
+            monkeypatch,
+        )
+    )
+    assert closed_input["content"] == followed["content"]
 
     run_follow = _load(
         _cli(
@@ -230,6 +279,17 @@ def test_s3_identifier_failures_do_not_call_reader(tmp_path, monkeypatch):
     )
     assert recovered["ok"] is True
     assert recovered["input_id"] is None
+
+
+def test_read_url_help_covers_ephemeral_and_mutex(tmp_path, monkeypatch):
+    serve, _pid, _ds = _prepare(tmp_path, monkeypatch)
+    result = _cli(["project", "read-url", "--help"], serve, monkeypatch)
+    assert result.exit_code == 0, result.output
+    text = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "临时读" in text
+    assert "--run" in text
+    assert "--record" in text
+    assert "互斥" in text
 
 
 def test_s3_next_can_create_record(tmp_path, monkeypatch):
