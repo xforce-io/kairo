@@ -66,5 +66,6 @@
 | 邮件查询串 | 不含密码的检索链接，用于推断 Reader 与查询条件。 | 邮件 URL、邮箱地址 |
 | Task | Project 内可编辑的工作定义，一次性或按规则触发。 | 作业、流水线 |
 | Run | 一次 Task 触发的不可变记录，冻结当时 Task 版本与输入。 | 执行、job |
+| 引用记录 | Project 内用于可核对引用的读取会话：可创建、中断恢复、结束与查询；不启动 Task、不产生 Artifact。 | 临时 Run、假 Run |
 | Artifact | 成功 Run 产生的可阅读正文，追溯到该 Run、当时 Task 版本与实际输入材料（Topic 或 Data Source）。 | 报告、产物文档 |
-| 材料身份 | 一条已记录输入对应的具体来源：Data Source id，或某 Topic 的事实层，或某一 Ref digest（slug、home 与 ref id），或本 Run 跟读的 URL（`type=url`，`source_id=url:` + 原文 URL）。 | Topic 名、slug 匹配 |
+| 材料身份 | 一条已记录输入对应的具体来源：Data Source id，或某 Topic 的事实层，或某一 Ref digest（slug、home 与 ref id），或本 Run / 本引用记录跟读的 URL（`type=url`，`source_id=url:` + 原文 URL）。 | Topic 名、slug 匹配 |
