@@ -1155,71 +1155,44 @@ def _format_block_diag(reason: str | None, diagnostic) -> str:
 
 
 @app.command()
-def status(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
-    """列 references / 各文档融入状态;顶部摘要 topic 与 run plan(stale/blocked)。"""
-    ws = _open_ws(topic)
-    state = ws.read_state()
-    plan = workspace_run_plan(ws)
-    typer.echo(
-        f"topic {ws.root.name}  name={ws.constitution.topic}  "
-        f"plan={plan['mode']}  stale={plan['pending_count']}  blocked={plan['blocked_count']}"
+def status(
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+    ref_id: str = typer.Option(None, "--ref", help="核指定 Ref 当前 digest 是否已融入活 target"),
+    home: str = typer.Option(None, "--home", help="Ref home；global 表示 global home"),
+    target: str = typer.Option(None, "--target", help="活 target 路径"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+) -> None:
+    """列待处理／已融入／全量综合后已增量融入／blocked；--ref 核当前 digest 四态。"""
+    from kairo.status_view import (
+        StatusError,
+        format_ref_status,
+        format_topic_status,
+        public_topic_payload,
+        ref_fold_payload,
+        topic_status_payload,
     )
-    compose = ComposeRule(ws, None)  # 仅用于 corpus 漂移检测(不调 provider)
-    from kairo.refs import RefError, resolve_open, run_members, serve_root_of
 
-    rows: list[tuple[str, str, list]] = []
-    seen: set[str] = set()
-    for rec in run_members(ws):
-        seen.add(rec.id)
-        roles: list[str] = []
-        try:
-            src_ws, rid = resolve_open(serve_root_of(ws), rec.home, rec.id)
-            man = src_ws.read_manifest(rid)
-            roles = [f.role for f in man.forms]
-        except (RefError, OSError):
-            roles = []
-        rows.append((rec.id, rec.title, roles))
-    for ref_id in ws.list_reference_ids():
-        if ref_id in seen:
-            continue
-        man = ws.read_manifest(ref_id)
-        rows.append((ref_id, man.title or "", [f.role for f in man.forms]))
-    for ref_id, title, roles in rows:
-        title_s = f" «{title}»" if title and title != ref_id else ""
-        blocked = [
-            f"{k.rsplit('/', 1)[-1]}:{_format_block_diag(v.reason, v.diagnostic)}"
-            for k, v in state.products.items()
-            if (
-                k.startswith(f"references/{ref_id}/")
-                or k.endswith(f"/{ref_id}")
-                or k == ref_id
-            )
-            and v.status == "blocked"
-        ]
-        flag = f"  ⚠ {','.join(blocked)}" if blocked else ""
-        typer.echo(f"reference {ref_id}{title_s}: [{','.join(roles)}]{flag}")
-    for target in ws.constitution.live_targets():
-        ts = state.targets.get(target.path)
-        if ts is None:
-            typer.echo(f"target {target.path}: (未生成)")
-            continue
-        drift = len(ts.folded) - len(ts.last_major_folded)
-        reason = effective_compose_block_reason(ws, target.path, ts)
-        flag = (
-            f"  ⚠ blocked:{_format_block_diag(reason, ts.diagnostic)}"
-            if ts.status == "blocked"
-            else ""
-        )
-        if reason in (
-            REASON_COMPOSE_MIGRATION_REQUIRED,
-            REASON_COMPOSE_OVER_BUDGET,
-        ):
-            flag += "；确认压缩历史正文后运行 kairo re-step understanding.md（失败保留旧版）"
-        if compose.corpus_drifted(target.path, state):
-            flag += "  ⚠ corpus 已变,可 re-step 重算"
-        typer.echo(
-            f"target {target.path}: folded {len(ts.folded)};距上次 A 已 {drift} 条{flag}"
-        )
+    try:
+        ws = _open_ws(topic)
+        if ref_id:
+            payload = ref_fold_payload(ws, ref_id, home, target)
+            if as_json:
+                _dump(True, payload)
+            else:
+                typer.echo(format_ref_status(payload))
+            return
+        payload = topic_status_payload(ws)
+        if as_json:
+            _dump(True, public_topic_payload(payload))
+            return
+        for line in format_topic_status(ws, payload, ws.read_state()):
+            typer.echo(line)
+    except StatusError as e:
+        if as_json:
+            _dump(True, {"ok": False, "code": e.code, "error": str(e)})
+        else:
+            typer.secho(str(e), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from None
 
 
 @app.command()

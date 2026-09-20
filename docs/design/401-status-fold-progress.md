@@ -2,7 +2,7 @@
 
 - Issue: [#401](https://github.com/xforce-io/kairo/issues/401)
 - 分支: `feat/401-status-fold-progress`
-- 状态: Draft（L2 · 待批准 · 不自批）
+- 状态: Approved（L2 · 苏晴 2026-09-20）
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/401#issuecomment-5747248628)（苏晴 2026-09-20）
 - 本文件是 #401 的 **L2 事实源**。Issue 只保留摘要与本链接。未获 L2 批准前不实现产品代码。实现不得与 #402 同时改 CLI 主路径。
 
