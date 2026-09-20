@@ -168,7 +168,7 @@ forms:
 ### 7.2 文档约定(有机生长,非冻结锚点)
 
 - 结构(章节/表格/术语表)由综合**有机生长并修订**,不预先钉死;宪法只给**维护指引**(维持术语表、未确认挂 ⚠️、事实与判断分两篇)。
-- **挂源**:章节级「来源」头 + 关键处内联标注(如 `(renmin 会议)`),不强制每条 `(src:)`。
+- **挂源**:章节级「来源」头 + 关键处内联标注(如 `(meeting_b 会议)`),不强制每条 `(src:)`。
 - `understanding.md`:事实、中立,⚠️ 标未确认;`assessment.md`:判断、立场,**引用 understanding 的事实**(D-target,标来源)但只谈「我怎么看」,随讨论演进。
 
 ---
@@ -309,7 +309,7 @@ targets:                             # ② 综合层(topic 相关)——MVP 两�
 - **纪要流轨**:三场会议的现成 transcript —— `meeting_a_0617` / `meeting_b_0617`(均有 audio→whisper transcript)/ `meeting_c_0617`(无 audio,仅文字实录,正好验证「给 transcript 跳过 ASR」)。
 - **资料库轨**:`references/北港系统/`(8 份 docx)+ `references/site_notes/`(I/O 语料)。⚠️ **最终文档约 1/3 内容来自此轨**(understanding §2 平台口径、§4a 真实 I/O 语料;assessment「白皮书⟂真实水位」对照需文档与会议同时在场)。docx/xlsx 异构 loader 是 P4,M1 阶段**手工转成 .md 当 `source_text` 喂入**绕过。
 
-**流程**:先 add 资料库 → 按 `recorded_at` 顺序 `add`+`step`(site_notes→renmin→wangqiang),每步一次 step;末了拿产出与真实 `understanding.md` / `assessment.md` **对照 diff**。
+**流程**:先 add 资料库 → 按 `recorded_at` 顺序 `add`+`step`(meeting_a→meeting_b→meeting_c),每步一次 step;末了拿产出与真实 `understanding.md` / `assessment.md` **对照 diff**。
 
 **验收维度(不要求逐字,D-repro)**:
 1. **会议贡献部分长出**:§3 商业打法 / §4 方法论 / §4b 落地优先级 / §5b 三智能体 / assessment 多数判断。

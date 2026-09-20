@@ -1656,7 +1656,7 @@ def test_ingest_resighting_of_confirmed_term_attaches_provenance_instead_of_requ
             {"title": "林工", "quote": "林工说", "aliases": ["林值秋"]},
             {"title": "港湾通", "quote": "港湾通要上线"},
             # alias proposal: the entry does not know this ASR mishearing yet -> reviewable
-            {"title": "西端", "quote": "林工说", "aliases": ["C 端"]},
+            {"title": "西侧", "quote": "林工说", "aliases": ["侧端"]},
         ],
         matcher=matcher,
         serve_root=root,
@@ -1665,7 +1665,7 @@ def test_ingest_resighting_of_confirmed_term_attaches_provenance_instead_of_requ
     by_title = {c.title: c for c in review.candidates}
     assert by_title["林工"].status == "merged" and by_title["林工"].merged_into == public.id
     assert by_title["港湾通"].status == "merged" and by_title["港湾通"].merged_into == local.id
-    assert by_title["西端"].status in {"sighted", "pending"}
+    assert by_title["西侧"].status in {"sighted", "pending"}
     assert todo_count(ws.root) == 0
 
     g_entry = next(e for e in load_global(root)[0].entries if e.id == public.id)
