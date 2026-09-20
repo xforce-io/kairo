@@ -21,7 +21,7 @@ CLI：`root` 取 `workspace.parent / glossary.yaml`（多 workspace 根布局）
 ## 文件格式
 
 ```yaml
-- name: 天溯
+- name: 示例机构
   note: 公司主体
   aka: []
   tags: [org]

@@ -104,9 +104,9 @@ knowledge:
   version: 2
   entries:
     - id: ke-example
-      title: 灵犀系统
+      title: 北港系统
       description: 本项目所研究的系统
-      aliases: [{value: 灵西, auto_match: true}]
+      aliases: [{value: 北港, auto_match: true}]
       status: confirmed
       scope: workspace
       created_at: "2026-08-29T00:00:00+00:00"
@@ -119,9 +119,9 @@ knowledge:
 
 ```yaml
 glossary:
-- name: 灵犀系统            # 规范名(示例),各环节统一用它
+- name: 北港系统            # 规范名(示例),各环节统一用它
   note: 本项目所研究的系统    # grounding,可选
-  aka: [灵西, 凌犀, 灵息]    # 已知误识别/同音变体,可选
+  aka: [北港, 凌犀, 港湾]    # 已知误识别/同音变体,可选
 - name: 星图平台
   note: 平台名（与 corpus 基线一致）
 ```

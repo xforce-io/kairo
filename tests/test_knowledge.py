@@ -511,22 +511,22 @@ def test_candidate_card_main_body_is_description_not_quote(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
-    a = _write_digest(ws, "a", "康医通要上线。")
-    b = _write_digest(ws, "b", "康医通下周演示。")
+    a = _write_digest(ws, "a", "港湾通要上线。")
+    b = _write_digest(ws, "b", "港湾通下周演示。")
     ingest_candidates(
-        ws.root, source_kind="digest", path=a, source_text="康医通要上线。",
-        drafts=[{"title": "康医通", "quote": "康医通要上线", "description": "待上线业务系统"}],
+        ws.root, source_kind="digest", path=a, source_text="港湾通要上线。",
+        drafts=[{"title": "港湾通", "quote": "港湾通要上线", "description": "待上线业务系统"}],
     )
     ingest_candidates(
-        ws.root, source_kind="digest", path=b, source_text="康医通下周演示。",
-        drafts=[{"title": "康医通", "quote": "康医通下周演示", "description": "待上线业务系统"}],
+        ws.root, source_kind="digest", path=b, source_text="港湾通下周演示。",
+        drafts=[{"title": "港湾通", "quote": "港湾通下周演示", "description": "待上线业务系统"}],
     )
     html = TestClient(create_app(root)).get("/knowledge?workspace=ws", headers={"accept-language": "zh"}).text
-    card = _candidate_card(html, "康医通")
+    card = _candidate_card(html, "港湾通")
     main, _, sources = card.partition("<details")
     assert "待上线业务系统" in main
-    assert "康医通要上线" not in main and "康医通下周演示" not in main
-    assert "康医通要上线" in sources and "康医通下周演示" in sources
+    assert "港湾通要上线" not in main and "港湾通下周演示" not in main
+    assert "港湾通要上线" in sources and "港湾通下周演示" in sources
 
 
 def test_candidate_card_empty_description_does_not_fall_back_to_quote(tmp_path):
@@ -557,22 +557,22 @@ def test_sighted_single_source_card_hides_quote_until_sources_expanded(tmp_path)
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
-    a = _write_digest(ws, "a", "高希彬提出方案。李四也在。")
+    a = _write_digest(ws, "a", "陈默提出方案。李四也在。")
     ingest_candidates(
-        ws.root, source_kind="digest", path=a, source_text="高希彬提出方案。李四也在。",
+        ws.root, source_kind="digest", path=a, source_text="陈默提出方案。李四也在。",
         drafts=[
-            {"title": "高希彬", "quote": "高希彬提出", "description": "项目提出人"},
+            {"title": "陈默", "quote": "陈默提出", "description": "项目提出人"},
             {"title": "李四", "quote": "李四也在"},
         ],
     )
     html = TestClient(create_app(root)).get(
         "/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"}
     ).text
-    gaoxi = _candidate_card(html, "高希彬")
+    gaoxi = _candidate_card(html, "陈默")
     main, _, sources = gaoxi.partition("<details")
     assert "项目提出人" in main
-    assert "高希彬提出" not in main
-    assert "高希彬提出" in sources
+    assert "陈默提出" not in main
+    assert "陈默提出" in sources
     lisi = _candidate_card(html, "李四")
     empty_main, _, empty_sources = lisi.partition("<details")
     assert "尚无拟议说明" in empty_main
@@ -587,19 +587,19 @@ def test_merge_is_separated_and_empty_entry_id_is_rejected(tmp_path):
     ws = Workspace.init(root / "ws")
     entry = new_entry(title="无关条目", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [entry]}))
-    a = _write_digest(ws, "a", "康医通要上线。")
-    b = _write_digest(ws, "b", "康医通下周演示。")
+    a = _write_digest(ws, "a", "港湾通要上线。")
+    b = _write_digest(ws, "b", "港湾通下周演示。")
     ingest_candidates(
-        ws.root, source_kind="digest", path=a, source_text="康医通要上线。",
-        drafts=[{"title": "康医通", "quote": "康医通要上线", "description": "待上线业务系统"}],
+        ws.root, source_kind="digest", path=a, source_text="港湾通要上线。",
+        drafts=[{"title": "港湾通", "quote": "港湾通要上线", "description": "待上线业务系统"}],
     )
     ingest_candidates(
-        ws.root, source_kind="digest", path=b, source_text="康医通下周演示。",
-        drafts=[{"title": "康医通", "quote": "康医通下周演示", "description": "待上线业务系统"}],
+        ws.root, source_kind="digest", path=b, source_text="港湾通下周演示。",
+        drafts=[{"title": "港湾通", "quote": "港湾通下周演示", "description": "待上线业务系统"}],
     )
     client = TestClient(create_app(root))
     html = client.get("/knowledge?workspace=ws", headers={"accept-language": "zh"}).text
-    card = _candidate_card(html, "康医通")
+    card = _candidate_card(html, "港湾通")
     actions, _, merge = card.partition("合并到已有条目")
     assert "采纳到本工作区" in actions and "忽略" in actions
     assert 'name="entry_id"' not in actions
@@ -1235,10 +1235,10 @@ def test_knowledge_queue_is_compact_without_merge_when_empty(tmp_path):
 def test_unicode_workspace_slug_is_retained_in_source(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
-    ws = Workspace.init(root / "能源梳理")
+    ws = Workspace.init(root / "北港梳理")
     _ingest_pending(ws, "中文范围", "证据")
     entry = accept_workspace(ws.root, load_review(ws.root).candidates[0].id)
-    assert entry.sources[0].workspace_slug == "能源梳理"
+    assert entry.sources[0].workspace_slug == "北港梳理"
 
 
 def test_candidate_provider_only_receives_current_product_and_redacts_error(tmp_path, monkeypatch):
@@ -1636,74 +1636,74 @@ def test_readme_v2_example_has_strict_audit_fields(tmp_path):
 
 
 def test_ingest_resighting_of_confirmed_term_attaches_provenance_instead_of_requeueing(tmp_path):
-    """P0: 已确认的「胡博」被反复提为候选、而条目出处始终为 0。"""
+    """P0: 已确认的「林工」被反复提为候选、而条目出处始终为 0。"""
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
-    public = new_entry(title="胡值彬", scope="global", aliases=[KnowledgeAlias(value="胡博")])
+    public = new_entry(title="林值秋", scope="global", aliases=[KnowledgeAlias(value="林工")])
     save_global(root, KnowledgeDocument(entries=[public]))
-    local = new_entry(title="康医通", scope="workspace")
+    local = new_entry(title="港湾通", scope="workspace")
     save_workspace(ws.root, load_workspace(ws.root)[0].model_copy(update={"entries": [local]}))
     matcher = KnowledgeMatcher(effective_entries(root, ws.root))
 
-    a = _write_digest(ws, "r1", "胡博说康医通要上线。")
+    a = _write_digest(ws, "r1", "林工说港湾通要上线。")
     ingest_candidates(
         ws.root,
         source_kind="digest",
         path=a,
-        source_text="胡博说康医通要上线。",
+        source_text="林工说港湾通要上线。",
         drafts=[
-            {"title": "胡博", "quote": "胡博说", "aliases": ["胡值彬"]},
-            {"title": "康医通", "quote": "康医通要上线"},
+            {"title": "林工", "quote": "林工说", "aliases": ["林值秋"]},
+            {"title": "港湾通", "quote": "港湾通要上线"},
             # alias proposal: the entry does not know this ASR mishearing yet -> reviewable
-            {"title": "西端", "quote": "胡博说", "aliases": ["C 端"]},
+            {"title": "西端", "quote": "林工说", "aliases": ["C 端"]},
         ],
         matcher=matcher,
         serve_root=root,
     )
     review = load_review(ws.root)
     by_title = {c.title: c for c in review.candidates}
-    assert by_title["胡博"].status == "merged" and by_title["胡博"].merged_into == public.id
-    assert by_title["康医通"].status == "merged" and by_title["康医通"].merged_into == local.id
+    assert by_title["林工"].status == "merged" and by_title["林工"].merged_into == public.id
+    assert by_title["港湾通"].status == "merged" and by_title["港湾通"].merged_into == local.id
     assert by_title["西端"].status in {"sighted", "pending"}
     assert todo_count(ws.root) == 0
 
     g_entry = next(e for e in load_global(root)[0].entries if e.id == public.id)
-    assert [s.path for s in g_entry.sources] == [a] and g_entry.sources[0].quote == "胡博说"
+    assert [s.path for s in g_entry.sources] == [a] and g_entry.sources[0].quote == "林工说"
     w_entry = next(e for e in load_workspace(ws.root)[0].entries if e.id == local.id)
     assert [s.path for s in w_entry.sources] == [a]
 
     # Idempotent re-ingest of the same digest: no duplicate provenance.
     ingest_candidates(
-        ws.root, source_kind="digest", path=a, source_text="胡博说康医通要上线。",
-        drafts=[{"title": "胡博", "quote": "胡博说"}], matcher=matcher, serve_root=root,
+        ws.root, source_kind="digest", path=a, source_text="林工说港湾通要上线。",
+        drafts=[{"title": "林工", "quote": "林工说"}], matcher=matcher, serve_root=root,
     )
     assert len(next(e for e in load_global(root)[0].entries if e.id == public.id).sources) == 1
 
     # A later digest re-sighting the already-merged candidate still feeds provenance.
-    b = _write_digest(ws, "r2", "胡博拍板。")
+    b = _write_digest(ws, "r2", "林工拍板。")
     ingest_candidates(
-        ws.root, source_kind="digest", path=b, source_text="胡博拍板。",
-        drafts=[{"title": "胡博", "quote": "胡博拍板"}], matcher=matcher, serve_root=root,
+        ws.root, source_kind="digest", path=b, source_text="林工拍板。",
+        drafts=[{"title": "林工", "quote": "林工拍板"}], matcher=matcher, serve_root=root,
     )
     g_entry = next(e for e in load_global(root)[0].entries if e.id == public.id)
     assert [s.path for s in g_entry.sources] == [a, b]
-    assert load_review(ws.root).candidates and all(c.title != "胡博" or c.status == "merged" for c in load_review(ws.root).candidates)
+    assert load_review(ws.root).candidates and all(c.title != "林工" or c.status == "merged" for c in load_review(ws.root).candidates)
 
 
 def test_ingest_closes_open_candidate_once_its_term_is_confirmed(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
-    a = _write_digest(ws, "r1", "胡博到场。")
-    ingest_candidates(ws.root, source_kind="digest", path=a, source_text="胡博到场。", drafts=[{"title": "胡博", "quote": "胡博到场"}])
+    a = _write_digest(ws, "r1", "林工到场。")
+    ingest_candidates(ws.root, source_kind="digest", path=a, source_text="林工到场。", drafts=[{"title": "林工", "quote": "林工到场"}])
     assert load_review(ws.root).candidates[0].status == "sighted"
-    public = new_entry(title="胡值彬", scope="global", aliases=[KnowledgeAlias(value="胡博")])
+    public = new_entry(title="林值秋", scope="global", aliases=[KnowledgeAlias(value="林工")])
     save_global(root, KnowledgeDocument(entries=[public]))
-    b = _write_digest(ws, "r2", "胡博发言。")
+    b = _write_digest(ws, "r2", "林工发言。")
     ingest_candidates(
-        ws.root, source_kind="digest", path=b, source_text="胡博发言。",
-        drafts=[{"title": "胡博", "quote": "胡博发言"}],
+        ws.root, source_kind="digest", path=b, source_text="林工发言。",
+        drafts=[{"title": "林工", "quote": "林工发言"}],
         matcher=KnowledgeMatcher(effective_entries(root, ws.root)), serve_root=root,
     )
     item = load_review(ws.root).candidates[0]
@@ -1712,11 +1712,11 @@ def test_ingest_closes_open_candidate_once_its_term_is_confirmed(tmp_path):
 
 
 def test_knowledge_context_treats_confirmed_terms_as_verified_spellings():
-    entry = _entry("胡值彬", aliases=("胡博",), description="产品负责人")
-    text = format_knowledge_context(KnowledgeMatcher([entry]).match("胡博说要上线"))
+    entry = _entry("林值秋", aliases=("林工",), description="产品负责人")
+    text = format_knowledge_context(KnowledgeMatcher([entry]).match("林工说要上线"))
     assert "不必再标 ⚠️" in text
-    assert "- 胡值彬（命中：胡博；别名：胡博；产品负责人）" not in text  # hit term is not repeated as alias
-    assert "- 胡值彬（命中：胡博；产品负责人）" in text
+    assert "- 林值秋（命中：林工；别名：林工；产品负责人）" not in text  # hit term is not repeated as alias
+    assert "- 林值秋（命中：林工；产品负责人）" in text
     assert "无出处" not in text and "global" not in text
 
 
@@ -1735,27 +1735,27 @@ def test_sighted_queue_lists_single_sightings_and_accept_ignore_work(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
     ws = Workspace.init(root / "ws")
-    a = _write_digest(ws, "a", "高希彬提出方案。李四也在。")
+    a = _write_digest(ws, "a", "陈默提出方案。李四也在。")
     ingest_candidates(
-        ws.root, source_kind="digest", path=a, source_text="高希彬提出方案。李四也在。",
-        drafts=[{"title": "高希彬", "quote": "高希彬提出"}, {"title": "李四", "quote": "李四也在"}],
+        ws.root, source_kind="digest", path=a, source_text="陈默提出方案。李四也在。",
+        drafts=[{"title": "陈默", "quote": "陈默提出"}, {"title": "李四", "quote": "李四也在"}],
     )
     assert todo_count(ws.root) == 0  # single sightings are not "to do"
     client = TestClient(create_app(root))
     page = client.get("/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"})
     assert page.status_code == 200
-    assert "目击 · 2" in page.text and "高希彬" in page.text and "李四" in page.text
+    assert "目击 · 2" in page.text and "陈默" in page.text and "李四" in page.text
     section = page.text.split("目击 · 2", 1)[1]
     assert "采纳到本工作区" in section and "忽略" in section
 
     by_title = {c.title: c for c in load_review(ws.root).candidates}
-    page = client.post(f"/w/ws/knowledge/candidates/{by_title['高希彬'].id}/accept?queue=sighted", headers={"accept-language": "zh"})
+    page = client.post(f"/w/ws/knowledge/candidates/{by_title['陈默'].id}/accept?queue=sighted", headers={"accept-language": "zh"})
     assert page.status_code == 200
-    assert any(e.title == "高希彬" and e.status == "confirmed" for e in load_workspace(ws.root)[0].entries)
+    assert any(e.title == "陈默" and e.status == "confirmed" for e in load_workspace(ws.root)[0].entries)
     page = client.post(f"/w/ws/knowledge/candidates/{by_title['李四'].id}/ignore?queue=sighted", headers={"accept-language": "zh"})
     assert page.status_code == 200
     statuses = {c.title: c.status for c in load_review(ws.root).candidates}
-    assert statuses == {"高希彬": "accepted", "李四": "ignored"}
+    assert statuses == {"陈默": "accepted", "李四": "ignored"}
     assert "目击 · 0" in client.get("/knowledge?workspace=ws&queue=sighted", headers={"accept-language": "zh"}).text
 
 

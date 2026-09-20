@@ -102,9 +102,9 @@ knowledge:
   version: 2
   entries:
     - id: ke-example
-      title: 灵犀系统
+      title: 北港系统
       description: 本项目所研究的系统
-      aliases: [{value: 灵西, auto_match: true}]
+      aliases: [{value: 北港, auto_match: true}]
       status: confirmed
       scope: workspace
       created_at: "2026-08-29T00:00:00+00:00"
