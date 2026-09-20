@@ -53,6 +53,8 @@ S3 人读恰好一句四态字面量，见 §8。
 
 只改 CLI 出口与 Skill。放弃第二套账本、放弃 Web 改版、放弃继续印「A」。
 
+严格成员模式下 `status --ref` 只认 `topic_members`：非成员一律 `not_found`，禁止回退 `list_reference_ids()`。兼容（非严格）模式才允许本地回退。
+
 S3 复用 compose 的 digest 键：本 Topic home 且未开 `strict_membership` 时为 `references/{id}/digest.md`；跨 home 用 Ref 身份键（与 `_all_digests` 一致）。当前文件内容哈希与 `folded[key]` 比较；无文件 → `digest_missing`，不论字典里是否残留旧键。
 
 ## 6. 架构

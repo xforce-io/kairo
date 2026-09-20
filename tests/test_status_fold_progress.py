@@ -9,7 +9,14 @@ from typer.testing import CliRunner
 import pytest
 
 from kairo.cli import app
-from kairo.refs import create_tag
+from kairo.refs import (
+    add_tag,
+    create_tag,
+    load_catalog,
+    ref_key,
+    save_catalog,
+    set_include_tags,
+)
 from kairo.workspace import Workspace
 
 runner = CliRunner()
@@ -155,3 +162,103 @@ def test_s3_missing_ref_json(topic_dir, monkeypatch):
     assert payload["ok"] is False
     assert payload["code"] == "not_found"
     assert "content" not in payload
+
+
+def _enable_strict(serve, *, assignments: dict | None = None):
+    cat = load_catalog(serve)
+    cat["strict_membership"] = True
+    if assignments is not None:
+        cat["assignments"] = assignments
+    save_catalog(serve, cat)
+
+
+def test_strict_non_member_local_ref_not_found(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(topic_dir.parent))
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    src = topic_dir / "orphan.txt"
+    src.write_text("x")
+    added = runner.invoke(app, ["add", str(src)])
+    assert added.exit_code == 0, added.output
+    rid = Workspace.open(topic_dir).list_reference_ids()[0]
+    serve = topic_dir.parent
+    _enable_strict(serve, assignments={})
+    cat = load_catalog(serve)
+    if "main" not in cat["tags"]:
+        cat["tags"] = sorted(set(cat["tags"]) | {"main"})
+        save_catalog(serve, cat)
+    set_include_tags(serve, "main", ["main"])
+    result = runner.invoke(app, ["status", "--ref", rid, "--json"])
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is False
+    assert payload["code"] == "not_found"
+
+
+def test_compat_mode_local_fallback(topic_dir, monkeypatch):
+    monkeypatch.chdir(topic_dir)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    runner.invoke(app, ["init"])
+    src = topic_dir / "local.txt"
+    src.write_text("x")
+    runner.invoke(app, ["add", str(src)])
+    rid = Workspace.open(topic_dir).list_reference_ids()[0]
+    payload = _load(runner.invoke(app, ["status", "--ref", rid, "--json"]))
+    assert payload["id"] == rid
+    assert payload["home"] == "main"
+
+
+def test_global_home_member_with_home_flag(tmp_path, monkeypatch):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    monkeypatch.chdir(serve)
+    create_tag(serve, "energy")
+    Workspace.init(serve / "energy", topic="energy")
+    src = tmp_path / "g.txt"
+    src.write_text("global")
+    added = runner.invoke(app, ["add", str(src), "--id", "g1"])
+    assert added.exit_code == 0, added.output
+    cat = load_catalog(serve)
+    cat["tags"] = sorted(set(cat["tags"]) | {"energy"})
+    save_catalog(serve, cat)
+    add_tag(serve, home="", ref_id="g1", tag="energy")
+    set_include_tags(serve, "energy", ["energy"])
+    _enable_strict(serve)
+    monkeypatch.chdir(serve / "energy")
+    payload = _load(
+        runner.invoke(app, ["status", "--ref", "g1", "--home", "global", "--json"])
+    )
+    assert payload["id"] == "g1"
+    assert payload["home"] == ""
+
+
+def test_cross_home_and_duplicate_id(tmp_path, monkeypatch):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    monkeypatch.chdir(serve)
+    create_tag(serve, "energy")
+    Workspace.init(serve / "energy", topic="energy")
+    src_g = tmp_path / "g.txt"
+    src_g.write_text("g")
+    src_t = tmp_path / "t.txt"
+    src_t.write_text("t")
+    assert runner.invoke(app, ["add", str(src_g), "--id", "dup"]).exit_code == 0
+    monkeypatch.chdir(serve / "energy")
+    assert runner.invoke(app, ["add", str(src_t), "--id", "dup"]).exit_code == 0
+    cat = load_catalog(serve)
+    cat["tags"] = sorted(set(cat["tags"]) | {"energy"})
+    save_catalog(serve, cat)
+    add_tag(serve, home="", ref_id="dup", tag="energy")
+    add_tag(serve, home="energy", ref_id="dup", tag="energy")
+    set_include_tags(serve, "energy", ["energy"])
+    _enable_strict(serve)
+    amb = runner.invoke(app, ["status", "--ref", "dup", "--json"])
+    assert amb.exit_code == 1
+    assert json.loads(amb.stdout)["code"] == "invalid_request"
+    glob = _load(runner.invoke(app, ["status", "--ref", "dup", "--home", "global", "--json"]))
+    assert glob["home"] == ""
+    loc = _load(runner.invoke(app, ["status", "--ref", "dup", "--home", "energy", "--json"]))
+    assert loc["home"] == "energy"

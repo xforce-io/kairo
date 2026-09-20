@@ -193,30 +193,32 @@ def _normalize_home(home: str | None) -> str | None:
 
 
 def resolve_status_ref(ws: Workspace, ref_id: str, home: str | None):
-    from kairo.refs import serve_root_of
+    from kairo.refs import load_catalog, serve_root_of
 
     serve = serve_root_of(ws)
     wanted = _normalize_home(home)
+    strict = bool(load_catalog(serve).get("strict_membership", False))
     try:
         members = topic_members(serve, ws.root.name)
     except Exception:
         members = []
     matches = [m for m in members if m.id == ref_id]
     if not matches:
-        local = ws.list_reference_ids()
-        if ref_id in local and wanted in (None, ws.root.name):
-            from kairo.refs import RefRecord
+        if not strict:
+            local = ws.list_reference_ids()
+            if ref_id in local and wanted in (None, ws.root.name):
+                from kairo.refs import RefRecord
 
-            digest = ws.references_dir() / ref_id / "digest.md"
-            man = ws.read_manifest(ref_id)
-            rec = RefRecord(
-                home=ws.root.name,
-                id=ref_id,
-                title=man.title or ref_id,
-                source_class=man.source_class,
-                digest_path=digest if digest.is_file() else None,
-            )
-            return rec
+                digest = ws.references_dir() / ref_id / "digest.md"
+                man = ws.read_manifest(ref_id)
+                rec = RefRecord(
+                    home=ws.root.name,
+                    id=ref_id,
+                    title=man.title or ref_id,
+                    source_class=man.source_class,
+                    digest_path=digest if digest.is_file() else None,
+                )
+                return rec
         raise StatusError("reference 不存在", code="not_found")
     if wanted is not None:
         matches = [m for m in matches if _normalize_home(m.home) == wanted]
