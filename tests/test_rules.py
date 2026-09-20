@@ -466,19 +466,19 @@ def test_normalize_persona_carries_readability_discipline_and_glossary(tmp_path,
     ws = Workspace.init(tmp_path)
     con = ws.constitution
     con.pipeline.normalize.enabled = True
-    con.glossary = [GlossaryEntry(name="灵犀系统", aka=["灵西"])]
+    con.glossary = [GlossaryEntry(name="北港系统", aka=["北港"])]
     _save_constitution(ws, con)
     ws2 = Workspace(ws.root)
     rid = _stub_asr_transcript(ws2, tmp_path, monkeypatch)
     transcript = ws2.root / f"references/{rid}/transcript.md"
-    transcript.write_text(transcript.read_text() + "\n灵西\n")
+    transcript.write_text(transcript.read_text() + "\n北港\n")
     prov = _RunOnlyProvider()
     NormalizeRule(ws2, prov).discover()[0].run(State())
     persona = prov.calls[0].persona
     assert "易读" in persona  # 可读优化目标(prose 供人通读)
     assert "不是纪要" in persona  # 与 digest 区分:这是全文,不是摘要
     assert "只输出文档正文" in persona  # 输出纪律 P1
-    assert "灵犀系统" in persona  # 命中的 legacy 真名册按需迁为知识上下文
+    assert "北港系统" in persona  # 命中的 legacy 真名册按需迁为知识上下文
 
 
 # ---- Digest ----

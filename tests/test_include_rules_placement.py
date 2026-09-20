@@ -19,10 +19,10 @@ def _client(root):
 def _topic(tmp_path):
     serve = tmp_path / "root"
     serve.mkdir()
-    Workspace.init(serve / "energy", topic="能源梳理")
+    Workspace.init(serve / "energy", topic="北港梳理")
     create_tag(serve, "流程质量")
-    create_tag(serve, "能源梳理")
-    set_include_tags(serve, "energy", ["能源梳理"])
+    create_tag(serve, "北港梳理")
+    set_include_tags(serve, "energy", ["北港梳理"])
     return serve
 
 
@@ -60,7 +60,7 @@ def test_include_tags_form_post_still_saves(tmp_path):
     r = _client(serve).post("/w/energy/include-tags", data={"tag": ["流程质量"]})
     assert r.status_code == 200
     assert r.headers.get("hx-redirect") == "/w/energy"
-    assert include_tags_of(Workspace.open(serve / "energy")) == ["能源梳理", "流程质量"]
+    assert include_tags_of(Workspace.open(serve / "energy")) == ["北港梳理", "流程质量"]
 
 
 def test_public_read_topic_page_has_no_include_rules_editor(tmp_path):

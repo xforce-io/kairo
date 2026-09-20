@@ -21,7 +21,7 @@ def _two_ws(tmp_path):
     b = root / "beta"
     a.mkdir(parents=True)
     b.mkdir()
-    wa = Workspace.init(a, topic="能源梳理")
+    wa = Workspace.init(a, topic="北港梳理")
     wb = Workspace.init(b, topic="招聘")
     (tmp_path / "m.txt").write_text("会议")
     (tmp_path / "n.txt").write_text("笔记")
@@ -239,10 +239,10 @@ def test_timeline_same_title_uses_topic_not_id(tmp_path):
     wb.add([tmp_path / "b.txt"], ref_id="20260903-16-b", title="20260903-16")
     html = _client(root).get("/timeline", params={"mode": "recent"}).text
     assert html.count("20260903-16") >= 2
-    assert "能源梳理" in html
+    assert "北港梳理" in html
     assert "招聘" in html
     meta = _meta_cells(html)
-    assert any("能源梳理" in cell for cell in meta)
+    assert any("北港梳理" in cell for cell in meta)
     assert any("招聘" in cell for cell in meta)
     assert all("20260903-16-a" not in cell and "20260903-16-b" not in cell for cell in meta)
     assert all("alpha" not in cell and "beta" not in cell for cell in meta)
@@ -290,7 +290,7 @@ def test_timeline_range_lists_inclusive_and_hides_unknown(tmp_path):
     r = c.get("/timeline", params={"from": "2026-08-24", "to": "2026-08-25"})
     assert r.status_code == 200
     assert "候选人沟通" in r.text
-    assert any("能源梳理" in cell for cell in _meta_cells(r.text))
+    assert any("北港梳理" in cell for cell in _meta_cells(r.text))
     assert "2026-08-24" in r.text
     assert 'href="/refs/2026-08-25-weekly?home=alpha&back=/timeline%3Ffrom%3D2026-08-24%26to%3D2026-08-25"' in r.text
     assert "2026-08-25-weekly" not in _meta_cells(r.text)

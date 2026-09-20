@@ -34,14 +34,14 @@ def _ws_with_digest(tmp_path) -> tuple[Workspace, str, Path]:
     root.mkdir()
     ws = Workspace.init(root / "ws", topic="t")
     src = root / "n.txt"
-    src.write_text("讨论天溯系统")
+    src.write_text("讨论示例机构系统")
     rid = ws.add([src])
     step(ws, provider=StubProvider())
     digest = ws.root / "references" / rid / "digest.md"
     # 保证证据原文在 digest 中
     text = digest.read_text()
-    if "天溯系统" not in text:
-        digest.write_text(text + "\n天溯系统\n")
+    if "示例机构系统" not in text:
+        digest.write_text(text + "\n示例机构系统\n")
     return ws, rid, root
 
 
@@ -50,31 +50,31 @@ def test_ingest_requires_quote_in_digest(tmp_path):
     ingest_candidates(
         ws.root,
         rid,
-        [{"name": "天溯", "quote": "天溯系统"}],
+        [{"name": "示例机构", "quote": "示例机构系统"}],
     )
     open_ = open_candidates(ws.root)
     assert len(open_) == 1
-    assert open_[0].name == "天溯"
+    assert open_[0].name == "示例机构"
     ingest_candidates(ws.root, rid, [{"name": "无证据", "quote": "不存在的话"}])
-    assert [c.name for c in open_candidates(ws.root)] == ["天溯"]
+    assert [c.name for c in open_candidates(ws.root)] == ["示例机构"]
 
 
 def test_ignore_suppresses_same_fingerprint(tmp_path):
     ws, rid, _ = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    ingest_candidates(ws.root, rid, [{"name": "示例机构", "quote": "示例机构系统"}])
     cid = open_candidates(ws.root)[0].id
     ignore_candidate(ws.root, cid)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    ingest_candidates(ws.root, rid, [{"name": "示例机构", "quote": "示例机构系统"}])
     assert open_candidates(ws.root) == []
     assert any(c.status == STATUS_IGNORED for c in load_review(ws.root).candidates)
 
 
 def test_accept_writes_workspace_only(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    ingest_candidates(ws.root, rid, [{"name": "示例机构", "quote": "示例机构系统"}])
     cid = open_candidates(ws.root)[0].id
     accept_workspace(ws, cid)
-    assert load_workspace_glossary(ws.root)[0].name == "天溯"
+    assert load_workspace_glossary(ws.root)[0].name == "示例机构"
     assert not (root / "glossary.yaml").exists() or load_glossary_file(root / "glossary.yaml") == []
 
 
@@ -98,7 +98,7 @@ def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
                 config.artifact_dir.mkdir(parents=True, exist_ok=True)
                 path = config.artifact_dir / "knowledge-candidates.yaml"
                 path.write_text(
-                    "- title: 天溯\n  description: 系统名称\n  quote: 天溯系统\n"
+                    "- title: 示例机构\n  description: 系统名称\n  quote: 示例机构系统\n"
                 )
                 return AgentResult(artifacts=[path], result_text=path.read_text())
             return super().run(config, signal)
@@ -117,15 +117,15 @@ def test_digest_success_uses_provider_to_create_review_candidate(tmp_path):
 
     candidates = knowledge_load_review(ws.root).candidates
     assert len(candidates) == 1
-    assert candidates[0].title == "天溯"
-    assert candidates[0].quote == "天溯系统"
+    assert candidates[0].title == "示例机构"
+    assert candidates[0].quote == "示例机构系统"
     assert candidates[0].status == "sighted"
     assert knowledge_open_candidates(ws.root) == []
 
 
 def test_delete_ref_invalidates_pending(tmp_path):
     ws, rid, _ = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    ingest_candidates(ws.root, rid, [{"name": "示例机构", "quote": "示例机构系统"}])
     assert open_candidates(ws.root)
     import shutil
 
@@ -136,7 +136,7 @@ def test_delete_ref_invalidates_pending(tmp_path):
 
 def test_root_reject_does_not_write_root(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    ingest_candidates(ws.root, rid, [{"name": "示例机构", "quote": "示例机构系统"}])
     cid = open_candidates(ws.root)[0].id
     promote_candidate(ws.root, cid)
     assert load_review(ws.root).candidates[0].status == STATUS_PENDING_ROOT
@@ -149,18 +149,18 @@ def test_root_reject_does_not_write_root(tmp_path):
 
 def test_root_accept_writes_root_not_local(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    ingest_candidates(ws.root, rid, [{"name": "示例机构", "quote": "示例机构系统"}])
     cid = open_candidates(ws.root)[0].id
     promote_candidate(ws.root, cid)
     accept_root(root, "ws", cid)
-    assert load_glossary_file(root / "glossary.yaml")[0].name == "天溯"
+    assert load_glossary_file(root / "glossary.yaml")[0].name == "示例机构"
     assert load_workspace_glossary(ws.root) == []
 
 
 def test_todo_count_sums_open_extract_and_pending(tmp_path):
     ws, rid, _ = _ws_with_digest(tmp_path)
     assert todo_count(ws.root, pending=[]) == 0
-    ingest_candidates(ws.root, rid, [{"name": "天溯", "quote": "天溯系统"}])
+    ingest_candidates(ws.root, rid, [{"name": "示例机构", "quote": "示例机构系统"}])
     assert todo_count(ws.root, pending=[]) == 1
     store = load_review(ws.root)
     store.extract_errors[rid] = "boom"
@@ -179,20 +179,20 @@ def test_web_review_actions(tmp_path):
     ws, rid, root = _ws_with_digest(tmp_path)
     understanding = ws.root / "understanding.md"
     body = understanding.read_text() if understanding.is_file() else ""
-    if "天溯系统" not in body:
-        understanding.write_text((body + "\n天溯系统\n").lstrip())
+    if "示例机构系统" not in body:
+        understanding.write_text((body + "\n示例机构系统\n").lstrip())
     ingest_knowledge(
         ws.root,
         source_kind="compose",
         path="understanding.md",
         source_text=understanding.read_text(),
-        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+        drafts=[{"title": "示例机构", "quote": "示例机构系统"}],
     )
     cid = knowledge_open(ws.root)[0].id
     c = TestClient(create_app(root))
     page = c.get("/knowledge?workspace=ws")
     assert page.status_code == 200
-    assert "天溯" in page.text
+    assert "示例机构" in page.text
     r = c.post(f"/w/ws/knowledge/candidates/{cid}/ignore")
     assert r.status_code == 200
     assert knowledge_open(ws.root) == []
@@ -205,14 +205,14 @@ def test_web_promote_then_root_reject_on_console(tmp_path):
 
     understanding = ws.root / "understanding.md"
     body = understanding.read_text() if understanding.is_file() else ""
-    if "天溯系统" not in body:
-        understanding.write_text((body + "\n天溯系统\n").lstrip())
+    if "示例机构系统" not in body:
+        understanding.write_text((body + "\n示例机构系统\n").lstrip())
     ingest_knowledge(
         ws.root,
         source_kind="compose",
         path="understanding.md",
         source_text=understanding.read_text(),
-        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+        drafts=[{"title": "示例机构", "quote": "示例机构系统"}],
     )
     entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
     c = TestClient(create_app(root))
@@ -221,7 +221,7 @@ def test_web_promote_then_root_reject_on_console(tmp_path):
     candidate = load_knowledge_review(ws.root).candidates[-1]
     bare = c.get("/knowledge")
     assert f"/knowledge/candidates/ws/{candidate.id}/reject" in bare.text
-    assert "天溯" in bare.text
+    assert "示例机构" in bare.text
     c.post(f"/knowledge/candidates/ws/{candidate.id}/reject", data={"reason": "本课题专用"})
     selected = c.get("/knowledge?workspace=ws")
     assert "本课题专用" in selected.text
@@ -234,14 +234,14 @@ def test_workspace_hides_actions_after_candidate_is_submitted_to_root(tmp_path):
 
     understanding = ws.root / "understanding.md"
     body = understanding.read_text() if understanding.is_file() else ""
-    if "天溯系统" not in body:
-        understanding.write_text((body + "\n天溯系统\n").lstrip())
+    if "示例机构系统" not in body:
+        understanding.write_text((body + "\n示例机构系统\n").lstrip())
     ingest_knowledge(
         ws.root,
         source_kind="compose",
         path="understanding.md",
         source_text=understanding.read_text(),
-        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+        drafts=[{"title": "示例机构", "quote": "示例机构系统"}],
     )
     entry = accept_knowledge_workspace(ws.root, load_knowledge_review(ws.root).candidates[0].id)
     candidate = promote_entry(ws.root, entry.id)

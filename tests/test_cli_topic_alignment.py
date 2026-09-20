@@ -1,6 +1,7 @@
 """Tests for #269 CLI Topic alignment."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -413,7 +414,7 @@ def test_title_topic_immediately_after_serve_root_add(tmp_path, monkeypatch):
     create_tag(serve, "energy")
     created = runner.invoke(app, ["new", "energy"])
     assert created.exit_code == 0, created.output
-    src = tmp_path / "C 端菜品制作流程讨论-260910.txt"
+    src = tmp_path / "侧端菜品制作流程讨论-260910.txt"
     src.write_text("x")
     added = runner.invoke(
         app,
@@ -421,13 +422,13 @@ def test_title_topic_immediately_after_serve_root_add(tmp_path, monkeypatch):
     )
     assert added.exit_code == 0, added.output
     rid = list_all_refs(serve)[0].id
-    titled = runner.invoke(app, ["title", rid, "C 端菜品制作流程讨论-260910", "--topic", "energy"])
+    titled = runner.invoke(app, ["title", rid, "侧端菜品制作流程讨论-260910", "--topic", "energy"])
     assert titled.exit_code == 0, titled.output
     refs = list_all_refs(serve)
     assert len(refs) == 1
     assert refs[0].id == rid
     assert refs[0].home == ""
-    assert refs[0].title == "C 端菜品制作流程讨论-260910"
+    assert refs[0].title == "侧端菜品制作流程讨论-260910"
     topic_dir = serve / "energy" / "references" / rid
     assert not topic_dir.exists()
 
@@ -475,12 +476,13 @@ Test session
     
     result = runner.invoke(app, ["archive", str(session), "--topic", "archive", "--create", "--json"])
     assert result.exit_code == 0 or result.exit_code == 2  # May need choice
-    # Check that --topic parameter is recognized
-    assert "--topic" in runner.invoke(app, ["archive", "--help"]).output
+    help_out = re.sub(r"\x1b\[[0-9;]*m", "", runner.invoke(app, ["archive", "--help"]).output)
+    assert "--topic" in help_out
 
 
 def test_review_uses_topic_parameter(tmp_path, monkeypatch):
     """#269: review command uses --topic instead of --workspace."""
     result = runner.invoke(app, ["review", "--help"])
-    assert "--topic" in result.output
-    assert "-t" in result.output
+    help_out = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "--topic" in help_out
+    assert "-t" in help_out

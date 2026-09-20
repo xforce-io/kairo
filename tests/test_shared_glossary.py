@@ -17,10 +17,10 @@ from kairo.workspace import Workspace
 
 
 def test_merge_glossary_later_wins():
-    a = [GlossaryEntry(name="天溯", note="旧"), GlossaryEntry(name="甲")]
-    b = [GlossaryEntry(name="天溯", note="新")]
+    a = [GlossaryEntry(name="示例机构", note="旧"), GlossaryEntry(name="甲")]
+    b = [GlossaryEntry(name="示例机构", note="新")]
     m = merge_glossary(a, b)
-    assert [e.name for e in m] == ["天溯", "甲"]
+    assert [e.name for e in m] == ["示例机构", "甲"]
     assert m[0].note == "新"
 
 
@@ -46,14 +46,14 @@ def test_workspace_glossary_reference_merges_parent_not_machine(tmp_path, monkey
     ws = Workspace.init(ws_dir, topic="能源业务")
     save_glossary_file(
         root / "glossary.yaml",
-        [GlossaryEntry(name="天溯", note="公司"), GlossaryEntry(name="共享词", note="root")],
+        [GlossaryEntry(name="示例机构", note="公司"), GlossaryEntry(name="共享词", note="root")],
     )
     machine = tmp_path / "cfg" / "kairo" / "glossary.yaml"
     machine.parent.mkdir(parents=True)
     save_glossary_file(machine, [GlossaryEntry(name="本机词", note="machine")])
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
 
-    ws.add_glossary_entry("天溯", note="本区覆盖")  # 覆盖 root 同名
+    ws.add_glossary_entry("示例机构", note="本区覆盖")  # 覆盖 root 同名
     ref = ws.glossary_reference()
     assert "本机词" not in ref
     assert "共享词" in ref

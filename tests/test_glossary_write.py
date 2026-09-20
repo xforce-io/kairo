@@ -98,13 +98,13 @@ def test_workspace_todo_hint_is_one_line(tmp_path):
     root = tmp_path
     ws = Workspace.init(root / "ws", topic="t")
     understanding = ws.root / "understanding.md"
-    understanding.write_text("天溯系统\n")
+    understanding.write_text("示例机构系统\n")
     ingest_candidates(
         ws.root,
         source_kind="compose",
         path="understanding.md",
         source_text=understanding.read_text(),
-        drafts=[{"title": "天溯", "quote": "天溯系统"}],
+        drafts=[{"title": "示例机构", "quote": "示例机构系统"}],
     )
     html = _client(root).get("/w/ws").text
     hints = re.findall(

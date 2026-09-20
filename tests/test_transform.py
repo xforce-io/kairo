@@ -71,7 +71,7 @@ def test_markitdown_converts_docx_to_source_text(tmp_path):
     TransformRule(ws, **DOC_BACKEND).discover()[0].run(state)
     out = ws.root / "references" / rid / "source_text.md"
     assert out.is_file()
-    assert "康医通系统" in out.read_text()
+    assert "港湾通系统" in out.read_text()
     forms = {f.role: f for f in ws.read_manifest(rid).forms}
     assert "source_text" in forms
     assert forms["source_text"].origin.startswith("markitdown-from:")

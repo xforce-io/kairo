@@ -48,7 +48,7 @@ def _fresh_topic(tmp_path) -> Workspace:
     root.mkdir()
     ws = Workspace.init(root / "ws", topic="ws")
     material = tmp_path / "a.txt"
-    material.write_text("胡值彬强调能源优先。")
+    material.write_text("林值秋强调能源优先。")
     ws.add([material], ref_id="a")
     return ws
 

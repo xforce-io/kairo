@@ -51,7 +51,7 @@ def _visible_text(html: str) -> str:
 
 
 def test_list_pages_share_one_page_toolbar(tmp_path):
-    Workspace.init(tmp_path / "energy", topic="能源梳理")
+    Workspace.init(tmp_path / "energy", topic="北港梳理")
     for path in ("/", "/projects", "/timeline", "/knowledge"):
         html = _html(tmp_path, path)
         assert html.count('class="page-toolbar"') == 1
@@ -59,7 +59,7 @@ def test_list_pages_share_one_page_toolbar(tmp_path):
 
 
 def test_topics_toolbar_find_left_create_right_without_tag_lesson(tmp_path):
-    Workspace.init(tmp_path / "energy", topic="能源梳理")
+    Workspace.init(tmp_path / "energy", topic="北港梳理")
     html = _html(tmp_path, "/")
     bar = _class_block(html, "page-toolbar")
     find = _class_block(bar, "page-toolbar-find")
@@ -76,7 +76,7 @@ def test_topics_toolbar_find_left_create_right_without_tag_lesson(tmp_path):
 
 
 def test_projects_toolbar_create_without_repeating_nav_title(tmp_path):
-    Workspace.init(tmp_path / "energy", topic="能源梳理")
+    Workspace.init(tmp_path / "energy", topic="北港梳理")
     html = _html(tmp_path, "/projects")
     bar = _class_block(html, "page-toolbar")
     action = _class_block(bar, "page-toolbar-action")
@@ -104,7 +104,7 @@ def test_projects_create_from_toolbar(tmp_path):
 
 
 def test_timeline_tag_filter_sits_in_find_cluster(tmp_path):
-    Workspace.init(tmp_path / "energy", topic="能源梳理")
+    Workspace.init(tmp_path / "energy", topic="北港梳理")
     html = _html(tmp_path, "/timeline")
     bar = _class_block(html, "page-toolbar")
     find = _class_block(bar, "page-toolbar-find")
@@ -117,7 +117,7 @@ def test_timeline_tag_filter_sits_in_find_cluster(tmp_path):
 
 
 def test_knowledge_toolbar_filters_without_injection_lesson(tmp_path):
-    Workspace.init(tmp_path / "energy", topic="能源梳理")
+    Workspace.init(tmp_path / "energy", topic="北港梳理")
     html = _html(tmp_path, "/knowledge")
     bar = _class_block(html, "page-toolbar")
     find = _class_block(bar, "page-toolbar-find")

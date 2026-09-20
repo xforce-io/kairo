@@ -204,7 +204,7 @@ def test_scan_includes_project_and_artifact_without_owning_them(tmp_path):
     root = tmp_path / "root"
     ws_dir = root / "alpha"
     ws_dir.mkdir(parents=True)
-    ws = Workspace.init(ws_dir, topic="能源梳理")
+    ws = Workspace.init(ws_dir, topic="北港梳理")
     (tmp_path / "m.txt").write_text("会议")
     ws.add(
         [tmp_path / "m.txt"],
@@ -404,7 +404,7 @@ def test_collapse_artifacts_does_not_merge_across_task_or_day():
         ),
         TimelineItem(
             workspace="alpha",
-            topic="能源梳理",
+            topic="北港梳理",
             id="ref-1",
             title="会议",
             occurred_at=dt.date(2026, 9, 6),

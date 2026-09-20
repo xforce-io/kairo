@@ -228,7 +228,7 @@ def test_digest_link_with_chinese_id_is_decoded_before_validation():
 
     ref_id = "2026-08-26-ai智控一期概要设计"
     for path_id in (ref_id, quote(ref_id, safe="")):
-        html = render_markdown(f"[digest](references/{path_id}/digest.md)", slug="能源梳理")
+        html = render_markdown(f"[digest](references/{path_id}/digest.md)", slug="北港梳理")
         assert f"/ref/{quote(ref_id, safe='')}/form/digest" in html
         assert 'hx-target="#reader"' in html
         assert 'href="references/' not in html

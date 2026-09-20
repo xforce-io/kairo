@@ -14,7 +14,7 @@
 |---|---|
 | **最终轮文本** | grok headless 模式最后一条 assistant 消息的正文；`streaming-messages-json` 的终止 `result` 行的 `result` 字段。 |
 | **再次目击（re-sighting）** | 提取器提出的 draft，其标题与全部别名都归一到同一条 confirmed 知识；它不携带新词，不构成新的审核事项。 |
-| **别名提案** | draft 的标题未被任何 confirmed 条目认领，但某个别名被认领（典型：ASR 误听「西端」配别名「C 端」）；它是可审事项。 |
+| **别名提案** | draft 的标题未被任何 confirmed 条目认领，但某个别名被认领（典型：ASR 误听「西侧」配别名「侧端」）；它是可审事项。 |
 | **幻影 stale** | 产物内容与输入都没变，仅因指纹算法改动导致 `input_hash` 不匹配而被判待重算。 |
 
 ## 3. 设计目标与非目标
