@@ -73,6 +73,10 @@ record_app = typer.Typer(
     help="引用记录：create / resume / end / show / input。与 Task Run 不是同一对象。"
 )
 project_app.add_typer(record_app, name="record")
+ref_app = typer.Typer(
+    help="按标题／发生日／Topic 检索并读取 digest 或 transcript。不要扫内部目录。"
+)
+app.add_typer(ref_app, name="ref")
 tag_app = typer.Typer(help="Ref Tag：add / rm / list")
 app.add_typer(tag_app, name="tag")
 include_app = typer.Typer(help="Topic 包含规则：set / clear / show")
@@ -607,6 +611,56 @@ def timeline(
         typer.echo(json.dumps([item_as_json(it) for it in items], ensure_ascii=False))
         return
     typer.echo(format_cli_timeline(items, recent=recent, day=parsed), nl=False)
+
+
+def _ref_fail(as_json: bool, exc) -> None:
+    if as_json:
+        _dump(True, {"ok": False, "code": getattr(exc, "code", "error"), "error": str(exc)})
+    else:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+    raise typer.Exit(1) from None
+
+
+@ref_app.command("find")
+def ref_find_cmd(
+    title: str = typer.Option(None, "--title", help="标题包含匹配，区分大小写"),
+    day: str = typer.Option(None, "--day", help="发生日 YYYY-MM-DD"),
+    topic: str = typer.Option(None, "--topic", help="Topic 成员（slug）"),
+    root: Path = typer.Option(None, "--root", "-r", help="serve root"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+) -> None:
+    """按标题／发生日／Topic 检索 Ref。零命中不算失败。多条不自动读取。"""
+    from kairo.ref_find import RefLookupError, find_refs, format_find
+
+    try:
+        payload = find_refs(_serve_root(root), title=title, day=day, topic=topic)
+    except RefLookupError as e:
+        _ref_fail(as_json, e)
+    if as_json:
+        _dump(True, payload)
+    else:
+        typer.echo(format_find(payload), nl=False)
+
+
+@ref_app.command("read")
+def ref_read_cmd(
+    ref_id: str = typer.Option(..., "--id", help="Ref id"),
+    home: str = typer.Option(None, "--home", help="global 或 Topic slug"),
+    form: str = typer.Option(..., "--form", help="digest 或 transcript"),
+    root: Path = typer.Option(None, "--root", "-r", help="serve root"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+) -> None:
+    """按 home+id 读取 digest 或 transcript。不触发 step。"""
+    from kairo.ref_find import RefLookupError, read_ref
+
+    try:
+        payload = read_ref(_serve_root(root), ref_id=ref_id, home=home, form=form)
+    except RefLookupError as e:
+        _ref_fail(as_json, e)
+    if as_json:
+        _dump(True, payload)
+    else:
+        typer.echo(payload["content"], nl=False)
 
 
 @app.command(name="brief")

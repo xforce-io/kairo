@@ -54,7 +54,16 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 | 删参考 / rm-ref | 说明会改 state；确认后 `kairo rm-ref <id>`（若带 `--recompose` 会立刻重综合，副作用更大，须单独确认） |
 | 生成 prose / 重建 MEETINGS 索引 | 写磁盘；确认后 `kairo prose <id>` / `kairo index` |
 
-纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`knowledge list`、`glossary list`、`timeline`，以及直接读 Topic 内 markdown / state。
+纯读命令（无需确认）：`list`、`status`、`history`、`diff`、`knowledge list`、`glossary list`、`timeline`、`kairo ref find`、`kairo ref read`，以及直接读 Topic 内 markdown / state。
+
+定位 Ref 正文用正式 CLI，不要 `find`/`ls` 扫 `references/` 或读内部 state：
+
+```
+kairo ref find [--title TEXT] [--day YYYY-MM-DD] [--topic SLUG] [--json] --root SERVE_ROOT
+kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SERVE_ROOT
+```
+
+`--home global` 表示 global home；JSON 的 `home` 为 `""`。零命中 `count 0` 不是失败。多条不要静默取第一条。`--form digest` 与 `transcript` 不可互换。
 
 ## 两个用户故事
 
@@ -73,7 +82,7 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 
 用户有额外文件（截图、补充文档）要附加到已登记的 Ref：
 
-1. **确认 Ref id**：`kairo status` 或 `kairo timeline --json`
+1. **确认 Ref id**：`kairo ref find --title …` 或 `kairo timeline --json`
 2. **attach form**：`kairo add <file> --to <ref_id> [--copy]`
 3. Ref 的成员资格不变（已在 Topic 内就不需要重复 `--topic`）
 
@@ -83,8 +92,8 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 
 1. `kairo status` — fold 进度、blocked、corpus 漂移提示
 2. `understanding.md` — **事实层**（中立、可标来源）；综合结论在这里
-3. 需要出处/细节时再下钻 `references/<id>/` 下的 **digest**（高密度记忆纪要 = 该条 reference 的记忆）
-4. transcript / source_text / prose / 原始 form — **原料或人读档案**，不是「调研结论」
+3. 需要出处/细节时再 `kairo ref read --id ID --form digest`（高密度记忆纪要）
+4. transcript 用 `kairo ref read --id ID --form transcript`。**原料或人读档案**，不是「调研结论」。不要 `ls` 扫盘取正文
 
 回复必须：
 
@@ -150,7 +159,7 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 
 - 想看状态却跑 `step` / `run` → 白烧 token 还可能改文档。**看用 `status` + 读 md。**
 - 把 `serve` root 当成单个 Topic 在 root 上 `status` → 失败或误导。**先 `kairo list`。**
-- 问「有哪些 Topics」却手写 `find` 扫盘 → 应用 **`kairo list`**。
+- 问「有哪些 Topics」却手写扫盘 → 应用 **`kairo list`**。定位 Ref 正文却扫 `references/` → 用 **`kairo ref find` / `kairo ref read`**。
 - 把 transcript / prose 摘要当成「调研结论」→ **结论在 understanding.md。**
 - 未确认就 `accept` 或 `re-step` → 钉基线或丢手改。**先说明副作用。**
 - 用户说「推进」就对所有 Topic 批量 `step` → 越界。**先列清单，确认范围。**
