@@ -30,33 +30,33 @@ def test_glossary_parsed_from_yaml():
             """
             topic: t
             glossary:
-              - name: 灵犀系统
-                note: 平台正式名,天溯出品
-                aka: [灵西, 灵息]
-              - name: 李华
-                note: 协和营养科主任
+              - name: 北港系统
+                note: 平台正式名,示例机构出品
+                aka: [北港, 港湾]
+              - name: 王路
+                note: 示例医院营养科主任
             """
         )
     )
-    assert [e.name for e in con.glossary] == ["灵犀系统", "李华"]
-    assert con.glossary[0].aka == ["灵西", "灵息"]
+    assert [e.name for e in con.glossary] == ["北港系统", "王路"]
+    assert con.glossary[0].aka == ["北港", "港湾"]
     assert con.glossary[1].aka == []  # aka 可选
 
 
 def test_glossary_reference_contains_name_note_aka():
     con = Constitution(
         glossary=[
-            GlossaryEntry(name="灵犀系统", note="平台正式名", aka=["灵西", "灵息"]),
-            GlossaryEntry(name="李华", note="协和营养科主任"),
+            GlossaryEntry(name="北港系统", note="平台正式名", aka=["北港", "港湾"]),
+            GlossaryEntry(name="王路", note="示例医院营养科主任"),
         ]
     )
     block = con.glossary_reference()
     # 真名是主角:都要出现
-    assert "灵犀系统" in block and "李华" in block
+    assert "北港系统" in block and "王路" in block
     # note 给模型 grounding
     assert "平台正式名" in block
     # aka 作参考变体出现
-    assert "灵西" in block and "灵息" in block
+    assert "北港" in block and "港湾" in block
     # 有一句指令让产出用规范名(grounding,不是字符串纠错)
     assert "规范名" in block
 
@@ -69,9 +69,9 @@ def _ws_with_glossary(tmp_path) -> Workspace:
     con = (tmp_path / "constitution.yaml").read_text()
     con += (
         "glossary:\n"
-        "  - name: 灵犀系统\n"
+        "  - name: 北港系统\n"
         "    note: 平台正式名\n"
-        "    aka: [灵西]\n"
+        "    aka: [北港]\n"
     )
     (tmp_path / "constitution.yaml").write_text(con)
     return Workspace(tmp_path)
@@ -80,14 +80,14 @@ def _ws_with_glossary(tmp_path) -> Workspace:
 def test_glossary_injected_into_digest_and_compose(tmp_path):
     ws = _ws_with_glossary(tmp_path)
     t = tmp_path / "meeting.txt"
-    t.write_text("今天讨论灵西的营养模块")
+    t.write_text("今天讨论北港的营养模块")
     ws.add([t])
     step(ws, StubProvider())
     rid = ws.list_reference_ids()[0]
     digest = (ws.root / f"references/{rid}/digest.md").read_text()
     understanding = (ws.root / "understanding.md").read_text()
     # 旧真名册迁为按需知识上下文，而非整表注入。
-    assert "灵犀系统" in digest and "领域知识上下文" in digest
+    assert "北港系统" in digest and "领域知识上下文" in digest
     # Compose 仅扫描本轮 digest；Stub 输出不保证复述 persona，主产物仍正常完成。
     assert "STUB UNDERSTANDING" in understanding
 

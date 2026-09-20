@@ -33,7 +33,7 @@ def _serve_root(tmp_path):
     root = tmp_path / "root"
     wsdir = root / "alpha"
     wsdir.mkdir(parents=True)
-    return root, Workspace.init(wsdir, topic="能源梳理")
+    return root, Workspace.init(wsdir, topic="北港梳理")
 
 
 # ---- unit:契约校验与过期判定 ----

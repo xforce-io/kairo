@@ -23,7 +23,7 @@ def _range_ws(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     root = tmp_path / "root"
     root.mkdir()
-    a = Workspace.init(root / "alpha", topic="能源梳理")
+    a = Workspace.init(root / "alpha", topic="北港梳理")
     b = Workspace.init(root / "beta", topic="招聘")
     dest = Workspace.init(root / "回顾", topic="回顾")
     (tmp_path / "m.txt").write_text("周会")
@@ -130,7 +130,7 @@ def test_prepare_range_skips_journal_items(tmp_path, monkeypatch):
 def test_resolve_review_workspace_creates_and_reuses(tmp_path):
     root = tmp_path / "root"
     root.mkdir()
-    Workspace.init(root / "alpha", topic="能源梳理")
+    Workspace.init(root / "alpha", topic="北港梳理")
     first = resolve_review_workspace(root)
     assert first.root.name == JOURNAL_NAME
     assert first.constitution.topic == JOURNAL_NAME

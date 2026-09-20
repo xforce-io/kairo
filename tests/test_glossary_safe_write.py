@@ -58,7 +58,7 @@ def test_bad_entry_rejects_whole_file(tmp_path):
     p = tmp_path / "glossary.yaml"
     p.write_text(
         yaml.safe_dump(
-            [{"name": "天溯", "note": "ok"}, "bad-item"],
+            [{"name": "示例机构", "note": "ok"}, "bad-item"],
             allow_unicode=True,
         )
     )
@@ -114,14 +114,14 @@ def test_corrupt_then_fixed_add_succeeds(tmp_path, monkeypatch):
     monkeypatch.chdir(root)
     Workspace.init(root / "ws", topic="t")
     monkeypatch.chdir(root / "ws")
-    failed = runner.invoke(app, ["glossary", "add", "天溯", "--scope", "shared"])
+    failed = runner.invoke(app, ["glossary", "add", "示例机构", "--scope", "shared"])
     assert failed.exit_code != 0
     assert path.read_text() == "oops\n"
     path.write_text("- name: 既有\n")
-    ok = runner.invoke(app, ["glossary", "add", "天溯", "--scope", "shared"])
+    ok = runner.invoke(app, ["glossary", "add", "示例机构", "--scope", "shared"])
     assert ok.exit_code == 0
     names = [e.name for e in load_glossary_file(path)]
-    assert names == ["既有", "天溯"]
+    assert names == ["既有", "示例机构"]
 
 
 def test_save_replace_failure_keeps_original(tmp_path, monkeypatch):
@@ -168,7 +168,7 @@ def test_workspace_save_failure_keeps_constitution(tmp_path, monkeypatch):
 
     monkeypatch.setattr("kairo.knowledge.os.replace", boom)
     with pytest.raises(ValueError, match="保存失败"):
-        ws.add_glossary_entry("天溯")
+        ws.add_glossary_entry("示例机构")
     assert con.read_bytes() == before
     assert yaml.safe_load(con.read_text())["topic"] == "t"
 
@@ -200,7 +200,7 @@ def test_cli_save_failure_is_locatable(tmp_path, monkeypatch):
         "kairo.glossary.os.replace",
         lambda *a, **k: (_ for _ in ()).throw(OSError("simulated replace failure")),
     )
-    result = runner.invoke(app, ["glossary", "add", "天溯", "--scope", "shared"])
+    result = runner.invoke(app, ["glossary", "add", "示例机构", "--scope", "shared"])
     assert result.exit_code == 1
     assert result.exception is None or isinstance(result.exception, SystemExit)
     err = result.output + (result.stderr or "")
@@ -217,7 +217,7 @@ def test_web_save_failure_inline_error(tmp_path, monkeypatch):
     )
     r = _client(root).post(
         "/glossary",
-        data={"name": "天溯", "note": "keep"},
+        data={"name": "示例机构", "note": "keep"},
     )
     assert r.status_code == 200
     assert "Knowledge changes could not be saved" in r.text

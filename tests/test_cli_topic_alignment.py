@@ -1,6 +1,7 @@
 """Tests for #269 CLI Topic alignment."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -305,7 +306,7 @@ def test_cli_add_copy_without_title_uses_file_stem(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
     create_tag(serve, "energy")
     runner.invoke(app, ["new", "energy", "--root", str(serve)])
-    src = tmp_path / "群控方向讨论-260908.txt"
+    src = tmp_path / "示例调度讨论-260908.txt"
     src.write_text("group control")
     result = runner.invoke(
         app,
@@ -314,10 +315,10 @@ def test_cli_add_copy_without_title_uses_file_stem(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     refs = list_all_refs(serve)
     assert len(refs) == 1
-    assert refs[0].title == "群控方向讨论-260908"
+    assert refs[0].title == "示例调度讨论-260908"
     assert refs[0].title != "energy"
     man = (refs[0].dir / "manifest.yaml").read_text()
-    assert "群控方向讨论-260908" in man
+    assert "示例调度讨论-260908" in man
     assert "title: " in man
     import re
 
@@ -345,12 +346,12 @@ def test_cli_add_explicit_title_on_global_topic_member(tmp_path, monkeypatch):
             "--root",
             str(serve),
             "--title",
-            "一张网 demo-260908",
+            "北港样例-260908",
         ],
     )
     assert result.exit_code == 0, result.output
     refs = list_all_refs(serve)
-    assert refs[0].title == "一张网 demo-260908"
+    assert refs[0].title == "北港样例-260908"
 
 
 def test_cli_title_and_status_for_global_topic_member(tmp_path, monkeypatch):
@@ -360,7 +361,7 @@ def test_cli_title_and_status_for_global_topic_member(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
     create_tag(serve, "energy")
     runner.invoke(app, ["new", "energy", "--root", str(serve)])
-    src = tmp_path / "群控方向讨论-260908.txt"
+    src = tmp_path / "示例调度讨论-260908.txt"
     src.write_text("x")
     added = runner.invoke(
         app,
@@ -369,12 +370,12 @@ def test_cli_title_and_status_for_global_topic_member(tmp_path, monkeypatch):
     assert added.exit_code == 0, added.output
     rid = list_all_refs(serve)[0].id
     monkeypatch.chdir(serve / "energy")
-    titled = runner.invoke(app, ["title", rid, "群控方向讨论"])
+    titled = runner.invoke(app, ["title", rid, "示例调度讨论"])
     assert titled.exit_code == 0, titled.output
     st = runner.invoke(app, ["status"])
     assert st.exit_code == 0, st.output
     assert rid in st.output
-    assert "群控方向讨论" in st.output
+    assert "示例调度讨论" in st.output
 
 
 def test_title_topic_from_inside_topic_dir_without_env(tmp_path, monkeypatch):
@@ -385,7 +386,7 @@ def test_title_topic_from_inside_topic_dir_without_env(tmp_path, monkeypatch):
     create_tag(serve, "energy")
     created = runner.invoke(app, ["new", "energy", "--root", str(serve)])
     assert created.exit_code == 0, created.output
-    src = tmp_path / "数仓技术评审-260910.txt"
+    src = tmp_path / "示例存储评审-260910.txt"
     src.write_text("x")
     added = runner.invoke(
         app,
@@ -395,13 +396,13 @@ def test_title_topic_from_inside_topic_dir_without_env(tmp_path, monkeypatch):
     rid = list_all_refs(serve)[0].id
     monkeypatch.delenv("KAIRO_SERVE_ROOT", raising=False)
     monkeypatch.chdir(serve / "energy")
-    titled = runner.invoke(app, ["title", rid, "数仓技术评审-260910", "--topic", "energy"])
+    titled = runner.invoke(app, ["title", rid, "示例存储评审-260910", "--topic", "energy"])
     assert titled.exit_code == 0, titled.output
     assert "不是 kairo Topic" not in (titled.output + titled.stdout)
     refs = list_all_refs(serve)
     assert len(refs) == 1
     assert refs[0].home == ""
-    assert refs[0].title == "数仓技术评审-260910"
+    assert refs[0].title == "示例存储评审-260910"
 
 
 def test_title_topic_immediately_after_serve_root_add(tmp_path, monkeypatch):
@@ -413,7 +414,7 @@ def test_title_topic_immediately_after_serve_root_add(tmp_path, monkeypatch):
     create_tag(serve, "energy")
     created = runner.invoke(app, ["new", "energy"])
     assert created.exit_code == 0, created.output
-    src = tmp_path / "C 端菜品制作流程讨论-260910.txt"
+    src = tmp_path / "示例配方流程-260910.txt"
     src.write_text("x")
     added = runner.invoke(
         app,
@@ -421,13 +422,13 @@ def test_title_topic_immediately_after_serve_root_add(tmp_path, monkeypatch):
     )
     assert added.exit_code == 0, added.output
     rid = list_all_refs(serve)[0].id
-    titled = runner.invoke(app, ["title", rid, "C 端菜品制作流程讨论-260910", "--topic", "energy"])
+    titled = runner.invoke(app, ["title", rid, "示例配方流程-260910", "--topic", "energy"])
     assert titled.exit_code == 0, titled.output
     refs = list_all_refs(serve)
     assert len(refs) == 1
     assert refs[0].id == rid
     assert refs[0].home == ""
-    assert refs[0].title == "C 端菜品制作流程讨论-260910"
+    assert refs[0].title == "示例配方流程-260910"
     topic_dir = serve / "energy" / "references" / rid
     assert not topic_dir.exists()
 
@@ -475,12 +476,13 @@ Test session
     
     result = runner.invoke(app, ["archive", str(session), "--topic", "archive", "--create", "--json"])
     assert result.exit_code == 0 or result.exit_code == 2  # May need choice
-    # Check that --topic parameter is recognized
-    assert "--topic" in runner.invoke(app, ["archive", "--help"]).output
+    help_out = re.sub(r"\x1b\[[0-9;]*m", "", runner.invoke(app, ["archive", "--help"]).output)
+    assert "--topic" in help_out
 
 
 def test_review_uses_topic_parameter(tmp_path, monkeypatch):
     """#269: review command uses --topic instead of --workspace."""
     result = runner.invoke(app, ["review", "--help"])
-    assert "--topic" in result.output
-    assert "-t" in result.output
+    help_out = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
+    assert "--topic" in help_out
+    assert "-t" in help_out

@@ -146,7 +146,7 @@ def test_step_binary_chain_doc2text_digest_compose_in_one_step(tmp_path):
     assert not (ws.root / f"references/{rid}/prose.md").exists()  # 不规范化
     assert (ws.root / f"references/{rid}/digest.md").exists()  # Digest
     # 正文(docx 标题)流到 understanding
-    assert "康医通系统" in (ws.root / "understanding.md").read_text()
+    assert "港湾通系统" in (ws.root / "understanding.md").read_text()
 
 
 def test_step_audio_chain_asr_digest_compose_in_one_step(tmp_path, monkeypatch):

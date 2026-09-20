@@ -50,7 +50,7 @@ GET `/w/{topic}/ref/{id}`、其 `/form/{key}` 与 `/file/{key}` 支持同一 hom
 
 ## 10 迁移/兼容/回滚
 
-不迁移数据。旧本地阅读地址兼容；独立 Ref 分享入口不变。部署目标为用户批准的本机 launchd `com.kairo.web`、8787，加载 `/Users/xupeng/dev/github/kairo/src`，数据根 `/Users/xupeng/kairo`。
+不迁移数据。旧本地阅读地址兼容；独立 Ref 分享入口不变。部署目标为用户批准的本机 launchd `com.kairo.web`、8787，加载 `/Users/demo/dev/github/kairo/src`，数据根 `/Users/demo/kairo`。
 
 发布顺序：独立 worktree 测试和评审通过 → PR 检查通过并合并 main → 主仓库快进到合并版本 → `launchctl kickstart -k gui/$(id -u)/com.kairo.web`。部署前记录主仓库 SHA 与 launchd 配置。健康验证包括服务状态、Topic 返回成功、真实浏览器切换两条用户材料及刷新恢复。失败时将服务加载的代码恢复到记录版本并重启、复验；保留失败提交和用户未跟踪文件，不回滚资料。
 

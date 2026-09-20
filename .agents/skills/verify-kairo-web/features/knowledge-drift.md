@@ -20,11 +20,11 @@ from kairo.knowledge import load_workspace, save_workspace, new_entry
 
 root = Path(sys.argv[1])
 ws = Workspace.init(root / "demo", topic="demo")
-for name, text in {"a": "胡值彬强调能源优先。", "b": "预算讨论,无人名。", "c": "排期讨论,无人名。"}.items():
+for name, text in {"a": "林值秋强调能源优先。", "b": "预算讨论,无人名。", "c": "排期讨论,无人名。"}.items():
     m = root / f"{name}.txt"; m.write_text(text); ws.add([m], ref_id=name)
 step(ws, StubProvider())                      # 三份 digest + understanding,均未匹配任何知识
 doc, _ = load_workspace(ws.root)
-doc.entries.append(new_entry(title="胡值彬", scope="workspace"))
+doc.entries.append(new_entry(title="林值秋", scope="workspace"))
 save_workspace(ws.root, doc)                  # 之后确认的人名:只有 a(及折叠了 a 的 understanding)受影响
 ```
 
@@ -33,7 +33,7 @@ save_workspace(ws.root, doc)                  # 之后确认的人名:只有 a(�
 | # | 路径 | 可判定结果 |
 |---|---|---|
 | A | GET `/w/demo` | 面板出现「2 个产物基于旧知识」（a 的 digest + understanding.md）与按钮「重算受影响」；b、c 不计入 |
-| B | GET `/knowledge?workspace=demo&queue=drift` | 漂移列表恰 2 行：`a` 的纪要行带「新增:胡值彬」；`understanding.md` 行；无 b/c |
+| B | GET `/knowledge?workspace=demo&queue=drift` | 漂移列表恰 2 行：`a` 的纪要行带「新增:林值秋」；`understanding.md` 行；无 b/c |
 | C | 在 `/w/demo` 点「重算受影响」 | `#step-area` 出现运行进度并到 done；**重新 GET** `/w/demo` 后「基于旧知识」整块消失 |
 | D | 重算后 GET `/knowledge?workspace=demo&queue=drift` | 队列空态；`.kairo/state.json` 中 `references/a/digest.md` 的 `knowledge_diagnostic.matched_entry_ids` 非空，`references/b/digest.md` 的 `knowledge_generation` 与重算前相同 |
 | E | 无漂移时 GET `/w/demo` | 无「基于旧知识」文案、无「重算受影响」按钮 |

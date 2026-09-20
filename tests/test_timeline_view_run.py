@@ -37,7 +37,7 @@ def _write(path: Path, text: str) -> Path:
 def _fixture(tmp_path):
     """同一日两个 Topic 可推进，alpha 另有视图外 pending。"""
     root = tmp_path / "root"
-    wa = Workspace.init(root / "alpha", topic="能源梳理")
+    wa = Workspace.init(root / "alpha", topic="北港梳理")
     wb = Workspace.init(root / "beta", topic="招聘")
     wa.add(
         [_write(tmp_path / "a.txt", "A 日")],
@@ -261,10 +261,10 @@ def test_view_run_progress_keeps_confirm_clock():
         t,
         now=now,
         elapsed_from=now - 70,
-        headline="能源梳理",
+        headline="北港梳理",
         index_label="1 / 2",
     )
-    assert "能源梳理" in html
+    assert "北港梳理" in html
     assert "1 / 2" in html
     assert "1 min" in html
     assert "1s" not in html.split("run-progress-text", 1)[1]
@@ -337,7 +337,7 @@ def test_timeline_run_processes_out_of_view_and_stays(tmp_path, monkeypatch):
     assert r.headers.get("location") is None
     assert "/w/" in r.text  # sse-connect 指向当前 slug，不是整页跳转
     assert "run-progress" in r.text
-    assert "能源梳理" in r.text or "招聘" in r.text
+    assert "北港梳理" in r.text or "招聘" in r.text
     assert "Raw run log" in r.text
     summary = _drain_view_run(c, r.text)
     assert "Done 2" in summary.text

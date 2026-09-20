@@ -91,7 +91,7 @@ def test_cli_end_to_end_domino_audio_and_text(topic_dir, monkeypatch):
     runner.invoke(app, ["init"])
     audio = topic_dir / "rec.m4a"
     audio.write_bytes(b"fake audio")
-    text = topic_dir / "wangqiang.txt"
+    text = topic_dir / "meeting_c.txt"
     text.write_text("王强会议:三智能体定位与落地优先级")
     runner.invoke(app, ["add", str(audio)])
     runner.invoke(app, ["add", str(text)])
@@ -289,7 +289,7 @@ def test_cli_e2e_corpus_dir_not_digested(topic_dir, monkeypatch):
     # corpus 目录
     cdir = topic_dir / "corpus_docs"
     (cdir / "平台").mkdir(parents=True)
-    (cdir / "平台" / "术语表.md").write_text("灵犀系统=正式名")
+    (cdir / "平台" / "术语表.md").write_text("北港系统=正式名")
     # stream 文件
     s = topic_dir / "会议.txt"
     s.write_text("王强会议:落地优先级")
@@ -431,7 +431,7 @@ def test_cli_glossary_workspace_and_shared(tmp_path, monkeypatch):
     runner.invoke(app, ["new", "ws", "--root", str(root)])
     monkeypatch.chdir(root / "ws")
 
-    add_ws = runner.invoke(app, ["glossary", "add", "天溯", "--note", "本区"])
+    add_ws = runner.invoke(app, ["glossary", "add", "示例机构", "--note", "本区"])
     assert add_ws.exit_code == 0
     add_sh = runner.invoke(
         app, ["glossary", "add", "公共锚", "--scope", "shared", "--note", "root"]
@@ -441,7 +441,7 @@ def test_cli_glossary_workspace_and_shared(tmp_path, monkeypatch):
 
     listed = runner.invoke(app, ["glossary", "list"])
     assert listed.exit_code == 0
-    assert "天溯" in listed.output and "公共锚" in listed.output
+    assert "示例机构" in listed.output and "公共锚" in listed.output
     assert "[workspace]" in listed.output and "[shared]" in listed.output
 
     rm_ws = runner.invoke(app, ["glossary", "rm", "0", "--scope", "workspace"])
@@ -449,5 +449,5 @@ def test_cli_glossary_workspace_and_shared(tmp_path, monkeypatch):
     rm_sh = runner.invoke(app, ["glossary", "rm", "0", "--scope", "shared"])
     assert rm_sh.exit_code == 0
     again = runner.invoke(app, ["glossary", "list"])
-    assert "天溯" not in again.output
+    assert "示例机构" not in again.output
     assert "公共锚" not in again.output or "[shared] (0)" in again.output

@@ -38,33 +38,33 @@ def test_new_entry_only_drifts_products_that_mention_it(tmp_path):
     """S1: three digests, one mentions the new name → exactly one drift row, with the reason."""
     ws, root = _topic_with_digests(
         tmp_path,
-        {"a": "高希彬提出了方案。", "b": "预算讨论,无人名。", "c": "排期讨论,无人名。"},
+        {"a": "陈默提出了方案。", "b": "预算讨论,无人名。", "c": "排期讨论,无人名。"},
     )
     assert drift_rows(ws, root) == []  # S3: nothing changed → nothing reported
-    _confirm(ws, "高希彬")
+    _confirm(ws, "陈默")
     rows = drift_rows(ws, root)
     products = [row for row in rows if row.kind == "digest"]
     assert [row.target for row in products] == ["a"]
-    assert products[0].new == ("高希彬",) and products[0].changed == ()
+    assert products[0].new == ("陈默",) and products[0].changed == ()
     # understanding.md folds digest a, so it mentions the name too and drifts with it; never b/c.
     assert {row.target for row in rows} <= {"a", "understanding.md"}
 
 
 def test_changed_matched_entry_drifts_only_its_consumers(tmp_path):
     """S1: editing an entry that a product consumed marks that product; unrelated products stay clean."""
-    ws, root = _topic_with_digests(tmp_path, {"a": "康医通要上线。", "b": "没有系统名。"})
-    _confirm(ws, "康医通", description="医院端产品")
+    ws, root = _topic_with_digests(tmp_path, {"a": "港湾通要上线。", "b": "没有系统名。"})
+    _confirm(ws, "港湾通", description="医院端产品")
     step(ws, StubProvider())  # nothing pending: state unchanged, drift still shows 'new'
     from kairo.engine import re_step
 
-    re_step(ws, StubProvider(), "a")  # product a now records matched 康医通 + its hash
+    re_step(ws, StubProvider(), "a")  # product a now records matched 港湾通 + its hash
     assert [row.target for row in drift_rows(ws, root) if row.kind == "digest"] == []
     doc, _ = load_workspace(ws.root)
     doc.entries[0].description = "院内全流程产品(改写)"
     save_workspace(ws.root, doc)
     rows = [row for row in drift_rows(ws, root) if row.kind == "digest"]
     assert [row.target for row in rows] == ["a"]
-    assert rows[0].changed == ("康医通",) and rows[0].new == ()
+    assert rows[0].changed == ("港湾通",) and rows[0].new == ()
 
 
 def test_legacy_products_without_hashes_still_detect_new_and_vanished_entries(tmp_path):
@@ -81,13 +81,13 @@ def test_legacy_products_without_hashes_still_detect_new_and_vanished_entries(tm
 def test_topic_page_banner_and_recompute_only_touch_drifted_products(tmp_path, monkeypatch):
     """S2 (E2E): banner shows N, the button re-steps exactly those products via the task runner."""
     monkeypatch.setenv("KAIRO_STUB", "1")
-    ws, root = _topic_with_digests(tmp_path, {"a": "胡值彬强调能源优先。", "b": "无关材料。"})
+    ws, root = _topic_with_digests(tmp_path, {"a": "林值秋强调能源优先。", "b": "无关材料。"})
     before_b = ws.read_state().products["references/b/digest.md"].knowledge_generation
     client = TestClient(create_app(root))
     page = client.get("/w/ws", headers={"accept-language": "zh"})
     assert "个产物基于旧知识" not in page.text  # S3: no banner without drift
 
-    _confirm(ws, "胡值彬")
+    _confirm(ws, "林值秋")
     page = client.get("/w/ws", headers={"accept-language": "zh"})
     n = len(drift_rows(ws, root))
     assert n >= 1
@@ -111,8 +111,8 @@ def test_topic_page_banner_and_recompute_only_touch_drifted_products(tmp_path, m
 
 def test_live_target_keeps_union_of_matched_entries_across_incremental_composes(tmp_path):
     """understanding.md accumulates names; an incremental compose for one digest must not forget the others."""
-    ws, root = _topic_with_digests(tmp_path, {"a": "胡值彬强调能源优先。", "b": "预算讨论,无人名。"})
-    _confirm(ws, "胡值彬")
+    ws, root = _topic_with_digests(tmp_path, {"a": "林值秋强调能源优先。", "b": "预算讨论,无人名。"})
+    _confirm(ws, "林值秋")
     recompute_drifted(ws, StubProvider(), root)
     assert drift_rows(ws, root) == []
     _confirm(ws, "预算讨论")

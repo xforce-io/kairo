@@ -1,7 +1,7 @@
 # kairo MVP 设计稿（workspace = 一个 topic）
 
 > 状态:**MVP 设计基本收敛**。2026-06-19 一轮 review 敲定:Compose 常态(B 批量 Δ)、漂移/抖动治理、指纹拆 model、target 间依赖、手改处理、版本/rollback、MVP 四段切分。详见 §2 决策表(★ = 本轮新增/修订)。剩余小项见 §13。
-> 来源:[../brainstorm/2026-06-18-kairo-concept.md](../brainstorm/2026-06-18-kairo-concept.md)(发散稿)+ 后续 review;并以 `前序项目` 的 `understanding.md` / `assessment.md`(三场会议增量综合而成)为真实参照。
+> 来源:[../brainstorm/2026-06-18-kairo-concept.md](../brainstorm/2026-06-18-kairo-concept.md)(发散稿)+ 后续 review;并以 `示例课题` 的 `understanding.md` / `assessment.md`(三场会议增量综合而成)为真实参照。
 > 范围:**一个 workspace = 一个 topic**,MVP 跑通它。多 topic = 多 workspace(P2)。分层归并 / 异构 loader 见分期。
 > Issue:[#1](https://github.com/xforce-io/kairo/issues/1)。本文件是 **single source of truth**;issue 只放一行摘要 + 指回本文件的链接。
 
@@ -9,7 +9,7 @@
 
 ## 1. 一句话与赌注
 
-把「录音 → 转写 → 纪要 → 理解/判断」这条手工活,变成 **`step` 驱动的增量知识构建引擎**:丢一个 reference,`step` 一下,知识往前长一格。它继承 前序项目 的纪律(可追溯、派生物可重生),但海拔相反——它是**编排 LLM** 的增量构建系统。
+把「录音 → 转写 → 纪要 → 理解/判断」这条手工活,变成 **`step` 驱动的增量知识构建引擎**:丢一个 reference,`step` 一下,知识往前长一格。它继承 示例课题 的纪律(可追溯、派生物可重生),但海拔相反——它是**编排 LLM** 的增量构建系统。
 
 ---
 
@@ -98,7 +98,7 @@ id: 2026-06-18-meeting
 title: meeting
 forms:
   - role: audio                               # role = 语义角色(media 可由扩展名推)
-    location: /Users/xupeng/rec/meeting.m4a   # 指针,不拷贝(--copy 时指内部 raw/)
+    location: /Users/demo/rec/meeting.m4a   # 指针,不拷贝(--copy 时指内部 raw/)
     hash: a3f2…
     origin: added
   - role: transcript                          # ASR 跑完追加;用户给完整转写稿也算 transcript
@@ -163,12 +163,12 @@ forms:
 - **漂移(原 §13#1)MVP 靠手动**:B 常态会攒「重读全部才看得出的全局重组」之债;MVP **不自动触发 A**,而由 `status` 显示「某文档距上次 A 已融入 N 条 digest」,用户据此手动 `re-step`。自动阈值(LSM size-tiered,如 `compose.major_every: N`)接口先想着,留 P 实现。
 - **抖动(原 §13#2)靠看 diff**:B 允许「推翻重组」,「正当修订 vs 无谓搅动」MVP **不靠工具判定,靠人看 `kairo diff`**(自带、不依赖 git)+ `--dry-run` 预演;自动 diff 护栏留 P。
 - discover:某文档「未融入的 digest」(Δ)= 全部 digest 减去 state 里该文档已融入集(按 digest hash 比对)。本步全部 Δ 一次 op 融入,完后记账。
-- 参照 前序项目:`understanding.md`/`assessment.md` 正是一场会议一场会议**增量综合修订**而成(v0.3→v0.4),结构会被改(智能体表加「现状」列、术语表去重并入)。⚠️ 注意 前序项目 那是**人**做的增量(有持久记忆与"何时全局重组"的判断);LLM 做 B 只见「当前文档+Δ」、缺此判断 → 故需 A 兜底与漂移可见。
+- 参照 示例课题:`understanding.md`/`assessment.md` 正是一场会议一场会议**增量综合修订**而成(v0.3→v0.4),结构会被改(智能体表加「现状」列、术语表去重并入)。⚠️ 注意 示例课题 那是**人**做的增量(有持久记忆与"何时全局重组"的判断);LLM 做 B 只见「当前文档+Δ」、缺此判断 → 故需 A 兜底与漂移可见。
 
 ### 7.2 文档约定(有机生长,非冻结锚点)
 
 - 结构(章节/表格/术语表)由综合**有机生长并修订**,不预先钉死;宪法只给**维护指引**(维持术语表、未确认挂 ⚠️、事实与判断分两篇)。
-- **挂源**:章节级「来源」头 + 关键处内联标注(如 `(renmin 会议)`),不强制每条 `(src:)`。
+- **挂源**:章节级「来源」头 + 关键处内联标注(如 `(meeting_b 会议)`),不强制每条 `(src:)`。
 - `understanding.md`:事实、中立,⚠️ 标未确认;`assessment.md`:判断、立场,**引用 understanding 的事实**(D-target,标来源)但只谈「我怎么看」,随讨论演进。
 
 ---
@@ -295,26 +295,26 @@ targets:                             # ② 综合层(topic 相关)——MVP 两�
 | 段 | 范围 | 验什么 |
 |---|---|---|
 | **M0 走路骨架** | 全 stub:`add`(audio+text)→ ASR stub(标记占位)→ Digest stub → Compose stub 进**单篇 understanding**;**`.kairo/history` 快照从此写入** | reconcile 循环 / state 记账 / folded / 收敛 / 完整骨牌链 / 挂源。**零 API** |
-| **M1 接真 Claude** | Digest + Compose 换 `ClaudeProvider`,跑 `前序项目` 的真实文本 reference | 真实纪要/综合质量;`produced_by` 溯源 |
+| **M1 接真 Claude** | Digest + Compose 换 `ClaudeProvider`,跑 `示例课题` 的真实文本 reference | 真实纪要/综合质量;`produced_by` 溯源 |
 | **M2 第二层 + 依赖** | 加 `assessment`(`depends_on understanding`)+ 级联重综合 | 事实/判断分层;拓扑序;上游变级联(D-target) |
 | **M3 治理闭合** | `re-step` / 手改 `blocked`+`accept` / `blocked` 三态(no-asr·missing-source·manual-edit)/ 漂移可见 / `rollback`·`diff`·`history` 命令 | 安全网与可追溯闭环 |
 
-> 本质:M0 把 前序项目 的核心循环用一个 topic、零 LLM 复现出来(证明骨牌+宪法+可追溯+收敛),后续段逐层接真模型与治理。真实音频转写靠 P4 的 ASR 后端。
+> 本质:M0 把 示例课题 的核心循环用一个 topic、零 LLM 复现出来(证明骨牌+宪法+可追溯+收敛),后续段逐层接真模型与治理。真实音频转写靠 P4 的 ASR 后端。
 
-### M1 验收基准:前序项目 回归(real-data dry-run)
+### M1 验收基准:示例课题 回归(real-data dry-run)
 
-以 `前序项目` 为黄金参照,把"按顺序 add+step 能否长出根目录 understanding/assessment"做成 M1 的端到端验收。
+以 `示例课题` 为黄金参照,把"按顺序 add+step 能否长出根目录 understanding/assessment"做成 M1 的端到端验收。
 
 **输入(两轨,缺一不可)**:
-- **纪要流轨**:三场会议的现成 transcript —— `nutritionist_0617` / `renmin_0617`(均有 audio→whisper transcript)/ `wangqiang_0617`(无 audio,仅文字实录,正好验证「给 transcript 跳过 ASR」)。
-- **资料库轨**:`references/灵犀系统/`(8 份 docx)+ `references/nutritionist/`(I/O 语料)。⚠️ **最终文档约 1/3 内容来自此轨**(understanding §2 平台口径、§4a 真实 I/O 语料;assessment「白皮书⟂真实水位」对照需文档与会议同时在场)。docx/xlsx 异构 loader 是 P4,M1 阶段**手工转成 .md 当 `source_text` 喂入**绕过。
+- **纪要流轨**:三场会议的现成 transcript —— `meeting_a_0617` / `meeting_b_0617`(均有 audio→whisper transcript)/ `meeting_c_0617`(无 audio,仅文字实录,正好验证「给 transcript 跳过 ASR」)。
+- **资料库轨**:`references/北港系统/`(8 份 docx)+ `references/site_notes/`(I/O 语料)。⚠️ **最终文档约 1/3 内容来自此轨**(understanding §2 平台口径、§4a 真实 I/O 语料;assessment「白皮书⟂真实水位」对照需文档与会议同时在场)。docx/xlsx 异构 loader 是 P4,M1 阶段**手工转成 .md 当 `source_text` 喂入**绕过。
 
-**流程**:先 add 资料库 → 按 `recorded_at` 顺序 `add`+`step`(nutritionist→renmin→wangqiang),每步一次 step;末了拿产出与真实 `understanding.md` / `assessment.md` **对照 diff**。
+**流程**:先 add 资料库 → 按 `recorded_at` 顺序 `add`+`step`(meeting_a→meeting_b→meeting_c),每步一次 step;末了拿产出与真实 `understanding.md` / `assessment.md` **对照 diff**。
 
 **验收维度(不要求逐字,D-repro)**:
 1. **会议贡献部分长出**:§3 商业打法 / §4 方法论 / §4b 落地优先级 / §5b 三智能体 / assessment 多数判断。
 2. **增量综合质量**:事实/判断分层、挂源、⚠️ 未确认、**结构有机生长与重组**(如三智能体表加列、术语表去重并入)而非堆砌。
-3. **全局重组是承重点**:跨材料对照(「灵西→灵犀系统」纠错、白皮书⟂真实水位)是 B-增量最易漂移处——记录**需几次手动 `re-step`(A)** 才让全局结构干净浮现,即为漂移自动阈值(P3)提供真实数据。
+3. **全局重组是承重点**:跨材料对照(「北港→北港系统」纠错、白皮书⟂真实水位)是 B-增量最易漂移处——记录**需几次手动 `re-step`(A)** 才让全局结构干净浮现,即为漂移自动阈值(P3)提供真实数据。
 4. **合格等价物**:产出结构相似、分层正确、立场合理即通过;逐字等同非目标。
 
 ### MVP 之后

@@ -266,7 +266,7 @@ def _header(html: str) -> str:
 
 def test_dashboard_journal_card_chip_and_count(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
-    _mk(tmp_path, "energy", "能源梳理", 80)
+    _mk(tmp_path, "energy", "北港梳理", 80)
     journal = Workspace.init(tmp_path / "总结", topic="总结")
     src = tmp_path / "a.txt"
     src.write_text("a")
@@ -307,7 +307,7 @@ def test_dashboard_journal_shows_stale_when_attachment_pending(tmp_path):
 
 
 def test_dashboard_journal_sits_with_pins(tmp_path):
-    _mk(tmp_path, "energy", "能源梳理", 40)
+    _mk(tmp_path, "energy", "北港梳理", 40)
     _mk(tmp_path, "other", "其它课题", 20)
     Workspace.init(tmp_path / "总结", topic="总结")
     (tmp_path / "pinned.yaml").write_text("- energy\n", encoding="utf-8")
@@ -336,7 +336,7 @@ def test_dashboard_journal_sits_with_pins(tmp_path):
 
 
 def test_dashboard_journal_in_unpinned_grid_without_pins(tmp_path):
-    _mk(tmp_path, "energy", "能源梳理", 40)
+    _mk(tmp_path, "energy", "北港梳理", 40)
     Workspace.init(tmp_path / "总结", topic="总结")
     html = _client(tmp_path).get("/").text
     assert "Pinned" not in html and "置顶" not in html

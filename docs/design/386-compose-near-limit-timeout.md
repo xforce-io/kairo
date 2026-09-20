@@ -10,7 +10,7 @@
 
 ## 1. 背景
 
-[#386](https://github.com/xforce-io/kairo/issues/386)。现场 Topic「能源梳理」的 `understanding.md` 为 **19,999** Unicode 字符。#161 硬门禁是 `len > 20_000`，故 **恰好 20,000 合法**，19,999 未拦。普通 `kairo run` 仍发起增量 Compose；Δdigest 约 8.5k，剩余 headroom 仅 1 字符，模型在满 `[agent] timeout_s`（现场 1800s）后以 `provider-failed` 结束。`engine.clear_provider_failed_targets` 使下一次普通 run 再次重试同一路径，再次空耗满超时。转写 / digest / 旧 understanding 未毁，但不可恢复地浪费墙钟，且恢复路径仍是「再烧一次 timeout」。
+[#386](https://github.com/xforce-io/kairo/issues/386)。现场 Topic「北港梳理」的 `understanding.md` 为 **19,999** Unicode 字符。#161 硬门禁是 `len > 20_000`，故 **恰好 20,000 合法**，19,999 未拦。普通 `kairo run` 仍发起增量 Compose；Δdigest 约 8.5k，剩余 headroom 仅 1 字符，模型在满 `[agent] timeout_s`（现场 1800s）后以 `provider-failed` 结束。`engine.clear_provider_failed_targets` 使下一次普通 run 再次重试同一路径，再次空耗满超时。转写 / digest / 旧 understanding 未毁，但不可恢复地浪费墙钟，且恢复路径仍是「再烧一次 timeout」。
 
 既有机制（keel-how，契约边界引用）：
 
@@ -52,7 +52,7 @@
 
 - 不改 ASR / digest 质量。
 - 不把 20,000 改为可配置。
-- 不对真实「能源梳理」静默压缩 live `understanding.md`。
+- 不对真实「北港梳理」静默压缩 live `understanding.md`。
 - 不恢复或改 `assessment.md`。
 - **不改默认 `[agent] timeout_s` 配置键本身**（可在近上限边沿路径用更短的有效 CLI timeout，但不新增/改写用户配置语义）。
 - **不把硬门禁从 `>` 改成 `>=`**（#161：恰好 20,000 合法）。

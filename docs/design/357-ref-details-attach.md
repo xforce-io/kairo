@@ -80,7 +80,7 @@ Topic 本地 `POST /w/{slug}/ref/{id}/attach` 不变，且仍不得用于跨来�
 
 ## 10 迁移/兼容/回滚
 
-不迁移数据。旧 `/refs/{id}` 阅读地址兼容。部署目标为本机 launchd `com.kairo.web`、8787，加载 `/Users/xupeng/dev/github/kairo/src`，数据根 `/Users/xupeng/kairo`。
+不迁移数据。旧 `/refs/{id}` 阅读地址兼容。部署目标为本机 launchd `com.kairo.web`、8787，加载 `/Users/demo/dev/github/kairo/src`，数据根 `/Users/demo/kairo`。
 
 发布顺序：本分支测试和评审通过 → PR 检查通过并合并 main → 主仓库快进到合并版本 → `launchctl kickstart -k gui/$(id -u)/com.kairo.web`。部署前记录主仓库 SHA 与 launchd 配置。健康验证：服务状态、独立详情出现附加入口、对一条全局 Ref 附加一次后列表与磁盘一致、Topic 侧栏跨来源仍无附加。失败时将服务加载的代码恢复到记录版本并重启、复验；保留失败提交和用户未跟踪文件，不回滚资料。
 

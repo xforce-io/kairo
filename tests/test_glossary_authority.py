@@ -28,13 +28,13 @@ runner = CliRunner()
 
 def test_effective_override_and_origins():
     root = [
-        GlossaryEntry(name="天溯", note="公司"),
+        GlossaryEntry(name="示例机构", note="公司"),
         GlossaryEntry(name="共享词", note="root"),
     ]
-    local = [GlossaryEntry(name="天溯", note="本区")]
+    local = [GlossaryEntry(name="示例机构", note="本区")]
     items = effective_items(root, local)
     assert [(i.origin, i.entry.name, i.entry.note) for i in items] == [
-        ("override", "天溯", "本区"),
+        ("override", "示例机构", "本区"),
         ("inherited", "共享词", "root"),
     ]
 
@@ -52,10 +52,10 @@ def test_alias_equals_name_rejected():
 
 
 def test_effective_hash_ignores_tags_and_is_stable():
-    a = [GlossaryEntry(name="天溯", note="公司", aka=["天溯公司"], tags=["org"])]
-    b = [GlossaryEntry(name="天溯", note="公司", aka=["天溯公司"], tags=["other"])]
+    a = [GlossaryEntry(name="示例机构", note="公司", aka=["示例机构公司"], tags=["org"])]
+    b = [GlossaryEntry(name="示例机构", note="公司", aka=["示例机构公司"], tags=["other"])]
     assert effective_hash(a) == effective_hash(b)
-    c = [GlossaryEntry(name="天溯", note="别的")]
+    c = [GlossaryEntry(name="示例机构", note="别的")]
     assert effective_hash(a) != effective_hash(c)
 
 
@@ -94,7 +94,7 @@ def test_web_root_add_updates_uncovered_workspace(tmp_path):
     root = tmp_path
     Workspace.init(root / "a", topic="a")
     ws_b = Workspace.init(root / "b", topic="b")
-    ws_b.add_glossary_entry("天溯", note="本地")
+    ws_b.add_glossary_entry("示例机构", note="本地")
     c = TestClient(create_app(root))
     dash = c.get("/")
     assert dash.status_code == 200
@@ -103,22 +103,22 @@ def test_web_root_add_updates_uncovered_workspace(tmp_path):
     assert preview.status_code == 200
     assert "b" in preview.text
     preview_b = c.get("/glossary?workspace=b")
-    assert "天溯" in preview_b.text
-    r = c.post("/glossary", data={"name": "天溯", "note": "公共"})
+    assert "示例机构" in preview_b.text
+    r = c.post("/glossary", data={"name": "示例机构", "note": "公共"})
     assert r.status_code == 200
-    assert "天溯" in r.text
+    assert "示例机构" in r.text
     assert "已保存" in r.text or "Saved" in r.text
     assert (root / "glossary.yaml").is_file()
     view_a = c.get("/glossary?workspace=a")
     panel_a = re.search(r'<section class="gl-ws-panel".*?</section>', view_a.text, re.S)
     assert panel_a
-    assert "天溯" not in panel_a.group(0)
+    assert "示例机构" not in panel_a.group(0)
     shared = re.search(r'<section class="gl-shared".*?</section>', view_a.text, re.S)
-    assert shared and "天溯" in shared.group(0)
+    assert shared and "示例机构" in shared.group(0)
     view_b = c.get("/glossary?workspace=b")
     panel_b = re.search(r'<section class="gl-ws-panel".*?</section>', view_b.text, re.S)
     assert panel_b
-    assert "天溯" in panel_b.group(0)
+    assert "示例机构" in panel_b.group(0)
     assert 'action="/w/b/knowledge' in panel_b.group(0)
 
 
@@ -179,7 +179,7 @@ def test_glossary_change_marks_pending_without_autostep(tmp_path):
     key = f"references/{rid}/digest.md"
     assert ws.read_state().products[key].glossary_hash
     before = (ws.root / key).read_text()
-    ws.add_glossary_entry("天溯", note="后加")
+    ws.add_glossary_entry("示例机构", note="后加")
     pending = ws.glossary_pending()
     assert key in pending or "understanding.md" in pending
     assert (ws.root / key).read_text() == before

@@ -19,15 +19,15 @@ from kairo.workspace import Workspace
 def test_resolve_kind_summary_topic_is_journal():
     assert resolve_kind(None, "总结") == KIND_JOURNAL
     assert resolve_kind("topic", "总结") == KIND_JOURNAL
-    assert resolve_kind("journal", "能源梳理") == KIND_JOURNAL
-    assert resolve_kind(None, "能源梳理") == PRESET_STANDARD
+    assert resolve_kind("journal", "北港梳理") == KIND_JOURNAL
+    assert resolve_kind(None, "北港梳理") == PRESET_STANDARD
     # Legacy `kind: topic` was the default in every old yaml; it must not hide the alias.
-    assert resolve_kind("topic", "能源梳理") == PRESET_STANDARD
+    assert resolve_kind("topic", "北港梳理") == PRESET_STANDARD
     # An explicit preset always wins.
     from kairo.kind import resolve_preset
 
     assert resolve_preset("standard", None, "总结") == PRESET_STANDARD
-    assert resolve_preset(None, "journal", "能源梳理") == PRESET_JOURNAL
+    assert resolve_preset(None, "journal", "北港梳理") == PRESET_JOURNAL
 
 
 def test_init_summary_workspace_has_no_ua_targets(tmp_path):
@@ -37,14 +37,14 @@ def test_init_summary_workspace_has_no_ua_targets(tmp_path):
     assert journal.constitution.targets == []
     assert journal.constitution.review_input is False
     assert journal.constitution.pipeline.digest.enabled is True
-    topic = Workspace.init(tmp_path / "能源", topic="能源梳理")
+    topic = Workspace.init(tmp_path / "能源", topic="北港梳理")
     assert topic.constitution.preset == PRESET_STANDARD
     assert [t.path for t in topic.constitution.targets] == ["understanding.md"]
 
 
 def test_open_existing_总结_is_journal_without_kind_field(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
-    ws = Workspace.init(tmp_path / "总结", topic="能源梳理")
+    ws = Workspace.init(tmp_path / "总结", topic="北港梳理")
     con = ws.constitution
     con.topic = "总结"
     con.kind = "topic"
@@ -85,7 +85,7 @@ def test_legacy_kind_journal_yaml_without_preset_key_stays_journal(tmp_path):
 def test_open_leftover_总结_yaml_without_kind_key_has_empty_live_targets(tmp_path):
     import yaml
 
-    ws = Workspace.init(tmp_path / "总结", topic="能源梳理")
+    ws = Workspace.init(tmp_path / "总结", topic="北港梳理")
     data = yaml.safe_load((ws.root / "constitution.yaml").read_text())
     data.pop("kind", None)
     data.pop("preset", None)
@@ -124,7 +124,7 @@ def test_produce_review_excludes_journal_kind(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     root = tmp_path / "root"
     root.mkdir()
-    alpha = Workspace.init(root / "alpha", topic="能源梳理")
+    alpha = Workspace.init(root / "alpha", topic="北港梳理")
     journal = Workspace.init(root / "回顾仓", topic="回顾仓", kind="journal")
     dest = Workspace.init(root / "dest", topic="dest")
     (tmp_path / "m.txt").write_text("周会")

@@ -30,7 +30,7 @@ def write(name: str, text: str) -> Path:
     p.write_text(text, encoding="utf-8")
     return p
 
-wa = Workspace.init(root / "alpha", topic="能源梳理")
+wa = Workspace.init(root / "alpha", topic="北港梳理")
 wb = Workspace.init(root / "beta", topic="招聘")
 wa.add([write("a.txt", "A 日")], ref_id="in-a", title="A 日", occurred_at="2026-08-24")
 wb.add([write("b.txt", "B 日")], ref_id="in-b", title="B 日", occurred_at="2026-08-24")
