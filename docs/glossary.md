@@ -33,6 +33,9 @@
 | journal | preset 预设：空 targets、开 digest（不计回顾自身 source_text）、关 compose、材料不进时段回顾原料。现网「总结」仓。 | 回顾仓、总结仓 |
 | kind | 已废弃字段，读取时向后兼容映射到 preset。新建 Topic 不再写入 kind。 | — |
 | fold | 把 stream digest 调和进 constitution 声明的活 target（默认 `understanding.md`）。 | 融合、合并文档 |
+| 待处理 | Topic 上尚未完成加工、计入 `pending_count` 的工作项条数。 | stale（对外）、落后 |
+| 已融入 | 指定活 target 的 `folded` 条数，即已折入的 digest 数。 | folded 条数（人读） |
+| 全量综合后已增量融入 | 上次全量重综合之后又折入的条数（`len(folded)-len(last_major_folded)`），是已完成量不是欠账。 | 距上次 A、落后 N 条 |
 | 回顾折入 | 把一条回顾上后附材料的 digest 写进该条回顾正文。 | — |
 | 活 target | constitution 中运行时参与 fold 的 target；当前排除判断层 target。 | 活文档、活动目标 |
 | 材料目录 | Digest/Compose 写入 prompt 的表：标记（必读/按需）、角色、来源、路径、体量；不含正文。 | 文件清单、prompt 目录 |

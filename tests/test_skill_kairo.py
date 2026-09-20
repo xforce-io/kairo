@@ -108,6 +108,10 @@ def test_skill_covers_discovery_status_and_understanding():
     ):
         assert needle in text, f"skill must mention {needle!r}"
     assert "事实" in text
+    assert "待处理" in text
+    assert "全量综合后已增量融入" in text
+    assert "距上次 A" not in text
+    assert "folded_stale" in text
     # read order / not treating transcript as conclusion
     assert "transcript" in text.lower()
     assert "结论" in text or "最终结论" in text

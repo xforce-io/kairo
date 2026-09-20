@@ -177,7 +177,10 @@ def test_cli_status_shows_drift_counter(topic_dir, monkeypatch):
     runner.invoke(app, ["add", str(t)])
     runner.invoke(app, ["step"])
     s = runner.invoke(app, ["status"])
-    assert s.exit_code == 0 and "距上次 A" in s.stdout
+    assert s.exit_code == 0
+    assert "全量综合后已增量融入" in s.stdout
+    assert "距上次 A" not in s.stdout
+    assert "stale=" not in s.stdout
 
 
 def test_cli_status_lists_references(topic_dir, monkeypatch):

@@ -129,8 +129,11 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 ## 输出解读
 
 - `status` 行形态：`reference <id>: [roles]`；blocked 时带 `⚠ …:reason`
-- `target understanding.md: folded N;距上次 A 已 D 条`；未生成时 `(未生成)`；手改/失败时 `⚠ blocked:reason`；corpus 变更时 advisory「corpus 已变,可 re-step 重算」——**advisory 不是自动执行**
-- 把上述归纳成人话：名称、进度、blocked 列表、建议下一步（问句），别贴超长原始日志
+- Topic 摘要含 `待处理 N` 与 `blocked N`。`待处理` 不是落后条数。
+- `target understanding.md: 已融入 N；全量综合后已增量融入 D`。`D` 是上次全量重综合之后**已经**折入的条数，**不是**待处理，也不是「落后」。禁止把该数字读成欠账。未生成时 `(未生成)`；手改/失败时 `⚠ blocked:reason`；corpus 变更时 advisory「corpus 已变,可 re-step 重算」——**advisory 不是自动执行**
+- 核单条：`kairo status --ref ID [--home HOME] [--target PATH] [--json]`。JSON `state` 闭集：`folded_current` / `not_folded` / `folded_stale` / `digest_missing`。旧版本已融入而当前 digest 已变 → `folded_stale`，不得报当前已融入。`home` 在 global 为 `""`。
+- `kairo status --json` 字段：`pending`、`folded`、`incremental_after_full_compose`、`blocked`、`blocked_reasons`。不要用 `stale` 键。
+- 把上述归纳成人话：名称、待处理、已融入、增量、blocked 列表、建议下一步（问句），别贴超长原始日志
 
 ### Web ACTIONS 主按钮
 
