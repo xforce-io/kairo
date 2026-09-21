@@ -26,11 +26,11 @@
 
 ### 3.1 目标
 
-与 L1 / 票面：Ref 详情看见列表；点开只读正文；空/错可判；同页追加一条后列表 +1。Topic 右侧「形态」的洞察 notes 与转写/音频同一套可点行，进入该 Ref 的 notes 区后可写会话能追加。左侧点选 Ref 后右侧须有该 Ref 详情入口。notes 区密度与同页 digest 一档。数据、稳定键、add 语义认 #410。
+与 L1 / 票面：Ref 详情看见列表；点开只读正文；空/错可判；同页追加一条后列表 +1。Topic 形态「洞察 notes」整行打开中间阅读画布 notes 预览（不是跳 `/refs`）；可写时该画布能追加。左侧点选后右侧须有 `/refs/{id}` 入口。notes 区密度与 digest 一档。数据、稳定键、add 语义认 #410。
 
 ### 3.2 非目标
 
-完整富文本编辑器、在 Topic 页展开 note 全文、Topic 页追加表单、附件、协作光标、编辑/删除已有 note、登录身份、「点按钮的人」、替代 digest/fold、重做 CLI。public-read 不开放写入。不开新票。
+完整富文本编辑器、在形态表展开 note 全文、在形态表内放追加表单、附件、协作光标、编辑/删除已有 note、登录身份、「点按钮的人」、替代 digest/fold、重做 CLI。public-read 不开放写入。不开新票。追加只发生在阅读画布 notes 预览与 Ref 详情，不发生在形态列表行上。
 
 ## 4. 能力
 
@@ -40,21 +40,22 @@
 
 ```mermaid
 flowchart LR
-  topic["Topic 右侧形态"] --> ref["Ref 详情 /refs/{id}#notes"]
-  tl["Timeline / Project"] --> ref
+  formRow["Topic 右侧形态 · 洞察 notes 整行"] --> reader["Topic 中间阅读画布 #reader · notes 预览"]
+  left["Topic 左侧点选 Ref"] --> meta["右侧边栏跟随 + 进 /refs/{id} 链接"]
+  reader --> add["可写：画布内追加"]
+  meta --> ref["Ref 详情 /refs/{id}"]
   ref --> list["notes 区在 digest 之上"]
-  ref --> form["轻量追加表单"]
   list --> one["单条只读页"]
-  one --> ref
 ```
 
-- 盖楼与追加只在 Ref 详情。不新增顶栏。
-- notes 区在标题/元数据之后、**digest 之上**。标题「洞察 notes」。
+- 盖楼列表在两处展示同一数据：Topic 阅读画布 notes 预览、Ref 详情。不新增顶栏。
+- **S5 落点（拍板）：** 形态「洞察 notes」整行点击 = 转写/音频同一套：在 Topic **中间阅读画布 `#reader`** 打开该 Ref 的 notes 预览。**不是**离开 Topic 跳到 `/refs/{id}#notes`。
+- 可写会话：该阅读画布 notes 预览内能追加（契约同 S4：成功后仍在该画布，列表 +1）。形态表本身无表单、不展开全文。
+- public-read：画布可见列表/空态，无追加。
+- Ref 详情 `/refs/{id}`：notes 仍在 digest 之上；可写同页追加。从 Topic 进详情走 S7 链接，不走形态 notes 整行的主路径。
 - 列表行：类型、作者、时间、首行；点击进入单条只读页。
 - 单条只读页：无表单。
-- 追加入口：仅 Ref 详情。public-read 不出现。
-- Topic 页：当前选中 Ref 的右侧「形态」表增加「洞察 notes」行。交互与同列「转写 / 音频」一致：整行可点（含预览），进入该 Ref 详情 `#notes`。不在 Topic 展开全文，不加表单。
-- Topic 左侧点选某 Ref 后，右侧边栏必须出现该 Ref 的详情相关入口：形态预览跟随选中项；须能进该 Ref 详情页，以及进 notes 区（可与形态 notes 行合一）。不得出现「已选中 Ref 但右侧找不到进详情的链接」。
+- Topic 左侧点选某 Ref 后，右侧边栏必须出现该 Ref 的详情相关入口：形态预览跟随选中项；须有进 `/refs/{id}` 的链接。不得出现「已选中但右侧找不到进详情的链接」。
 
 **入口线框（审查面）**
 
@@ -65,13 +66,13 @@ Topic 页右侧边栏「形态」（当前选中 Ref）：
   摘要      digest.md          预览     ← 整行可点（现网）
   音频      …….m4a             预览     ← 整行可点（现网）
   转写      transcript.md      预览     ← 整行可点（现网）
-  洞察 notes  3 · 最近首行……    预览     ← 须同样整行可点，进 Ref 详情 #notes
-  洞察 notes  尚无洞察 notes    预览     ← 空态仍整行可点，进该 Ref notes 区；不造 Ref
+  洞察 notes  3 · 最近首行……    预览     ← 整行可点 → 中间 #reader 打开该 Ref notes 预览
+  洞察 notes  尚无洞察 notes    预览     ← 空态仍整行可点 → 同一画布；不造 Ref
 ```
 
-禁止：只有「预览」文字链可点、绿框/整行点击无响应。public-read 同样可见该行，无追加。
+禁止：只有旁路小字「预览」可点而整行/绿框无响应。禁止整行主路径跳 `/refs/{id}`。public-read 同样可见该行；画布无追加。
 
-右侧边栏在选中 Ref 后还须有进该 Ref 详情的入口（标题/身份链或等价「打开详情」），不得只剩形态文件列表而找不到详情页。
+右侧边栏在选中 Ref 后还须有进 `/refs/{id}` 的入口（标题/身份链或等价「打开详情」）。
 
 Ref 详情，从上到下（密度对齐同页 digest，禁止堆砌大框）：
 
@@ -107,19 +108,21 @@ Ref 详情，从上到下（密度对齐同页 digest，禁止堆砌大框）：
 | 追加成功 | 仍在该 Ref 详情，列表 +1，新条可见 | 可与 CLI list/show 对上 |
 | 追加失败 | 留在表单；错误可判；列表条数不变 | 空正文、非法类型、请求失败分得开；不落半条 |
 | public-read | 列表/空/只读可见；无表单 | POST 被拒绝 |
-| Topic 预览有 | 形态区「洞察 notes」显示条数或最近首行 | 整行可点，进入该 Ref 详情 notes 区；Topic 无表单 |
-| Topic 预览无 | 形态区入口仍在，文案可判尚无 | 整行仍可点进该 Ref notes 区；不造 Ref；Topic 无表单 |
-| Topic 选中 Ref | 右侧出现该 Ref 详情相关入口 | 形态跟随选中；有进详情与进 notes 的链接 |
-| notes 观感 | 列表与追加分区清楚 | 无堆砌大框、无通栏廉价主按钮、无漂浮空矩形；密度与同页 digest 一档 |
+| Topic 预览有 | 形态区「洞察 notes」显示条数或最近首行 | 整行可点后 `#reader` 出现该 Ref 的 notes 列表；URL 仍留在 Topic；形态表无表单 |
+| Topic 预览无 | 形态区入口仍在，文案可判尚无 | 整行可点后 `#reader` 为「尚无洞察 notes」；不造 Ref；可写时画布内有追加 |
+| Topic 画布追加 | 可写时在 `#reader` notes 预览提交 | 成功仍在该画布，列表 +1；契约同 S4 |
+| Topic 选中 Ref | 右侧出现该 Ref 详情相关入口 | 形态跟随选中；有进 `/refs/{id}` 的链接（链到当前选中 Ref） |
+| notes 观感 | 列表与追加分区清楚 | 无堆砌大框、无通栏厚按钮、无漂浮空矩形；密度与同页 digest / 阅读正文一档。不做像素级截图比对 |
 
 **布局与交互**
 
 - 列表在上、追加在下（空态：空文案在上、短表在下）。分区用标题/间距，不用套大卡片。
 - 追加：类型四选一（insight / decision / open-question / correction），未选提交为 insight；正文为 markdown 源，无工具栏、无预览；提交控件随内容宽度，禁止通栏厚按钮。输入框高度随一行到数行，禁止页面中央漂浮空矩形。
 - 空正文：前端拦截 + 服务端再拒（#410 `invalid_request`）。列表不变。
-- 成功：PRG 回到同一 Ref 详情，不进单条页。
+- 成功：在 Ref 详情提交则留在详情；在阅读画布提交则留在该画布。均不进单条页。
 - 单条页失败：note 不存在或不可读 → 错误态，不是空列表。
-- Topic 形态 notes 行：整行可点，与转写/音频同一交互；只跳转、不展开全文、不在 Topic 提交。
+- Topic 形态 notes 行：整行可点，与转写/音频同一交互，目标为 `#reader` notes 预览；形态表不展开全文、不出现表单。
+- 观感可判定（S6）：分区可识别；不回归截图二（厚边框堆叠、居中空矩形、通栏厚按钮）；字号/行距/边距与同页 digest 或阅读正文同一档。不做像素级对照。
 - 不做：WYSIWYG、拖放上传、在只读页追加、把用户送去 CLI。
 
 ### 4.2 数据
@@ -130,9 +133,9 @@ Ref 详情，从上到下（密度对齐同页 digest，禁止堆砌大框）：
 
 ## 5. 思路与折衷
 
-采纳：notes 放在 digest 之上。Topic 形态 notes 与转写/音频同一套整行可点，落地仍是 Ref 详情；追加只在 Ref 详情。观感跟 digest，不跟独立后台表单。
+采纳：形态 notes 与转写/音频同一套整行预览进 `#reader`；可写在该画布追加。Ref 详情仍保留盖楼与追加。观感跟 digest。
 
-放弃：Topic 页展开全文或追加表单；只有「预览」文字链可点；堆砌卡片 + 通栏按钮；入口只提示 CLI；富文本编辑器；把 Console 列表做成近 48h 切片。放弃为本票引入登录用户。
+放弃：整行主路径跳 `/refs/{id}#notes`；只有「预览」文字链可点；形态表内放表单或展开全文；堆砌卡片 + 通栏按钮；入口只提示 CLI；富文本编辑器；把 Console 列表做成近 48h 切片。放弃为本票引入登录用户。
 
 ## 6. 架构
 
@@ -150,14 +153,14 @@ flowchart TD
   show -->|fail| oneErr["只读页错误"]
 ```
 
-主路径：Topic 形态入口 → Ref 详情 notes（在 digest 之上）→ 填表提交 → 仍在详情且 +1 → 点开一条只读。失败路径不写半条。不调用 `step` / `compose`。
+主路径：Topic 形态整行 → `#reader` notes 预览 → 可写提交仍在画布且 +1。副路径：右侧详情链接 → `/refs/{id}` notes（digest 之上）→ 提交仍在详情且 +1。失败路径不写半条。不调用 `step` / `compose`。
 
 ## 7. 模块
 
 | 面 | 变化 |
 |---|---|
 | Ref 详情模板 | notes 区在 digest 之上；含列表与表单 |
-| Topic 右侧形态 | 增加「洞察 notes」预览入口（只读跳转） |
+| Topic 右侧形态 | 增加「洞察 notes」整行；点击刷新 `#reader` notes 预览 |
 | 单条只读页 | 新页，无表单 |
 | web 路由 | GET 详情带 notes；GET 单条；POST 追加 |
 | `kairo.notes` | **不改契约**；页面调用现有函数 |
@@ -195,7 +198,7 @@ In/Out 同 issue `## 设计`。无 digest 的 Ref 仍可追加。#410 近 48h �
 | E2E S3 | 无 notes 的 Ref 详情 | 「尚无洞察 notes」；无假行；同页有表单；与 digest 空文案不同 |
 | E2E S4 | 详情提交非空正文 | 提交中按钮不可用；成功后仍本页、列表 +1；CLI 对得上；作者为进程用户；未选类型为 insight |
 | E2E S4 失败 | 空正文 / 非法类型 / 请求失败 | 错误可判；条数不变；无新 `notes.jsonl` 行 |
-| E2E S5 | Topic 形态「洞察 notes」行（有/无楼） | 整行可点，与转写/音频同一交互；进该 Ref `#notes`；可写会话该页能追加；空态仍可点、不造 Ref；Topic 无表单 |
+| E2E S5 | Topic 形态「洞察 notes」整行（有/无楼） | 与转写/音频同一交互；落点为 Topic `#reader` notes 预览（URL 仍在 Topic，不是 `/refs/{id}`）；可写画布内能追加且 +1；空态仍可点、不造 Ref；形态表无表单 |
 | E2E S6 | Ref 详情 notes 区对照同页 digest | 列表与追加分区清楚；无堆砌大框、无通栏厚按钮、无漂浮空矩形；密度与 digest 一档 |
 | E2E S7 | Topic 左侧点选某 Ref | 右侧形态跟随该 Ref；有进该 Ref 详情的链接；有进 notes 区的链接 |
 | Integration | public-read 打开同一 Ref | 可见列表或空；无表单；POST 不落盘 |
