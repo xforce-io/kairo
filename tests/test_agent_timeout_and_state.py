@@ -23,7 +23,7 @@ from kairo.provider import (
     resolve_cli_timeout,
     snapshot_cli_proxy_env,
 )
-from kairo.rules import COMPOSE_NEAR_LIMIT_TIMEOUT_S, _run_agent
+from kairo.rules import _run_agent
 from kairo.web.tasks import StepTask, classify_task, is_fatal_agent_line
 from kairo.workspace import Workspace
 
@@ -242,10 +242,10 @@ def test_run_agent_preserves_explicit_timeout():
     assert p.timeout_s == 42
 
 
-def test_run_agent_near_limit_cap_does_not_change_agent_timeout_key(
+def test_run_agent_optional_cap_does_not_change_agent_timeout_key(
     tmp_path, monkeypatch
 ):
-    """#386:近上限帽只收窄本次 CLI timeout,不改 [agent] timeout_s。"""
+    """调用方的显式帽只收窄本次 CLI timeout，不改配置。"""
     cfg = tmp_path / "kairo" / "config.toml"
     cfg.parent.mkdir()
     cfg.write_text("[agent]\ntimeout_s = 1800\n")
@@ -269,10 +269,10 @@ def test_run_agent_near_limit_cap_does_not_change_agent_timeout_key(
         "persona",
         "ctx",
         "out.md",
-        timeout_cap=COMPOSE_NEAR_LIMIT_TIMEOUT_S,
+        timeout_cap=120,
     )
     assert text == "ok"
-    assert seen["timeout_s"] == COMPOSE_NEAR_LIMIT_TIMEOUT_S
+    assert seen["timeout_s"] == 120
     assert resolve_agent_timeout_s() == 1800
     assert resolve_cli_timeout(None) == 1800
 

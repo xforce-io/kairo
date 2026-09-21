@@ -3033,7 +3033,11 @@ def run_summary(request: Request, slug: str, task_id: str | None = None) -> HTML
         lines.append(
             f'<p class="run-summary-error-detail">{escape(summary)}</p>'
         )
-        lines.append(f'<p class="muted">{t("run.failed_retry_hint")}</p>')
+        plan = workspace_run_plan(ws)
+        hint = "run.failed_attention_hint" if any(
+            not item["retryable"] for item in plan["blocked_targets"]
+        ) or any(not item["retryable"] for item in plan["blocked_refs"]) else "run.failed_retry_hint"
+        lines.append(f'<p class="muted">{t(hint)}</p>')
     elif result.kind == "cancelled":
         lines = [
             f'<p class="run-summary-title run-summary-cancel">{t("run.cancelled")}</p>',

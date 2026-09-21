@@ -289,6 +289,19 @@ def _finished_ok_task(app, ws):
     return task
 
 
+def test_failed_summary_does_not_offer_run_for_manual_protection(tmp_path):
+    ws = Workspace.init(tmp_path / "ws")
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(status="blocked", reason="manual-edit")
+    ws.write_state(state)
+    app = create_app(tmp_path)
+    task = app.state.registry.start("ws", ws.root, [sys.executable, "-c", "raise SystemExit(1)"])
+    _wait(task)
+    text = TestClient(app).get(f"/w/ws/run-summary?task_id={task.task_id}").text
+    assert "ordinary Run cannot clear" in text or "普通运行无法解除" in text
+    assert "wait for the service" not in text and "等待服务恢复" not in text
+
+
 def test_run_summary_clean_oob_refreshes_meta_and_nav(tmp_path, monkeypatch):
     """#180 S1: plan=clean 的成功 run-summary OOB 刷新元信息与左栏圆点。"""
     monkeypatch.setenv("KAIRO_STUB", "1")
@@ -341,7 +354,7 @@ def test_run_summary_still_blocked_keeps_meta_and_nav(tmp_path, monkeypatch):
     assert REASON_COMPOSE_MIGRATION_REQUIRED in text
     assert "dot blocked" in text
     assert "meta-st blocked" in text
-    assert "Needs re-step" in text or "需要 re-step" in text
+    assert "Retry failures" in text or "重试失败" in text
     assert "No remaining blocks" not in text
     assert "无剩余阻塞" not in text
 

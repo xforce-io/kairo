@@ -6,7 +6,6 @@ from kairo.engine import step
 from kairo.models import Form, GlossaryEntry, Manifest, ProductState, State, TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import (
-    COMPOSE_NEAR_LIMIT_TIMEOUT_S,
     REASON_COMPOSE_MIGRATION_REQUIRED,
     REASON_COMPOSE_OVER_BUDGET,
     REASON_DIGEST_DEGRADED,
@@ -19,7 +18,6 @@ from kairo.rules import (
     TransformRule,
     _COMPOSE_MIN_PRIOR_LEN,
     _hash,
-    is_cli_agent_timeout,
 )
 from kairo.workspace import Workspace
 
@@ -813,12 +811,12 @@ def test_leftover_degraded_oversized_is_observed_as_migration(tmp_path):
     ws.write_state(state)
 
     plan = workspace_run_plan(ws)
-    assert plan["mode"] == "attention"
+    assert plan["mode"] == "retry"
     assert plan["pending_count"] == 0
     assert plan["blocked_count"] == 1
-    assert plan["retryable_blocked_count"] == 0
+    assert plan["retryable_blocked_count"] == 1
     assert plan["blocked_targets"][0]["reason"] == REASON_COMPOSE_MIGRATION_REQUIRED
-    assert plan["blocked_targets"][0]["retryable"] is False
+    assert plan["blocked_targets"][0]["retryable"] is True
 
     provider = _FixedProvider("不应调用")
     step(ws, provider)
@@ -830,7 +828,7 @@ def test_leftover_degraded_oversized_is_observed_as_migration(tmp_path):
     assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
 
 
-def test_compose_old_oversized_understanding_requires_explicit_migration(tmp_path):
+def test_compose_old_oversized_understanding_compacts_automatically(tmp_path):
     ws = Workspace.init(tmp_path)
     source = tmp_path / "m.txt"
     source.write_text("x")
@@ -839,15 +837,15 @@ def test_compose_old_oversized_understanding_requires_explicit_migration(tmp_pat
     old = "旧历史" * (UNDERSTANDING_MAX_CHARS // 3 + 1)
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, old)
-    provider = _FixedProvider(_valid_compose_doc(ws, "不应调用"))
+    provider = _FixedProvider(_valid_compose_doc(ws, "已整理。" * 3000))
 
     item = _understanding_item(ws, provider, state)
     item.run(state)
 
-    assert provider.calls == 0
-    assert (ws.root / "understanding.md").read_text() == old
+    assert provider.calls >= 1
+    assert len((ws.root / "understanding.md").read_text()) <= UNDERSTANDING_MAX_CHARS
     ts = state.targets["understanding.md"]
-    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert ts.status == "ok"
     assert item.is_stale(state) is False
 
 
@@ -946,14 +944,8 @@ def _near_limit_text(n: int = UNDERSTANDING_NEAR_LIMIT) -> str:
     return "旧" * n
 
 
-def test_is_cli_agent_timeout_matches_runner_and_equivalents():
-    assert is_cli_agent_timeout(RuntimeError("CLI agent timeout after 120s: grok"))
-    assert is_cli_agent_timeout(TimeoutError("timed out"))
-    assert not is_cli_agent_timeout(RuntimeError("Grok request failed status 502"))
-
-
-def test_compose_near_limit_incremental_gates_without_provider(tmp_path):
-    """#386 S1:近上限 + Δ 的普通增量,0 次 Compose provider。"""
+def test_compose_near_limit_incremental_compacts(tmp_path):
+    """#408：近上限普通增量自动整理。"""
     ws = Workspace.init(tmp_path)
     source = tmp_path / "m.txt"
     source.write_text("x")
@@ -962,20 +954,20 @@ def test_compose_near_limit_incremental_gates_without_provider(tmp_path):
     old = _near_limit_text(19_999)
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, old)
-    provider = _FixedProvider(_valid_compose_doc(ws, "不应调用"))
+    provider = _FixedProvider(_valid_compose_doc(ws, "已整理。" * 3000))
 
     item = _understanding_item(ws, provider, state)
     item.run(state)
 
-    assert provider.calls == 0
-    assert (ws.root / "understanding.md").read_text() == old
+    assert provider.calls >= 1
+    assert len((ws.root / "understanding.md").read_text()) <= UNDERSTANDING_MAX_CHARS
     ts = state.targets["understanding.md"]
-    assert ts.status == "blocked"
-    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert ts.status == "ok"
+    assert ts.reason is None
     assert item.is_stale(state) is False
 
 
-def test_compose_near_limit_boundary_12000_gates_11999_still_calls(tmp_path):
+def test_compose_near_limit_boundary_both_sides_continue(tmp_path):
     ws = Workspace.init(tmp_path)
     source = tmp_path / "m.txt"
     source.write_text("x")
@@ -985,10 +977,10 @@ def test_compose_near_limit_boundary_12000_gates_11999_still_calls(tmp_path):
     gated_old = _near_limit_text(UNDERSTANDING_NEAR_LIMIT)
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, gated_old)
-    gated_provider = _FixedProvider(_valid_compose_doc(ws, "不应调用"))
+    gated_provider = _FixedProvider(_valid_compose_doc(ws, "已整理。" * 3000))
     _understanding_item(ws, gated_provider, state).run(state)
-    assert gated_provider.calls == 0
-    assert state.targets["understanding.md"].reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert gated_provider.calls >= 1
+    assert state.targets["understanding.md"].status == "ok"
 
     open_old = _near_limit_text(UNDERSTANDING_NEAR_LIMIT - 1)
     open_state = State()
@@ -1002,8 +994,8 @@ def test_compose_near_limit_boundary_12000_gates_11999_still_calls(tmp_path):
     assert open_state.targets["understanding.md"].status == "ok"
 
 
-def test_compose_exact_20000_with_delta_uses_near_limit_not_hard_gt(tmp_path):
-    """#386:恰好 20_000 仍合法;有 Δ 时走近上限门禁,不是 >20k 硬门。"""
+def test_compose_exact_20000_with_delta_continues(tmp_path):
+    """#408：恰好 20k 也能继续接纳新增材料。"""
     ws = Workspace.init(tmp_path)
     source = tmp_path / "m.txt"
     source.write_text("x")
@@ -1013,13 +1005,13 @@ def test_compose_exact_20000_with_delta_uses_near_limit_not_hard_gt(tmp_path):
     assert len(old) == UNDERSTANDING_MAX_CHARS
     state = State()
     state.targets["understanding.md"] = _seed_prior_understanding(ws, old)
-    provider = _FixedProvider(_valid_compose_doc(ws, "不应调用"))
+    provider = _FixedProvider(_valid_compose_doc(ws, "已整理。" * 3000))
 
     _understanding_item(ws, provider, state).run(state)
 
-    assert provider.calls == 0
-    assert (ws.root / "understanding.md").read_text() == old
-    assert state.targets["understanding.md"].reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert provider.calls >= 1
+    assert len((ws.root / "understanding.md").read_text()) <= UNDERSTANDING_MAX_CHARS
+    assert state.targets["understanding.md"].status == "ok"
 
 
 def test_compose_near_limit_without_delta_does_not_discover(tmp_path):
@@ -1063,8 +1055,8 @@ def test_compose_explicit_recompose_bypasses_near_limit_gate(tmp_path):
     assert state.targets["understanding.md"].status == "ok"
 
 
-def test_compose_near_limit_edge_timeout_is_migration_and_capped(tmp_path, monkeypatch):
-    """#386:无 Δ 的 materials-changed 边沿仍调 provider;超时落迁移码并套 120s 帽。"""
+def test_compose_near_limit_timeout_preserves_full_recompose_retry(tmp_path, monkeypatch):
+    """#408：超时可普通重试，并保留全量触发语义。"""
     cfg = tmp_path / "kairo" / "config.toml"
     cfg.parent.mkdir()
     cfg.write_text("[agent]\ntimeout_s = 1800\n")
@@ -1086,12 +1078,12 @@ def test_compose_near_limit_edge_timeout_is_migration_and_capped(tmp_path, monke
     _understanding_item(ws, provider, state).run(state)
 
     assert provider.calls == 1
-    assert provider.configs[0].timeout_s == COMPOSE_NEAR_LIMIT_TIMEOUT_S
+    assert provider.configs[0].timeout_s == 1800
     assert (ws.root / "understanding.md").read_text() == old
     ts = state.targets["understanding.md"]
     assert ts.status == "blocked"
-    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
-    assert ts.retry_reason is None
+    assert ts.reason == "provider-failed"
+    assert ts.retry_reason == "materials-changed"
     assert ts.diagnostic is not None
     assert "timeout" in ts.diagnostic.summary.lower()
 
@@ -1116,7 +1108,7 @@ def test_compose_timeout_below_near_limit_stays_provider_failed(tmp_path):
     assert ts.status == "blocked"
 
 
-def test_compose_explicit_recompose_timeout_is_migration_without_short_cap(
+def test_compose_explicit_recompose_timeout_preserves_retry_without_short_cap(
     tmp_path, monkeypatch
 ):
     from kairo.provider import DEFAULT_CLI_TIMEOUT_S, resolve_cli_timeout
@@ -1140,11 +1132,10 @@ def test_compose_explicit_recompose_timeout_is_migration_without_short_cap(
 
     assert provider.calls == 1
     assert provider.configs[0].timeout_s == DEFAULT_CLI_TIMEOUT_S
-    assert provider.configs[0].timeout_s > COMPOSE_NEAR_LIMIT_TIMEOUT_S
     assert (ws.root / "understanding.md").read_text() == old
     ts = state.targets["understanding.md"]
-    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
-    assert ts.retry_reason is None
+    assert ts.reason == "provider-failed"
+    assert ts.retry_reason == REASON_EXPLICIT_RECOMPOSE
 
 
 # ---- rules 走 agent run 接口(#4),不再依赖 complete ----

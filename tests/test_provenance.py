@@ -10,9 +10,21 @@ from kairo.provenance import (
     fact_anchor_id,
     source_id_for,
     validate_provenance,
+    referenced_source_ids,
+    prune_unused_source_rows,
 )
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts, _stub_compose_document
 from kairo.workspace import Workspace
+
+
+def test_unused_index_rows_do_not_keep_sources_alive():
+    body = '## 事实\n保留〔S-abcdef〕。\n<a id="F-123abc-01"></a>锚点事实。\n'
+    text = body + '## 来源索引\n| ID | 来源 |\n|---|---|\n| S-abcdef | a |\n| S-123abc | b |\n| S-deadbeef | unused |\n'
+    assert referenced_source_ids(text) == {"S-abcdef", "S-123abc"}
+    pruned = prune_unused_source_rows(text)
+    assert pruned.startswith(body)
+    assert "S-deadbeef" not in pruned
+    assert "| S-123abc |" in pruned
 
 
 def test_source_id_stable_and_collision_extends():

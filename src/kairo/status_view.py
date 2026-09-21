@@ -159,7 +159,7 @@ def format_topic_status(ws: Workspace, payload: dict, state) -> list[str]:
         reason = item.get("blocked_reason")
         flag = f"  ⚠ blocked:{_format_block(reason, ts.diagnostic)}" if item["status"] == "blocked" else ""
         if reason in (REASON_COMPOSE_MIGRATION_REQUIRED, REASON_COMPOSE_OVER_BUDGET):
-            flag += "；确认压缩历史正文后运行 kairo re-step understanding.md（失败保留旧版）"
+            flag += "；可运行 kairo run 自动整理结论后继续（失败保留最近成功版本）"
         if corpus_flags.get(path):
             flag += "  ⚠ corpus 已变,可 re-step 重算"
         lines.append(

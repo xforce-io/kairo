@@ -9,6 +9,7 @@
 | `notion-project-datasource.md` | #388 Project 新数据源只认 Notion 页：Settings 文案、粘贴提示、Reader 标签、添加/读取错误码 | `/settings`；`/projects/<id>` 添加框；`/projects/<id>/datasources/<ds>`。S3 agent Run **skip**（需 provider，不在此触发 LLM） |
 | `timeline-view-run.md` | #396 Timeline 当前视图一次确认推进：未加工标记、确认数字、Web/CLI `run-view` | `/timeline?day=`、`/timeline/run-preview`、`POST /timeline/run`、`kairo run-view`。真 ASR/LLM **skip** |
 | `interactive-project-read.md` | #400 交互式读取 Project 登记源及一跳外链：临时读、引用记录、前置失败指引 | 正式 CLI `project context/read/read-url`、`project record *`。无 Console；真网 Reader / LLM **skip** |
+| `continuous-compose.md` | #408 连续新增材料自动整理、分批恢复、失败保护与旧容量恢复 | CLI `run/status`；Topic 主按钮、产物与运行摘要；scratch 确定性 provider，无真实 LLM |
 | `status-fold-progress.md` | #401 status 待处理／已融入／增量／blocked 口径与按 Ref 核当前 digest | 正式 CLI `kairo status`、`--json`、`--ref`。无 Console；LLM **skip** |
 | `ref-find-read.md` | #402 按标题／发生日／Topic 检索并直接读 digest 或 transcript | 正式 CLI `kairo ref find`、`kairo ref read`。无 Console；LLM / step **skip** |
 

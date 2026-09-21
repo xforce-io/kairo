@@ -114,15 +114,16 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 | `manual-edit` | 文档被手改，待接受 | 确认后 `kairo accept <doc>`；或放弃手改再 `re-step`（会丢手改，必须讲清） |
 | `compose-degraded` | 综合输出骤缩，已拒绝覆盖以保护旧文档 | 终态；确认后 `re-step` 重算。若 `understanding.md` 已超过 20,000 字符，按 `compose-migration-required` 观察与恢复 |
 | `digest-degraded` | 纪要输出骤缩，已拒绝覆盖以保护旧 digest | 终态；普通 Run 不会清掉该 digest。确认后 `kairo re-step <id>` / `retry-ref` |
-| `compose-migration-required` | 旧 `understanding.md` 超过 20,000 字符，或近上限（≥12,000）普通增量有未折 Δ / 近上限超时，普通 run 不静默压缩（含超长 leftover `compose-degraded`） | 说明“全量重综合会压缩历史正文，失败保留旧版”；确认后 `kairo re-step understanding.md` |
-| `compose-over-budget` | 候选 `understanding.md` 超过 20,000 字符，已拒绝覆盖 | 终态；确认压缩代价后 `kairo re-step understanding.md` |
+| `compose-migration-required` | 旧容量阻塞（含超长 leftover `compose-degraded`），新策略允许普通推进自动整理结论 | 说明普通推进会压缩整理正文、历史细节回查 digest、失败保留最近成功版本；授权后 `kairo run` |
+| `compose-over-budget` | 候选经最多一次预算修订后仍超过 20,000 字符，已拒绝覆盖 | 普通 Run 可重试；不要求全量 re-step；失败保留最近成功批次 |
 | `compose-provenance-invalid` | 候选溯源结构无效，已拒绝覆盖 | 终态；检查来源后确认 `re-step` |
 | `provider-failed` | provider 调用或材料读取能力失败 | 查安全诊断；恢复后可 Run，或确认后 `re-step` |
 
 规则摘要：
 
 - 前置条件变化后，部分 blocked 在下次 `step` **自动**重试（如配好 ASR 后的 `no-asr`）
-- `asr-failed` / `convert-failed` / `compose-degraded` / `digest-degraded` / `compose-migration-required` / `compose-over-budget` / `compose-provenance-invalid` 视为**终态**，需手动 `re-step` / `retry-ref`
+- `asr-failed` / `convert-failed` / `compose-degraded` / `digest-degraded` / `compose-provenance-invalid` 视为**终态**，需手动 `re-step` / `retry-ref`；understanding 的容量原因可普通 Run 重试
+- 普通综合自动去重、归并、压缩，正文目标约 12,000 字符、硬上限 20,000；新增 digest 分批处理，每批成功后才更新该批 folded，失败不丢已完成进度。正常无新增材料不调用综合。
 - skill **解释 + 给选项**；**绝不**未授权就 `accept` / `step` / `re-step`
 
 ## 铁律
@@ -151,7 +152,7 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 - **不是**按钮坏了；**不是** METADATA 里当前选中的 reference 要重跑
 - **不要**点主按钮，**不要**把「点 re-step」落成 `kairo run`（attention 下普通 run 不会综合）
 - 先 `kairo status` 看 `⚠ blocked:reason`
-- `compose-migration-required`（含超长 leftover `compose-degraded`）：恢复入口在左边活 target（`understanding.md`）的「重新生成」，或讲清压缩代价后确认 `kairo re-step understanding.md`（失败保留旧版）
+- `compose-migration-required`（含超长 leftover `compose-degraded`）与 `compose-over-budget`：新版本主按钮应为可点的普通重试；说明自动整理代价后按授权运行 `kairo run`，无需反复全量重综合。旧页面若仍是 attention，先核对服务版本。
 
 命令报错 → 如实呈现 stderr 要点，不臆造 workspace 状态。
 

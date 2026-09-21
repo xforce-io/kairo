@@ -223,13 +223,12 @@ def test_run_all_stops_at_attention_topics_like_single_run(tmp_path, monkeypatch
     monkeypatch.setenv("KAIRO_SERVE_ROOT", str(tmp_path))
     from kairo.refs import create_tag
     from kairo.models import TargetState
-    from kairo.rules import REASON_COMPOSE_MIGRATION_REQUIRED
 
     create_tag(tmp_path, "t")
     ws = Workspace.init(tmp_path / "t", topic="t")
     (ws.root / "understanding.md").write_text("旧正文")
     state = ws.read_state()
-    state.targets["understanding.md"] = TargetState(status="blocked", reason=REASON_COMPOSE_MIGRATION_REQUIRED)
+    state.targets["understanding.md"] = TargetState(status="blocked", reason="compose-provenance-invalid")
     ws.write_state(state)
     import kairo.cli as cli
 
@@ -245,3 +244,22 @@ def test_run_all_and_topic_are_mutually_exclusive(tmp_path, monkeypatch):
     monkeypatch.setenv("KAIRO_STUB", "1")
     result = runner.invoke(app, ["run", "--all", "--topic", "x"])
     assert result.exit_code == 2
+
+
+def test_run_all_reports_capacity_failure_nonzero(tmp_path, monkeypatch):
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(tmp_path))
+    from kairo.models import TargetState
+    from kairo.rules import _hash
+    import kairo.cli as cli
+    ws = Workspace.init(tmp_path / "capacity", topic="capacity")
+    (ws.root / "understanding.md").write_text("旧正文")
+    state = ws.read_state()
+    state.targets["understanding.md"] = TargetState(output_hash=_hash("旧正文"), status="blocked", reason="compose-over-budget")
+    ws.write_state(state)
+    calls = []
+    monkeypatch.setattr(cli, "engine_run_workspace", lambda ws, p, **kw: calls.append(ws.root.name))
+    result = runner.invoke(app, ["run", "--all"])
+    assert result.exit_code == 1
+    assert calls == ["capacity"]
+    assert "capacity: failed (blocked; see kairo status)" in result.output

@@ -175,6 +175,30 @@ def fact_anchor_ids(content: str) -> set[str]:
     return set(_FACT_ANCHOR_RE.findall(content))
 
 
+def referenced_source_ids(content: str) -> set[str]:
+    """正文引用（含事实锚点），不把来源索引本身当作引用。"""
+    body, _ = _split_body_and_index(content)
+    ids = set(_SID_RE.findall(body))
+    ids.update(f"S-{fid[2:].rsplit('-', 1)[0]}" for fid in fact_anchor_ids(body))
+    return ids
+
+
+def prune_unused_source_rows(content: str) -> str:
+    """仅去掉来源索引中未引用的表格行，正文逐字保留；调用前先校验来源。"""
+    body, index = _split_body_and_index(content)
+    used = referenced_source_ids(content)
+    lines = []
+    in_sources = False
+    for line in index.splitlines(keepends=True):
+        if line.strip().startswith("## "):
+            in_sources = line.strip() in _SOURCE_INDEX_HEADINGS
+        ids = set(_SID_RE.findall(line))
+        if in_sources and line.lstrip().startswith("|") and ids and not (ids & used):
+            continue
+        lines.append(line)
+    return body + "".join(lines)
+
+
 def validate_provenance(
     content: str,
     catalog: list[SourceEntry],
