@@ -33,13 +33,18 @@
 <ul class="notes-list">
   {% for it in notes['items'] %}
   <li class="notes-card">
-    <a href="/refs/{{ ref_id | urlencode }}/notes/{{ it.note_id | urlencode }}?home={{ (home or 'global') | urlencode }}">
-      <div class="notes-card-head">
-        <span class="notes-type">{{ it.type }}</span>
-        <span class="notes-meta">{{ it.author }} · {{ it.created_at }}</span>
-      </div>
-      <div class="notes-card-body">{{ it.excerpt }}</div>
-    </a>
+    <div class="notes-card-head">
+      <span class="notes-type">{{ it.type }}</span>
+      <span class="notes-meta">{{ it.author }} · {{ it.created_at }}</span>
+    </div>
+    <div class="notes-card-body notes-preview">
+      <div class="notes-preview-content">{{ it.body_html | safe }}</div>
+    </div>
+    <div class="notes-card-actions">
+      <button type="button" class="notes-more" hidden aria-expanded="false"
+              data-more="{{ t('notes.more') }}" data-less="{{ t('notes.less') }}">{{ t('notes.more') }}</button>
+      <a class="notes-detail-link" href="/refs/{{ ref_id | urlencode }}/notes/{{ it.note_id | urlencode }}?home={{ (home or 'global') | urlencode }}">{{ t('notes.detail') }}</a>
+    </div>
   </li>
   {% endfor %}
 </ul>
