@@ -33,7 +33,7 @@
     </button>
   </form>
   {% endif %}
-  {% if ref_read_only and not public_read %}<a class="btn btn-ghost" href="{{ manage_href }}">{{ t('ref.open_details') }}</a>{% endif %}
+  <a class="btn btn-ghost ref-open-details" href="{{ manage_href }}">{{ t('ref.open_details') }}</a>
   {% if hint %}<p class="meta-hint">{{ hint }}</p>{% endif %}
   {% if can_edit_time %}
   <div class="meta-label">{{ t('tl.time') }}</div>
@@ -130,7 +130,8 @@
       </td>
     </tr>
     {% endfor %}
-    <tr>
+    <tr class="is-prev notes-form-row" data-href="{{ notes_href }}"
+        onclick="if(!event.target.closest('a,button')) location.href=this.dataset.href">
       <td class="mf-role">
         <span class="mf-role-main">{{ t('notes.section') }}</span>
         {% if notes_count %}
@@ -140,7 +141,7 @@
         {% endif %}
       </td>
       <td class="mf-actions">
-        <a class="mf-prev" href="{{ notes_href }}">{{ t('forms.preview') }}</a>
+        <span class="mf-prev">{{ t('forms.preview') }}</span>
       </td>
     </tr>
     </tbody>

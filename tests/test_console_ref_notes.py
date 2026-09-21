@@ -54,6 +54,8 @@ def test_s1_s3_notes_above_digest(tmp_path, monkeypatch):
     assert html.find("洞察 notes") < html.find("Digest")
     assert "追加 note" in html
     assert "请去 CLI" not in html
+    notes_block = html.split('id="notes"', 1)[1]
+    assert "btn-step" not in notes_block.split("</section>", 1)[0]
     add_note(serve, ref_id=rid, content="第一条洞察", home="energy")
     listed = client.get(f"/refs/{rid}?home=energy", headers=ZH)
     assert listed.status_code == 200
@@ -109,7 +111,10 @@ def test_s5_topic_preview_follows_selected_ref(tmp_path, monkeypatch):
     assert meta.status_code == 200
     assert "洞察 notes" in meta.text
     assert "侧栏预览" in meta.text
-    assert re.search(r'href="/refs/[^"]+#notes"', meta.text)
+    assert 'class="is-prev notes-form-row"' in meta.text
+    assert re.search(r'data-href="/refs/[^"]+#notes"', meta.text)
+    assert "ref-open-details" in meta.text
+    assert "打开资料详情" in meta.text
     assert "追加 note" not in meta.text
     # 无 notes 的同一 Topic：另加一条无 note 的 Ref
     monkeypatch.chdir(serve / "energy")
@@ -122,7 +127,19 @@ def test_s5_topic_preview_follows_selected_ref(tmp_path, monkeypatch):
     empty_meta = client.get(f"/w/energy/ref/{other}", headers=ZH)
     assert empty_meta.status_code == 200
     assert "尚无洞察 notes" in empty_meta.text
+    assert re.search(r'data-href="/refs/[^"]+#notes"', empty_meta.text)
     assert "追加 note" not in empty_meta.text
+
+
+def test_s6_notes_compact_not_card_form(tmp_path, monkeypatch):
+    serve, rid = _setup(tmp_path, monkeypatch)
+    client = TestClient(create_app(serve))
+    html = client.get(f"/refs/{rid}?home=energy", headers=ZH).text
+    add_block = html.split('id="notes"', 1)[1].split("</section>", 1)[0]
+    assert "notes-add" in add_block
+    assert "btn-step" not in add_block
+    assert 'rows="2"' in add_block
+    assert "btn-inline" in add_block
 
 
 def test_public_read_no_form_and_no_write(tmp_path, monkeypatch):

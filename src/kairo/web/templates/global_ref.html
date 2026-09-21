@@ -20,10 +20,9 @@
       {% for it in notes['items'] %}
       <li>
         <a href="/refs/{{ ref_id | urlencode }}/notes/{{ it.note_id | urlencode }}?home={{ (home or 'global') | urlencode }}">
-          <span>{{ it.type }}</span>
-          <span>{{ it.author }}</span>
-          <span>{{ it.created_at }}</span>
-          <span>{{ it.excerpt }}</span>
+          <span class="notes-type">{{ it.type }}</span>
+          <span class="notes-meta">{{ it.author }} · {{ it.created_at }}</span>
+          <span class="notes-excerpt">{{ it.excerpt }}</span>
         </a>
       </li>
       {% endfor %}
@@ -36,16 +35,14 @@
           onsubmit="var b=this.querySelector('[type=submit]'); b.disabled=true; b.textContent='{{ t('notes.submitting') }}';">
       <input type="hidden" name="home" value="{{ home or 'global' }}">
       <input type="hidden" name="back" value="{{ back_url }}">
-      <label class="dlg-label" for="note-type">{{ t('notes.type') }}</label>
-      <select id="note-type" name="type">
+      <select id="note-type" name="type" aria-label="{{ t('notes.type') }}">
         <option value="" selected>insight</option>
         {% for ty in notes.types %}
         {% if ty != 'insight' %}<option value="{{ ty }}">{{ ty }}</option>{% endif %}
         {% endfor %}
       </select>
-      <label class="dlg-label" for="note-body">{{ t('notes.body') }}</label>
-      <textarea id="note-body" name="content" rows="6" required></textarea>
-      <button class="btn btn-step" type="submit">{{ t('notes.add') }}</button>
+      <textarea id="note-body" name="content" rows="2" required placeholder="{{ t('notes.body') }}"></textarea>
+      <button class="btn btn-inline" type="submit">{{ t('notes.add') }}</button>
     </form>
     {% endif %}
   </section>
