@@ -12,5 +12,6 @@
 | `continuous-compose.md` | #408 连续新增材料自动整理、分批恢复、失败保护与旧容量恢复 | CLI `run/status`；Topic 主按钮、产物与运行摘要；scratch 确定性 provider，无真实 LLM |
 | `status-fold-progress.md` | #401 status 待处理／已融入／增量／blocked 口径与按 Ref 核当前 digest | 正式 CLI `kairo status`、`--json`、`--ref`。无 Console；LLM **skip** |
 | `ref-find-read.md` | #402 按标题／发生日／Topic 检索并直接读 digest 或 transcript | 正式 CLI `kairo ref find`、`kairo ref read`。无 Console；LLM / step **skip** |
+| `ref-markdown-notes.md` | #410 Ref 级 markdown notes 盖楼：CLI list/add/show、近窗稳定键、provenance 样例 | 正式 CLI `kairo notes`。无 Console（#411）；LLM / step / compose **skip** |
 
 新增用户可见功能时在此加一行并补功能文件；验收 Story 对不上任何一行即 BLOCKED。

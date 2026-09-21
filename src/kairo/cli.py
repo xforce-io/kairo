@@ -77,6 +77,10 @@ ref_app = typer.Typer(
     help="按标题／发生日／Topic 检索并读取 digest 或 transcript。不要扫内部目录。"
 )
 app.add_typer(ref_app, name="ref")
+notes_app = typer.Typer(
+    help="Ref 级 markdown notes 盖楼：list / add / show。不替代 digest，不等于已 fold。"
+)
+app.add_typer(notes_app, name="notes")
 tag_app = typer.Typer(help="Ref Tag：add / rm / list")
 app.add_typer(tag_app, name="tag")
 include_app = typer.Typer(help="Topic 包含规则：set / clear / show")
@@ -661,6 +665,102 @@ def ref_read_cmd(
         _dump(True, payload)
     else:
         typer.echo(payload["content"], nl=False)
+
+
+def _notes_fail(as_json: bool, exc) -> None:
+    if as_json:
+        _dump(True, {"ok": False, "code": getattr(exc, "code", "error"), "error": str(exc)})
+    else:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+    raise typer.Exit(1) from None
+
+
+def _read_note_content(content: str) -> str:
+    if content == "-":
+        return sys.stdin.read()
+    return content
+
+
+@notes_app.command("add")
+def notes_add_cmd(
+    ref_id: str = typer.Argument(..., help="Ref id"),
+    content: str = typer.Option(..., "--content", help="markdown 正文；- 表示 stdin"),
+    note_type: str = typer.Option(None, "--type", help="insight|decision|open-question|correction"),
+    home: str = typer.Option(None, "--home", help="global 或 Topic slug"),
+    root: Path = typer.Option(None, "--root", "-r", help="serve root"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+) -> None:
+    """对已有 Ref 追加一条 markdown note。失败不写半条。"""
+    from kairo.notes import NotesError, add_note, format_add
+
+    try:
+        payload = add_note(
+            _serve_root(root),
+            ref_id=ref_id,
+            content=_read_note_content(content),
+            note_type=note_type,
+            home=home,
+        )
+    except NotesError as e:
+        _notes_fail(as_json, e)
+    if as_json:
+        _dump(True, payload)
+    else:
+        typer.echo(format_add(payload), nl=False)
+
+
+@notes_app.command("list")
+def notes_list_cmd(
+    ref_id: str = typer.Option(None, "--ref", help="按 Ref 列出"),
+    topic: str = typer.Option(None, "--topic", help="按 Topic 成员列出"),
+    home: str = typer.Option(None, "--home", help="与 --ref 合用；global 或 Topic slug"),
+    since: str = typer.Option(None, "--since", help="RFC3339 或小时数；省略为近 48h"),
+    root: Path = typer.Option(None, "--root", "-r", help="serve root"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+) -> None:
+    """列出近窗 notes。必须 --ref 或 --topic 之一。零命中成功空。"""
+    from kairo.notes import NotesError, format_list, list_notes
+
+    try:
+        payload = list_notes(
+            _serve_root(root),
+            ref_id=ref_id,
+            topic=topic,
+            home=home,
+            since=since,
+        )
+    except NotesError as e:
+        _notes_fail(as_json, e)
+    if as_json:
+        _dump(True, payload)
+    else:
+        typer.echo(format_list(payload), nl=False)
+
+
+@notes_app.command("show")
+def notes_show_cmd(
+    note_stable_id: str = typer.Argument(None, help="note:<ref_key>/<note_id>"),
+    ref_id: str = typer.Option(None, "--ref", help="该 Ref 全部 notes（不受近窗限制）"),
+    home: str = typer.Option(None, "--home", help="与 --ref 合用；global 或 Topic slug"),
+    root: Path = typer.Option(None, "--root", "-r", help="serve root"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+) -> None:
+    """显示单条 note 或某 Ref 全楼。"""
+    from kairo.notes import NotesError, format_show, show_notes
+
+    try:
+        payload = show_notes(
+            _serve_root(root),
+            stable_id=note_stable_id,
+            ref_id=ref_id,
+            home=home,
+        )
+    except NotesError as e:
+        _notes_fail(as_json, e)
+    if as_json:
+        _dump(True, payload)
+    else:
+        typer.echo(format_show(payload), nl=False)
 
 
 @app.command(name="brief")
