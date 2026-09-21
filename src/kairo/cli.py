@@ -816,12 +816,12 @@ def _exit_if_run_failed(ws: Workspace) -> None:
         )
         raise typer.Exit(1)
     plan = workspace_run_plan(ws)
-    blocked = [item for item in plan["blocked_targets"] if not item["retryable"]]
+    blocked = plan["blocked_targets"]
     if blocked:
         item = blocked[0]
         hint = (
-            " — run `kairo re-step understanding.md` after confirming full "
-            "re-synthesis will compress history; failures keep the old version"
+            " — retry with `kairo run`; conclusions are automatically compacted; "
+            "the last successful version is preserved"
             if item["reason"]
             in (REASON_COMPOSE_MIGRATION_REQUIRED, REASON_COMPOSE_OVER_BUDGET)
             else " — see kairo status"
@@ -920,9 +920,10 @@ def _run_all_topics() -> None:
             failed.append(identity.slug)
             typer.secho(f"{identity.slug}: failed ({exc})", fg=typer.colors.RED, err=True)
             continue
-        if has_provider_failed(ws):
+        if has_provider_failed(ws) or workspace_run_plan(ws)["blocked_count"]:
             failed.append(identity.slug)
-            typer.secho(f"{identity.slug}: failed (provider-failed)", fg=typer.colors.RED, err=True)
+            reason = "provider-failed" if has_provider_failed(ws) else "blocked; see kairo status"
+            typer.secho(f"{identity.slug}: failed ({reason})", fg=typer.colors.RED, err=True)
         else:
             ran.append(identity.slug)
             typer.echo(f"{identity.slug}: ran")
@@ -978,6 +979,8 @@ def _execute_view_run(
     serve: Path, plan, *, quiet: bool
 ) -> tuple[list[str], list[str], list[str]]:
     """Serial in-process run of in-set slugs. Not TaskRegistry, not kairo run --all."""
+    from contextlib import nullcontext, redirect_stderr, redirect_stdout
+    from io import StringIO
     provider = select_provider(require_read_dirs=True)
     ran: list[str] = []
     failed: list[str] = []
@@ -1011,7 +1014,11 @@ def _execute_view_run(
                 )
             continue
         try:
-            engine_run_workspace(ws, provider)
+            # JSON 模式仅输出结果信封；运行诊断已持久化到各 Topic 状态。
+            with (redirect_stdout(StringIO()) if quiet else nullcontext()), (
+                redirect_stderr(StringIO()) if quiet else nullcontext()
+            ):
+                engine_run_workspace(ws, provider)
         except Exception as exc:  # one Topic must not abort the pass
             failed.append(topic.slug)
             if not quiet:
@@ -1021,11 +1028,12 @@ def _execute_view_run(
                     err=True,
                 )
             continue
-        if has_provider_failed(ws):
+        if has_provider_failed(ws) or workspace_run_plan(ws)["blocked_count"]:
             failed.append(topic.slug)
             if not quiet:
+                reason = "provider-failed" if has_provider_failed(ws) else "blocked; see kairo status"
                 typer.secho(
-                    f"{topic.slug}: failed (provider-failed)",
+                    f"{topic.slug}: failed ({reason})",
                     fg=typer.colors.RED,
                     err=True,
                 )

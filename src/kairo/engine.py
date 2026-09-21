@@ -12,6 +12,8 @@ from kairo.history import snapshot
 from kairo.models import REASON_PROVIDER_FAILED, TargetState
 from kairo.rules import (
     REASON_COMPOSE_MIGRATION_REQUIRED,
+    REASON_COMPOSE_OVER_BUDGET,
+    REASON_CAPACITY_RETRY,
     REASON_DIGEST_DEGRADED,
     REASON_EXPLICIT_RECOMPOSE,
     ComposeRule,
@@ -212,11 +214,7 @@ def ref_product_blocks(ws, ref_id: str) -> list[dict]:
 
 
 def clear_provider_failed_targets(ws) -> int:
-    """清除 target 上的 provider-failed 终态(保留正文),返回清除条数。
-
-    #98:run 等显式恢复入口用;不删 understanding/assessment 已有内容。
-    #386:不得清除 compose-migration-required(非 retryable)。
-    """
+    """普通 run 恢复服务/容量失败，保留正文及原触发语义。"""
     state = ws.read_state()
     n = 0
     live_paths = {t.path for t in ws.constitution.live_targets()}
@@ -224,10 +222,13 @@ def clear_provider_failed_targets(ws) -> int:
         if (
             path in live_paths
             and ts.status == "blocked"
-            and ts.reason == REASON_PROVIDER_FAILED
+            and compose_block_retryable(path, effective_compose_block_reason(ws, path, ts))
         ):
+            capacity = effective_compose_block_reason(ws, path, ts) in (
+                REASON_COMPOSE_MIGRATION_REQUIRED, REASON_COMPOSE_OVER_BUDGET,
+            )
             ts.status = "ok"
-            ts.reason = ts.retry_reason
+            ts.reason = ts.retry_reason or (REASON_CAPACITY_RETRY if capacity else None)
             ts.diagnostic = None
             ts.retry_reason = None
             state.targets[path] = ts
@@ -348,6 +349,13 @@ def _product_block_retryable(reason: str | None) -> bool:
     return reason != REASON_DIGEST_DEGRADED
 
 
+def compose_block_retryable(path: str, reason: str | None) -> bool:
+    return reason == REASON_PROVIDER_FAILED or (
+        path == "understanding.md"
+        and reason in (REASON_COMPOSE_MIGRATION_REQUIRED, REASON_COMPOSE_OVER_BUDGET)
+    )
+
+
 def workspace_run_plan(ws, catalog=None) -> dict:
     """#75/#161:主按钮状态机输入,区分总 blocked 与 Run 可重试 blocked。"""
     from kairo.refs import list_all_refs, member_sources, serve_root_of
@@ -382,7 +390,7 @@ def workspace_run_plan(ws, catalog=None) -> dict:
                     "summary": diag.summary if diag else None,
                     "stage": diag.stage if diag else None,
                     "provider": diag.provider if diag else None,
-                    "retryable": reason == REASON_PROVIDER_FAILED,
+                    "retryable": compose_block_retryable(path, reason),
                 }
             )
     blocked_ref_n = sum(len(b["blocks"]) for b in blocked_refs)

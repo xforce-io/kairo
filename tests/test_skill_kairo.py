@@ -168,7 +168,8 @@ def test_skill_web_attention_button_is_not_runnable():
     assert "attention" in text
     assert "disabled" in text or "不可点" in text
     assert "kairo status" in text
-    assert "kairo re-step understanding.md" in text
+    assert "kairo run" in text
+    assert "无需反复全量重综合" in text
     assert "主按钮" in text or "ACTIONS" in text
 
 

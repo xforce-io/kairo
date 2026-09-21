@@ -32,10 +32,11 @@ from kairo.models import (
 )
 from kairo.provenance import (
     REASON_PROVENANCE_INVALID,
-    build_source_catalog,
     fact_anchor_ids,
     format_source_catalog_block,
     provenance_protocol_for,
+    referenced_source_ids,
+    prune_unused_source_rows,
     validate_provenance,
 )
 from kairo.catalog import (
@@ -417,24 +418,13 @@ _COMPOSE_MIN_PRIOR_LEN = 2000
 _COMPOSE_DEGRADE_RATIO = 0.5
 UNDERSTANDING_MAX_CHARS = 20_000
 UNDERSTANDING_NEAR_LIMIT = 12_000
-COMPOSE_NEAR_LIMIT_TIMEOUT_S = 120
+COMPOSE_BATCH_CHARS = 24_000
+COMPOSE_BATCH_REFS = 16
+REASON_CAPACITY_RETRY = "compose-capacity-retry"
 REASON_COMPOSE_MIGRATION_REQUIRED = "compose-migration-required"
 REASON_COMPOSE_OVER_BUDGET = "compose-over-budget"
 REASON_EXPLICIT_RECOMPOSE = "explicit-recompose"
 REASON_DIGEST_DEGRADED = "digest-degraded"
-
-
-def is_understanding_near_limit(content: str) -> bool:
-    """#386:已存在正文落在近上限带(含恰好 20_000;硬门禁仍是 >20_000)。"""
-    return len(content) >= UNDERSTANDING_NEAR_LIMIT
-
-
-def is_cli_agent_timeout(exc: BaseException) -> bool:
-    """#386:Compose provider 的 CLI / 等价超时,不是普通 provider-failed。"""
-    if type(exc).__name__ in {"TimeoutExpired", "TimeoutError"}:
-        return True
-    text = str(exc).lower()
-    return "cli agent timeout" in text or "timeout after" in text or "超时" in text
 
 
 def is_catastrophic_shrink(prior: str, candidate: str) -> bool:
@@ -1035,6 +1025,7 @@ class ComposeRule:
                 delta
                 or materials_changed
                 or explicit_recompose
+                or (ts is not None and ts.reason == REASON_CAPACITY_RETRY)
                 or self._upstream_changed(target, state, ts)
                 or self._is_edited(target.path, ts)
             ):
@@ -1042,6 +1033,38 @@ class ComposeRule:
         return items
 
     def _make(self, target, delta: dict[str, str], all_digests: dict[str, str]) -> WorkItem:
+        base = self._make_batch(target, delta, all_digests)
+
+        def run(state: State) -> None:
+            ts = state.targets.get(target.path)
+            if target.path != "understanding.md" or (
+                ts and ts.reason in ("materials-changed", REASON_EXPLICIT_RECOMPOSE)
+            ):
+                base.run(state)
+                return
+            batches: list[dict[str, str]] = []
+            batch: dict[str, str] = {}
+            chars = 0
+            for path in sorted(delta):
+                size = len(self._member_digests[path].digest_path.read_text())
+                if batch and (chars + size > COMPOSE_BATCH_CHARS or len(batch) >= COMPOSE_BATCH_REFS):
+                    batches.append(batch)
+                    batch, chars = {}, 0
+                batch[path] = delta[path]
+                chars += size
+            if batch or not batches:
+                batches.append(batch)
+            for index, selected in enumerate(batches, 1):
+                print(f"compose {target.path}: batch {index}/{len(batches)} ({len(selected)} digest)", flush=True)
+                self._make_batch(target, selected, all_digests).run(state)
+                # 每批独立提交，后续失败或中断不抹掉已完成批次。
+                self.ws.write_state(state)
+                if state.targets[target.path].status == "blocked":
+                    break
+
+        return WorkItem(base.key, base.input_hash, run, base.is_stale)
+
+    def _make_batch(self, target, delta: dict[str, str], all_digests: dict[str, str]) -> WorkItem:
         key = target.path
         input_hash = _hash("".join(sorted(all_digests.values())))
 
@@ -1064,39 +1087,6 @@ class ComposeRule:
                 ts0.reason = "manual-edit"
                 ts0.retry_reason = None
                 state.targets[key] = ts0
-                return
-            if (
-                key == "understanding.md"
-                and len(old_content) > UNDERSTANDING_MAX_CHARS
-                and not explicit_recompose
-            ):
-                ts = ts0 or TargetState(
-                    depends_on=list(target.depends_on),
-                    output_hash=_hash(old_content),
-                )
-                ts.status = "blocked"
-                ts.reason = REASON_COMPOSE_MIGRATION_REQUIRED
-                ts.diagnostic = None
-                ts.retry_reason = None
-                state.targets[key] = ts
-                return
-            if (
-                key == "understanding.md"
-                and not explicit_recompose
-                and old_content
-                and is_understanding_near_limit(old_content)
-                and delta
-            ):
-                # #386:近上限 + Δ 的普通增量,0 次 provider;恢复入口仍是 explicit-recompose。
-                ts = ts0 or TargetState(
-                    depends_on=list(target.depends_on),
-                    output_hash=_hash(old_content),
-                )
-                ts.status = "blocked"
-                ts.reason = REASON_COMPOSE_MIGRATION_REQUIRED
-                ts.diagnostic = None
-                ts.retry_reason = None
-                state.targets[key] = ts
                 return
             current = "" if full_recompose else old_content
             use_delta = dict(all_digests) if full_recompose else delta
@@ -1167,14 +1157,20 @@ class ComposeRule:
 
             used_source_ids: set[str] = set()
             catalog = []
+            # 只授读当前正文引用与本批新增来源，避免历史目录随总材料数膨胀。
+            current_sids = referenced_source_ids(current)
             for ref_key in sorted(all_digests):
                 rec = self._member_digests[ref_key]
+                sid = source_id_for(
+                    rec.id if rec.home == self.ws.root.name else ref_key,
+                    used_source_ids,
+                )
+                used_source_ids.add(sid)
+                if key == "understanding.md" and ref_key not in use_delta and sid not in current_sids:
+                    continue
                 catalog.append(
                     SourceEntry(
-                        source_id=source_id_for(
-                            rec.id if rec.home == self.ws.root.name else ref_key,
-                            used_source_ids,
-                        ),
+                        source_id=sid,
                         ref_id=rec.id if rec.home == self.ws.root.name else ref_key,
                         title=rec.title,
                         digest_path=(
@@ -1204,8 +1200,20 @@ class ComposeRule:
             budget_discipline = (
                 "\n- 完整 `understanding.md`（含标题、空白、正文、来源索引）不得超过 "
                 f"{UNDERSTANDING_MAX_CHARS} 个 Unicode 字符；不得截断句子或来源索引。"
+                f"\n- 正常目标约 {UNDERSTANDING_NEAR_LIMIT} 字符。容量整理是本次综合的一部分："
+                "去重、归并、压缩历史叙述，保留与研究目标相关的关键事实、数字、分歧和未决问题及来源；"
+                "新材料必须得到处理，不得用仅复述旧文或变更说明代替完整正文。"
+                "历史细节通过 digest 回查；来源索引只列正文实际引用的来源，不抄全量材料目录。"
+                f"\n- 异常骤缩保护：已有长正文时，候选至少 {min(len(current), UNDERSTANDING_MAX_CHARS) // 2} 字符；"
+                "不要为凑长度添加无意义重复。"
                 if key == "understanding.md"
                 else ""
+            )
+            retry_reason = (
+                REASON_EXPLICIT_RECOMPOSE if explicit_recompose
+                else "materials-changed" if materials_changed
+                else REASON_CAPACITY_RETRY if ts0 and ts0.reason == REASON_CAPACITY_RETRY
+                else None
             )
             halt = digest_transport_halt()
             if halt is not None:
@@ -1225,36 +1233,28 @@ class ComposeRule:
                 ts.diagnostic = make_provider_diagnostic(
                     "compose", self.provider, skip_exc
                 )
-                ts.retry_reason = (
-                    REASON_EXPLICIT_RECOMPOSE
-                    if explicit_recompose
-                    else "materials-changed" if materials_changed else None
-                )
+                ts.retry_reason = retry_reason
                 state.targets[key] = ts
                 return
-            apply_near_limit_cap = (
-                key == "understanding.md"
-                and is_understanding_near_limit(old_content)
-                and not explicit_recompose
-            )
             try:
-                content = _run_agent(
-                    self.provider,
-                    resolve_fold_protocol(target.fold_protocol)
+                persona = (resolve_fold_protocol(target.fold_protocol)
                     + provenance_protocol_for(layer)
                     + knowledge_context
                     + reference_section
                     + _CATALOG_DISCIPLINE
                     + _OUTPUT_DISCIPLINE
                     + _COMPOSE_DISCIPLINE
-                    + budget_discipline,
-                    context,
-                    "doc.md",
-                    catalog_items=materials,
-                    timeout_cap=(
-                        COMPOSE_NEAR_LIMIT_TIMEOUT_S if apply_near_limit_cap else None
-                    ),
+                    + budget_discipline
                 )
+                content = _run_agent(self.provider, persona, context, "doc.md", catalog_items=materials)
+                if key == "understanding.md" and len(content) > UNDERSTANDING_MAX_CHARS:
+                    print(f"compose {key}: budget revision 1/1 ({len(content)} chars)", flush=True)
+                    content = _run_agent(
+                        self.provider, persona,
+                        context + f"\n[预算修订 1/1] 上次候选 {len(content)} 字符超出预算。"
+                        "请重新读取原输入，压缩冗余，输出满足预算的完整正文；不得截断或遗漏关键事实。",
+                        "doc.md", catalog_items=materials,
+                    )
             except Exception as exc:  # #98:不写新正文,保留已有文档,持久化诊断
                 import sys
 
@@ -1265,22 +1265,8 @@ class ComposeRule:
                 )
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
-                near_limit_timeout = (
-                    key == "understanding.md"
-                    and is_understanding_near_limit(old_content)
-                    and is_cli_agent_timeout(exc)
-                )
-                if near_limit_timeout:
-                    # #386:近上限超时安全网 — 非 retryable,避免 clear-and-retry 空耗。
-                    ts.reason = REASON_COMPOSE_MIGRATION_REQUIRED
-                    ts.retry_reason = None
-                else:
-                    ts.reason = REASON_PROVIDER_FAILED
-                    ts.retry_reason = (
-                        REASON_EXPLICIT_RECOMPOSE
-                        if explicit_recompose
-                        else "materials-changed" if materials_changed else None
-                    )
+                ts.reason = REASON_PROVIDER_FAILED
+                ts.retry_reason = retry_reason
                 ts.diagnostic = make_provider_diagnostic("compose", self.provider, exc)
                 state.targets[key] = ts
                 return
@@ -1292,7 +1278,7 @@ class ComposeRule:
                 ts.status = "blocked"
                 ts.reason = REASON_COMPOSE_OVER_BUDGET
                 ts.diagnostic = None
-                ts.retry_reason = None
+                ts.retry_reason = retry_reason
                 state.targets[key] = ts
                 return
             # #99:判断层 F-… 必须在实际的上游事实文档中声明，不能只符合格式。
@@ -1316,8 +1302,11 @@ class ComposeRule:
                 # 不改 output_hash / folded / 文件,便于 re-step 恢复
                 state.targets[key] = ts
                 return
+            if key == "understanding.md":
+                content = prune_unused_source_rows(content)
             # 退化护栏(#28):溯源有效后再判灾难性骤缩;全量重综合沿用既有例外。
-            if not full_recompose and is_catastrophic_shrink(current, content):
+            shrink_prior = current[:UNDERSTANDING_MAX_CHARS] if key == "understanding.md" else current
+            if not full_recompose and is_catastrophic_shrink(shrink_prior, content):
                 ts = ts0 or TargetState(depends_on=list(target.depends_on))
                 ts.status = "blocked"
                 ts.reason = "compose-degraded"
@@ -1327,7 +1316,7 @@ class ComposeRule:
                 return
             doc_path.write_text(content)
             ts = state.targets.get(key) or TargetState(depends_on=list(target.depends_on))
-            ts.folded = dict(all_digests)
+            ts.folded = dict(all_digests) if full_recompose else {**ts.folded, **use_delta}
             ts.output_hash = _hash(content)
             ts.produced_by = {
                 "provider": self.provider.name,
@@ -1356,7 +1345,7 @@ class ComposeRule:
                 ts.knowledge_generation = uuid.uuid4().hex
             # 全量重综合(A)或材料集变更后的重综合 → 刷新漂移基线
             if ts0 is None or full_recompose:
-                ts.last_major_folded = dict(all_digests)
+                ts.last_major_folded = dict(ts.folded)
             state.targets[key] = ts
             from kairo.knowledge_review import extract_after_success
             from kairo.sidecars import join
@@ -1385,7 +1374,7 @@ class ComposeRule:
             ):
                 return False
             # #77 / #161:全量重综合触发
-            if ts and ts.reason in ("materials-changed", REASON_EXPLICIT_RECOMPOSE):
+            if ts and ts.reason in ("materials-changed", REASON_EXPLICIT_RECOMPOSE, REASON_CAPACITY_RETRY):
                 return True
             if (
                 ts

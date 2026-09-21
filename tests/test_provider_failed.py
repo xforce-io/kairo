@@ -325,8 +325,8 @@ def test_provider_retry_restores_full_recompose_origin(tmp_path):
         assert restored.retry_reason is None
 
 
-def test_clear_provider_failed_targets_skips_compose_migration_required(tmp_path):
-    """#386:clear 不得把近上限迁移门禁当成可重试 provider-failed。"""
+def test_clear_provider_failed_targets_recovers_capacity_without_deleting_document(tmp_path):
+    """#408：普通 run 可以恢复容量阻塞，正文仍保留。"""
     ws = Workspace.init(tmp_path)
     old = "旧" * UNDERSTANDING_NEAR_LIMIT
     (ws.root / "understanding.md").write_text(old)
@@ -339,20 +339,24 @@ def test_clear_provider_failed_targets_skips_compose_migration_required(tmp_path
     )
     ws.write_state(state)
 
-    assert clear_provider_failed_targets(ws) == 0
+    plan = workspace_run_plan(ws)
+    assert plan["mode"] == "retry"
+    assert plan["retryable_blocked_count"] == 1
+    assert plan["blocked_targets"][0]["retryable"] is True
+    assert clear_provider_failed_targets(ws) == 1
     ts = ws.read_state().targets["understanding.md"]
-    assert ts.status == "blocked"
-    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert ts.status == "ok"
+    assert ts.reason == "compose-capacity-retry"
     assert (ws.root / "understanding.md").read_text() == old
 
     plan = workspace_run_plan(ws)
-    assert plan["mode"] == "attention"
+    assert plan["mode"] == "run"
     assert plan["retryable_blocked_count"] == 0
-    assert plan["blocked_targets"][0]["retryable"] is False
+    assert not plan["blocked_targets"]
 
     run_workspace(ws, StubProvider())
     ts = ws.read_state().targets["understanding.md"]
-    assert ts.reason == REASON_COMPOSE_MIGRATION_REQUIRED
+    assert ts.reason == "compose-degraded"  # stub 的短输出仍受骤缩保护。
     assert ts.status == "blocked"
 
 

@@ -88,10 +88,10 @@ kairo add 截图.png --to <ref_id> --copy    # 向既有 Ref 追加形态
 
 - **constitution.yaml**：本 Topic 的宪法——心智与协议（stream/corpus、fold、扩展名→role、转换声明）都在此声明，引擎不硬编码。
 - **stream（观测）/ corpus（基线）**：reference 的认识论归类。stream 逐条 fold 进 `understanding.md`；corpus 作 agent 只读参考层，不 digest、不进 fold 循环，与观测冲突时以基线校正专名/术语。
-- **综合产出**：`understanding.md`（事实层，中立、可标来源），完整文件不超过 20,000 Unicode 字符。Digest / Compose 用材料目录授读，不把原文倾倒进 prompt；超长旧文档先阻塞，确认“全量重综合会压缩历史正文，失败保留旧版”后用 `kairo re-step understanding.md` 迁移。
+- **综合产出**：`understanding.md`（事实层，中立、可标来源），完整文件不超过 20,000 Unicode 字符，普通推进自动整理，目标约 12,000 字符。新增 digest 按每批 24,000 字符、最多 16 条处理（超大的单条独占一批），成功一批才记录对应 fold 进度；超预算最多自动修订一次。历史细节回查 digest，失败保留最近成功版本。Digest / Compose 用材料目录授读，不把原文倾倒进 prompt。
 - **收敛**：`step` 像 `make`——朝宪法声明的状态调和，按内容 hash 判定 stale，跑到没有新推进为止。
 - **二进制摄入**（[#15](https://github.com/xforce-io/kairo/issues/15)）：`add 文件.docx`（docx/pptx/xlsx/pdf）经 `doc2text`（[markitdown](https://github.com/microsoft/markitdown) 进程内转换）产 `source_text`，与 ASR 同构（`audio→transcript` ↔ `binary→source_text`），下游零改动；xlsx 转 GFM 表格保表头语义。无需机器配置（markitdown 是项目依赖）。仅 stream 型处理；corpus 二进制不转（基线只读直读，不派生）。
-- **blocked 状态**：源/转换原因（`no-asr`、`asr-failed`、`convert-failed`、`missing-source`）、`manual-edit`、`provider-failed`，Compose 保护（`compose-degraded`、`compose-provenance-invalid`、`compose-migration-required`、`compose-over-budget`），以及 digest 骤缩护栏（`digest-degraded`）。`provider-failed` 可由 Run 重试；Compose 与 `digest-degraded` 是终态，旧文档或旧 digest 保持不变。普通 Run 不会清掉 `digest-degraded` 的参考。预算原因需在确认压缩取舍后显式执行 `kairo re-step understanding.md`。`understanding.md` 已超过 20,000 字符时，leftover `compose-degraded` 按 `compose-migration-required` 观察与恢复。
+- **blocked 状态**：源/转换原因（`no-asr`、`asr-failed`、`convert-failed`、`missing-source`）、`manual-edit`、`provider-failed`，Compose 保护（`compose-degraded`、`compose-provenance-invalid`、`compose-migration-required`、`compose-over-budget`），以及 digest 骤缩护栏（`digest-degraded`）。`provider-failed` 和 understanding 的容量原因可由普通 Run 重试；旧容量阻塞无需反复人工 re-step。手改、来源无效和骤缩保护仍需核对；普通 Run 不清除 `digest-degraded`。旧文档或旧 digest 在失败时保留。`understanding.md` 已超过 20,000 字符时，leftover `compose-degraded` 按 `compose-migration-required` 观察与恢复。
 
 ## 领域知识（knowledge）与兼容真名册（glossary）
 

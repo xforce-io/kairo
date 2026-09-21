@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -50,7 +51,7 @@ def test_empty_workspace_plan_is_clean(tmp_path):
     assert plan["blocked_count"] == 0
 
 
-def test_plan_attention_for_non_retryable_target_block(tmp_path):
+def test_plan_retry_for_capacity_target_block(tmp_path):
     ws = Workspace.init(tmp_path / "ws", topic="t")
     state = ws.read_state()
     state.targets["understanding.md"] = TargetState(
@@ -60,10 +61,10 @@ def test_plan_attention_for_non_retryable_target_block(tmp_path):
 
     plan = workspace_run_plan(ws)
 
-    assert plan["mode"] == "attention"
+    assert plan["mode"] == "retry"
     assert plan["blocked_count"] == 1
-    assert plan["retryable_blocked_count"] == 0
-    assert plan["blocked_targets"][0]["retryable"] is False
+    assert plan["retryable_blocked_count"] == 1
+    assert plan["blocked_targets"][0]["retryable"] is True
 
 
 def test_empty_workspace_step_does_not_invoke_provider(tmp_path):
@@ -149,7 +150,7 @@ def test_web_run_button_retry_label(tmp_path, monkeypatch):
     )
 
 
-def test_web_attention_button_disabled_and_regen_warning(tmp_path):
+def test_web_capacity_retry_enabled_and_explicit_regen_warning(tmp_path):
     ws = Workspace.init(tmp_path / "ws", topic="t")
     old = ws.root / "understanding.md"
     old.write_text("旧正文")
@@ -165,8 +166,8 @@ def test_web_attention_button_disabled_and_regen_warning(tmp_path):
     page = client.get("/w/ws")
     target = client.get("/w/ws/target?path=understanding.md")
 
-    assert "Needs re-step" in page.text or "需要 re-step" in page.text
-    assert 'id="run-btn"' in page.text and "disabled" in page.text
+    button = re.search(r'<button\b[^>]*id="run-btn"[^>]*>', page.text)
+    assert button and "disabled" not in button.group()
     assert "Blocked: 1" in page.text or "阻塞: 1" in page.text
     assert "compress" in target.text or "压缩历史正文" in target.text
     assert "failures keep" in target.text or "失败保留旧版" in target.text
@@ -189,8 +190,8 @@ def test_web_leftover_oversized_degraded_uses_migration_copy(tmp_path):
     page = client.get("/w/ws")
     target = client.get("/w/ws/target?path=understanding.md")
 
-    assert "Needs re-step" in page.text or "需要 re-step" in page.text
-    assert 'id="run-btn"' in page.text and "disabled" in page.text
+    button = re.search(r'<button\b[^>]*id="run-btn"[^>]*>', page.text)
+    assert button and "disabled" not in button.group()
     assert REASON_COMPOSE_MIGRATION_REQUIRED in target.text
     assert "compose-degraded" not in target.text
     assert "compress" in target.text or "压缩历史正文" in target.text
