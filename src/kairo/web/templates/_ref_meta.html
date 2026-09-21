@@ -130,8 +130,8 @@
       </td>
     </tr>
     {% endfor %}
-    <tr class="is-prev notes-form-row" data-href="{{ notes_href }}"
-        onclick="if(!event.target.closest('a,button')) location.href=this.dataset.href">
+    <tr class="is-prev notes-form-row{% if preview_key == 'notes' %} on{% endif %}"
+        hx-get="{{ form_base }}/notes{{ form_query }}" hx-target="#reader">
       <td class="mf-role">
         <span class="mf-role-main">{{ t('notes.section') }}</span>
         {% if notes_count %}
