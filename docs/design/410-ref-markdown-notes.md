@@ -2,7 +2,7 @@
 
 - Issue: [#410](https://github.com/xforce-io/kairo/issues/410)
 - 分支: `feat/410-ref-markdown-notes`
-- 状态: Draft（L2 · 待评审）
+- 状态: Approved（L2 · 苏晴 LGTM、周衡宣布设计通过 2026-09-21）
 - L1: [Approved](https://github.com/xforce-io/kairo/issues/410)（issue `## 设计`，2026-09-21）
 - 本文件是 #410 的 **L2 事实源**。Issue 只保留摘要与本链接。未获 L2 批准前不写功能代码。不混 #401 / #402 / #404。
 
@@ -159,7 +159,8 @@ In/Out 同 issue `## 设计`。无 digest 的 Ref 仍可 `add`。#411 只读 Con
 | E2E S1 | 已有 Ref（可无 digest）`notes add`，再 `list --ref` / `show` | list 条数 +1；show 正文、作者、时间、类型、稳定键与写入一致；未给类型则为 insight |
 | E2E S2 | 三子命令 `--help` 与成功路径；失败走真实子命令 | 均有帮助；空 notes 的合法 Ref：list 成功空；错：Ref 不存在 / 空正文 / 非法类型 / 缺作用域 → 非 0、一句原因、不落半条 |
 | E2E S3 | 刚写入后 `list --ref --since` 显式近窗；无 notes 的 Ref 再 list | 有则至少 1 个稳定键；无则成功空 |
-| E2E S4 | add 前后读 folded；读 `list --json` 的 `provenance`；无 notes 再读一次 | 有 note 时 `provenance` 含 `note:`；无则不含；folded 不变；未自动综合 |
+| E2E S3 默认窗 | 省略 `--since`（固定时钟：窗内 / 窗外各一条） | 只列出近 48h 内 |
+| E2E S4 | add 前后 `kairo status` 已融入计数；读 `list --json` 的 `provenance`；无 notes 再读一次 | 已融入不变；有 note 时 `provenance` 含 `note:`；无则不含；未自动综合 |
 | Integration | `--topic` list 只含该 Topic 成员 Ref 的 notes；`--ref` 与 `--topic` 同时给 | 成员过滤成立；同时给为 `invalid_request` |
 | Unit | 类型闭集；稳定键解析（含 global home）；notes 不修改 folded | 不跑网络、不跑 compose |
 
