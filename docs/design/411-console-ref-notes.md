@@ -26,11 +26,11 @@
 
 ### 3.1 目标
 
-与 L1 / 票面 S1–S4：Ref 详情看见列表；点开只读正文；空/错可判；同页追加一条后列表 +1。数据、稳定键、add 语义认 #410。
+与 L1 / 票面：Ref 详情看见列表；点开只读正文；空/错可判；同页追加一条后列表 +1。Topic 右侧「形态」有只读预览入口。数据、稳定键、add 语义认 #410。
 
 ### 3.2 非目标
 
-完整富文本编辑器、实时预览、附件、协作光标、编辑/删除已有 note、登录身份、「点按钮的人」、替代 digest/fold、重做 CLI、本窗口发版。public-read 不开放写入。
+完整富文本编辑器、在 Topic 页展开 note 全文、Topic 页追加表单、附件、协作光标、编辑/删除已有 note、登录身份、「点按钮的人」、替代 digest/fold、重做 CLI、本窗口发版。public-read 不开放写入。
 
 ## 4. 能力
 
@@ -40,40 +40,53 @@
 
 ```mermaid
 flowchart LR
-  tl["Timeline / Topic / Project"] --> ref["Ref 详情 /refs/{id}"]
-  ref --> list["notes 区：列表或空态"]
+  topic["Topic 右侧形态"] --> ref["Ref 详情 /refs/{id}#notes"]
+  tl["Timeline / Project"] --> ref
+  ref --> list["notes 区在 digest 之上"]
   ref --> form["轻量追加表单"]
   list --> one["单条只读页"]
   one --> ref
 ```
 
-- 入口：现有 Ref 详情。不新增顶栏导航。
-- notes 区是详情页上独立一节，位于 digest 节之后、与 Tag 等并列。标题即「洞察 notes」，不复用 digest 空态文案。
-- 列表行：类型、作者、时间、首行/标题；点击进入单条只读页。
-- 单条只读页：返回 Ref 详情；展示类型、作者、时间、稳定键、markdown 正文。无表单、无保存。
-- 追加入口：仅 Ref 详情。空态与有列表时都在。public-read 不出现。
+- 盖楼与追加只在 Ref 详情。不新增顶栏。
+- notes 区在标题/元数据之后、**digest 之上**。标题「洞察 notes」。
+- 列表行：类型、作者、时间、首行；点击进入单条只读页。
+- 单条只读页：无表单。
+- 追加入口：仅 Ref 详情。public-read 不出现。
+- Topic 页：当前选中 Ref 的右侧「形态」表增加「洞察 notes」预览入口（条数或最近首行；无则入口仍在）。点击进入该 Ref 详情 notes 区。不在 Topic 展开全文，不加表单。
 
 **入口线框（审查面）**
 
-Topic 页本票不改：仍是 Ref 列表。点某一 Ref 打开 `/refs/{id}`。Topic 页不加 notes 预览、不加「添加 note」。
+Topic 页右侧边栏「形态」（当前选中 Ref）：
 
-Ref 详情（唯一入口），从上到下：
+```
+形态
+  digest     ……
+  transcript ……
+  洞察 notes  3 · 最近首行……     ← 有则条数+最近首行；点进 Ref 详情 notes 区
+  洞察 notes  尚无洞察 notes     ← 无则入口仍在；无表单
+```
+
+public-read 同样可见该预览行，无追加。
+
+Ref 详情，从上到下：
 
 ```
 [ 返回 ]
 [ Ref 标题 / 元数据 ]
-[ digest …… ]
 
 ── 洞察 notes ──
   insight   作者  时间  首行摘要……     ← 点击进只读页
   decision  作者  时间  另一条……
 
-  类型 [ insight ▼ ]     ← 四选一，未选当 insight
+  类型 [ insight ▼ ]
   [ markdown 正文，纯文本框，无工具栏、无预览 ]
-  [ 追加 note ]           ← 仅可写会话；public-read 无此段
+  [ 追加 note ]           ← 仅可写；public-read 无此段
+
+[ digest …… ]
 ```
 
-空态：digest 下仍是「洞察 notes」标题 +「尚无洞察 notes」+ 同一表单。无「去 CLI」。
+空态：标题/元数据下是「洞察 notes」+「尚无洞察 notes」+ 表单，再下面才是 digest。无「去 CLI」。
 
 单条只读页：类型 / 作者 / 时间 / 正文。无表单。
 
@@ -90,6 +103,8 @@ Ref 详情（唯一入口），从上到下：
 | 追加成功 | 仍在该 Ref 详情，列表 +1，新条可见 | 可与 CLI list/show 对上 |
 | 追加失败 | 留在表单；错误可判；列表条数不变 | 空正文、非法类型、请求失败分得开；不落半条 |
 | public-read | 列表/空/只读可见；无表单 | POST 被拒绝 |
+| Topic 预览有 | 形态区「洞察 notes」显示条数或最近首行 | 点击进入该 Ref 详情 notes 区；无表单 |
+| Topic 预览无 | 形态区入口仍在，文案可判尚无 | 不假装有楼；无表单 |
 
 **布局与交互**
 
@@ -98,6 +113,7 @@ Ref 详情（唯一入口），从上到下：
 - 空正文：前端拦截 + 服务端再拒（#410 `invalid_request`）。列表不变。
 - 成功：PRG 回到同一 Ref 详情，不进单条页。
 - 单条页失败：note 不存在或不可读 → 错误态，不是空列表。
+- Topic 形态入口只预览、只跳转，不展开全文、不提交。
 - 不做：WYSIWYG、拖放上传、在只读页追加、把用户送去 CLI。
 
 ### 4.2 数据
@@ -108,9 +124,9 @@ Ref 详情（唯一入口），从上到下：
 
 ## 5. 思路与折衷
 
-采纳：在现有 Ref 详情加一节，而不是新的 Notes 顶栏。只读拆页，满足 S2「该页无写入控件」，详情页保留 S4 入口。
+采纳：notes 放在 digest 之上，先看到盖楼再看到纪要。Topic 只在右侧「形态」加预览入口，追加仍只在 Ref 详情。
 
-放弃：入口只提示 CLI；富文本编辑器；把 Console 列表做成近 48h 切片（盖楼会缺楼，故列表对齐 `show --ref` 全量）。放弃为本票引入登录用户。
+放弃：Topic 页展开全文或追加表单；入口只提示 CLI；富文本编辑器；把 Console 列表做成近 48h 切片。放弃为本票引入登录用户。
 
 ## 6. 架构
 
@@ -128,13 +144,14 @@ flowchart TD
   show -->|fail| oneErr["只读页错误"]
 ```
 
-主路径：打开详情 → 见列表或空 → 填表提交 → 仍在详情且 +1 → 点开一条只读。失败路径不写半条、不与空态混用。不调用 `step` / `compose`。
+主路径：Topic 形态入口 → Ref 详情 notes（在 digest 之上）→ 填表提交 → 仍在详情且 +1 → 点开一条只读。失败路径不写半条。不调用 `step` / `compose`。
 
 ## 7. 模块
 
 | 面 | 变化 |
 |---|---|
-| Ref 详情模板 | 增加 notes 区与表单 |
+| Ref 详情模板 | notes 区在 digest 之上；含列表与表单 |
+| Topic 右侧形态 | 增加「洞察 notes」预览入口（只读跳转） |
 | 单条只读页 | 新页，无表单 |
 | web 路由 | GET 详情带 notes；GET 单条；POST 追加 |
 | `kairo.notes` | **不改契约**；页面调用现有函数 |
@@ -172,12 +189,13 @@ In/Out 同 issue `## 设计`。无 digest 的 Ref 仍可追加。#410 近 48h �
 | E2E S3 | 无 notes 的 Ref 详情 | 「尚无洞察 notes」；无假行；同页有表单；与 digest 空文案不同 |
 | E2E S4 | 详情提交非空正文 | 提交中按钮不可用；成功后仍本页、列表 +1；CLI 对得上；作者为进程用户；未选类型为 insight |
 | E2E S4 失败 | 空正文 / 非法类型 / 请求失败 | 错误可判；条数不变；无新 `notes.jsonl` 行 |
+| E2E S5 | Topic 打开有/无 notes 的成员 Ref | 形态区有「洞察 notes」入口；有则条数或最近首行，点进详情 notes 区；无则尚无文案；无表单 |
 | Integration | public-read 打开同一 Ref | 可见列表或空；无表单；POST 不落盘 |
 | Unit | 空态文案键不与 digest/fold 共用；类型闭集 | 不跑网络 |
 
 ## 12. 开放问题
 
-无。入口只在 Ref 详情；Topic 页不加预览/追加。列表全楼已由产品点头。本节线框供负责人审「入口长什么样」。
+无。负责人两点已写入本节：notes 在 digest 之上；Topic 形态区只预览不追加。若预览必须在 Topic 展开全文或 Topic 也要追加，再改本节。
 
 ## 13. 关联
 
