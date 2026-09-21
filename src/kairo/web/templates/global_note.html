@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block subtitle %}{{ t('notes.section') }}{% endblock %}
+{% block body %}
+<main class="ref-page">
+  <a class="ref-back" href="{{ back_url }}">← {{ t('notes.back_ref') }}</a>
+  <header class="ref-head">
+    <p class="obj-kicker">{{ t('notes.section') }}</p>
+    <h1>{{ item.type }}</h1>
+    <p class="ref-occurred">{{ item.author }} · {{ item.created_at }}</p>
+    <p class="ref-id">{{ item.stable_id }}</p>
+  </header>
+  <section class="ref-section">
+    {% if body_html %}<article class="doc">{{ body_html|safe }}</article>{% else %}<p class="panel-hint">{{ item.content }}</p>{% endif %}
+  </section>
+</main>
+{% endblock %}

@@ -1197,9 +1197,31 @@ def _global_ref_primary_body(ws: Workspace, rid: str, man, t) -> tuple[str, str]
     return t("ref.digest"), ""
 
 
+def _notes_home(home: str) -> str:
+    return "global" if not home or home == "global" else home
+
+
+def _notes_tower(serve, ref_id: str, home: str) -> dict:
+    from kairo.notes import NOTE_TYPES, NotesError, show_notes
+
+    try:
+        data = show_notes(serve, ref_id=ref_id, home=_notes_home(home))
+        items = list(data.get("items") or [])
+        for it in items:
+            it["note_id"] = _note_id_of(it)
+        return {"ok": True, "items": items, "count": int(data.get("count") or 0), "types": NOTE_TYPES}
+    except NotesError as exc:
+        return {"ok": False, "error": str(exc), "code": exc.code, "items": [], "count": 0, "types": NOTE_TYPES}
+
+
+def _note_id_of(item: dict) -> str:
+    sid = item.get("stable_id") or ""
+    return sid.rsplit("/", 1)[-1] if "/" in sid else sid
+
+
 @router.get("/refs/{ref_id}", response_class=HTMLResponse)
 def global_ref_view(
-    request: Request, ref_id: str, home: str = "", back: str = ""
+    request: Request, ref_id: str, home: str = "", back: str = "", note_err: str = ""
 ) -> HTMLResponse:
     from kairo.refs import (
         RefError,
@@ -1235,6 +1257,7 @@ def global_ref_view(
     locked_tags = [tag for tag in tags if is_locked_home_tag(serve, home, rid, tag)]
     project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+(?:\?[^\r\n#]*)?", back)) and not _is_public_read(request)
     back_url = back if project_back or back == "/timeline" or back.startswith("/timeline?") else "/timeline"
+    notes = _notes_tower(serve, rid, home)
     return _render(
         request,
         "global_ref.html",
@@ -1253,6 +1276,98 @@ def global_ref_view(
             "forms": forms,
             "back_url": back_url,
             "back_label": t("art.back") if project_back else t("ref.back_timeline"),
+            "notes": notes,
+            "notes_error": t("notes.empty_body")
+            if note_err == "empty"
+            else t("notes.invalid_type")
+            if note_err == "type"
+            else t("notes.submit_error")
+            if note_err
+            else "",
+        },
+    )
+
+
+def _ref_query(home: str, back: str) -> str:
+    parts = []
+    if home:
+        parts.append("home=" + quote(home))
+    if back:
+        parts.append("back=" + quote(back, safe="/"))
+    return ("?" + "&".join(parts)) if parts else ""
+
+
+@router.post("/refs/{ref_id}/notes")
+async def global_ref_note_add_view(
+    request: Request,
+    ref_id: str,
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.notes import NotesError, add_note
+
+    form = await request.form()
+    home = str(form.get("home") or "")
+    home = "" if home == "global" else home
+    back = str(form.get("back") or "")
+    content = str(form.get("content") or "")
+    note_type = str(form.get("type") or "") or None
+    try:
+        add_note(
+            _serve(request),
+            ref_id=ref_id,
+            content=content,
+            note_type=note_type,
+            home=_notes_home(home),
+        )
+    except NotesError as exc:
+        if exc.code == "invalid_request" and "正文" in str(exc):
+            code = "empty"
+        elif exc.code == "invalid_request" and "类型" in str(exc):
+            code = "type"
+        else:
+            code = "fail"
+        suffix = _ref_query(home, back)
+        join = "&" if suffix else "?"
+        return RedirectResponse(
+            f"/refs/{quote(ref_id)}{suffix}{join}note_err={code}#notes",
+            status_code=303,
+        )
+    suffix = _ref_query(home, back)
+    return RedirectResponse(f"/refs/{quote(ref_id)}{suffix}#notes", status_code=303)
+
+
+@router.get("/refs/{ref_id}/notes/{note_id}", response_class=HTMLResponse)
+def global_note_view(
+    request: Request, ref_id: str, note_id: str, home: str = "", back: str = ""
+) -> HTMLResponse:
+    from kairo.notes import NotesError, show_notes, stable_id_for
+    from kairo.refs import RefError, resolve_open
+
+    t = _t(request)
+    home = "" if home == "global" else home
+    try:
+        ws, rid = resolve_open(_serve(request), home, ref_id)
+    except RefError:
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
+    _require_public_ref(request, home, rid)
+    sid = stable_id_for(home, rid, note_id)
+    try:
+        item = show_notes(_serve(request), stable_id=sid)
+    except NotesError:
+        raise HTTPException(status_code=404, detail=t("notes.missing"))
+    html = render_markdown(item.get("content") or "", slug=ws.root.name)
+    suffix = _ref_query(home, back)
+    return _render(
+        request,
+        "global_note.html",
+        {
+            "nav_active": "timeline",
+            "title": (item.get("excerpt") or note_id),
+            "ref_id": rid,
+            "home": home,
+            "item": item,
+            "body_html": html,
+            "back_url": f"/refs/{quote(rid)}{suffix}#notes",
         },
     )
 
@@ -1589,6 +1704,7 @@ def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) 
     blocks = ref_product_blocks(ws, ref_id)
     # 基线干净指针无 blocked 时隐藏「重新处理」(避免假故障感);stream 或 blocked 仍显示
     show_retry = bool(blocks) or not is_corpus
+    notes_tower = _notes_tower(_serve(request), ref_id, source)
     return _render(
         request,
         "_ref_meta.html",
@@ -1620,6 +1736,9 @@ def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) 
             "occurred_src": occ_src,
             "added_display": added_dt.astimezone().strftime("%Y-%m-%d %H:%M"),
             "is_public": _is_public_ref(request, source, ref_id),
+            "notes_count": notes_tower["count"] if notes_tower["ok"] else 0,
+            "notes_excerpt": (notes_tower["items"][-1]["excerpt"] if notes_tower["ok"] and notes_tower["items"] else ""),
+            "notes_href": f"/refs/{quote(ref_id, safe='')}?home={quote(source or 'global', safe='')}#notes",
         },
     )
 
