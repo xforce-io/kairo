@@ -2,8 +2,8 @@
 
 - Issue: [#411](https://github.com/xforce-io/kairo/issues/411)
 - 分支: `feat/411-console-ref-notes`
-- 状态: Draft（L2 · 生产交互驳回后修订，待负责人再审）
-- L1: [Approved](https://github.com/xforce-io/kairo/issues/411)（issue `## 设计`，2026-09-21；验收已按驳回三条增补）
+- 状态: Draft（L2 · 观感二次驳回：对齐 researcher 文档批注，待实现后再审）
+- L1: [Approved](https://github.com/xforce-io/kairo/issues/411)（issue `## 设计`，2026-09-21；S6 按 researcher 文档批注修订）
 - 本文件是 #411 的 **L2 事实源**。Issue 只保留摘要与本链接。数据与稳定键认 [#410](https://github.com/xforce-io/kairo/issues/410) / `docs/design/410-ref-markdown-notes.md`。53f312e 的交互批准已被生产驳回，以本修订为准。
 
 ## 1. 背景
@@ -74,24 +74,26 @@ Topic 页右侧边栏「形态」（当前选中 Ref）：
 
 右侧边栏在选中 Ref 后还须有进 `/refs/{id}` 的入口（标题/身份链或等价「打开详情」）。
 
-Ref 详情，从上到下（密度对齐同页 digest，禁止堆砌大框）：
+Ref 详情，从上到下。**视觉事实源**是 researcher Library 文档批注（`~/dev/github/researcher` 的 `paper-notes-panel` / `paper-note-form` / `paper-note`）：区头 + 短表 + 轻卡片列表，不是独立廉价表单页。不抄置顶、删除、批注种类闭集。
 
 ```
 [ 返回 ]
 [ Ref 标题 / 元数据 ]
 
-洞察 notes
-  尚无洞察 notes                         ← 空态一行，不是卡片
-  insight  作者  时间  首行摘要……         ← 紧凑行，点击进只读页
-  decision 作者  时间  另一条……
+洞察 notes                         记录你的判断，fold 后仍保留     ← 区头一行：标题 + 浅色说明
+  ┌ 新增                                                         ← 短表，仅底部分割线，无外套厚卡片
+  │  [textarea ≈3 行，占满内容列，圆角细边框]
+  │  类型 [insight ▼]                         [追加]             ← 同一行；主按钮内容宽度、右对齐
+  └
+  ┌ insight  时间                                                ← 轻卡片：1px 软边、约 8px 圆角
+  │  markdown 正文预览 / 首行……                                   点击进只读页
+  └
+  尚无洞察 notes                                                 ← 空态一行，不是空卡片
 
-  类型 [insight ▼]  正文 [单行/短多行输入]  [追加]   ← 一行或两行短表，按钮随内容宽度
-                                                     禁止通栏厚按钮、禁止漂浮空矩形
-
-[ digest …… ]                            ← notes 与 digest 字号/行距/边距同一档
+[ digest …… ]                                                    ← 与 notes 同一字号/行距档
 ```
 
-空态：标题下是「洞察 notes」+「尚无洞察 notes」+ 短表，再下面才是 digest。无「去 CLI」。可写会话该页必须能追加。
+空态：区头 + 短表 + 空文案一行，再下面才是 digest。无「去 CLI」。可写会话该页必须能追加。阅读画布 `#reader` notes 预览用同一套区头/短表/列表，禁止另一套视觉。
 
 单条只读页：类型 / 作者 / 时间 / 正文。无表单。
 
@@ -112,17 +114,17 @@ Ref 详情，从上到下（密度对齐同页 digest，禁止堆砌大框）：
 | Topic 预览无 | 形态区入口仍在，文案可判尚无 | 整行可点后 `#reader` 为「尚无洞察 notes」；不造 Ref；可写时画布内有追加 |
 | Topic 画布追加 | 可写时在 `#reader` notes 预览提交 | 成功仍在该画布，列表 +1；契约同 S4 |
 | Topic 选中 Ref | 右侧出现该 Ref 详情相关入口 | 形态跟随选中；有进 `/refs/{id}` 的链接（链到当前选中 Ref） |
-| notes 观感 | 列表与追加分区清楚 | 无堆砌大框、无通栏厚按钮、无漂浮空矩形；密度与同页 digest / 阅读正文一档。不做像素级截图比对 |
+| notes 观感 | 与 researcher 文档批注同一结构：区头、短表、轻卡片列表 | 对照本文件线框；禁止通栏厚按钮、居中空矩形、外套厚卡片；密度与 digest 一档。不做像素级截图比对 |
 
 **布局与交互**
 
-- 列表在上、追加在下（空态：空文案在上、短表在下）。分区用标题/间距，不用套大卡片。
-- 追加：类型四选一（insight / decision / open-question / correction），未选提交为 insight；正文为 markdown 源，无工具栏、无预览；提交控件随内容宽度，禁止通栏厚按钮。输入框高度随一行到数行，禁止页面中央漂浮空矩形。
+- **顺序对齐 researcher：** 区头 → 短表在上 → 列表在下（空态：短表仍在上，空文案在列表位）。分区用区头与一条细分隔，不用外套大卡片。
+- 追加：类型四选一（insight / decision / open-question / correction），未选提交为 insight；正文为 markdown 源，无工具栏、无预览。textarea 默认约 3 行（约 72px 量级）、占满内容列。主按钮随文案宽度、与类型选择同一行并右对齐。禁止通栏厚按钮。禁止页面中央漂浮空矩形。
 - 空正文：前端拦截 + 服务端再拒（#410 `invalid_request`）。列表不变。
 - 成功：在 Ref 详情提交则留在详情；在阅读画布提交则留在该画布。均不进单条页。
 - 单条页失败：note 不存在或不可读 → 错误态，不是空列表。
 - Topic 形态 notes 行：整行可点，与转写/音频同一交互，目标为 `#reader` notes 预览；形态表不展开全文、不出现表单。
-- 观感可判定（S6）：分区可识别；不回归截图二（厚边框堆叠、居中空矩形、通栏厚按钮）；字号/行距/边距与同页 digest 或阅读正文同一档。不做像素级对照。
+- 观感可判定（S6）：打开 Ref 详情或阅读画布 notes，能对照 researcher 文档批注认出同一结构（区头、短表、轻卡片）。不过：仍是廉价独立表单、通栏厚按钮、居中空矩形、外套厚卡片，或与 digest 两套字号。不做像素级对照。不移植 researcher 的置顶/删除。
 - 不做：WYSIWYG、拖放上传、在只读页追加、把用户送去 CLI。
 
 ### 4.2 数据
@@ -133,9 +135,9 @@ Ref 详情，从上到下（密度对齐同页 digest，禁止堆砌大框）：
 
 ## 5. 思路与折衷
 
-采纳：形态 notes 与转写/音频同一套整行预览进 `#reader`；可写在该画布追加。Ref 详情仍保留盖楼与追加。观感跟 digest。
+采纳：形态 notes 与转写/音频同一套整行预览进 `#reader`；可写在该画布追加。Ref 详情仍保留盖楼与追加。观感以 researcher 文档批注为事实源，密度跟 digest。
 
-放弃：整行主路径跳 `/refs/{id}#notes`；只有「预览」文字链可点；形态表内放表单或展开全文；堆砌卡片 + 通栏按钮；入口只提示 CLI；富文本编辑器；把 Console 列表做成近 48h 切片。放弃为本票引入登录用户。
+放弃：整行主路径跳 `/refs/{id}#notes`；只有「预览」文字链可点；形态表内放表单或展开全文；堆砌卡片 + 通栏按钮；入口只提示 CLI；富文本编辑器；把 Console 列表做成近 48h 切片。放弃为本票引入登录用户。放弃抄 researcher 的置顶、删除与批注种类。
 
 ## 6. 架构
 
@@ -199,14 +201,14 @@ In/Out 同 issue `## 设计`。无 digest 的 Ref 仍可追加。#410 近 48h �
 | E2E S4 | 详情提交非空正文 | 提交中按钮不可用；成功后仍本页、列表 +1；CLI 对得上；作者为进程用户；未选类型为 insight |
 | E2E S4 失败 | 空正文 / 非法类型 / 请求失败 | 错误可判；条数不变；无新 `notes.jsonl` 行 |
 | E2E S5 | Topic 形态「洞察 notes」整行（有/无楼） | 与转写/音频同一交互；落点为 Topic `#reader` notes 预览（URL 仍在 Topic，不是 `/refs/{id}`）；可写画布内能追加且 +1；空态仍可点、不造 Ref；形态表无表单 |
-| E2E S6 | Ref 详情 notes 区对照同页 digest | 列表与追加分区清楚；无堆砌大框、无通栏厚按钮、无漂浮空矩形；密度与 digest 一档 |
+| E2E S6 | Ref 详情与阅读画布对照 researcher 文档批注结构 | 区头 + 短表在上 + 轻卡片列表；textarea 约 3 行；主按钮内容宽右对齐；无通栏厚按钮、无居中空矩形、无外套厚卡片；密度与 digest 一档 |
 | E2E S7 | Topic 左侧点选某 Ref | 右侧形态跟随该 Ref；有进该 Ref 详情的链接；有进 notes 区的链接 |
 | Integration | public-read 打开同一 Ref | 可见列表或空；无表单；POST 不落盘 |
 | Unit | 空态文案键不与 digest/fold 共用；类型闭集 | 不跑网络 |
 
 ## 12. 开放问题
 
-生产交互驳回三条已写入 §4.1 与票面 S5–S7。本修订待负责人再审观感；项目经理已令同一分支继续改，不另开票。
+负责人二次驳回观感，指定参考 `~/dev/github/researcher` 的 notes（Library 文档批注）。S6 已改写为该结构；S5/S7 交互不变。同一分支继续改，不另开票。
 
 ## 13. 关联
 

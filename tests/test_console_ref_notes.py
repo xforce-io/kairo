@@ -62,7 +62,7 @@ def test_s1_s3_notes_above_digest(tmp_path, monkeypatch):
     tower = show_notes(serve, ref_id=rid, home="energy")
     assert tower["count"] == 1
     block = listed.text.split('class="notes-list"', 1)[1].split("</ul>", 1)[0]
-    assert block.count("<li>") == tower["count"]
+    assert block.count('<li class="notes-card">') == tower["count"]
     assert listed.text.count("第一条洞察") >= tower["count"]
     assert listed.text.find("第一条洞察") < listed.text.find("digest 标题")
 
@@ -149,15 +149,42 @@ def test_s5_topic_preview_follows_selected_ref(tmp_path, monkeypatch):
     assert "追加 note" in empty_canvas.text
 
 
+def _assert_notes_panel(html: str) -> None:
+    assert "notes-head" in html
+    assert "记录你的判断，fold 后仍保留" in html
+    assert "notes-add" in html
+    assert "notes-add-row" in html
+    assert 'rows="3"' in html
+    assert "btn-inline" in html
+    assert "btn-step" not in html
+    assert html.find("notes-head") < html.find("notes-add")
+    empty_at = html.find("尚无洞察 notes")
+    list_at = html.find("notes-list")
+    if empty_at != -1:
+        assert html.find("notes-add") < empty_at
+    if list_at != -1:
+        assert html.find("notes-add") < list_at
+        assert "notes-card" in html
+    assert "置顶" not in html
+    assert "删除这条" not in html
+
+
 def test_s6_notes_compact_not_card_form(tmp_path, monkeypatch):
     serve, rid = _setup(tmp_path, monkeypatch)
     client = TestClient(create_app(serve))
-    html = client.get(f"/refs/{rid}?home=energy", headers=ZH).text
-    add_block = html.split('id="notes"', 1)[1].split("</section>", 1)[0]
-    assert "notes-add" in add_block
-    assert "btn-step" not in add_block
-    assert 'rows="2"' in add_block
-    assert "btn-inline" in add_block
+    add_block = client.get(f"/refs/{rid}?home=energy", headers=ZH).text.split(
+        'id="notes"', 1
+    )[1].split("</section>", 1)[0]
+    _assert_notes_panel(add_block)
+    canvas = client.get(f"/w/energy/ref/{rid}/notes", headers=ZH).text
+    _assert_notes_panel(canvas)
+    add_note(serve, ref_id=rid, content="轻卡片", home="energy")
+    listed = client.get(f"/refs/{rid}?home=energy", headers=ZH).text.split(
+        'id="notes"', 1
+    )[1].split("</section>", 1)[0]
+    _assert_notes_panel(listed)
+    listed_canvas = client.get(f"/w/energy/ref/{rid}/notes", headers=ZH).text
+    _assert_notes_panel(listed_canvas)
 
 
 def test_public_read_no_form_and_no_write(tmp_path, monkeypatch):
