@@ -1238,14 +1238,15 @@ header.top .root-gl.on { color: var(--pine-deep); }
 .ref-id { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 12px; }
 .ref-section { padding: 20px 0; border-bottom: 1px solid var(--line); }
 .ref-section h2 { margin: 0 0 10px; font-family: var(--serif); font-size: 19px; font-weight: 600; }
+.notes-panel { font-family: var(--sans); }
 .notes-head {
-  display: flex; align-items: baseline; justify-content: space-between;
+  display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
   gap: 12px; margin: 0 0 12px;
 }
-.notes-head h2 { margin: 0; }
+.notes-panel .notes-head h2 { margin: 0; padding: 0; border: 0; font: 600 19px/1.3 var(--serif); }
 .notes-head-hint { font-size: 13px; }
-.notes-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
-.notes-card {
+.notes-panel .notes-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.notes-panel .notes-card {
   margin: 0; padding: 12px 12px 10px;
   border: 1px solid var(--line); border-radius: 8px; background: var(--card);
 }
@@ -1261,7 +1262,7 @@ header.top .root-gl.on { color: var(--pine-deep); }
 }
 .notes-meta { margin-left: auto; font-size: 11px; color: var(--muted); }
 .notes-card-body { margin: 0; font-size: 14px; line-height: 1.55; }
-.notes-empty { padding: 6px 0; }
+.notes-panel .notes-empty { margin: 0; padding: 6px 0; font: 13px/1.6 var(--sans); }
 .notes-add {
   display: grid; gap: 10px; margin: 0 0 14px; padding: 0 0 14px;
   border-bottom: 1px solid var(--line);
@@ -1397,3 +1398,10 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 }
 .knowledge-drift-topic a { color: var(--pine); text-decoration: none; }
 .knowledge-drift-topic a:hover { color: var(--pine-deep); }
+
+.note-delete-trigger { float: right; }
+.note-delete-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.notes-success { color: var(--pine-deep); font-size: 13px; }
+.notes-error { color: var(--clay); font-size: 13px; }
+.notes-card-body { overflow-wrap: anywhere; }
+.notes-card-head { flex-wrap: wrap; }

@@ -6,9 +6,29 @@
   <header class="ref-head">
     <p class="obj-kicker">{{ t('notes.section') }}</p>
     <h1>{{ item.type }}</h1>
+    {% if not public_read %}
+    <button class="btn btn-inline btn-danger-ghost note-delete-trigger" type="button"
+            onclick="document.getElementById('note-delete-dialog').showModal()">{{ t('notes.delete') }}</button>
+    {% endif %}
     <p class="ref-occurred">{{ item.author }} · {{ item.created_at }}</p>
     <p class="ref-id">{{ item.stable_id }}</p>
   </header>
+  {% if delete_error %}<p role="alert" class="notes-error">{{ t('notes.delete_error') }}</p>{% endif %}
+  {% if not public_read %}
+  <dialog id="note-delete-dialog" class="ref-dialog" aria-labelledby="note-delete-title" aria-describedby="note-delete-description">
+    <h2 id="note-delete-title" class="dlg-title">{{ t('notes.delete') }}</h2>
+    <p id="note-delete-description">{{ t('notes.delete_confirm') }}</p>
+    <form method="post" action="/refs/{{ ref_id | urlencode }}/notes/{{ note_id | urlencode }}/delete"
+          onsubmit="this.querySelector('[type=submit]').disabled=true">
+      <input type="hidden" name="home" value="{{ home or 'global' }}">
+      <input type="hidden" name="confirmed" value="yes">
+      <div class="note-delete-actions">
+        <button type="button" class="btn btn-inline btn-ghost" autofocus onclick="this.closest('dialog').close()">{{ t('notes.cancel') }}</button>
+        <button type="submit" class="btn btn-inline btn-danger">{{ t('notes.delete_submit') }}</button>
+      </div>
+    </form>
+  </dialog>
+  {% endif %}
   <section class="ref-section">
     {% if body_html %}<article class="doc">{{ body_html|safe }}</article>{% else %}<p class="panel-hint">{{ item.content }}</p>{% endif %}
   </section>

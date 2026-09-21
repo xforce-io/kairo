@@ -7,6 +7,7 @@ import getpass
 import json
 import os
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -138,14 +139,12 @@ def _with_lock(rec, fn):
 
 
 def _new_note_id(existing: set[str], now: datetime) -> str:
-    base = "n" + now.strftime("%Y%m%dT%H%M%SZ")
-    if base not in existing:
-        return base
-    for i in range(2, 1000):
-        cand = f"{base}-{i}"
-        if cand not in existing:
-            return cand
-    raise NotesError("无法分配 note id", code="invalid_request")
+    # Deleted stable IDs must never be assigned to a later note (even in the same second).
+    while True:
+        candidate = "n" + now.strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex
+        if candidate not in existing:
+            return candidate
+
 
 
 def _item(rec, note: dict, *, include_content: bool) -> dict:
@@ -215,6 +214,23 @@ def add_note(
         "author": item["author"],
         "created_at": item["created_at"],
     }
+
+
+def delete_note(serve: Path, *, stable_id: str) -> None:
+    """Remove exactly one note under the same lock used by add_note."""
+    key, note_id = parse_stable_id(stable_id)
+    home, rid = parse_ref_key(key)
+    rec = _resolve_rec(serve, rid, home or "global")
+
+    def _commit():
+        path = _notes_path(rec)
+        records = _read_records(path)
+        remaining = [note for note in records if note["id"] != note_id]
+        if len(remaining) == len(records):
+            raise NotesError("note 不存在", code="not_found")
+        _write_records(path, remaining)
+
+    _with_lock(rec, _commit)
 
 
 def list_notes(

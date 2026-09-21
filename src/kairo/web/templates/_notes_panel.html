@@ -2,6 +2,7 @@
   <h2>{{ t('notes.section') }}</h2>
   <span class="notes-head-hint muted">{{ t('notes.hint') }}</span>
 </div>
+{% if notes_deleted %}<p role="status" class="notes-success">{{ t('notes.deleted') }}</p>{% endif %}
 {% if notes_error %}<p class="notes-error" role="alert">{{ notes_error }}</p>{% endif %}
 {% if notes_can_write %}
 <form class="notes-add" {% if notes_use_hx %}hx-post="{{ notes_form_action }}" hx-target="#reader"{% else %}method="post" action="{{ notes_form_action }}"{% endif %}
