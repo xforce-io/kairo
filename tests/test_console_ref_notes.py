@@ -58,8 +58,10 @@ def test_s1_s3_notes_above_digest(tmp_path, monkeypatch):
     listed = client.get(f"/refs/{rid}?home=energy", headers=ZH)
     assert listed.status_code == 200
     tower = show_notes(serve, ref_id=rid, home="energy")
-    assert listed.text.count("第一条洞察") >= 1
-    assert str(tower["count"]) or True
+    assert tower["count"] == 1
+    block = listed.text.split('class="notes-list"', 1)[1].split("</ul>", 1)[0]
+    assert block.count("<li>") == tower["count"]
+    assert listed.text.count("第一条洞察") >= tower["count"]
     assert listed.text.find("第一条洞察") < listed.text.find("digest 标题")
 
 
