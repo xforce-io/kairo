@@ -174,7 +174,7 @@ def test_s6_notes_compact_not_card_form(tmp_path, monkeypatch):
     client = TestClient(create_app(serve))
     ref_page = client.get(f"/refs/{rid}?home=energy", headers=ZH)
     assert ref_page.status_code == 200
-    assert 'href="/static/app.css?v=411-notes-add"' in ref_page.text
+    assert 'href="/static/app.css?v=411-notes-delete-confirm"' in ref_page.text
     assert "396-view-run-exec" not in ref_page.text
     css = client.get("/static/app.css")
     assert css.status_code == 200
@@ -210,3 +210,81 @@ def test_public_read_no_form_and_no_write(tmp_path, monkeypatch):
     tower = show_notes(serve, ref_id=rid, home="energy")
     assert tower["count"] == 1
     assert all("不该写入" not in (it.get("excerpt") or "") for it in tower["items"])
+
+
+def test_delete_requires_confirmation_and_preserves_other_notes(tmp_path, monkeypatch):
+    from kairo.notes import NotesError
+    import pytest
+
+    serve, rid = _setup(tmp_path, monkeypatch)
+    first = add_note(serve, ref_id=rid, content="删除目标", home="energy")
+    second = add_note(serve, ref_id=rid, content="保留正文", home="energy")
+    sid = first["stable_id"]
+    nid = sid.rsplit("/", 1)[-1]
+    client = TestClient(create_app(serve))
+    url = f"/refs/{rid}/notes/{nid}/delete"
+    assert client.post(url, data={"home": "energy"}).status_code == 400
+    assert show_notes(serve, ref_id=rid, home="energy")["count"] == 2
+    response = client.post(url, data={"home": "energy", "confirmed": "yes"}, headers=ZH)
+    assert response.status_code == 200
+    assert "已删除 note" in response.text
+    assert "保留正文" in response.text
+    assert "删除目标" not in response.text
+    assert show_notes(serve, ref_id=rid, home="energy")["count"] == 1
+    with pytest.raises(NotesError):
+        show_notes(serve, stable_id=sid)
+    assert client.post(url, data={"home": "energy", "confirmed": "yes"}).status_code == 404
+    assert show_notes(serve, stable_id=second["stable_id"])["content"] == "保留正文"
+
+
+def test_delete_failure_retry_and_last_note(tmp_path, monkeypatch):
+    import kairo.notes as notes
+
+    serve, rid = _setup(tmp_path, monkeypatch)
+    added = add_note(serve, ref_id=rid, content="失败仍保留", home="energy")
+    nid = added["stable_id"].rsplit("/", 1)[-1]
+    url = f"/refs/{rid}/notes/{nid}/delete"
+    client = TestClient(create_app(serve))
+    write = notes._write_records
+    def fail(*args):
+        raise OSError("disk unavailable")
+    monkeypatch.setattr(notes, "_write_records", fail)
+    response = client.post(url, data={"home": "energy", "confirmed": "yes"}, headers=ZH)
+    assert "删除失败" in response.text
+    assert "失败仍保留" in response.text
+    assert "note-delete-dialog" in response.text
+    monkeypatch.setattr(notes, "_write_records", write)
+    response = client.post(url, data={"home": "energy", "confirmed": "yes"}, headers=ZH)
+    assert "尚无洞察 notes" in response.text
+    assert show_notes(serve, ref_id=rid, home="energy")["count"] == 0
+
+
+def test_public_delete_never_writes(tmp_path, monkeypatch):
+    serve, rid = _setup(tmp_path, monkeypatch)
+    added = add_note(serve, ref_id=rid, content="不可删除", home="energy")
+    nid = added["stable_id"].rsplit("/", 1)[-1]
+    client = TestClient(create_app(serve, mode="public-read"))
+    url = f"/refs/{rid}/notes/{nid}"
+    page = client.get(url + "?home=energy", headers=ZH)
+    assert "note-delete-dialog" not in page.text
+    assert client.post(url + "/delete", data={"home": "energy", "confirmed": "yes"}).status_code in (403, 404, 405)
+    assert show_notes(serve, stable_id=added["stable_id"])["content"] == "不可删除"
+
+
+def test_concurrent_delete_add_and_no_reused_id(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import datetime, timezone
+    from kairo.notes import delete_note
+
+    serve, rid = _setup(tmp_path, monkeypatch)
+    when = datetime.now(timezone.utc)
+    first = add_note(serve, ref_id=rid, content="旧条目", home="energy", now=when)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        deletion = pool.submit(delete_note, serve, stable_id=first["stable_id"])
+        addition = pool.submit(add_note, serve, ref_id=rid, content="并发新条目", home="energy", now=when)
+        deletion.result()
+        new = addition.result()
+    assert first["stable_id"] != new["stable_id"]
+    tower = show_notes(serve, ref_id=rid, home="energy")
+    assert tower["count"] == 1
+    assert tower["items"][0]["content"] == "并发新条目"

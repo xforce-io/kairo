@@ -1221,7 +1221,7 @@ def _note_id_of(item: dict) -> str:
 
 @router.get("/refs/{ref_id}", response_class=HTMLResponse)
 def global_ref_view(
-    request: Request, ref_id: str, home: str = "", back: str = "", note_err: str = ""
+    request: Request, ref_id: str, home: str = "", back: str = "", note_err: str = "", note_deleted: bool = False
 ) -> HTMLResponse:
     from kairo.refs import (
         RefError,
@@ -1277,6 +1277,7 @@ def global_ref_view(
             "back_url": back_url,
             "back_label": t("art.back") if project_back else t("ref.back_timeline"),
             "notes": notes,
+            "notes_deleted": note_deleted,
             "notes_error": t("notes.empty_body")
             if note_err == "empty"
             else t("notes.invalid_type")
@@ -1338,7 +1339,7 @@ async def global_ref_note_add_view(
 
 @router.get("/refs/{ref_id}/notes/{note_id}", response_class=HTMLResponse)
 def global_note_view(
-    request: Request, ref_id: str, note_id: str, home: str = "", back: str = ""
+    request: Request, ref_id: str, note_id: str, home: str = "", back: str = "", delete_error: bool = False
 ) -> HTMLResponse:
     from kairo.notes import NotesError, show_notes, stable_id_for
     from kairo.refs import RefError, resolve_open
@@ -1366,9 +1367,36 @@ def global_note_view(
             "ref_id": rid,
             "home": home,
             "item": item,
+            "note_id": note_id,
+            "delete_error": delete_error,
             "body_html": html,
             "back_url": f"/refs/{quote(rid)}{suffix}#notes",
         },
+    )
+
+
+@router.post("/refs/{ref_id}/notes/{note_id}/delete")
+async def global_note_delete_view(request: Request, ref_id: str, note_id: str):
+    _console_only(request)
+    from kairo.notes import NotesError, delete_note, stable_id_for
+
+    form = await request.form()
+    home = str(form.get("home") or "global")
+    if form.get("confirmed") != "yes":
+        raise HTTPException(status_code=400, detail=_t(request)("notes.delete_confirm"))
+    suffix = _ref_query("" if home == "global" else home, "")
+    join = "&" if suffix else "?"
+    try:
+        delete_note(_serve(request), stable_id=stable_id_for("" if home == "global" else home, ref_id, note_id))
+    except NotesError as exc:
+        raise HTTPException(status_code=404 if exc.code == "not_found" else 400, detail=_t(request)("notes.missing"))
+    except (OSError, ValueError):
+        return RedirectResponse(
+            f"/refs/{quote(ref_id, safe='')}/notes/{quote(note_id, safe='')}{suffix}{join}delete_error=true",
+            status_code=303,
+        )
+    return RedirectResponse(
+        f"/refs/{quote(ref_id, safe='')}{suffix}{join}note_deleted=true#notes", status_code=303
     )
 
 
