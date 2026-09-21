@@ -10,6 +10,46 @@
     <p class="ref-id">{{ ref_id }}</p>
   </header>
 
+  <section class="ref-section" id="notes">
+    <h2>{{ t('notes.section') }}</h2>
+    {% if notes_error %}<p class="notes-error" role="alert">{{ notes_error }}</p>{% endif %}
+    {% if not notes.ok %}
+    <p class="notes-error" role="alert">{{ t('notes.load_error') }}</p>
+    {% elif notes.count %}
+    <ul class="notes-list">
+      {% for it in notes['items'] %}
+      <li>
+        <a href="/refs/{{ ref_id | urlencode }}/notes/{{ it.note_id | urlencode }}?home={{ (home or 'global') | urlencode }}">
+          <span>{{ it.type }}</span>
+          <span>{{ it.author }}</span>
+          <span>{{ it.created_at }}</span>
+          <span>{{ it.excerpt }}</span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="panel-hint notes-empty">{{ t('notes.empty') }}</p>
+    {% endif %}
+    {% if not public_read %}
+    <form class="notes-add" method="post" action="/refs/{{ ref_id | urlencode }}/notes"
+          onsubmit="var b=this.querySelector('[type=submit]'); b.disabled=true; b.textContent='{{ t('notes.submitting') }}';">
+      <input type="hidden" name="home" value="{{ home or 'global' }}">
+      <input type="hidden" name="back" value="{{ back_url }}">
+      <label class="dlg-label" for="note-type">{{ t('notes.type') }}</label>
+      <select id="note-type" name="type">
+        <option value="" selected>insight</option>
+        {% for ty in notes.types %}
+        {% if ty != 'insight' %}<option value="{{ ty }}">{{ ty }}</option>{% endif %}
+        {% endfor %}
+      </select>
+      <label class="dlg-label" for="note-body">{{ t('notes.body') }}</label>
+      <textarea id="note-body" name="content" rows="6" required></textarea>
+      <button class="btn btn-step" type="submit">{{ t('notes.add') }}</button>
+    </form>
+    {% endif %}
+  </section>
+
   <section class="ref-section">
     <h2>{{ primary_heading }}</h2>
     {% if primary_html %}<article class="doc">{{ primary_html|safe }}</article>{% else %}<p class="panel-hint">{{ t('ref.digest_empty') }}</p>{% endif %}

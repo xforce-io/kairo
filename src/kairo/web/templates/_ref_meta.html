@@ -130,6 +130,19 @@
       </td>
     </tr>
     {% endfor %}
+    <tr>
+      <td class="mf-role">
+        <span class="mf-role-main">{{ t('notes.section') }}</span>
+        {% if notes_count %}
+        <span class="mf-name">{{ notes_count }} · {{ notes_excerpt }}</span>
+        {% else %}
+        <span class="mf-name">{{ t('notes.empty') }}</span>
+        {% endif %}
+      </td>
+      <td class="mf-actions">
+        <a class="mf-prev" href="{{ notes_href }}">{{ t('forms.preview') }}</a>
+      </td>
+    </tr>
     </tbody>
   </table>
   {% if not public_read and not ref_read_only %}
