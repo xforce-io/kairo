@@ -172,9 +172,15 @@ def _assert_notes_panel(html: str) -> None:
 def test_s6_notes_compact_not_card_form(tmp_path, monkeypatch):
     serve, rid = _setup(tmp_path, monkeypatch)
     client = TestClient(create_app(serve))
-    add_block = client.get(f"/refs/{rid}?home=energy", headers=ZH).text.split(
-        'id="notes"', 1
-    )[1].split("</section>", 1)[0]
+    ref_page = client.get(f"/refs/{rid}?home=energy", headers=ZH)
+    assert ref_page.status_code == 200
+    assert 'href="/static/app.css?v=411-notes-add"' in ref_page.text
+    assert "396-view-run-exec" not in ref_page.text
+    css = client.get("/static/app.css")
+    assert css.status_code == 200
+    assert ".notes-add textarea" in css.text
+    assert "min-height: 72px" in css.text
+    add_block = ref_page.text.split('id="notes"', 1)[1].split("</section>", 1)[0]
     _assert_notes_panel(add_block)
     canvas = client.get(f"/w/energy/ref/{rid}/notes", headers=ZH).text
     _assert_notes_panel(canvas)
