@@ -1892,6 +1892,75 @@ def _form_file_response(ws: Workspace, ref_id: str, key: str, t) -> FileResponse
     return FileResponse(path)
 
 
+def _notes_reader_page(
+    request: Request,
+    slug: str,
+    ref_id: str,
+    home: str | None,
+    *,
+    notes_error: str = "",
+) -> HTMLResponse:
+    ws, source = _open_topic_ref(request, slug, ref_id, home)
+    t = _t(request)
+    man = ws.read_manifest(ref_id)
+    notes = _notes_tower(_serve(request), ref_id, source)
+    query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
+    return _render(
+        request,
+        "_notes_reader.html",
+        {
+            "title": f"{man.title} · {t('notes.section')}",
+            "slug": slug,
+            "ref_id": ref_id,
+            "home": source or "global",
+            "form_query": query,
+            "notes": notes,
+            "notes_error": notes_error,
+            "can_write": (not _is_public_read(request)) and source == slug,
+        },
+    )
+
+
+@router.get("/w/{slug}/ref/{ref_id}/notes", response_class=HTMLResponse)
+def ref_notes_preview_view(
+    request: Request, slug: str, ref_id: str, home: str | None = None
+) -> HTMLResponse:
+    return _notes_reader_page(request, slug, ref_id, home)
+
+
+@router.post("/w/{slug}/ref/{ref_id}/notes", response_class=HTMLResponse)
+async def ref_notes_add_view(
+    request: Request, slug: str, ref_id: str, home: str | None = None
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.notes import NotesError, add_note
+
+    t = _t(request)
+    ws, source = _open_topic_ref(request, slug, ref_id, home)
+    if source != slug:
+        raise HTTPException(status_code=403, detail=t("notes.submit_error"))
+    form = await request.form()
+    content = str(form.get("content") or "")
+    note_type = str(form.get("type") or "") or None
+    err = ""
+    try:
+        add_note(
+            _serve(request),
+            ref_id=ref_id,
+            content=content,
+            note_type=note_type,
+            home=_notes_home(source),
+        )
+    except NotesError as exc:
+        if exc.code == "invalid_request" and "正文" in str(exc):
+            err = t("notes.empty_body")
+        elif exc.code == "invalid_request" and "类型" in str(exc):
+            err = t("notes.invalid_type")
+        else:
+            err = t("notes.submit_error")
+    return _notes_reader_page(request, slug, ref_id, home, notes_error=err)
+
+
 @router.get("/w/{slug}/ref/{ref_id}/form/{key}", response_class=HTMLResponse)
 def ref_form_view(
     request: Request, slug: str, ref_id: str, key: str, home: str | None = None
