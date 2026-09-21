@@ -1201,7 +1201,7 @@ def _notes_home(home: str) -> str:
     return "global" if not home or home == "global" else home
 
 
-def _notes_tower(serve, ref_id: str, home: str) -> dict:
+def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False) -> dict:
     from kairo.notes import NOTE_TYPES, NotesError, show_notes
 
     try:
@@ -1209,6 +1209,8 @@ def _notes_tower(serve, ref_id: str, home: str) -> dict:
         items = list(data.get("items") or [])
         for it in items:
             it["note_id"] = _note_id_of(it)
+            if render_body:
+                it["body_html"] = render_markdown(it.get("content") or "", slug=home if home and home != "global" else None)
         return {"ok": True, "items": items, "count": int(data.get("count") or 0), "types": NOTE_TYPES}
     except NotesError as exc:
         return {"ok": False, "error": str(exc), "code": exc.code, "items": [], "count": 0, "types": NOTE_TYPES}
@@ -1257,7 +1259,7 @@ def global_ref_view(
     locked_tags = [tag for tag in tags if is_locked_home_tag(serve, home, rid, tag)]
     project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+(?:\?[^\r\n#]*)?", back)) and not _is_public_read(request)
     back_url = back if project_back or back == "/timeline" or back.startswith("/timeline?") else "/timeline"
-    notes = _notes_tower(serve, rid, home)
+    notes = _notes_tower(serve, rid, home, render_body=True)
     return _render(
         request,
         "global_ref.html",
@@ -1931,7 +1933,7 @@ def _notes_reader_page(
     ws, source = _open_topic_ref(request, slug, ref_id, home)
     t = _t(request)
     man = ws.read_manifest(ref_id)
-    notes = _notes_tower(_serve(request), ref_id, source)
+    notes = _notes_tower(_serve(request), ref_id, source, render_body=True)
     query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
     return _render(
         request,

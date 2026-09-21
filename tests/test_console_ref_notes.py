@@ -174,7 +174,7 @@ def test_s6_notes_compact_not_card_form(tmp_path, monkeypatch):
     client = TestClient(create_app(serve))
     ref_page = client.get(f"/refs/{rid}?home=energy", headers=ZH)
     assert ref_page.status_code == 200
-    assert 'href="/static/app.css?v=411-notes-delete-confirm"' in ref_page.text
+    assert 'href="/static/app.css?v=411-notes-markdown-preview"' in ref_page.text
     assert "396-view-run-exec" not in ref_page.text
     css = client.get("/static/app.css")
     assert css.status_code == 200
@@ -288,3 +288,24 @@ def test_concurrent_delete_add_and_no_reused_id(tmp_path, monkeypatch):
     tower = show_notes(serve, ref_id=rid, home="energy")
     assert tower["count"] == 1
     assert tower["items"][0]["content"] == "并发新条目"
+
+
+def test_s6_markdown_preview_uses_full_body_and_separate_detail_link(tmp_path, monkeypatch):
+    serve, rid = _setup(tmp_path, monkeypatch)
+    body = '**重点判断**\n\n- 第一点\n- 第二点\n\n> 引用\n\n' + ('长正文\n\n' * 30) + '末尾完整内容\n\n[来源](https://example.com)\n\n<script>alert(1)</script>'
+    add_note(serve, ref_id=rid, content=body, home="energy")
+    client = TestClient(create_app(serve))
+    for url in (f'/refs/{rid}?home=energy', f'/w/energy/ref/{rid}/notes'):
+        html = client.get(url, headers=ZH).text
+        assert '<strong>重点判断</strong>' in html
+        assert '<li>第一点</li>' in html
+        assert '<blockquote>' in html
+        assert '末尾完整内容' in html
+        assert '<script>alert(1)</script>' not in html
+        assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
+        assert '<a href="https://example.com">来源</a>' in html
+        assert 'class="notes-more" hidden aria-expanded="false"' in html
+        assert 'class="notes-detail-link"' in html
+        assert '>查看详情</a>' in html
+        card = html.split('<li class="notes-card">', 1)[1]
+        assert card.lstrip().startswith('<div class="notes-card-head">')
