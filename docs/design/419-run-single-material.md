@@ -69,7 +69,7 @@ N/A。本项没有页面。Web 主按钮保持现状，不在验收内。
 - 已有一批提交成功、下一批失败：未折入等于失败前条数减去第一批实际写入条数，且仍大于 0。正文停在第一批提交后的版本，不含失败候选。分批沿用现有规则（约 2.4 万字符或 16 条）。
 - 开跑前 understanding 已是上述两种阻塞之一：命令不以成功结束；未折入仍为 N；正文不变；原因仍在。
 
-两种失败下，人读与 `targets[].unfolded` 相同，并带对应原因。`kairo status` 成功读出时退出码为 0。
+两种失败下，人读「未折入 N」与 `targets[]` 里 `path` 为 `understanding.md` 的那一项的 `unfolded` 相同。原因只读该项的 `blocked_reason`，取值为 `compose-over-budget` 或 `compose-provenance-invalid`。不读 `pending`、已融入或全量综合后已增量融入。`kairo status` 成功读出时退出码为 0。这次失败的退出码不为 0，也不为 2。退出码 2 只用于参数或材料错误。
 
 单条 `kairo run --ref` 不调用综合。上述阻塞只留在 understanding 上，不写到该条材料上。
 
@@ -117,7 +117,7 @@ N/A。不在本文件指定改哪些函数。实现仍落在现有 `run`、`step
 
 - 0：`kairo run --ref` 完成或无需再写；`--understanding-only` 按写入条数折入成功；`kairo status` 成功读出。
 - 2：`kairo run` 缺少 `--ref`，或 `--ref` 与 `--all` 冲突，或材料不在主题，或材料是 corpus，或 status 参数错误。
-- 非 0 且非上述用法错误：`--understanding-only` 因长度上限或溯源无效失败。不要求 status 使用这个退出码。
+- 其他非 0：`--understanding-only` 因长度上限或溯源无效失败。该退出码不得为 2。不要求 status 使用这个退出码。
 
 ## 9. 边界
 
@@ -143,7 +143,7 @@ E2E：
 
 - S1：`kairo run --ref` 只处理指定的 1 条。该条有转写和纪要；understanding 正文与折入计数不变；`unfolded` 不变。
 - S2：understanding 已处于终态阻塞时，对尚未转写的一条执行 `kairo run --ref`。转写与纪要都产出；阻塞仍只在 understanding。
-- S3：综合前 `kairo status` 的未折入为 N，且 N 大于 0，人读与 `targets[].unfolded` 相同。成功的 `--understanding-only` 使 N 的下降等于写入条数。失败按沈予三条：一批都未提交；先成功一批再失败；开跑前已是 `compose-over-budget` 或 `compose-provenance-invalid`。过的条件是 §4.4。不过：退出码 0、失败稿覆盖正文、未折入变成 0、status 没有对应原因，或人读与 `unfolded` 不一致。
+- S3：综合前 `kairo status` 的未折入为 N，且 N 大于 0。人读与 `path` 为 `understanding.md` 的 `unfolded` 相同。成功的 `--understanding-only` 使 N 的下降等于写入条数。失败按沈予三条：一批都未提交；先成功一批再失败；开跑前已是 `compose-over-budget` 或 `compose-provenance-invalid`。过的条件是 §4.4。不过：单独综合退出码为 0 或 2、失败稿覆盖正文、`unfolded` 变成 0、该项没有对应 `blocked_reason`，或人读与这份 `unfolded` 不一致。
 - 补充：`kairo run` 不带 `--ref` 时退出码 2，主题无写入。
 
 Integration：`kairo status` 人读未折入与 `targets[].unfolded` 一致。`kairo run --ref` 与 `--all` 同时出现时退出码 2。`src/kairo/data/SKILL.md` 含 §7 的三条命令，且不再把无参 `kairo run` 写成整主题入口。
