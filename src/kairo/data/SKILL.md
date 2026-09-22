@@ -40,12 +40,14 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 | 知识 / knowledge | `kairo knowledge list`；写操作用 `add` / `rm`（`--scope workspace|global`）并先确认；`glossary` 是兼容别名 |
 | 事实到哪了 / 总结结论 / 结论是什么 | **先** `kairo status`，再读 `understanding.md`（见下节）；必要时下钻 digest，**不**把 raw transcript 当最终结论 |
 | 为什么卡住 / blocked / 怎么推进 | 依据 `status` 的 `⚠ blocked:…` 与下表解释含义与选项；**未确认不写** |
-| 推进一下 / step / 调和 | **默认**说明副作用（烧 LLM token、可能改文档）→ 确认后 `kairo step`（在 Topic 目录内；不自动清终态 blocked） |
-| 与 Web 主按钮一致 / run / 含终态 blocked 一并重试 | `kairo run` 在有**可重试**终态 blocked 时会先清派生产物再 step，副作用比 `step` 更重（可重烧 ASR/LLM）；`digest-degraded` 等不可重试终态不会被 Run 清掉——**勿把口语「推进」默认落成 run**；须单独讲清并确认 |
+| 处理这一条（只要转写和纪要） | 确认后 `kairo run --ref <id>`。只做该条转写和纪要，不改 understanding，不减少未折入。无参 `kairo run` 退出码 2，不写产物；它不是整主题入口，也不是 Web 主按钮 |
+| 单独综合（只折入已有纪要） | 确认后 `kairo step --understanding-only`。不新开转写或纪要。日常单独综合不走 `kairo re-step understanding.md`，也不走不带该开关的 `kairo step` |
+| 推进一下 / 整主题调和 | 用户明确要整主题时，说明副作用后 `kairo step`（不带 `--understanding-only`；不自动清终态 blocked）。不要把「处理这一条」落成整主题 `kairo step` |
+| 与 Web 主按钮一致的整主题重试 | 页面主按钮仍是服务端整主题运行，**不是**无参 `kairo run`。无参 `kairo run` 退出码 2。`digest-degraded` 等不可重试终态不会被页面重试清掉——须单独讲清并确认 |
 | 重算 / re-step / 重试某条 | 说明副作用（文档级重综合可能丢手改；ref 级重产 digest）→ 确认后 `kairo re-step …` / `kairo retry-ref <id>` |
 | 接受手改 / accept | 说明将钉为新基线、解除 `manual-edit` → 确认后 `kairo accept <doc>` |
 | 回退 / rollback | 说明文档回退到快照、references 不动 → 确认后 `kairo rollback <seq>`（可先 `kairo history` / `kairo diff` 只读预览） |
-| 注册音频到 Topic / 全局登记 | **场景一**：将音频/文件注册为全局 Ref 并加入 Topic —— 确认后 `kairo add <audio> --topic <slug> [--copy] [--occurred YYYY-MM-DD]`（须先 `kairo tag create <slug>` 且确保 Topic 的 include_tags 包含该 Tag）；然后确认 `cd <topic-dir> && kairo step` |
+| 注册音频到 Topic / 全局登记 | **场景一**：将音频/文件注册为全局 Ref 并加入 Topic —— 确认后 `kairo add <audio> --topic <slug> [--copy] [--occurred YYYY-MM-DD]`（须先 `kairo tag create <slug>` 且确保 Topic 的 include_tags 包含该 Tag）。若只要这一条的转写和纪要，下一步是 `kairo run --ref <id>`，不是默认 `kairo step` |
 | 附加 form 到现有 Ref / attach | **场景二**：往既有 Ref 追加形态 —— 确认后 `kairo add <file> --to <ref_id> [--copy]`（Ref 成员资格不变；仅当 Ref 还不是 Topic 成员时才需单独 `--topic`） |
 | Topic 内新 Ref | 在 Topic 目录内 `kairo add <file> [--copy] [--corpus]`（home 自动为当前 Topic） |
 | 归档会话 / archive 到 Kairo | 确认后 `kairo archive`（见下节）；**不要**用 `kairo add`。成功回执必须原样写回；**不**自动 `step` |
@@ -74,7 +76,7 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 1. **先确认 Tag 存在**：`kairo tag list --root <serve-root>`；若无则 `kairo tag create <topic-slug>`
 2. **确认 Topic include_tags 包含该 Tag**（或手工 `kairo include set <tag>` 在 Topic 内）
 3. **注册全局 Ref 并打 Tag**：`kairo add <audio> --topic <slug> --copy --root <serve-root>`
-4. **cd 进 Topic 并 step**：`cd <serve-root>/<slug> && kairo step`
+4. **只要这一条的转写和纪要**：`kairo run --ref <id> --topic <slug>`。不要默认 `kairo step`。用户明确要整主题调和时才 `kairo step`；只要把已有纪要折入理解时用 `kairo step --understanding-only`
 
 成员资格由 Tag 决定；Ref 成功打上 Topic-name Tag 后自动进入该 Topic。
 
@@ -114,9 +116,9 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 | `manual-edit` | 文档被手改，待接受 | 确认后 `kairo accept <doc>`；或放弃手改再 `re-step`（会丢手改，必须讲清） |
 | `compose-degraded` | 综合输出骤缩，已拒绝覆盖以保护旧文档 | 终态；确认后 `re-step` 重算。若 `understanding.md` 已超过 20,000 字符，按 `compose-migration-required` 观察与恢复 |
 | `digest-degraded` | 纪要输出骤缩，已拒绝覆盖以保护旧 digest | 终态；普通 Run 不会清掉该 digest。确认后 `kairo re-step <id>` / `retry-ref` |
-| `compose-migration-required` | 旧容量阻塞（含超长 leftover `compose-degraded`），新策略允许普通推进自动整理结论 | 说明普通推进会压缩整理正文、历史细节回查 digest、失败保留最近成功版本；授权后 `kairo run` |
-| `compose-over-budget` | 候选经最多一次预算修订后仍超过 20,000 字符，已拒绝覆盖 | 普通 Run 可重试；不要求全量 re-step；失败保留最近成功批次 |
-| `compose-provenance-invalid` | 候选溯源结构无效，已拒绝覆盖 | 终态；检查来源后确认 `re-step` |
+| `compose-migration-required` | 旧容量阻塞（含超长 leftover `compose-degraded`），页面主按钮仍可整主题重试 | 说明会压缩整理正文、历史细节回查 digest、失败保留最近成功版本。不要改用无参 `kairo run`（退出码 2，不写产物）。无需反复全量重综合 |
+| `compose-over-budget` | 候选经最多一次预算修订后仍超过 20,000 字符，已拒绝覆盖 | 失败保留最近成功批次。`kairo status` 读出未折入和该原因，成功读出时退出码 0。单独综合若开跑前已是此阻塞则不成功。不要用无参 `kairo run` 重试 |
+| `compose-provenance-invalid` | 候选溯源结构无效，已拒绝覆盖 | 终态。未折入保持账本剩余。单独综合开跑前已是此阻塞则不成功。检查来源后若要整篇重算才是 `re-step`，不是日常综合 |
 | `provider-failed` | provider 调用或材料读取能力失败 | 查安全诊断；恢复后可 Run，或确认后 `re-step` |
 
 规则摘要：
@@ -140,9 +142,9 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 
 - `status` 行形态：`reference <id>: [roles]`；blocked 时带 `⚠ …:reason`
 - Topic 摘要含 `待处理 N` 与 `blocked N`。`待处理` 不是落后条数。
-- `target understanding.md: 已融入 N；全量综合后已增量融入 D`。`D` 是上次全量重综合之后**已经**折入的条数，**不是**待处理，也不是「落后」。禁止把该数字读成欠账。未生成时 `(未生成)`；手改/失败时 `⚠ blocked:reason`；corpus 变更时 advisory「corpus 已变,可 re-step 重算」——**advisory 不是自动执行**
+- `target understanding.md: 已融入 N；全量综合后已增量融入 D；未折入 U`。`D` 是上次全量重综合之后**已经**折入的条数，**不是**未折入。`U` 才是未折入：已有纪要且尚未记入该 target 折入账，不含尚无纪要的材料，不含 corpus。禁止把 `待处理`、已融入、全量综合后已增量融入读成未折入。未生成时 `(未生成)；未折入 U`；手改/失败时 `⚠ blocked:reason`；corpus 变更时 advisory「corpus 已变,可 re-step 重算」——**advisory 不是自动执行**
 - 核单条：`kairo status --ref ID [--home HOME] [--target PATH] [--json]`。JSON `state` 闭集：`folded_current` / `not_folded` / `folded_stale` / `digest_missing`。旧版本已融入而当前 digest 已变 → `folded_stale`，不得报当前已融入。`home` 在 global 为 `""`。
-- `kairo status --json` 字段：`pending`、`folded`、`incremental_after_full_compose`、`blocked`、`blocked_reasons`。不要用 `stale` 键。
+- `kairo status --json` 字段：`pending`、`folded`、`incremental_after_full_compose`、`targets[].unfolded`、`blocked`、`blocked_reasons`。未折入只读 `understanding.md` 那一项的 `unfolded`，与人读「未折入 N」相同。不要用 `pending`、`not_folded` 或 `stale` 表示这个数。综合失败后 status 仍是只读，成功读出时退出码 0；原因在该项 `blocked_reason`（`compose-over-budget` 或 `compose-provenance-invalid`）。
 - 把上述归纳成人话：名称、待处理、已融入、增量、blocked 列表、建议下一步（问句），别贴超长原始日志
 
 ### Web ACTIONS 主按钮
@@ -152,7 +154,7 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 - **不是**按钮坏了；**不是** METADATA 里当前选中的 reference 要重跑
 - **不要**点主按钮，**不要**把「点 re-step」落成 `kairo run`（attention 下普通 run 不会综合）
 - 先 `kairo status` 看 `⚠ blocked:reason`
-- `compose-migration-required`（含超长 leftover `compose-degraded`）与 `compose-over-budget`：新版本主按钮应为可点的普通重试；说明自动整理代价后按授权运行 `kairo run`，无需反复全量重综合。旧页面若仍是 attention，先核对服务版本。
+- `compose-migration-required`（含超长 leftover `compose-degraded`）与 `compose-over-budget`：新版本主按钮应为可点的普通重试；说明自动整理代价后再使用页面主按钮，无需反复全量重综合。无参 `kairo run` 不是这个按钮，退出码 2。旧页面若仍是 attention，先核对服务版本。
 
 命令报错 → 如实呈现 stderr 要点，不臆造 workspace 状态。
 

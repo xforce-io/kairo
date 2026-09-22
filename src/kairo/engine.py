@@ -156,16 +156,43 @@ def promote_oversized_degraded(ws, state=None):
     return state
 
 
-def step(ws, provider) -> bool:
+def _understanding_refuses_incremental(ws) -> bool:
+    """长度上限或溯源无效已落在 understanding 上时，单独综合不得再写。"""
+    from kairo.provenance import REASON_PROVENANCE_INVALID
+
+    state = ws.read_state()
+    ts = state.targets.get("understanding.md")
+    if ts is None or ts.status != "blocked":
+        return False
+    reason = effective_compose_block_reason(ws, "understanding.md", ts)
+    return reason in (REASON_COMPOSE_OVER_BUDGET, REASON_PROVENANCE_INVALID)
+
+
+def _item_is_ref(key: str, ref_id: str) -> bool:
+    return f"references/{ref_id}/" in key
+
+
+def step(ws, provider, *, only_ref: str | None = None, understanding_only: bool = False) -> bool:
     """跑调和循环到收敛。返回是否有推进。
 
     #105:每个 WorkItem 执行后立刻 write_state,使 provider-failed 等 blocked
     诊断在后续 item 挂起/进程被杀时仍已落盘。
+    only_ref:只推进该条转写和纪要,不跑综合,也不改 understanding。
+    understanding_only:只折入已有纪要,不新开转写或纪要。
     """
     from kairo.sidecars import begin, end, join, kick
 
+    if understanding_only and _understanding_refuses_incremental(ws):
+        return False
+
     state = promote_oversized_degraded(ws)
     rules = _build_rules(ws, provider)
+    if understanding_only:
+        rules = [rule for rule in rules if isinstance(rule, ComposeRule)]
+    elif only_ref:
+        rules = [
+            rule for rule in rules if not isinstance(rule, (ComposeRule, ReviewFoldRule))
+        ]
     any_progress = False
     clear_digest_transport_halt()
     begin()
@@ -174,6 +201,10 @@ def step(ws, provider) -> bool:
             progressed = False
             for rule in rules:
                 for item in rule.discover(state):
+                    if only_ref and not _item_is_ref(item.key, only_ref):
+                        continue
+                    if understanding_only and item.key != "understanding.md":
+                        continue
                     if item.is_stale(state):
                         item.run(state)
                         progressed = True

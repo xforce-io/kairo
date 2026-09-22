@@ -3200,7 +3200,7 @@ def start_step(request: Request, slug: str, target: str = Form(None)) -> HTMLRes
             return HTMLResponse(
                 f'<p class="muted run-summary">{_t(request)("run.clean_msg")}</p>'
             )
-        argv = [sys.executable, "-m", "kairo", "run"]
+        argv = [sys.executable, "-m", "kairo.workspace_run"]
     try:
         # 必须在子进程实际工作前建立边界，避免历史候选被说成本次产出。
         boundary = _knowledge_run_boundary(ws)

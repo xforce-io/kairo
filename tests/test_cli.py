@@ -64,14 +64,13 @@ def test_cli_status_warns_on_corpus_drift(topic_dir, monkeypatch):
     assert "corpus" in out and "re-step" in out  # advisory
 
 
-def test_cli_run_empty_workspace_up_to_date(topic_dir, monkeypatch):
-    """#134 S2:空 workspace `kairo run` 输出 up to date,不写 target。"""
+def test_cli_run_without_ref_rejects(topic_dir, monkeypatch):
+    """#419:无参 kairo run 拒绝，不写 target。整主题不再走这条命令。"""
     monkeypatch.chdir(topic_dir)
     monkeypatch.setenv("KAIRO_STUB", "1")
     runner.invoke(app, ["init"])
     result = runner.invoke(app, ["run"])
-    assert result.exit_code == 0
-    assert "up to date" in result.output
+    assert result.exit_code == 2
     assert not (topic_dir / "understanding.md").exists()
     assert not (topic_dir / "assessment.md").exists()
 

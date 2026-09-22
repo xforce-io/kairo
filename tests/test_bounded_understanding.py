@@ -2,9 +2,11 @@
 from __future__ import annotations
 import re
 import pytest
+import typer
 from typer.testing import CliRunner
 from kairo.cli import app
-from kairo.engine import step, workspace_run_plan
+from kairo.cli import _exit_if_run_failed
+from kairo.engine import run_workspace, step, workspace_run_plan
 from kairo.models import TargetState
 from kairo.provider import AgentResult, StubProvider, _scan_artifacts
 from kairo.rules import DigestRule, _hash
@@ -69,9 +71,21 @@ class CompactProvider(StubProvider):
 
 
 def cli_run(ws, provider, monkeypatch):
+    """#408 仍测引擎整主题。#419 之后无参 `kairo run` 不再进入这里。"""
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+    from types import SimpleNamespace
+
     monkeypatch.chdir(ws.root)
-    monkeypatch.setattr("kairo.cli.select_provider", lambda **kw: provider)
-    return CliRunner().invoke(app, ["run"])
+    buf = io.StringIO()
+    code = 0
+    with redirect_stdout(buf), redirect_stderr(buf):
+        try:
+            run_workspace(ws, provider)
+            _exit_if_run_failed(ws)
+        except typer.Exit as exc:
+            code = int(exc.exit_code or 0)
+    return SimpleNamespace(exit_code=code, output=buf.getvalue())
 
 
 def test_s1_five_cli_rounds_keep_old_and_new_facts(tmp_path, monkeypatch):
