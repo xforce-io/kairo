@@ -68,24 +68,20 @@ def test_run_workspace_keeps_digest_degraded_prior(tmp_path):
     assert ps.status == "blocked" and ps.reason == REASON_DIGEST_DEGRADED
 
 
-def test_cli_run_keeps_digest_degraded_prior(tmp_path, monkeypatch):
-    """CLI kairo run 与 run_workspace 同语义:不得清掉 digest-degraded 的长纪要。"""
+def test_cli_run_without_ref_does_not_touch_digest_degraded(tmp_path, monkeypatch):
+    """#419:无参 kairo run 在写盘前拒绝，不会清掉 digest-degraded。"""
     ws, _rid, key, digest, prior = _blocked_long_digest(tmp_path)
     prior_bytes = digest.read_bytes()
 
     monkeypatch.chdir(ws.root)
-    monkeypatch.setattr(
-        "kairo.cli.select_provider", lambda **_: _FixedProvider("CLI run 不得写入")
-    )
     status = CliRunner().invoke(app, ["status"])
     assert status.exit_code == 0, status.output
     assert REASON_DIGEST_DEGRADED in status.output
     assert "⚠" in status.output
 
     result = CliRunner().invoke(app, ["run"])
+    assert result.exit_code == 2, result.output
     assert digest.is_file()
     assert digest.read_bytes() == prior_bytes
     ps = ws.read_state().products[key]
     assert ps.status == "blocked" and ps.reason == REASON_DIGEST_DEGRADED
-    assert result.exit_code == 1, result.output
-    assert REASON_DIGEST_DEGRADED in (result.output or "") + (result.stderr or "")

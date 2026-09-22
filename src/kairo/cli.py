@@ -920,8 +920,8 @@ def _exit_if_run_failed(ws: Workspace) -> None:
     if blocked:
         item = blocked[0]
         hint = (
-            " — retry with `kairo run`; conclusions are automatically compacted; "
-            "the last successful version is preserved"
+            " — the last successful version is preserved; "
+            "bare `kairo run` does not retry this"
             if item["reason"]
             in (REASON_COMPOSE_MIGRATION_REQUIRED, REASON_COMPOSE_OVER_BUDGET)
             else " — see kairo status"
@@ -946,15 +946,61 @@ def _exit_if_run_failed(ws: Workspace) -> None:
         raise typer.Exit(1)
 
 
+def _reject_single_run_ref(ws: Workspace, ref_id: str) -> str | None:
+    """材料不在主题或是 corpus 时返回原因；通过则 None。不写产物。"""
+    from kairo.refs import member_sources
+    from kairo.timeline import is_fold_class
+
+    matches = [
+        (source_ws, rid, rec)
+        for source_ws, rid, rec in member_sources(ws)
+        if rid == ref_id
+    ]
+    if not matches:
+        return f"材料不在该主题:{ref_id}"
+    for source_ws, rid, rec in matches:
+        if rec.source_class == "corpus" or not is_fold_class(source_ws, rec.source_class):
+            return f"corpus 不能单条 run:{ref_id}"
+    return None
+
+
+def _exit_if_ref_failed(ws: Workspace, ref_id: str) -> None:
+    """单条 run 只看该条产物。understanding 上的综合阻塞不使本命令失败。"""
+    from kairo.engine import ref_product_blocks
+
+    blocks = ref_product_blocks(ws, ref_id)
+    if not blocks:
+        return
+    reason = blocks[0]["reason"]
+    typer.secho(
+        f"Error: {ref_id} blocked:{reason} — see kairo status",
+        fg=typer.colors.RED,
+        err=True,
+    )
+    raise typer.Exit(1)
+
+
 @app.command()
-def step(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd")) -> None:
+def step(
+    topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+    understanding_only: bool = typer.Option(
+        False,
+        "--understanding-only",
+        help="只把已有纪要折入 understanding，不新开转写或纪要",
+    ),
+) -> None:
     """跑调和循环到收敛(provider auto:codex→grok→claude→endpoint→stub;材料路径跳过不兼容者)。
 
-    注意:不自动重试 asr-failed 等终态 blocked;需要时用 run / retry-ref。
+    注意:不自动重试 asr-failed 等终态 blocked;需要时用 retry-ref。
+    整主题调和仍是本命令。单独综合加 --understanding-only。
     provider-failed 时非零退出(#105),便于 Web Run 显示失败而非 Running/假成功。
     """
     ws = _open_ws(topic)
-    progressed = engine_step(ws, select_provider(require_read_dirs=True))
+    progressed = engine_step(
+        ws,
+        select_provider(require_read_dirs=True),
+        understanding_only=understanding_only,
+    )
     typer.echo("stepped" if progressed else "no change")
     _exit_if_run_failed(ws)
 
@@ -962,27 +1008,52 @@ def step(topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省�
 @app.command(name="run")
 def run_cmd(
     topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
+    ref: str = typer.Option(
+        None, "--ref", help="只处理这一条材料的转写和纪要，不改 understanding"
+    ),
     all_topics: bool = typer.Option(
         False, "--all", help="serve root 下每个非 clean Topic 顺序 run 一次;有剩余失败则非零退出"
     ),
 ) -> None:
-    """推进 Topic:有 blocked 则先清终态再 step(与 Web 主按钮一致)。"""
+    """处理指定的一条材料。不带 --ref 则拒绝。整主题用 kairo step。"""
+    if all_topics and ref:
+        typer.secho("--ref 与 --all 互斥", fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
     if all_topics:
         if topic:
             typer.secho("--all 与 --topic 互斥", fg=typer.colors.RED, err=True)
             raise typer.Exit(2)
         _run_all_topics()
         return
+    if not ref:
+        typer.secho(
+            "kairo run 需要 --ref <reference id>。整主题请用 kairo step。",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(2)
     ws = _open_ws(topic)
+    rejection = _reject_single_run_ref(ws, ref)
+    if rejection:
+        typer.secho(rejection, fg=typer.colors.RED, err=True)
+        raise typer.Exit(2)
+    progressed = engine_step(
+        ws, select_provider(require_read_dirs=True), only_ref=ref
+    )
+    typer.echo("ran" if progressed else "no change")
+    _exit_if_ref_failed(ws, ref)
+
+
+def run_topic_workspace() -> None:
+    """页面主按钮与日历视图子进程：整主题调和。不是公开的无参 `kairo run`。"""
+    ws = _open_ws(None)
     plan = workspace_run_plan(ws)
     if plan["mode"] == "clean":
         typer.echo("up to date")
         return
     if plan["mode"] == "attention":
         _exit_if_run_failed(ws)
-    progressed = engine_run_workspace(
-        ws, select_provider(require_read_dirs=True)
-    )
+    progressed = engine_run_workspace(ws, select_provider(require_read_dirs=True))
     typer.echo("ran" if progressed else "no change")
     _exit_if_run_failed(ws)
 
@@ -1324,7 +1395,7 @@ def status(
     target: str = typer.Option(None, "--target", help="活 target 路径"),
     as_json: bool = typer.Option(False, "--json/--no-json"),
 ) -> None:
-    """列待处理／已融入／全量综合后已增量融入／blocked；--ref 核当前 digest 四态。"""
+    """列待处理／已融入／全量综合后已增量融入／未折入／blocked；--ref 核当前 digest 四态。"""
     from kairo.status_view import (
         StatusError,
         format_ref_status,

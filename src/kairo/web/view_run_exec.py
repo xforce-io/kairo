@@ -30,7 +30,7 @@ def _start_topic(app, slug: str):
     existing = reg.current(slug)
     if existing is not None:
         return existing
-    argv = [sys.executable, "-m", "kairo", "run"]
+    argv = [sys.executable, "-m", "kairo.workspace_run"]
     boundary = _knowledge_run_boundary(ws)
     try:
         task = reg.start(slug, ws.root, argv, job_kind="reconcile")

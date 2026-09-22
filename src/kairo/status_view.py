@@ -32,6 +32,16 @@ def incremental_after_full_compose(folded: dict, last_major: dict) -> int:
     return max(0, len(folded) - len(last_major))
 
 
+def unfolded_count(ws: Workspace, target_path: str, state) -> int:
+    """已有纪要且尚未记入该 target 折入账的条数。不含尚无纪要的材料，不含 corpus。"""
+    digests = ComposeRule(ws, None)._all_digests()
+    folded = {}
+    ts = state.targets.get(target_path)
+    if ts is not None:
+        folded = ts.folded
+    return sum(1 for key in digests if key not in folded)
+
+
 def _blocked_reasons(plan: dict) -> list[dict]:
     out: list[dict] = []
     for item in plan.get("blocked_refs") or []:
@@ -69,6 +79,7 @@ def topic_status_payload(ws: Workspace) -> dict:
                     "path": target.path,
                     "folded": 0,
                     "incremental_after_full_compose": 0,
+                    "unfolded": unfolded_count(ws, target.path, state),
                     "status": "missing",
                     "blocked_reason": None,
                 }
@@ -83,6 +94,7 @@ def topic_status_payload(ws: Workspace) -> dict:
                 "incremental_after_full_compose": incremental_after_full_compose(
                     ts.folded, ts.last_major_folded
                 ),
+                "unfolded": unfolded_count(ws, target.path, state),
                 "status": ts.status,
                 "blocked_reason": blocked_reason,
             }
@@ -153,18 +165,19 @@ def format_topic_status(ws: Workspace, payload: dict, state) -> list[str]:
     for item in payload["targets"]:
         path = item["path"]
         if item["status"] == "missing":
-            lines.append(f"target {path}: (未生成)")
+            lines.append(f"target {path}: (未生成)；未折入 {item['unfolded']}")
             continue
         ts = state.targets[path]
         reason = item.get("blocked_reason")
         flag = f"  ⚠ blocked:{_format_block(reason, ts.diagnostic)}" if item["status"] == "blocked" else ""
         if reason in (REASON_COMPOSE_MIGRATION_REQUIRED, REASON_COMPOSE_OVER_BUDGET):
-            flag += "；可运行 kairo run 自动整理结论后继续（失败保留最近成功版本）"
+            flag += "；失败保留最近成功版本。无参 kairo run 不会重试这一阻塞"
         if corpus_flags.get(path):
             flag += "  ⚠ corpus 已变,可 re-step 重算"
         lines.append(
             f"target {path}: 已融入 {item['folded']}；"
-            f"全量综合后已增量融入 {item['incremental_after_full_compose']}{flag}"
+            f"全量综合后已增量融入 {item['incremental_after_full_compose']}；"
+            f"未折入 {item['unfolded']}{flag}"
         )
     return lines
 
