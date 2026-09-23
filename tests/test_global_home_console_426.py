@@ -87,8 +87,9 @@ def test_s1_console_default_entry_opens_global_home_refs(tmp_path):
         page = client.get(f"/w/energy?ref={rid}", headers=ZH)
         assert page.status_code == 200, rid
         assert UNAVAILABLE not in page.text
-        assert f'hx-get="/w/energy/ref/{rid}"' in page.text
+        assert f'hx-get="/w/energy/ref/{rid}?home=global"' in page.text
         assert f'href="/w/energy?ref={rid}&amp;home=global"' in page.text
+        assert 'nav-doc is-ref is-active' in page.text
 
         detail = client.get(f"/w/energy/ref/{rid}", headers={**ZH, "HX-Request": "true"})
         assert detail.status_code == 200, rid
