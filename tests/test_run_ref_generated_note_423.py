@@ -47,6 +47,7 @@ def _ws(tmp_path, monkeypatch):
 
 def _bind(monkeypatch, provider):
     monkeypatch.setattr("kairo.cli.select_provider", lambda **_kw: provider)
+    monkeypatch.setattr("kairo.generated_note.select_note_provider", lambda: provider)
 
 
 def _add_text(ws, tmp_path, name, text):

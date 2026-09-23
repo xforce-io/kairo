@@ -1071,7 +1071,7 @@ def run_cmd(
         _exit_if_ref_failed(ws, ref)
         from kairo.generated_note import maybe_append_generated_note
 
-        maybe_append_generated_note(ws, ref, provider)
+        maybe_append_generated_note(ws, ref)
 
 
 def run_topic_workspace() -> None:

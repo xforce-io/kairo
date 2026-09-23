@@ -341,6 +341,7 @@ def test_grok_provider_invokes_cli_and_reads_stdout_text(tmp_path):
     assert "--output-format" in args and "streaming-messages-json" in args
     assert "json" not in args  # aggregate `text` glues narration onto the answer
     assert "-m" in args and "grok-4.5" in args
+    assert "--reasoning-effort" not in args
     assert timeout == 30
     prompt_blob = " ".join(str(a) for a in args) + "\n" + (sent or "")
     assert "材料Y" not in prompt_blob
@@ -371,6 +372,27 @@ def test_grok_provider_omits_model_flag_when_empty(tmp_path):
         )
     )
     assert "-m" not in calls[0]
+
+
+def test_grok_provider_passes_reasoning_effort(tmp_path):
+    calls = []
+
+    def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        calls.append((cmd, args))
+        Path(stdout_file).write_text(_grok_ndjson("OK"))
+
+    GrokProvider(reasoning_effort="low", runner=fake_runner).run(
+        AgentConfig(
+            persona="P",
+            context="C",
+            artifact_dir=tmp_path,
+            model="",
+            artifact="out.md",
+        )
+    )
+    cmd, args = calls[0]
+    assert cmd == "grok"
+    assert args[args.index("--reasoning-effort") + 1] == "low"
 
 
 _FORBIDDEN_GROK_FLAGS = (
