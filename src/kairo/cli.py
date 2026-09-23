@@ -1009,7 +1009,9 @@ def step(
 def run_cmd(
     topic: str = typer.Option(None, "--topic", "-t", help="Topic slug;省略时为 cwd"),
     ref: str = typer.Option(
-        None, "--ref", help="只处理这一条材料的转写和纪要，不改 understanding"
+        None,
+        "--ref",
+        help="只处理这一条材料的转写和纪要，并尝试追加一条机器 note；不改 understanding",
     ),
     all_topics: bool = typer.Option(
         False, "--all", help="serve root 下每个非 clean Topic 顺序 run 一次;有剩余失败则非零退出"
@@ -1037,11 +1039,13 @@ def run_cmd(
     if rejection:
         typer.secho(rejection, fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
-    progressed = engine_step(
-        ws, select_provider(require_read_dirs=True), only_ref=ref
-    )
+    provider = select_provider(require_read_dirs=True)
+    progressed = engine_step(ws, provider, only_ref=ref)
     typer.echo("ran" if progressed else "no change")
     _exit_if_ref_failed(ws, ref)
+    from kairo.generated_note import maybe_append_generated_note
+
+    maybe_append_generated_note(ws, ref, provider)
 
 
 def run_topic_workspace() -> None:

@@ -169,6 +169,34 @@ def _provenance(items: list[dict]) -> list[dict]:
     return [{"kind": "note", "id": it["stable_id"]} for it in items]
 
 
+def _commit_note(rec, *, kind: str, author: str, body: str, when: datetime) -> dict:
+    def _commit():
+        path = _notes_path(rec)
+        records = _read_records(path)
+        note_id = _new_note_id({r["id"] for r in records}, when)
+        record = {
+            "id": note_id,
+            "type": kind,
+            "author": author,
+            "created_at": _created(when),
+            "content": body,
+        }
+        _write_records(path, [*records, record])
+        return record
+
+    record = _with_lock(rec, _commit)
+    item = _item(rec, record, include_content=True)
+    return {
+        "ok": True,
+        "stable_id": item["stable_id"],
+        "home": item["home"],
+        "ref_id": item["ref_id"],
+        "type": item["type"],
+        "author": item["author"],
+        "created_at": item["created_at"],
+    }
+
+
 def add_note(
     serve: Path,
     *,
@@ -188,32 +216,31 @@ def add_note(
     rec = _resolve_rec(serve, ref_id, home)
     when = now or _now()
     who = (author or getpass.getuser() or "").strip() or "unknown"
+    return _commit_note(rec, kind=kind, author=who, body=body, when=when)
 
-    def _commit():
-        path = _notes_path(rec)
-        records = _read_records(path)
-        note_id = _new_note_id({r["id"] for r in records}, when)
-        record = {
-            "id": note_id,
-            "type": kind,
-            "author": who,
-            "created_at": _created(when),
-            "content": body,
-        }
-        _write_records(path, [*records, record])
-        return record
 
-    record = _with_lock(rec, _commit)
-    item = _item(rec, record, include_content=True)
-    return {
-        "ok": True,
-        "stable_id": item["stable_id"],
-        "home": item["home"],
-        "ref_id": item["ref_id"],
-        "type": item["type"],
-        "author": item["author"],
-        "created_at": item["created_at"],
-    }
+def append_generated_note(
+    serve: Path,
+    *,
+    ref_id: str,
+    content: str,
+    home: str | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """只给机器 note 用。人工 add 的类型闭集不包含 generated。"""
+    body = (content or "").strip()
+    if not body:
+        raise NotesError("正文为空", code="invalid_request")
+    if len(body) > 800:
+        raise NotesError("正文超过 800 个字符", code="invalid_request")
+    rec = _resolve_rec(serve, ref_id, home)
+    return _commit_note(
+        rec,
+        kind="generated",
+        author="machine",
+        body=body,
+        when=now or _now(),
+    )
 
 
 def delete_note(serve: Path, *, stable_id: str) -> None:
