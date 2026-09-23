@@ -14,5 +14,6 @@
 | `ref-find-read.md` | #402 按标题／发生日／Topic 检索并直接读 digest 或 transcript | 正式 CLI `kairo ref find`、`kairo ref read`。无 Console；LLM / step **skip** |
 | `ref-markdown-notes.md` | #410 Ref 级 markdown notes 盖楼：CLI list/add/show、近窗稳定键、provenance 样例 | 正式 CLI `kairo notes`。无 Console（#411）；LLM / step / compose **skip** |
 | `console-ref-notes.md` | #411 Console：Ref 详情 notes（digest 之上）列表/只读/空态/轻量追加；阅读画布与详情同一套文档批注观感；单条详情确认删除；Markdown 多行预览与更多/收起；Topic 形态整行进 `#reader` | `/w/{slug}` 形态与 `#reader`、`/refs/{id}`、`/refs/{id}/notes/{note_id}`。LLM / step / compose **skip** |
+| `run-ref-generated-note.md` | #423 `kairo run --ref` 完成后追加一条 `generated` 机器 note；失败不挡 run | 正式 CLI `kairo run --ref` 与 `kairo notes`。无新 Console；真网 LLM 可用确定性替身 |
 
 新增用户可见功能时在此加一行并补功能文件；验收 Story 对不上任何一行即 BLOCKED。
