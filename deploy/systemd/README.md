@@ -3,7 +3,7 @@
 先手动跑通 `kairo backup push REMOTE`，再启用 timer。
 
 1. 把 `kairo-backup@.service` / `kairo-backup@.timer` 拷到 `/etc/systemd/system/`。
-2. 改 service：`User`、`ExecStart` 里的 kairo 路径（uv tool 常见为 `%h/.local/bin/kairo`）。
+2. 改 service：`User`、`ExecStart` 里的 kairo 路径。生产请钉 uv-tool 绝对路径（常见 `%h/.local/bin/kairo` / `/home/<user>/.local/bin/kairo`），不要用 PATH 上 thin/旧 bin。见仓库 README「Production binary and PATH」。
 3. 设置 `Environment=KAIRO_SERVE_ROOT=/path/to/serve-root`，或设 `WorkingDirectory` 为 serve root。
 4. `systemctl enable --now kairo-backup@<remote>.timer`
 

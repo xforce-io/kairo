@@ -50,6 +50,7 @@ from kairo.timeline import (
     parse_calendar_date,
     scan_timeline,
 )
+from kairo.run_lock import RunOccupiedError, acquire_run_lock
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound, delete_workspace
 
 _EPILOG = (
@@ -946,6 +947,24 @@ def _exit_if_run_failed(ws: Workspace) -> None:
         raise typer.Exit(1)
 
 
+def _hold_run_lock(serve_root: Path, target: str):
+    """Refuse a second mutating kairo run on the same serve root."""
+    try:
+        return acquire_run_lock(serve_root, target=target)
+    except RunOccupiedError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(1) from exc
+
+
+def _run_lock_target(*, ref: str | None = None, topic: str | None = None, all_topics: bool = False) -> str:
+    if all_topics:
+        return "--all"
+    bits = [f"--ref {ref}"] if ref else []
+    if topic:
+        bits.append(f"--topic {topic}")
+    return " ".join(bits) or "run"
+
+
 def _reject_single_run_ref(ws: Workspace, ref_id: str) -> str | None:
     """材料不在主题或是 corpus 时返回原因；通过则 None。不写产物。"""
     from kairo.refs import member_sources
@@ -1017,7 +1036,10 @@ def run_cmd(
         False, "--all", help="serve root 下每个非 clean Topic 顺序 run 一次;有剩余失败则非零退出"
     ),
 ) -> None:
-    """处理指定的一条材料。不带 --ref 则拒绝。整主题用 kairo step。"""
+    """处理指定的一条材料。不带 --ref 则拒绝。整主题用 kairo step。
+
+    同一 serve root 同时只允许一个会改产物的 kairo run。
+    """
     if all_topics and ref:
         typer.secho("--ref 与 --all 互斥", fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
@@ -1039,13 +1061,17 @@ def run_cmd(
     if rejection:
         typer.secho(rejection, fg=typer.colors.RED, err=True)
         raise typer.Exit(2)
-    provider = select_provider(require_read_dirs=True)
-    progressed = engine_step(ws, provider, only_ref=ref)
-    typer.echo("ran" if progressed else "no change")
-    _exit_if_ref_failed(ws, ref)
-    from kairo.generated_note import maybe_append_generated_note
+    from kairo.refs import serve_root_of
 
-    maybe_append_generated_note(ws, ref, provider)
+    target = _run_lock_target(ref=ref, topic=topic)
+    with _hold_run_lock(serve_root_of(ws), target):
+        provider = select_provider(require_read_dirs=True)
+        progressed = engine_step(ws, provider, only_ref=ref)
+        typer.echo("ran" if progressed else "no change")
+        _exit_if_ref_failed(ws, ref)
+        from kairo.generated_note import maybe_append_generated_note
+
+        maybe_append_generated_note(ws, ref, provider)
 
 
 def run_topic_workspace() -> None:
@@ -1068,9 +1094,14 @@ def _run_all_topics() -> None:
     No second attempt and no scheduler; whatever is still provider-failed after
     its single run is listed and turns the exit code non-zero.
     """
+    serve = _scan_root()
+    with _hold_run_lock(serve, _run_lock_target(all_topics=True)):
+        _run_all_topics_locked(serve)
+
+
+def _run_all_topics_locked(serve: Path) -> None:
     from kairo.web.discovery import scan_topic_identities
 
-    serve = _scan_root()
     provider = select_provider(require_read_dirs=True)
     ran: list[str] = []
     skipped: list[str] = []

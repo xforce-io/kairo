@@ -26,6 +26,23 @@ kairo connect    # 把 operator skill 挂到本机 Claude / Cursor / Codex / Pi
 
 开发者在 checkout 里：`uv tool install .` 或 `uv run kairo --help`。
 
+### 生产二进制与 PATH
+
+席位脚本、`run.sh`、systemd unit 应钉死 uv-tool 安装的二进制，不要用 PATH 上碰巧排第一的 `kairo`。
+
+推荐 pin（`uv tool install` 之后可核对的绝对路径）：
+
+```bash
+$HOME/.local/bin/kairo
+# 典型 Linux 席位：
+/home/you/.local/bin/kairo --help
+/home/you/.local/bin/kairo run --help   # 必须列出 --ref
+```
+
+反例：PATH 更靠前的 thin / 旧 `kairo`（例如 `/usr/local/bin/kairo`，或 Desktop 遗留包装）没有 `--ref`。用它跑无参 `kairo run` 会整主题改产物，叠上正在跑的任务，看起来像假失败。不要为此改 upstream Desktop——在脚本里钉 `$HOME/.local/bin/kairo`（或上面的绝对路径）。
+
+同一 serve root 同时只允许一个会改产物的 `kairo run`（`--ref` 或 `--all`）。第二个实例非 0 退出，并在 stderr 打印占用信息（pid / 开始时间 / 目标），不会 SIGKILL 第一个。
+
 音频转写依赖本机 whisper，见下方「本机 ASR 配置」。
 
 ## 快速上手
@@ -67,7 +84,7 @@ kairo add 截图.png --to <ref_id> --copy    # 向既有 Ref 追加形态
 | `occurred` | 修正或清空参考发生时间（`--clear`；不改 id、不 step） |
 | `timeline` | 跨 Topic 按发生日列出观测（`--day` / `--recent` 列表别名 / `--json`） |
 | `step` | 跑调和循环到收敛（在 Topic 目录内；自动选择可读取材料的 provider，顺序见下文） |
-| `run` | 有终态 blocked 则先清再 step（与 Web 主按钮一致） |
+| `run` | 只处理一条材料（`--ref`）；同一 serve root 已有会改产物的 `kairo run` 时拒绝启动 |
 | `re-step` | 强制重算（文档级=整篇重综合，丢手改） |
 | `retry-ref` | 单条参考清派生产物后重跑 |
 | `rm-ref` | 永久删除一条参考 |
