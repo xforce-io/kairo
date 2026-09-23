@@ -26,6 +26,23 @@ kairo connect    # hang the operator skill onto local Claude / Cursor / Codex / 
 
 Developers working in a checkout: `uv tool install .` or `uv run kairo --help`.
 
+### Production binary and PATH
+
+Seat scripts, `run.sh`, and systemd units should pin the uv-tool binary. Do not rely on whichever `kairo` is first on `PATH`.
+
+Recommended pin after `uv tool install` (verifiable absolute path):
+
+```bash
+$HOME/.local/bin/kairo
+# typical Linux seat:
+/home/you/.local/bin/kairo --help
+/home/you/.local/bin/kairo run --help   # must list --ref
+```
+
+Anti-example: a thin or old `kairo` earlier on `PATH` (for example `/usr/local/bin/kairo` or a leftover Desktop wrapper) that has no `--ref`. Bare `kairo run` from that binary can start a full-topic mutation, overlap a live job, and look like a false failure. Do not change upstream Desktop to paper over this — pin `$HOME/.local/bin/kairo` (or the absolute path above) in the script.
+
+Same serve root: only one mutating `kairo run` (`--ref` or `--all`) may run at a time. A second instance exits non-zero and prints occupancy (pid / started / target) on stderr; it does not kill the first.
+
 Audio transcription depends on a local whisper — see "Local ASR configuration" below.
 
 ## Quick start
@@ -67,7 +84,7 @@ Produces `understanding.md` (neutral facts). An existing `assessment.md` on disk
 | `occurred` | Set or clear a reference's occurred date (`--clear`; does not change id or run step) |
 | `timeline` | List fold observations across Topics by occurred date (`--day` / `--recent` list alias / `--json`) |
 | `step` | Run the reconciliation loop to convergence (in Topic directory; material-capable auto provider; selection details below) |
-| `run` | Clear terminal blocked then step (same as Web primary button) |
+| `run` | Process one material (`--ref`); refuse if another mutating `kairo run` occupies the same serve root |
 | `re-step` | Force recompute (document-level = full re-synthesis, dropping manual edits) |
 | `retry-ref` | Clear derived products for one reference and re-run |
 | `rm-ref` | Permanently delete a reference |
