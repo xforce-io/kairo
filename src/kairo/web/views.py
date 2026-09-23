@@ -1032,8 +1032,16 @@ def _topic_ref_nav(slug: str, home: str, ref_id: str) -> dict[str, str]:
     }
 
 
-def _topic_ref_home(slug: str, home: str | None) -> str | None:
-    return slug if home is None else ("" if home == "global" else home or None)
+def _topic_ref_home(
+    slug: str,
+    home: str | None,
+    *,
+    ref_id: str | None = None,
+    members=None,
+) -> str | None:
+    from kairo.refs import resolve_topic_ref_home
+
+    return resolve_topic_ref_home(slug, home, ref_id, members)
 
 
 def _open_topic_ref(
@@ -1044,9 +1052,9 @@ def _open_topic_ref(
 
     _open(request, slug)
     t = _t(request)
-    source = _topic_ref_home(slug, home)
     try:
         members = topic_members(_serve(request), slug)
+        source = _topic_ref_home(slug, home, ref_id=ref_id, members=members)
         if source is None or not any(r.home == source and r.id == ref_id for r in members):
             raise HTTPException(status_code=404, detail=t("err.reference_not_found"))
         _require_public_ref(request, source, ref_id)
@@ -1474,9 +1482,10 @@ def workspace_view(
     if requested_task is not None and requested_task.slug != slug:
         requested_task = None
     shown_task = running or requested_task
-    select_home = _topic_ref_home(slug, home)
+    listed = streams + corpus
+    select_home = _topic_ref_home(slug, home, ref_id=ref, members=listed)
     selected = next(
-        (r for r in streams + corpus if r["id"] == ref and r["home"] == select_home), None
+        (r for r in listed if r["id"] == ref and r["home"] == select_home), None
     )
     select_ref = selected["id"] if selected else None
     select_target = None

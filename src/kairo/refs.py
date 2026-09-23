@@ -12,7 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound
 
@@ -884,6 +884,42 @@ def project_member_refs(serve: Path, slugs: list[str]) -> list[RefRecord]:
                 seen.add(rec.key)
                 out.append(rec)
     return out
+
+
+def _member_id_home(item: RefRecord | dict[str, Any]) -> tuple[str, str]:
+    if isinstance(item, dict):
+        return str(item["id"]), str(item["home"])
+    return item.id, item.home
+
+
+def resolve_topic_ref_home(
+    slug: str,
+    home: str | None,
+    ref_id: str | None,
+    members: Iterable[RefRecord | dict[str, Any]] | None = None,
+) -> str | None:
+    """Resolve catalog home for a Topic-page ref.
+
+    Explicit home is a strict identity (`global` → ""). An empty explicit
+    home does not guess. Omitted home prefers the Topic-local member when
+    present; otherwise the unique member, including global-home (`""`).
+    Ambiguous omitted-home matches return None.
+    """
+    if home is not None:
+        return "" if home == "global" else home or None
+    if not ref_id:
+        return slug
+    homes = [
+        item_home
+        for item in members or []
+        for item_id, item_home in (_member_id_home(item),)
+        if item_id == ref_id
+    ]
+    if slug in homes:
+        return slug
+    if len(homes) == 1:
+        return homes[0]
+    return None
 
 
 def resolve_open(serve: Path, home: str, ref_id: str) -> tuple[Workspace, str]:
