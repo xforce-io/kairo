@@ -106,6 +106,25 @@ def test_s1_console_default_entry_opens_global_home_refs(tmp_path):
         assert f"{rid} DIGEST" in digest_form.text
 
 
+def test_s1_understanding_digest_link_omits_home(tmp_path):
+    """Default Topic conclusion links to /ref/{id}/form/digest with no ?home=."""
+    serve = _setup_global_samples(tmp_path)
+    rid = SAMPLE_IDS[0]
+    (serve / "energy" / "understanding.md").write_text(
+        f"# 结论\n\n见 [纪要](references/{rid}/digest.md)\n"
+    )
+    client = TestClient(create_app(serve))
+    doc = client.get("/w/energy/doc", params={"path": "understanding.md"}, headers=ZH)
+    assert doc.status_code == 200
+    assert UNAVAILABLE not in doc.text
+    assert f"/w/energy/ref/{rid}/form/digest" in doc.text
+    assert f"/w/energy/ref/{rid}/form/digest?home=" not in doc.text
+    opened = client.get(f"/w/energy/ref/{rid}/form/digest", headers=ZH)
+    assert opened.status_code == 200
+    assert UNAVAILABLE not in opened.text
+    assert f"{rid} DIGEST" in opened.text
+
+
 def test_s2_cli_and_console_resolve_same_path(tmp_path, monkeypatch):
     serve = _setup_global_samples(tmp_path)
     client = TestClient(create_app(serve))
