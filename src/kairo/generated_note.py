@@ -1,10 +1,17 @@
-"""#423：`kairo run --ref` 在纪要就绪后追加一条机器 note。失败不改变 run 的退出码。"""
+"""#423：`kairo run --ref` 在纪要就绪后追加一条机器 note。失败不改变 run 的退出码。
+
+#425: machine notes pin grok + reasoning effort low, with a short timeout_cap.
+They do not follow digest/compose auto-select or `[agent] timeout_s`.
+"""
 
 from __future__ import annotations
 
+import os
 import sys
+import tomllib
 
 MAX_GENERATED_CHARS = 800
+DEFAULT_NOTE_TIMEOUT_CAP_S = 120
 _ARTIFACT = "generated-note.txt"
 _PERSONA = (
     "根据下面这一份详备纪要写一条短 note，供人以后扫读。"
@@ -26,7 +33,39 @@ def prepared_body(text: str) -> str | None:
     return body
 
 
-def maybe_append_generated_note(ws, ref_id: str, provider) -> None:
+def resolve_note_timeout_cap() -> int:
+    """#425: note-only CLI cap. Default 120s. Does not change `[agent] timeout_s`."""
+    from kairo.provider import _config_path
+
+    path = _config_path()
+    if not path.is_file():
+        return DEFAULT_NOTE_TIMEOUT_CAP_S
+    try:
+        section = tomllib.loads(path.read_text()).get("agent") or {}
+    except (OSError, tomllib.TOMLDecodeError):
+        return DEFAULT_NOTE_TIMEOUT_CAP_S
+    raw = section.get("note_timeout_s")
+    if raw is None:
+        return DEFAULT_NOTE_TIMEOUT_CAP_S
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_NOTE_TIMEOUT_CAP_S
+    if value <= 0:
+        return DEFAULT_NOTE_TIMEOUT_CAP_S
+    return value
+
+
+def select_note_provider(*, runner=None):
+    """Machine notes are grok + low. Ignore auto / KAIRO_PROVIDER / digest settings."""
+    from kairo.provider import GrokProvider, StubProvider
+
+    if os.environ.get("KAIRO_STUB"):
+        return StubProvider()
+    return GrokProvider(reasoning_effort="low", runner=runner)
+
+
+def maybe_append_generated_note(ws, ref_id: str) -> None:
     """纪要已就绪时调用一轮模型。不合契约或调用失败则不落半条。"""
     from kairo.notes import NotesError, append_generated_note
     from kairo.refs import serve_root_of
@@ -38,8 +77,12 @@ def maybe_append_generated_note(ws, ref_id: str, provider) -> None:
     digest = path.read_text(encoding="utf-8")
     if not digest.strip():
         return
+    provider = select_note_provider()
+    timeout_cap = resolve_note_timeout_cap()
     try:
-        raw = _run_agent(provider, _PERSONA, digest, _ARTIFACT)
+        raw = _run_agent(
+            provider, _PERSONA, digest, _ARTIFACT, timeout_cap=timeout_cap
+        )
     except Exception as exc:
         _warn(ref_id, str(exc))
         return

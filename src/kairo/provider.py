@@ -817,6 +817,7 @@ class GrokProvider:
     #350:Grok 读 cwd 工作集;read_dirs 非空时预授 Read,不倾倒全文,不加 --add-dir。
     #390:write_dirs 非空时预授 Bash+Write(Project CLI / cache / scratch);Topic 路径不加。
     #145:prompt 走 --prompt-file,不把正文塞进 argv。
+    #425:reasoning_effort 非空时传 --reasoning-effort;digest/compose 默认不传。
     JSON 成功字段为 text;错误为 {"type":"error","message":...},写产物前拦截(#8)。
     """
 
@@ -824,8 +825,11 @@ class GrokProvider:
     supports_read_dirs = True
     supports_project_cli = True
 
-    def __init__(self, model: str = "", runner=None) -> None:
+    def __init__(
+        self, model: str = "", reasoning_effort: str = "", runner=None
+    ) -> None:
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self._runner = runner or _default_cli_runner
 
     def run(self, config: AgentConfig, signal=None) -> AgentResult:
@@ -859,6 +863,9 @@ class GrokProvider:
             args += ["--allow", "Bash", "--allow", "Write"]
         if self.model.strip():
             args += ["-m", self.model]
+        # #425: pass through when set. Empty keeps digest/compose on grok's default.
+        if self.reasoning_effort.strip():
+            args += ["--reasoning-effort", self.reasoning_effort.strip()]
         self._runner(
             "grok",
             args,
