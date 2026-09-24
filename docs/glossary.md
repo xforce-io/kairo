@@ -76,3 +76,4 @@
 | 材料身份 | 一条已记录输入对应的具体来源：Data Source id，或某 Topic 的事实层，或某一 Ref digest（slug、home 与 ref id），或本 Run / 本引用记录跟读的 URL（`type=url`，`source_id=url:` + 原文 URL）。 | Topic 名、slug 匹配 |
 | note | Ref 上由用户记录、以稳定键定位的一条判断，包含正文、类型、作者和时间。 | — |
 | generated | `kairo run --ref` 在该 Ref 转写和纪要完成后追加的机器 note 类型；作者固定为机器，不是人的决定或修正。 | 人工批注、insight、决策 |
+| 置顶 | 一条参考上由人指定、至多一条、用来决定预览默认展开哪条 note 的标识。 | 钉住、收藏、星标 |
