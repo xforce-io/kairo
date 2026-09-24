@@ -2,6 +2,8 @@
   <p class="doc-kicker"><span class="dk-title">{{ title }}</span></p>
   {% set notes_can_write = can_write %}
   {% set notes_use_hx = true %}
+  {% set notes_pin_enabled = true %}
   {% set notes_form_action = "/w/" ~ (slug | urlencode) ~ "/ref/" ~ (ref_id | urlencode) ~ "/notes" ~ form_query %}
+  {% set notes_back_summary = "/w/" ~ (slug | urlencode) ~ "/ref/" ~ (ref_id | urlencode) ~ form_query %}
   {% include "_notes_panel.html" %}
 </article>

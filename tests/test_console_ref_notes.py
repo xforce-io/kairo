@@ -149,7 +149,7 @@ def test_s5_topic_preview_follows_selected_ref(tmp_path, monkeypatch):
     assert "追加 note" in empty_canvas.text
 
 
-def _assert_notes_panel(html: str) -> None:
+def _assert_notes_panel(html: str, *, allow_pin: bool = False) -> None:
     assert "notes-head" in html
     assert "记录你的判断，fold 后仍保留" in html
     assert "notes-add" in html
@@ -165,7 +165,8 @@ def _assert_notes_panel(html: str) -> None:
     if list_at != -1:
         assert html.find("notes-add") < list_at
         assert "notes-card" in html
-    assert "置顶" not in html
+    if not allow_pin:
+        assert "置顶" not in html
     assert "删除这条" not in html
 
 
@@ -190,7 +191,7 @@ def test_s6_notes_compact_not_card_form(tmp_path, monkeypatch):
     )[1].split("</section>", 1)[0]
     _assert_notes_panel(listed)
     listed_canvas = client.get(f"/w/energy/ref/{rid}/notes", headers=ZH).text
-    _assert_notes_panel(listed_canvas)
+    _assert_notes_panel(listed_canvas, allow_pin=True)
 
 
 def test_public_read_no_form_and_no_write(tmp_path, monkeypatch):
@@ -295,8 +296,9 @@ def test_s6_markdown_preview_uses_full_body_and_separate_detail_link(tmp_path, m
     body = '**重点判断**\n\n- 第一点\n- 第二点\n\n> 引用\n\n' + ('长正文\n\n' * 30) + '末尾完整内容\n\n[来源](https://example.com)\n\n<script>alert(1)</script>'
     add_note(serve, ref_id=rid, content=body, home="energy")
     client = TestClient(create_app(serve))
-    for url in (f'/refs/{rid}?home=energy', f'/w/energy/ref/{rid}/notes'):
-        html = client.get(url, headers=ZH).text
+    detail = client.get(f'/refs/{rid}?home=energy', headers=ZH).text
+    preview = client.get(f'/w/energy/ref/{rid}/notes', headers=ZH).text
+    for html in (detail, preview):
         assert '<strong>重点判断</strong>' in html
         assert '<li>第一点</li>' in html
         assert '<blockquote>' in html
@@ -304,8 +306,10 @@ def test_s6_markdown_preview_uses_full_body_and_separate_detail_link(tmp_path, m
         assert '<script>alert(1)</script>' not in html
         assert '&lt;script&gt;alert(1)&lt;/script&gt;' in html
         assert '<a href="https://example.com">来源</a>' in html
-        assert 'class="notes-more" hidden aria-expanded="false"' in html
         assert 'class="notes-detail-link"' in html
         assert '>查看详情</a>' in html
-        card = html.split('<li class="notes-card">', 1)[1]
-        assert card.lstrip().startswith('<div class="notes-card-head">')
+    assert 'class="notes-more" hidden aria-expanded="false"' in detail
+    card = detail.split('<li class="notes-card">', 1)[1]
+    assert card.lstrip().startswith('<div class="notes-card-head">')
+    assert 'is-expanded' in preview
+    assert 'class="notes-more"' not in preview

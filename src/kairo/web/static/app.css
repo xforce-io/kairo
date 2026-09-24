@@ -1433,6 +1433,10 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 .notes-panel .notes-preview-content td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
 .notes-panel .notes-preview-content img { max-width: 100%; height: auto; }
 .notes-card-actions { display: flex; align-items: center; gap: 14px; margin-top: 10px; font-size: 12px; }
+.notes-pinned { color: var(--pine-deep); font-size: 12px; }
+.notes-pin { margin: 0; }
+.notes-pin-btn, .notes-back-summary { font: inherit; color: var(--pine-deep); background: none; border: 0; padding: 0; cursor: pointer; }
+.notes-back-summary { display: inline-block; margin-top: 8px; font-size: 13px; }
 .notes-more { border: 0; padding: 0; background: none; color: var(--pine-deep); font: inherit; cursor: pointer; }
 .notes-more:hover { text-decoration: underline; }
 .notes-detail-link { margin-left: auto; }
