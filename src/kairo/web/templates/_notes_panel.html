@@ -32,17 +32,31 @@
 {% elif notes.count %}
 <ul class="notes-list">
   {% for it in notes['items'] %}
-  <li class="notes-card">
+  <li class="notes-card{% if notes_pin_enabled and it.expanded %} is-expanded{% endif %}">
     <div class="notes-card-head">
       <span class="notes-type">{{ it.type }}</span>
       <span class="notes-meta">{{ it.author }} · {{ it.created_at }}</span>
+      {% if notes_pin_enabled and it.pinned %}<span class="notes-pinned">{{ t('notes.pinned') }}</span>{% endif %}
     </div>
+    {% if notes_pin_enabled and it.expanded %}
+    <div class="notes-card-body notes-expanded">
+      <div class="notes-preview-content">{{ it.body_html | safe }}</div>
+    </div>
+    {% else %}
     <div class="notes-card-body notes-preview">
       <div class="notes-preview-content">{{ it.body_html | safe }}</div>
     </div>
+    {% endif %}
     <div class="notes-card-actions">
+      {% if not (notes_pin_enabled and it.expanded) %}
       <button type="button" class="notes-more" hidden aria-expanded="false"
               data-more="{{ t('notes.more') }}" data-less="{{ t('notes.less') }}">{{ t('notes.more') }}</button>
+      {% endif %}
+      {% if notes_pin_enabled and notes_can_write and not it.pinned %}
+      <form class="notes-pin" hx-post="/w/{{ slug | urlencode }}/ref/{{ ref_id | urlencode }}/notes/{{ it.note_id | urlencode }}/pin{{ form_query }}" hx-target="#reader">
+        <button class="notes-pin-btn" type="submit">{{ t('notes.pin') }}</button>
+      </form>
+      {% endif %}
       <a class="notes-detail-link" href="/refs/{{ ref_id | urlencode }}/notes/{{ it.note_id | urlencode }}?home={{ (home or 'global') | urlencode }}">{{ t('notes.detail') }}</a>
     </div>
   </li>
@@ -50,4 +64,10 @@
 </ul>
 {% else %}
 <p class="panel-hint notes-empty">{{ t('notes.empty') }}</p>
+{% endif %}
+{% if notes_pin_enabled and (not notes.ok or not notes.count) %}
+<p class="notes-back-error notes-error" role="alert" hidden>{{ t('notes.back_summary_error') }}</p>
+<button type="button" class="notes-back-summary"
+        hx-get="{{ notes_back_summary }}" hx-target="#reader" hx-select="#reader" hx-swap="outerHTML"
+        hx-on::response-error="this.previousElementSibling.hidden=false">{{ t('notes.back_summary') }}</button>
 {% endif %}

@@ -1224,6 +1224,25 @@ def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False) ->
         return {"ok": False, "error": str(exc), "code": exc.code, "items": [], "count": 0, "types": NOTE_TYPES}
 
 
+def _mark_preview_pin(serve, ref_id: str, home: str, notes: dict) -> None:
+    """只给 Topic notes 预览标出展开项和有效置顶。不写置顶文件。"""
+    from kairo.notes import NotesError, choose_expanded_note_id, read_note_pin
+
+    if not notes.get("ok"):
+        return
+
+    try:
+        pin_id = read_note_pin(serve, ref_id=ref_id, home=_notes_home(home))
+    except NotesError:
+        pin_id = None
+    ids = [it["note_id"] for it in notes["items"]]
+    expanded = choose_expanded_note_id(ids, pin_id)
+    pinned = pin_id if pin_id in ids else None
+    for it in notes["items"]:
+        it["expanded"] = it["note_id"] == expanded
+        it["pinned"] = it["note_id"] == pinned
+
+
 def _note_id_of(item: dict) -> str:
     sid = item.get("stable_id") or ""
     return sid.rsplit("/", 1)[-1] if "/" in sid else sid
@@ -1943,6 +1962,7 @@ def _notes_reader_page(
     t = _t(request)
     man = ws.read_manifest(ref_id)
     notes = _notes_tower(_serve(request), ref_id, source, render_body=True)
+    _mark_preview_pin(_serve(request), ref_id, source, notes)
     query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
     return _render(
         request,
@@ -1998,6 +2018,30 @@ async def ref_notes_add_view(
         else:
             err = t("notes.submit_error")
     return _notes_reader_page(request, slug, ref_id, home, notes_error=err)
+
+
+@router.post("/w/{slug}/ref/{ref_id}/notes/{note_id}/pin", response_class=HTMLResponse)
+def ref_notes_pin_view(
+    request: Request, slug: str, ref_id: str, note_id: str, home: str | None = None
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.notes import NotesError, pin_note
+
+    t = _t(request)
+    _ws, source = _open_topic_ref(request, slug, ref_id, home)
+    if source != slug:
+        raise HTTPException(status_code=403, detail=t("notes.submit_error"))
+    try:
+        pin_note(
+            _serve(request),
+            ref_id=ref_id,
+            note_id=note_id,
+            home=_notes_home(source),
+        )
+    except NotesError as exc:
+        err = t("notes.pin_missing") if exc.code == "not_found" else t("notes.submit_error")
+        return _notes_reader_page(request, slug, ref_id, home, notes_error=err)
+    return _notes_reader_page(request, slug, ref_id, home)
 
 
 @router.get("/w/{slug}/ref/{ref_id}/form/{key}", response_class=HTMLResponse)

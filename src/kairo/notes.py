@@ -243,6 +243,68 @@ def append_generated_note(
     )
 
 
+def _pin_path(rec) -> Path:
+    return rec.dir / "note-pin.json"
+
+
+def _parse_pin_file(path: Path) -> str | None:
+    """读置顶标识。文件缺失或内容不可用时返回 None，不改文件。"""
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    note_id = data.get("note_id")
+    if not isinstance(note_id, str) or not note_id.strip():
+        return None
+    return note_id.strip()
+
+
+def _write_pin_file(path: Path, note_id: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps({"note_id": note_id}, ensure_ascii=False) + "\n", encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
+def choose_expanded_note_id(note_ids: list[str], pin_id: str | None) -> str | None:
+    """有效置顶展开该条；否则展开追加序第一条。空列表没有展开项。"""
+    if not note_ids:
+        return None
+    if pin_id and pin_id in note_ids:
+        return pin_id
+    return note_ids[0]
+
+
+def read_note_pin(serve: Path, *, ref_id: str, home: str | None = None) -> str | None:
+    """返回文件里的 note_id。悬空 id 也原样返回，由选择函数判断是否仍在列表中。"""
+    rec = _resolve_rec(serve, ref_id, home)
+    return _parse_pin_file(_pin_path(rec))
+
+
+def pin_note(serve: Path, *, ref_id: str, note_id: str, home: str | None = None) -> None:
+    """把这一条设为唯一置顶。note 不在列表中时不写文件。"""
+    if not note_id or not _NOTE_ID_RE.match(note_id):
+        raise NotesError("note 不存在", code="not_found")
+    rec = _resolve_rec(serve, ref_id, home)
+
+    def _commit():
+        records = _read_records(_notes_path(rec))
+        if not any(note["id"] == note_id for note in records):
+            raise NotesError("note 不存在", code="not_found")
+        _write_pin_file(_pin_path(rec), note_id)
+
+    _with_lock(rec, _commit)
+
+
 def delete_note(serve: Path, *, stable_id: str) -> None:
     """Remove exactly one note under the same lock used by add_note."""
     key, note_id = parse_stable_id(stable_id)
@@ -256,6 +318,9 @@ def delete_note(serve: Path, *, stable_id: str) -> None:
         if len(remaining) == len(records):
             raise NotesError("note 不存在", code="not_found")
         _write_records(path, remaining)
+        pin = _pin_path(rec)
+        if _parse_pin_file(pin) == note_id and pin.is_file():
+            pin.unlink()
 
     _with_lock(rec, _commit)
 
