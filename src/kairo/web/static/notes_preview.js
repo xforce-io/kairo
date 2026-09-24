@@ -19,7 +19,10 @@
     document.querySelectorAll('.notes-preview-content').forEach(content => {
       if (cards.has(content)) return;
       const preview = content.parentElement;
-      const button = preview.closest('.notes-card').querySelector('.notes-more');
+      const card = preview && preview.closest('.notes-card');
+      const button = card && card.querySelector('.notes-more');
+      // 展开项没有「更多」。跳过它，否则 setAttribute 会中断后面卡片的初始化。
+      if (!button) return;
       preview.id = `notes-preview-${++nextId}`;
       button.setAttribute('aria-controls', preview.id);
       cards.set(content, { preview, button });
