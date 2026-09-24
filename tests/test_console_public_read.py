@@ -236,14 +236,14 @@ def _assert_shareable_ref_page(client: TestClient, slug: str, rid: str) -> str:
     page = client.get(f"/w/{slug}", params={"ref": rid})
     assert page.status_code == 200
     share = f"/w/{slug}?ref={rid}"
-    meta = f"/w/{slug}/ref/{rid}"
+    meta = f"/w/{slug}/ref/{rid}?panel=notes"
     assert f'href="{share}"' in page.text
     assert 'href="#"' not in page.text.split('id="refs-list"', 1)[-1].split("id=", 1)[0]
     assert f"is-active" in page.text
     assert share in page.text
     assert f'hx-get="{meta}"' in page.text
     assert 'hx-trigger="load"' in page.text
-    assert f'hx-get="{meta}"' in page.text.split('id="meta"', 1)[-1][:400]
+    assert f'hx-get="{meta}"' in page.text.split('id="meta"', 1)[-1][:480]
     return page.text
 
 

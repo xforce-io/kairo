@@ -1024,11 +1024,13 @@ def delete_workspace_view(
 
 
 def _topic_ref_nav(slug: str, home: str, ref_id: str) -> dict[str, str]:
+    """左侧列表的 hx 默认进入 notes 预览；href 仍是主题页上的参考选中。"""
     base = f"/w/{quote(slug, safe='')}"
     query = f"home={quote(home or 'global', safe='')}" if home != slug else ""
+    hx_query = f"{query}&panel=notes" if query else "panel=notes"
     return {
         "href": f"{base}?ref={quote(ref_id, safe='')}" + (f"&{query}" if query else ""),
-        "hx": f"{base}/ref/{quote(ref_id, safe='')}" + (f"?{query}" if query else ""),
+        "hx": f"{base}/ref/{quote(ref_id, safe='')}?{hx_query}",
     }
 
 
@@ -1099,12 +1101,15 @@ def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
         man = ws.read_manifest(ref_id)
         nav = ref_nav(ws.root.name, ref_id)
         occurred_at, _ = effective_occurred(ref_id, man.occurred_at)
+        hx = nav["hx"] or ""
+        if hx:
+            hx = f"{hx}&panel=notes" if "?" in hx else f"{hx}?panel=notes"
         item = {
             "id": ref_id,
             "title": man.title,
             "home": ws.root.name,
             "href": nav["href"],
-            "hx": nav["hx"],
+            "hx": hx,
             "occurred_at": occurred_at,
         }
         (corpus if man.source_class == "corpus" else streams).append(item)
@@ -1707,8 +1712,14 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
 
 
 @router.get("/w/{slug}/ref/{ref_id}", response_class=HTMLResponse)
-def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) -> HTMLResponse:
-    """右栏元信息 + (OOB)中间预览主形态(默认 digest 摘要 → 否则 transcript → 首个可预览)。"""
+def ref_view(
+    request: Request,
+    slug: str,
+    ref_id: str,
+    home: str | None = None,
+    panel: str | None = None,
+) -> HTMLResponse:
+    """右栏元信息 + (OOB)中间预览。panel=notes 时中间区是 notes 预览，否则仍是摘要主预览。"""
     _open(request, slug)
     try:
         ws, source = _open_topic_ref(request, slug, ref_id, home)
@@ -1763,6 +1774,18 @@ def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) 
     # 基线干净指针无 blocked 时隐藏「重新处理」(避免假故障感);stream 或 blocked 仍显示
     show_retry = bool(blocks) or not is_corpus
     notes_tower = _notes_tower(_serve(request), ref_id, source)
+    show_notes_reader = panel == "notes"
+    notes_reader: dict = {}
+    if show_notes_reader:
+        notes = _notes_tower(_serve(request), ref_id, source, render_body=True)
+        _mark_preview_pin(_serve(request), ref_id, source, notes)
+        notes_reader = {
+            "notes_title": f"{man.title} · {t('notes.section')}",
+            "home": source or "global",
+            "notes": notes,
+            "notes_error": "",
+            "can_write": (not _is_public_read(request)) and source == slug,
+        }
     return _render(
         request,
         "_ref_meta.html",
@@ -1797,6 +1820,8 @@ def ref_view(request: Request, slug: str, ref_id: str, home: str | None = None) 
             "notes_count": notes_tower["count"] if notes_tower["ok"] else 0,
             "notes_excerpt": (notes_tower["items"][-1]["excerpt"] if notes_tower["ok"] and notes_tower["items"] else ""),
             "notes_href": f"/refs/{quote(ref_id, safe='')}?home={quote(source or 'global', safe='')}#notes",
+            "show_notes_reader": show_notes_reader,
+            **notes_reader,
         },
     )
 

@@ -460,7 +460,7 @@ def test_workspace_ref_query_selects(tmp_path):
     root, _, _ = _two_ws(tmp_path)
     r = _client(root).get("/w/alpha", params={"ref": "2026-08-25-weekly"})
     assert r.status_code == 200
-    assert 'hx-get="/w/alpha/ref/2026-08-25-weekly"' in r.text
+    assert 'hx-get="/w/alpha/ref/2026-08-25-weekly?panel=notes"' in r.text
 
 
 def test_nav_links_on_dashboard(tmp_path):

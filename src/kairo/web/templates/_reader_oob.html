@@ -1,6 +1,7 @@
 {# OOB:选中条目时顺带刷新中间预览画布(#reader) #}
 <main id="reader" class="pane-read" hx-swap-oob="true">
-  {% if preview_html %}<article class="doc"><p class="doc-kicker"><span class="dk-title">{{ preview_title }}</span>{% if exportable %}<button type="button" class="doc-export" onclick="kairoPrintDoc()">{{ t('doc.export_pdf') }}</button>{% endif %}</p>{{ preview_html|safe }}</article>
+  {% if show_notes_reader %}{% with title=notes_title %}{% include "_notes_reader.html" %}{% endwith %}
+  {% elif preview_html %}<article class="doc"><p class="doc-kicker"><span class="dk-title">{{ preview_title }}</span>{% if exportable %}<button type="button" class="doc-export" onclick="kairoPrintDoc()">{{ t('doc.export_pdf') }}</button>{% endif %}</p>{{ preview_html|safe }}</article>
   {% elif empty_card and open_form %}
   {# #88 基线原件空态卡:文件身份 + 轻量操作,不抢全局 primary #}
   <div class="reader-empty-wrap">
