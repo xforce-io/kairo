@@ -2,7 +2,7 @@
 
 - Issue: [#431](https://github.com/xforce-io/kairo/issues/431)
 - 分支: `feat/431-pin-one-note-preview`
-- 状态: Draft（待审；通过前不写功能代码）
+- 状态: Approved（2026-09-24，苏晴「设计通过」；不需要单独的取消置顶）
 - L1: Approved（2026-09-24，[评论](https://github.com/xforce-io/kairo/issues/431#issuecomment-5806551180)，已写入 Issue `## 设计`）
 - 本文件是 #431 的 L2 事实源。与实现同一分支，不单独合入设计。
 
