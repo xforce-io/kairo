@@ -256,3 +256,37 @@ def test_s2_malformed_generation_state_has_readable_diagnostic(tmp_path, monkeyp
     result = runner.invoke(app, ['notes', 'status', '--ref', rid, '--home', 'energy'])
     assert result.exit_code == 0, result.output
     assert 'note failed' in result.output and '状态无法读取' in result.output
+
+
+def test_s2_unreadable_state_waits_for_explicit_retry(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch); rid = add(ws, tmp_path, 'explicit-recovery.txt', True)
+    path = generation_path(ws, rid); path.write_text('invalid json'); before = path.read_bytes()
+    from kairo.generated_note import note_stale
+    assert not note_stale(ws, rid)
+    provider = _NoteProvider('显式恢复事实')
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: provider)
+    from kairo.rules import GeneratedNoteRule
+    items = GeneratedNoteRule(ws, None).discover(ws.read_state())
+    assert not any(item.is_stale(ws.read_state()) for item in items)
+    assert path.read_bytes() == before and not provider.contexts
+    ordinary = runner.invoke(app, ["run", "--ref", rid])
+    assert ordinary.exit_code == 1, ordinary.output
+    assert path.read_bytes() == before and not provider.contexts
+    result = runner.invoke(app, ['notes', 'generate', rid, '--home', 'energy', '--json'])
+    assert result.exit_code == 0, result.output
+    assert len(provider.contexts) == 1 and read_generation(ws, rid)['status'] == 'succeeded'
+
+
+def test_s1_known_refs_do_not_rescan_notes_catalog(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch)
+    refs = [add(ws, tmp_path, f'known-{i}.txt', True) for i in range(8)]
+    def unexpected(*args, **kwargs):
+        pytest.fail('已解析 Ref 的检查/生成/左侧导航不得再次扫描全库')
+    monkeypatch.setattr('kairo.notes.list_all_refs', unexpected)
+    for rid in refs:
+        assert ensure_generated_note(ws, rid)['status'] == 'succeeded'
+    client = TestClient(create_app(root)); page = client.get('/w/energy')
+    assert page.status_code == 200
+    for rid in refs:
+        assert f'hx-get="/w/energy/ref/{rid}?panel=notes"' in page.text
+        assert len((ws.references_dir()/rid/'notes.jsonl').read_text().splitlines()) == 1

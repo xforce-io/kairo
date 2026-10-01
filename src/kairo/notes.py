@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kairo.ref_find import _normalize_home
-from kairo.refs import RefError, list_all_refs, parse_ref_key, ref_key, topic_members
+from kairo.refs import RefError, RefRecord, list_all_refs, parse_ref_key, ref_key, topic_members
 
 NOTE_TYPES = ("insight", "decision", "open-question", "correction")
 DEFAULT_WINDOW_HOURS = 48
@@ -228,12 +228,17 @@ def append_generated_note(
     now: datetime | None = None,
 ) -> dict:
     """只给机器 note 用。人工 add 的类型闭集不包含 generated。"""
+    rec = _resolve_rec(serve, ref_id, home)
+    return append_generated_note_to_ref(rec, content=content, now=now)
+
+
+def append_generated_note_to_ref(rec: RefRecord, *, content: str, now: datetime | None = None) -> dict:
+    """对调用方已解析的实际 Ref 写机器 note，复用同一校验与原子提交。"""
     body = (content or "").strip()
     if not body:
         raise NotesError("正文为空", code="invalid_request")
     if len(body) > 800:
         raise NotesError("正文超过 800 个字符", code="invalid_request")
-    rec = _resolve_rec(serve, ref_id, home)
     return _commit_note(
         rec,
         kind="generated",
@@ -387,6 +392,11 @@ def show_notes(
                 return {"ok": True, **item}
         raise NotesError("note 不存在", code="not_found")
     rec = _resolve_rec(serve, ref_id, home)
+    return show_ref_notes(rec)
+
+
+def show_ref_notes(rec: RefRecord) -> dict:
+    """只读调用方已解析的实际 Ref，不重复扫描 serve root。"""
     items = [_item(rec, n, include_content=True) for n in _read_records(_notes_path(rec))]
     return {"ok": True, "count": len(items), "items": items}
 

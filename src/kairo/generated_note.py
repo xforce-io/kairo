@@ -47,7 +47,10 @@ def generation_path(ws, ref_id: str) -> Path:
 
 
 def read_generation(ws, ref_id: str) -> dict:
-    path = generation_path(ws, ref_id)
+    return read_generation_path(generation_path(ws, ref_id))
+
+
+def read_generation_path(path: Path) -> dict:
     if not path.exists():
         return {"status": "not-attempted", "reason": ""}
     try:
@@ -79,11 +82,15 @@ def _home(ws) -> str:
     return "" if ws.root.resolve() == global_home_path(serve_root_of(ws)).resolve() else ws.root.name
 
 
+def _ref_record(ws, ref_id: str):
+    from kairo.refs import RefRecord
+    return RefRecord(home=_home(ws), id=ref_id, title="", source_class="",
+                     dir=ws.references_dir() / ref_id)
+
+
 def _generated(ws, ref_id: str) -> list[dict]:
-    from kairo.notes import show_notes
-    from kairo.refs import serve_root_of
-    home = _home(ws) or "global"
-    return [it for it in show_notes(serve_root_of(ws), ref_id=ref_id, home=home)["items"]
+    from kairo.notes import show_ref_notes
+    return [it for it in show_ref_notes(_ref_record(ws, ref_id))["items"]
             if it["type"] == "generated"]
 
 
@@ -115,13 +122,14 @@ def note_stale(ws, ref_id: str, state=None) -> bool:
         return False
     digest_hash = hashlib.sha256((ws.references_dir() / ref_id / "digest.md").read_bytes()).hexdigest()
     prior = read_generation(ws, ref_id)
+    if prior.get("code") == "state-unreadable":
+        return False  # 损坏状态必须显式只补，不把未知 hash 当成新 digest。
     return prior.get("status") != "failed" or prior.get("digest_hash") != digest_hash
 
 
 def ensure_generated_note(ws, ref_id: str, *, state=None) -> dict:
     """独占生成锁后重新核对，模型等待不占人工 notes 的锁。"""
-    from kairo.notes import append_generated_note
-    from kairo.refs import serve_root_of
+    from kairo.notes import append_generated_note_to_ref
     from kairo.rules import _run_agent, safe_provider_summary
     folder = ws.references_dir() / ref_id
     with (folder / "generated-note.lock").open("a") as lock:
@@ -143,8 +151,7 @@ def ensure_generated_note(ws, ref_id: str, *, state=None) -> dict:
             body = prepared_body(raw)
             if body is None:
                 raise ValueError("note 正文为空或超过 800 个字符")
-            home = _home(ws) or "global"
-            result = append_generated_note(serve_root_of(ws), ref_id=ref_id, content=body, home=home)
+            result = append_generated_note_to_ref(_ref_record(ws, ref_id), content=body)
             return _write_generation(ws, ref_id, "succeeded", digest_hash,
                                      provider="grok", note_id=result["stable_id"], reason="")
         except Exception as exc:

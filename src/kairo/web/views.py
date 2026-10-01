@@ -1023,11 +1023,11 @@ def delete_workspace_view(
     return HTMLResponse("", headers={"HX-Redirect": "/"})
 
 
-def _topic_ref_nav(slug: str, home: str, ref_id: str, serve: Path | None = None) -> dict[str, str]:
+def _topic_ref_nav(slug: str, home: str, ref_id: str, serve: Path | None = None, *, record=None) -> dict[str, str]:
     """逐 Ref 选择 notes 或主预览；href 仍是主题页上的参考选中。"""
     base = f"/w/{quote(slug, safe='')}"
     query = f"home={quote(home or 'global', safe='')}" if home != slug else ""
-    notes = _notes_tower(serve, ref_id, home) if serve is not None else {"ok": False}
+    notes = _notes_tower(serve, ref_id, home, record=record) if serve is not None else {"ok": False}
     has_notes = not notes["ok"] or notes.get("count", 0) > 0
     hx_query = (f"{query}&panel=notes" if query else "panel=notes") if has_notes else query
     return {
@@ -1078,7 +1078,7 @@ def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
             from kairo.refs import resolve_open
 
             for rec in topic_members(serve, ws.root.name, catalog=catalog):
-                nav = _topic_ref_nav(ws.root.name, rec.home, rec.id, serve)
+                nav = _topic_ref_nav(ws.root.name, rec.home, rec.id, serve, record=rec)
                 try:
                     ref_ws, ref_id = resolve_open(serve, rec.home, rec.id)
                     man = ref_ws.read_manifest(ref_id)
@@ -1212,20 +1212,19 @@ def _notes_home(home: str) -> str:
     return "global" if not home or home == "global" else home
 
 
-def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False) -> dict:
-    from kairo.notes import NOTE_TYPES, NotesError, show_notes
+def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False, record=None) -> dict:
+    from kairo.notes import NOTE_TYPES, NotesError, _resolve_rec, show_ref_notes
 
     try:
-        data = show_notes(serve, ref_id=ref_id, home=_notes_home(home))
+        rec = record if record is not None else _resolve_rec(serve, ref_id, _notes_home(home))
+        data = show_ref_notes(rec)
         items = list(data.get("items") or [])
         for it in items:
             it["note_id"] = _note_id_of(it)
             if render_body:
                 it["body_html"] = render_markdown(it.get("content") or "", slug=home if home and home != "global" else None)
-        from kairo.generated_note import read_generation
-        from kairo.refs import resolve_open
-        actual, _ = resolve_open(serve, "" if home == "global" else home, ref_id)
-        generation = read_generation(actual, ref_id)
+        from kairo.generated_note import read_generation_path
+        generation = read_generation_path(rec.dir / "generated-note.json")
         if any(it["type"] == "generated" for it in items):
             generation = {**generation, "status": "succeeded", "reason": ""}
         return {"ok": True, "items": items, "count": int(data.get("count") or 0), "types": NOTE_TYPES,
