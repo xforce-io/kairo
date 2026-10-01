@@ -1740,9 +1740,11 @@ def ref_view(
             response.status_code = 404
             response.headers["X-Kairo-Ref-Unavailable"] = "1"
         return response
-    nav = _topic_ref_nav(slug, source, ref_id, _serve(request))
     form_base = f"/w/{quote(slug, safe='')}/ref/{quote(ref_id, safe='')}"
     form_query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
+    share_path = f"/w/{quote(slug, safe='')}?ref={quote(ref_id, safe='')}" + (
+        f"&{form_query[1:]}" if form_query else ""
+    )
     t = _t(request)
     man = ws.read_manifest(ref_id)
     forms = _ref_forms(ws, ref_id, man, t)
@@ -1800,7 +1802,7 @@ def ref_view(
             "slug": slug,
             "ref_id": ref_id,
             "ref_read_only": source != slug,
-            "share_path": nav["href"],
+            "share_path": share_path,
             "manage_href": f"/refs/{quote(ref_id, safe='')}?home={quote(source or 'global', safe='')}",
             "form_base": form_base,
             "form_query": form_query,

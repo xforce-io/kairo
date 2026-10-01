@@ -304,3 +304,28 @@ def test_s1_resolved_write_does_not_resurrect_deleted_ref(tmp_path, monkeypatch)
     with pytest.raises(NotesError):
         append_generated_note_to_ref(record, content='不应写入已删除材料')
     assert not record.dir.exists()
+
+
+@pytest.mark.parametrize("home", ["energy", "global"])
+def test_s3_ref_click_does_not_add_catalog_scan_for_unused_navigation(tmp_path, monkeypatch, home):
+    from kairo import notes
+
+    root, ws = setup(tmp_path, monkeypatch)
+    source = global_home(root) if home == "global" else ws
+    rid = add(source, tmp_path, "click.txt", True)
+    if home == "global":
+        add_tag(root, home="", ref_id=rid, tag="energy")
+    scans = []
+    list_refs = notes.list_all_refs
+    def scan(serve):
+        scans.append(serve)
+        return list_refs(serve)
+    monkeypatch.setattr(notes, "list_all_refs", scan)
+
+    suffix = "?home=global" if home == "global" else ""
+    page = TestClient(create_app(root)).get(f"/w/energy/ref/{rid}{suffix}")
+
+    assert page.status_code == 200 and "明确事实" in page.text
+    expected = f"/w/energy?ref={rid}" + ("&amp;home=global" if home == "global" else "")
+    assert f'data-share-path="{expected}"' in page.text
+    assert len(scans) == 1  # 保持既有notes读取成本；分享链接不得再增加全库扫描
