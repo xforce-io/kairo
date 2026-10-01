@@ -285,8 +285,21 @@ def test_s1_known_refs_do_not_rescan_notes_catalog(tmp_path, monkeypatch):
     monkeypatch.setattr('kairo.notes.list_all_refs', unexpected)
     for rid in refs:
         assert ensure_generated_note(ws, rid)['status'] == 'succeeded'
+    from kairo.web.views import _split_refs
+    assert len(_split_refs(ws)[0]) == len(refs)
     client = TestClient(create_app(root)); page = client.get('/w/energy')
     assert page.status_code == 200
     for rid in refs:
         assert f'hx-get="/w/energy/ref/{rid}?panel=notes"' in page.text
         assert len((ws.references_dir()/rid/'notes.jsonl').read_text().splitlines()) == 1
+
+
+def test_s1_resolved_write_does_not_resurrect_deleted_ref(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch); rid = add(ws, tmp_path, 'deleted.txt', True)
+    from kairo.generated_note import _ref_record
+    from kairo.notes import append_generated_note_to_ref, NotesError
+    import shutil
+    record = _ref_record(ws, rid); shutil.rmtree(record.dir)
+    with pytest.raises(NotesError):
+        append_generated_note_to_ref(record, content='不应写入已删除材料')
+    assert not record.dir.exists()

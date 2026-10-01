@@ -1097,9 +1097,12 @@ def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
             return streams, corpus
         except RefError:
             pass
+    from kairo.refs import RefRecord
     for ref_id in ws.list_reference_ids():
         man = ws.read_manifest(ref_id)
-        nav = _topic_ref_nav(ws.root.name, ws.root.name, ref_id, serve or ws.root.parent)
+        record = RefRecord(home=ws.root.name, id=ref_id, title=man.title,
+                           source_class=man.source_class, dir=ws.references_dir() / ref_id)
+        nav = _topic_ref_nav(ws.root.name, ws.root.name, ref_id, serve or ws.root.parent, record=record)
         occurred_at, _ = effective_occurred(ref_id, man.occurred_at)
         hx = nav["hx"] or ""
         item = {

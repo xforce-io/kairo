@@ -234,6 +234,8 @@ def append_generated_note(
 
 def append_generated_note_to_ref(rec: RefRecord, *, content: str, now: datetime | None = None) -> dict:
     """对调用方已解析的实际 Ref 写机器 note，复用同一校验与原子提交。"""
+    if rec.dir is None or not (rec.dir / "manifest.yaml").is_file():
+        raise NotesError("reference 不存在", code="not_found")
     body = (content or "").strip()
     if not body:
         raise NotesError("正文为空", code="invalid_request")
