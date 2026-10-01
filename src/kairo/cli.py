@@ -854,7 +854,7 @@ def _notes_process(root, topic, ref_id, home, apply, as_json):
                     if row["status"] == "ready" or (row["status"] == "already-generated"
                                                        and row["generation"]["status"] in {"running", "failed"}):
                         try:
-                            result = ensure_generated_note(ws, rid)
+                            result = ensure_generated_note(ws, rid, retry_failed=True)
                         except (ValueError, OSError) as exc:
                             from kairo.rules import safe_provider_summary
                             result = {"status": "failed", "reason": safe_provider_summary(exc)}
@@ -1014,10 +1014,11 @@ def review(
 
 
 def _exit_if_notes_failed(ws, ref_id=None, *, previous_failures=None):
-    from kairo.generated_note import failed_notes
+    from kairo.generated_note import _home, failed_notes
     failures = failed_notes(ws, None if previous_failures is not None else ref_id)
     if previous_failures is not None:
-        failures = [row for row in failures if row["ref_id"] == ref_id
+        target = (_home(ws), ref_id)
+        failures = [row for row in failures if (row["home"], row["ref_id"]) == target
                     or previous_failures.get((row["home"], row["ref_id"])) != row["generation"]]
     if failures:
         row = failures[0]

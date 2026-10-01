@@ -368,3 +368,47 @@ def test_s2_retry_reports_new_other_ref_note_failure_but_not_unchanged_history(
     else:
         assert other in result.output and "机器 note 未写入" in result.output
         assert len(provider.contexts) == (2 if prior == "none" else 3)
+
+
+def test_s2_concurrent_automatic_failure_converges_and_explicit_retry_recovers(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch); rid = add(ws, tmp_path, "once.txt", True)
+    providers = [_NoteProvider(RuntimeError("first attempt failed")), _NoteProvider("显式恢复成功")]
+    calls = []
+    def select():
+        provider = providers[len(calls)]; calls.append(provider)
+        return provider
+    monkeypatch.setattr("kairo.generated_note.select_note_provider", select)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: ensure_generated_note(ws, rid), range(2)))
+    assert [r["status"] for r in results] == ["failed", "failed"]
+    assert len(calls) == 1 and not tower(root, ws, rid)
+    assert read_generation(ws, rid)["status"] == "failed"
+
+    retry = runner.invoke(app, ["notes", "generate", rid, "--home", "energy"])
+    assert retry.exit_code == 0, retry.output
+    assert len(calls) == 2 and len(tower(root, ws, rid)) == 1
+
+
+def test_s2_retry_target_identity_excludes_same_id_global_historical_failure(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch)
+    rid = "2026-10-01-retry-collision"
+    g = global_home(root); src = tmp_path / "global-same-id.txt"; src.write_text("全局独立事实。")
+    assert g.add([src], ref_id=rid) == rid
+    add_tag(root, home="", ref_id=rid, tag="energy")
+    failed = _NoteProvider(RuntimeError("global historical failure"))
+    monkeypatch.setattr("kairo.generated_note.select_note_provider", lambda: failed)
+    first = runner.invoke(app, ["run", "--ref", rid])
+    assert first.exit_code == 1, first.output
+    assert read_generation(g, rid)["status"] == "failed"
+    before = generation_path(g, rid).read_bytes()
+    local = tmp_path / "local-target.txt"; local.write_text("本地独立事实。")
+    assert ws.add([local], ref_id=rid) == rid
+    add_tag(root, home="energy", ref_id=rid, tag="energy")
+    recovered = _NoteProvider("仅本地目标成功")
+    monkeypatch.setattr("kairo.generated_note.select_note_provider", lambda: recovered)
+
+    result = runner.invoke(app, ["retry-ref", rid])
+
+    assert result.exit_code == 0, result.output
+    assert len(recovered.contexts) == 1 and len(tower(root, ws, rid)) == 1
+    assert not tower(root, g, rid) and generation_path(g, rid).read_bytes() == before

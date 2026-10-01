@@ -132,7 +132,7 @@ def note_stale(ws, ref_id: str, state=None) -> bool:
     return prior.get("status") != "failed" or prior.get("digest_hash") != digest_hash
 
 
-def ensure_generated_note(ws, ref_id: str, *, state=None) -> dict:
+def ensure_generated_note(ws, ref_id: str, *, state=None, retry_failed: bool = False) -> dict:
     """独占生成锁后重新核对，模型等待不占人工 notes 的锁。"""
     from kairo.notes import append_generated_note_to_ref
     from kairo.rules import _run_agent, safe_provider_summary
@@ -149,6 +149,11 @@ def ensure_generated_note(ws, ref_id: str, *, state=None) -> dict:
         digest_bytes = (folder / "digest.md").read_bytes()
         digest = digest_bytes.decode("utf-8")
         digest_hash = hashlib.sha256(digest_bytes).hexdigest()
+        prior = read_generation(ws, ref_id)
+        if not retry_failed and (prior.get("code") == "state-unreadable"
+                                 or (prior["status"] == "failed"
+                                     and prior.get("digest_hash") == digest_hash)):
+            return prior
         _write_generation(ws, ref_id, "running", digest_hash, provider="grok", reason="")
         try:
             raw = _run_agent(select_note_provider(), _PERSONA, digest, _ARTIFACT,

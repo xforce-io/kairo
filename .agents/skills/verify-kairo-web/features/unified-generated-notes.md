@@ -23,6 +23,8 @@ S3 关联 #431 已置顶全文与追加后保持原置顶、#411 人工 notes �
 
 重试回归：`retry-ref A` 内部调和产生的其它 Ref 新 note 失败必须非零；未变化的无关历史失败不误判。覆盖首次失败、历史失败不变、历史失败在新 digest 上再次失败，目标 A 的 note 保持成功且无重复。
 
+并发失败与身份回归：等待者取得生成锁后再次检查失败状态与digest hash，自动调用最多一次；`notes generate/backfill --apply` 可显式恢复。`retry-ref` 目标按home+id区分，本地目标不得继承同id global Ref未变化的历史失败。
+
 ## 发布后闭环（不冒充预发布证明）
 
 S5.A1：合入并取得部署批准后，用现有 scripts/serve deploy 和同 checkout 的 uv tool install 更新，120秒内核对模块路径/哈希/实际 SHA、页面 GET 与浏览器。
