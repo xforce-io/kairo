@@ -204,3 +204,16 @@ npx skills add xforce-io/kairo --skill kairo -g
 ## Design & decision trail
 
 The CLI tools are usable (`init`/`add`/`step`/… all ready, 105+ tests). Each feature's design doc is stored by issue number under [`docs/design/`](docs/design) and is the single source of truth for that decision: MVP [#1](https://github.com/xforce-io/kairo/issues/1), AgentProvider [#4](https://github.com/xforce-io/kairo/issues/4), source layering [#13](https://github.com/xforce-io/kairo/issues/13), Web Console i18n [#41](https://github.com/xforce-io/kairo/issues/41), Grok provider [#61](https://github.com/xforce-io/kairo/issues/61), etc.
+
+### 自动 note 诊断与补齐
+
+单条、整 Topic、日历批量和材料重试在有效 stream digest 就绪后确保一条 `generated` note，保留已有 notes 与置顶。失败记录在实际 Ref 目录的 `generated-note.json`，同 digest 不自动反复尝试；运行失败以非零退出，digest 仍保留。
+
+```bash
+kairo notes status --topic <topic> --root <serve-root> --json
+kairo notes generate <ref-id> --home global --root <serve-root>
+kairo notes backfill --topic <topic> --root <serve-root> --json
+kairo notes backfill --topic <topic> --root <serve-root> --apply --json
+```
+
+backfill 默认只读预览，`--apply` 才补齐；corpus、缺失/空/blocked digest 和已有自动 note 跳过。单项失败继续其它 Ref，并以非零退出。`generate` 只补 note，不重做转写、digest 或理解文档。Topic 左侧逐 Ref 判断：有 notes 展开原预览与有效置顶，无 notes 展示 digest；读取错误仍显示错误。

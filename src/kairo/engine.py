@@ -18,6 +18,7 @@ from kairo.rules import (
     REASON_EXPLICIT_RECOMPOSE,
     ComposeRule,
     DigestRule,
+    GeneratedNoteRule,
     NormalizeRule,
     ReviewFoldRule,
     TransformRule,
@@ -100,6 +101,7 @@ def _build_rules(ws, provider) -> list:
         *transform_rules,
         NormalizeRule(ws, provider),  # ASR 誊录 → 规范化全文 prose(#30),插在 Digest 前
         DigestRule(ws, provider),
+        GeneratedNoteRule(ws, provider),
         ReviewFoldRule(ws, provider),  # #193 journal 后附纪要折入该条回顾
         ComposeRule(ws, provider),
     ]

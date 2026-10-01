@@ -764,6 +764,113 @@ def notes_show_cmd(
         typer.echo(format_show(payload), nl=False)
 
 
+
+def _note_selection(root, topic, ref_id, home):
+    from kairo.notes import NotesError, _resolve_rec
+    from kairo.refs import member_sources, resolve_open, open_topic
+    serve = _serve_root(root)
+    if bool(topic) == bool(ref_id):
+        raise NotesError("必须指定 --ref 或 --topic 之一", code="invalid_request")
+    if topic:
+        if home is not None:
+            raise NotesError("--topic 不使用 --home", code="invalid_request")
+        return serve, [(ws, rid, rec) for ws, rid, rec in member_sources(open_topic(serve, topic))]
+    rec = _resolve_rec(serve, ref_id, home)
+    ws, rid = resolve_open(serve, rec.home, rec.id)
+    return serve, [(ws, rid, rec)]
+
+
+def _note_rows(selected):
+    from kairo.generated_note import eligibility, read_generation
+    rows = []
+    for ws, rid, rec in selected:
+        try:
+            status, reason = eligibility(ws, rid)
+        except (ValueError, OSError) as exc:
+            from kairo.rules import safe_provider_summary
+            status, reason = "failed", safe_provider_summary(exc)
+        rows.append({"home": rec.home, "ref_id": rid, "title": rec.title,
+                     "status": status, "reason": reason, "generation": read_generation(ws, rid)})
+    return rows
+
+
+def _note_output(payload, as_json):
+    if as_json:
+        _dump(True, payload)
+    else:
+        for row in payload["items"]:
+            generation = row["generation"]
+            detail = row.get("reason") or generation.get("reason", "")
+            attempt = f"; note {generation['status']}" if row["status"] == "ready" else ""
+            typer.echo(f"{row['home'] or 'global'}/{row['ref_id']}: {row['status']}{attempt} {detail}")
+        typer.echo(f"written {payload.get('written', 0)}; failed {payload.get('failed', 0)}")
+
+
+@notes_app.command("status")
+def notes_status_cmd(
+    ref_id: str = typer.Option(None, "--ref"), topic: str = typer.Option(None, "--topic"),
+    home: str = typer.Option(None, "--home"), root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+):
+    """只读核查自动 note 资格与持久化生成状态。"""
+    try:
+        _, selected = _note_selection(root, topic, ref_id, home)
+        rows = _note_rows(selected)
+    except (ValueError, OSError) as exc:
+        _notes_fail(as_json, exc)
+    failed = sum(row["status"] == "failed" or (row["status"] == "ready"
+                 and row["generation"]["status"] == "failed") for row in rows)
+    _note_output({"ok": True, "failed": failed, "items": rows}, as_json)
+
+
+@notes_app.command("generate")
+def notes_generate_cmd(
+    ref_id: str = typer.Argument(...), home: str = typer.Option(None, "--home"),
+    root: Path = typer.Option(None, "--root", "-r"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+):
+    """只确保该 Ref 有一条自动 note；不转写、不改 digest 或综合。"""
+    _notes_process(root, None, ref_id, home, True, as_json)
+
+
+@notes_app.command("backfill")
+def notes_backfill_cmd(
+    topic: str = typer.Option(..., "--topic"), root: Path = typer.Option(None, "--root", "-r"),
+    apply: bool = typer.Option(False, "--apply", help="显式执行补齐；默认仅预览，零写零模型"),
+    as_json: bool = typer.Option(False, "--json/--no-json"),
+):
+    """预览或补齐 Topic 合格 stream 的缺失自动 note，已有 notes 保留。"""
+    _notes_process(root, topic, None, None, apply, as_json)
+
+
+def _notes_process(root, topic, ref_id, home, apply, as_json):
+    from kairo.generated_note import ensure_generated_note
+    try:
+        serve, selected = _note_selection(root, topic, ref_id, home)
+        rows = _note_rows(selected)
+        if apply:
+            with _hold_run_lock(serve, f"notes {topic or ref_id}"):
+                for row, (ws, rid, _) in zip(rows, selected):
+                    if row["status"] == "ready" or (row["status"] == "already-generated"
+                                                       and row["generation"]["status"] in {"running", "failed"}):
+                        try:
+                            result = ensure_generated_note(ws, rid, retry_failed=True)
+                        except (ValueError, OSError) as exc:
+                            from kairo.rules import safe_provider_summary
+                            result = {"status": "failed", "reason": safe_provider_summary(exc)}
+                        row.update(status=result["status"], reason=result.get("reason", ""), generation=result)
+                        if not as_json:
+                            typer.echo(f"note {row['home'] or 'global'}/{rid}: {row['status']}")
+    except (ValueError, OSError) as exc:
+        _notes_fail(as_json, exc)
+    written = sum(row["status"] == "succeeded" and not row["generation"].get("recovered") for row in rows)
+    failed = sum(row["status"] not in {"succeeded", "already-generated"} if ref_id
+                 else row["status"] == "failed" for row in rows)
+    _note_output({"ok": failed == 0, "apply": apply, "written": written, "failed": failed, "items": rows}, as_json)
+    if failed:
+        raise typer.Exit(1)
+
+
 @app.command(name="brief")
 def brief_cmd(
     ref_id: str = typer.Argument(None, help="reference id;省略时处理 serve root 内全部"),
@@ -906,9 +1013,24 @@ def review(
     typer.echo(f"review {rid} → {ws.root.name}")
 
 
-def _exit_if_run_failed(ws: Workspace) -> None:
+def _exit_if_notes_failed(ws, ref_id=None, *, previous_failures=None):
+    from kairo.generated_note import _home, failed_notes
+    failures = failed_notes(ws, None if previous_failures is not None else ref_id)
+    if previous_failures is not None:
+        target = (_home(ws), ref_id)
+        failures = [row for row in failures if (row["home"], row["ref_id"]) == target
+                    or previous_failures.get((row["home"], row["ref_id"])) != row["generation"]]
+    if failures:
+        row = failures[0]
+        typer.secho(f"Error: 机器 note 未写入 {row['ref_id']}: {row['generation'].get('reason') or row['reason']}；使用 kairo notes generate 重试", fg=typer.colors.RED, err=True)
+        raise typer.Exit(1)
+
+
+def _exit_if_run_failed(ws: Workspace, *, check_notes: bool = True) -> None:
     """provider 或终态 target blocked 后非零退出,避免 CLI/Web 假成功。"""
     promote_oversized_degraded(ws)
+    if check_notes:
+        _exit_if_notes_failed(ws)
     if has_provider_failed(ws):
         typer.secho(
             "Error: provider-failed — see kairo status / Web blocks",
@@ -987,7 +1109,10 @@ def _exit_if_ref_failed(ws: Workspace, ref_id: str) -> None:
     """单条 run 只看该条产物。understanding 上的综合阻塞不使本命令失败。"""
     from kairo.engine import ref_product_blocks
 
-    blocks = ref_product_blocks(ws, ref_id)
+    from kairo.refs import member_sources
+    matches = [source for source, rid, _ in member_sources(ws) if rid == ref_id]
+    actual = matches[0] if len(matches) == 1 else ws
+    blocks = ref_product_blocks(actual, ref_id)
     if not blocks:
         return
     reason = blocks[0]["reason"]
@@ -1021,7 +1146,7 @@ def step(
         understanding_only=understanding_only,
     )
     typer.echo("stepped" if progressed else "no change")
-    _exit_if_run_failed(ws)
+    _exit_if_run_failed(ws, check_notes=not understanding_only)
 
 
 @app.command(name="run")
@@ -1069,9 +1194,7 @@ def run_cmd(
         progressed = engine_step(ws, provider, only_ref=ref)
         typer.echo("ran" if progressed else "no change")
         _exit_if_ref_failed(ws, ref)
-        from kairo.generated_note import maybe_append_generated_note
-
-        maybe_append_generated_note(ws, ref)
+        _exit_if_notes_failed(ws, ref)
 
 
 def run_topic_workspace() -> None:
@@ -1079,6 +1202,7 @@ def run_topic_workspace() -> None:
     ws = _open_ws(None)
     plan = workspace_run_plan(ws)
     if plan["mode"] == "clean":
+        _exit_if_notes_failed(ws)
         typer.echo("up to date")
         return
     if plan["mode"] == "attention":
@@ -1101,6 +1225,7 @@ def _run_all_topics() -> None:
 
 def _run_all_topics_locked(serve: Path) -> None:
     from kairo.web.discovery import scan_topic_identities
+    from kairo.generated_note import failed_notes
 
     provider = select_provider(require_read_dirs=True)
     ran: list[str] = []
@@ -1111,6 +1236,10 @@ def _run_all_topics_locked(serve: Path) -> None:
         ws = Workspace.open(serve / identity.slug)
         promote_oversized_degraded(ws)
         mode = workspace_run_plan(ws)["mode"]
+        if mode == "clean" and failed_notes(ws):
+            failed.append(identity.slug)
+            typer.secho(f"{identity.slug}: note failed; use kairo notes generate", fg=typer.colors.RED, err=True)
+            continue
         if mode == "clean":
             skipped.append(identity.slug)
             typer.echo(f"{identity.slug}: up to date")
@@ -1126,7 +1255,8 @@ def _run_all_topics_locked(serve: Path) -> None:
             failed.append(identity.slug)
             typer.secho(f"{identity.slug}: failed ({exc})", fg=typer.colors.RED, err=True)
             continue
-        if has_provider_failed(ws) or workspace_run_plan(ws)["blocked_count"]:
+        from kairo.generated_note import failed_notes
+        if has_provider_failed(ws) or workspace_run_plan(ws)["blocked_count"] or failed_notes(ws):
             failed.append(identity.slug)
             reason = "provider-failed" if has_provider_failed(ws) else "blocked; see kairo status"
             typer.secho(f"{identity.slug}: failed ({reason})", fg=typer.colors.RED, err=True)
@@ -1187,6 +1317,7 @@ def _execute_view_run(
     """Serial in-process run of in-set slugs. Not TaskRegistry, not kairo run --all."""
     from contextlib import nullcontext, redirect_stderr, redirect_stdout
     from io import StringIO
+    from kairo.generated_note import failed_notes
     provider = select_provider(require_read_dirs=True)
     ran: list[str] = []
     failed: list[str] = []
@@ -1204,6 +1335,11 @@ def _execute_view_run(
                     fg=typer.colors.RED,
                     err=True,
                 )
+            continue
+        if mode == "clean" and failed_notes(ws):
+            failed.append(topic.slug)
+            if not quiet:
+                typer.secho(f"{topic.slug}: note failed; use kairo notes generate", fg=typer.colors.RED, err=True)
             continue
         if mode == "clean":
             ran.append(topic.slug)
@@ -1234,7 +1370,8 @@ def _execute_view_run(
                     err=True,
                 )
             continue
-        if has_provider_failed(ws) or workspace_run_plan(ws)["blocked_count"]:
+        from kairo.generated_note import failed_notes
+        if has_provider_failed(ws) or workspace_run_plan(ws)["blocked_count"] or failed_notes(ws):
             failed.append(topic.slug)
             if not quiet:
                 reason = "provider-failed" if has_provider_failed(ws) else "blocked; see kairo status"
@@ -1349,9 +1486,14 @@ def retry_ref(
     if ref_id not in ws.list_reference_ids():
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
+    from kairo.generated_note import failed_notes
+    previous_failures = {(row["home"], row["ref_id"]): row["generation"]
+                         for row in failed_notes(ws)}
     progressed = engine_retry_reference(
         ws, select_provider(require_read_dirs=True), ref_id
     )
+    _exit_if_ref_failed(ws, ref_id)
+    _exit_if_notes_failed(ws, ref_id, previous_failures=previous_failures)
     typer.echo("retried" if progressed else "no change")
 
 

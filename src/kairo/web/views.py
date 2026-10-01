@@ -1023,14 +1023,16 @@ def delete_workspace_view(
     return HTMLResponse("", headers={"HX-Redirect": "/"})
 
 
-def _topic_ref_nav(slug: str, home: str, ref_id: str) -> dict[str, str]:
-    """左侧列表的 hx 默认进入 notes 预览；href 仍是主题页上的参考选中。"""
+def _topic_ref_nav(slug: str, home: str, ref_id: str, serve: Path | None = None, *, record=None) -> dict[str, str]:
+    """逐 Ref 选择 notes 或主预览；href 仍是主题页上的参考选中。"""
     base = f"/w/{quote(slug, safe='')}"
     query = f"home={quote(home or 'global', safe='')}" if home != slug else ""
-    hx_query = f"{query}&panel=notes" if query else "panel=notes"
+    notes = _notes_tower(serve, ref_id, home, record=record) if serve is not None else {"ok": False}
+    has_notes = not notes["ok"] or notes.get("count", 0) > 0
+    hx_query = (f"{query}&panel=notes" if query else "panel=notes") if has_notes else query
     return {
         "href": f"{base}?ref={quote(ref_id, safe='')}" + (f"&{query}" if query else ""),
-        "hx": f"{base}/ref/{quote(ref_id, safe='')}?{hx_query}",
+        "hx": f"{base}/ref/{quote(ref_id, safe='')}" + (f"?{hx_query}" if hx_query else ""),
     }
 
 
@@ -1076,7 +1078,7 @@ def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
             from kairo.refs import resolve_open
 
             for rec in topic_members(serve, ws.root.name, catalog=catalog):
-                nav = _topic_ref_nav(ws.root.name, rec.home, rec.id)
+                nav = _topic_ref_nav(ws.root.name, rec.home, rec.id, serve, record=rec)
                 try:
                     ref_ws, ref_id = resolve_open(serve, rec.home, rec.id)
                     man = ref_ws.read_manifest(ref_id)
@@ -1095,15 +1097,14 @@ def _split_refs(ws: Workspace, serve: Path | None = None, catalog=None):
             return streams, corpus
         except RefError:
             pass
-    from kairo.refs import ref_nav
-
+    from kairo.refs import RefRecord
     for ref_id in ws.list_reference_ids():
         man = ws.read_manifest(ref_id)
-        nav = ref_nav(ws.root.name, ref_id)
+        record = RefRecord(home=ws.root.name, id=ref_id, title=man.title,
+                           source_class=man.source_class, dir=ws.references_dir() / ref_id)
+        nav = _topic_ref_nav(ws.root.name, ws.root.name, ref_id, serve or ws.root.parent, record=record)
         occurred_at, _ = effective_occurred(ref_id, man.occurred_at)
         hx = nav["hx"] or ""
-        if hx:
-            hx = f"{hx}&panel=notes" if "?" in hx else f"{hx}?panel=notes"
         item = {
             "id": ref_id,
             "title": man.title,
@@ -1214,19 +1215,25 @@ def _notes_home(home: str) -> str:
     return "global" if not home or home == "global" else home
 
 
-def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False) -> dict:
-    from kairo.notes import NOTE_TYPES, NotesError, show_notes
+def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False, record=None) -> dict:
+    from kairo.notes import NOTE_TYPES, NotesError, _resolve_rec, show_ref_notes
 
     try:
-        data = show_notes(serve, ref_id=ref_id, home=_notes_home(home))
+        rec = record if record is not None else _resolve_rec(serve, ref_id, _notes_home(home))
+        data = show_ref_notes(rec)
         items = list(data.get("items") or [])
         for it in items:
             it["note_id"] = _note_id_of(it)
             if render_body:
                 it["body_html"] = render_markdown(it.get("content") or "", slug=home if home and home != "global" else None)
-        return {"ok": True, "items": items, "count": int(data.get("count") or 0), "types": NOTE_TYPES}
-    except NotesError as exc:
-        return {"ok": False, "error": str(exc), "code": exc.code, "items": [], "count": 0, "types": NOTE_TYPES}
+        from kairo.generated_note import read_generation_path
+        generation = read_generation_path(rec.dir / "generated-note.json")
+        if any(it["type"] == "generated" for it in items):
+            generation = {**generation, "status": "succeeded", "reason": ""}
+        return {"ok": True, "items": items, "count": int(data.get("count") or 0), "types": NOTE_TYPES,
+                "generation": generation}
+    except (NotesError, ValueError, OSError, KeyError, TypeError) as exc:
+        return {"ok": False, "error": "notes 无法读取", "code": getattr(exc, "code", "read-failed"), "items": [], "count": 0, "types": NOTE_TYPES}
 
 
 def _mark_preview_pin(serve, ref_id: str, home: str, notes: dict) -> None:
@@ -1733,9 +1740,11 @@ def ref_view(
             response.status_code = 404
             response.headers["X-Kairo-Ref-Unavailable"] = "1"
         return response
-    nav = _topic_ref_nav(slug, source, ref_id)
     form_base = f"/w/{quote(slug, safe='')}/ref/{quote(ref_id, safe='')}"
     form_query = f"?home={quote(source or 'global', safe='')}" if source != slug else ""
+    share_path = f"/w/{quote(slug, safe='')}?ref={quote(ref_id, safe='')}" + (
+        f"&{form_query[1:]}" if form_query else ""
+    )
     t = _t(request)
     man = ws.read_manifest(ref_id)
     forms = _ref_forms(ws, ref_id, man, t)
@@ -1793,7 +1802,7 @@ def ref_view(
             "slug": slug,
             "ref_id": ref_id,
             "ref_read_only": source != slug,
-            "share_path": nav["href"],
+            "share_path": share_path,
             "manage_href": f"/refs/{quote(ref_id, safe='')}?home={quote(source or 'global', safe='')}",
             "form_base": form_base,
             "form_query": form_query,
@@ -1817,6 +1826,7 @@ def ref_view(
             "occurred_src": occ_src,
             "added_display": added_dt.astimezone().strftime("%Y-%m-%d %H:%M"),
             "is_public": _is_public_ref(request, source, ref_id),
+            "note_generation": notes_tower.get("generation", {}),
             "notes_count": notes_tower["count"] if notes_tower["ok"] else 0,
             "notes_excerpt": (notes_tower["items"][-1]["excerpt"] if notes_tower["ok"] and notes_tower["items"] else ""),
             "notes_href": f"/refs/{quote(ref_id, safe='')}?home={quote(source or 'global', safe='')}#notes",

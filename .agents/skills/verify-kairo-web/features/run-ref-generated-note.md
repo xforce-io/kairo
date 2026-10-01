@@ -1,5 +1,7 @@
 # #423 单条 run 默认生成一条机器 note
 
+> 历史验收记录：#436 的当前契约见 [unified-generated-notes.md](unified-generated-notes.md)。重复生成、失败退出码及无 note 的默认落点以 #436 为准。
+
 无新 Console 页面（#411 不改）。Drive 走正式 CLI `kairo run --ref`，再用 `kairo notes list` / `show` 核对。不碰现网 serve root。模型轮次用确定性替身，不要求真实供应商。不跑 `kairo step`，不改 `understanding.md`。
 
 ## 入口

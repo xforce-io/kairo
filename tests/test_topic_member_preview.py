@@ -40,7 +40,7 @@ def test_s1_s2_member_preview_and_restore(members, home):
     query = "" if home == "topic" else f"&home={home}"
     address = f"/w/topic?ref=shared{query}"
     detail = f"/w/topic/ref/shared" + (f"?home={home}" if query else "")
-    click = detail + ("&panel=notes" if "?" in detail else "?panel=notes")
+    click = detail
     for url in [address, address.replace("/w/", "/topics/")]:
         page = client.get(url)
         active = re.findall(r'<a class="nav-doc is-ref is-active"[^>]+>', page.text)
@@ -161,10 +161,10 @@ def test_s2_encoded_source_and_id(tmp_path):
     assert '%20' in link[1] and '%20' in link[2]
     assert 'nav-doc is-ref is-active' in client.get(unescape(link[1])).text
     clicked = unescape(link[2])
-    assert "panel=notes" in clicked
+    assert "panel=notes" not in clicked
     opened = client.get(clicked)
     assert opened.status_code == 200
-    assert "notes-reader" in opened.text
+    assert "ENCODED CONTENT" in opened.text
     summary = clicked.replace("&panel=notes", "").replace("?panel=notes", "")
     assert "ENCODED CONTENT" in client.get(summary).text
 

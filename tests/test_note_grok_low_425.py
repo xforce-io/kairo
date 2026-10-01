@@ -147,7 +147,7 @@ def test_s2_note_uses_default_timeout_cap_not_agent_timeout(tmp_path, monkeypatc
     assert _show(ref_id)["count"] == 1
 
 
-def test_s2_note_timeout_is_visible_and_does_not_fail_run(tmp_path, monkeypatch):
+def test_s2_note_timeout_is_visible_and_fails_run(tmp_path, monkeypatch):
     _write_agent_config(tmp_path, monkeypatch, "[agent]\ntimeout_s = 1800\n")
     _serve, ws = _ws(tmp_path, monkeypatch)
     ref_id = _add_text(ws, tmp_path, "a.txt", "会超时的纪要")
@@ -162,7 +162,7 @@ def test_s2_note_timeout_is_visible_and_does_not_fail_run(tmp_path, monkeypatch)
     monkeypatch.setattr("kairo.provider._default_cli_runner", fake_runner)
 
     result = runner.invoke(app, ["run", "--ref", ref_id])
-    assert result.exit_code == 0, result.output + result.stderr
+    assert result.exit_code == 1, result.output + result.stderr
     assert seen["timeout"] == DEFAULT_NOTE_TIMEOUT_CAP_S
     assert seen["timeout"] != 1800
     combined = result.output + result.stderr

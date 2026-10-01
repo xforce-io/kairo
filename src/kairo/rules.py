@@ -790,6 +790,34 @@ class DigestRule:
         return WorkItem(product_key, input_hash, run, is_stale)
 
 
+
+class GeneratedNoteRule:
+    """Ref 层派生 note；失败同 hash 收敛，诊断保存在 actual home。"""
+    def __init__(self, ws, provider):
+        self.ws = ws
+
+    def discover(self, state=None):
+        from kairo.generated_note import eligibility, ensure_generated_note, note_stale
+        from kairo.refs import member_sources
+        items = []
+        for source_ws, rid, _ in member_sources(self.ws):
+            # 同 home 的尚未落盘 digest 状态以当前 state 为准。
+            home_state = state if source_ws.root == self.ws.root else source_ws.read_state()
+            if eligibility(source_ws, rid, home_state)[0] not in {"ready", "already-generated"}:
+                continue
+            def run(st, ws=source_ws, ref_id=rid):
+                result = ensure_generated_note(ws, ref_id, state=st)
+                if result["status"] == "failed":
+                    import sys
+                    print(f"Error: 机器 note 未写入 {ref_id}: {result['reason']}；使用 kairo notes generate 重试", file=sys.stderr, flush=True)
+                elif result["status"] == "succeeded":
+                    print(f"机器 note 已写入 {ref_id}", flush=True)
+            def stale(st, ws=source_ws, ref_id=rid):
+                return note_stale(ws, ref_id, st)
+            item = WorkItem(f"references/{rid}/generated-note.json", "", run, stale)
+            items.append(_bind_home_state(source_ws, self.ws, item))
+        return items
+
 _REVIEW_FOLD_PERSONA = (
     "把新纪要并入这篇时段回顾。"
     "保留原结构（发生了什么 / 待跟进事项 / 明显冲突与未调和点）；没有的节按材料需要可补。"
