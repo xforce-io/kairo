@@ -329,3 +329,42 @@ def test_s3_ref_click_does_not_add_catalog_scan_for_unused_navigation(tmp_path, 
     expected = f"/w/energy?ref={rid}" + ("&amp;home=global" if home == "global" else "")
     assert f'data-share-path="{expected}"' in page.text
     assert len(scans) == 1  # 保持既有notes读取成本；分享链接不得再增加全库扫描
+
+
+@pytest.mark.parametrize("prior", ["none", "historical", "changed"])
+def test_s2_retry_reports_new_other_ref_note_failure_but_not_unchanged_history(
+    tmp_path, monkeypatch, prior
+):
+    root, ws = setup(tmp_path, monkeypatch)
+    source = tmp_path / "other-ref.txt"
+    source.write_text("另一个 Ref B 的明确事实。")
+    other = ws.add([source]); add_tag(root, home="energy", ref_id=other, tag="energy")
+
+    class FailOther(_NoteProvider):
+        def run(self, config, signal=None):
+            if "另一个 Ref B" in config.context:
+                self.contexts.append(config.context)
+                raise RuntimeError("B note failed")
+            return super().run(config, signal)
+
+    provider = FailOther("A 的自动事实")
+    monkeypatch.setattr("kairo.generated_note.select_note_provider", lambda: provider)
+    if prior != "none":
+        failed = runner.invoke(app, ["run", "--ref", other])
+        assert failed.exit_code == 1, failed.output
+        prior_ledger = generation_path(ws, other).read_bytes()
+        if prior == "changed":
+            source.write_text("另一个 Ref B 的明确事实。新增了新的事实。")
+    target = add(ws, tmp_path, "retry-target.txt")
+
+    result = runner.invoke(app, ["retry-ref", target])
+
+    assert result.exit_code == (0 if prior == "historical" else 1), result.output
+    assert len(tower(root, ws, target)) == 1 and not tower(root, ws, other)
+    assert read_generation(ws, other)["status"] == "failed"
+    if prior == "historical":
+        assert generation_path(ws, other).read_bytes() == prior_ledger
+        assert len(provider.contexts) == 2  # B旧失败一次、A一次，未重试B。
+    else:
+        assert other in result.output and "机器 note 未写入" in result.output
+        assert len(provider.contexts) == (2 if prior == "none" else 3)

@@ -21,6 +21,8 @@ S3 关联 #431 已置顶全文与追加后保持原置顶、#411 人工 notes �
 
 边界回归：正式 `step --understanding-only` 仅报告综合结果；历史 note 失败不改变成功退出码，不调用 note 模型、不改生成状态；综合失败仍非零并保留旧正文。由 `tests/test_run_single_material_419.py` 的成功、无效溯源、超时三种确定性 CLI 用例证明。
 
+重试回归：`retry-ref A` 内部调和产生的其它 Ref 新 note 失败必须非零；未变化的无关历史失败不误判。覆盖首次失败、历史失败不变、历史失败在新 digest 上再次失败，目标 A 的 note 保持成功且无重复。
+
 ## 发布后闭环（不冒充预发布证明）
 
 S5.A1：合入并取得部署批准后，用现有 scripts/serve deploy 和同 checkout 的 uv tool install 更新，120秒内核对模块路径/哈希/实际 SHA、页面 GET 与浏览器。

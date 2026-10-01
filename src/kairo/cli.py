@@ -1013,9 +1013,12 @@ def review(
     typer.echo(f"review {rid} → {ws.root.name}")
 
 
-def _exit_if_notes_failed(ws, ref_id=None):
+def _exit_if_notes_failed(ws, ref_id=None, *, previous_failures=None):
     from kairo.generated_note import failed_notes
-    failures = failed_notes(ws, ref_id)
+    failures = failed_notes(ws, None if previous_failures is not None else ref_id)
+    if previous_failures is not None:
+        failures = [row for row in failures if row["ref_id"] == ref_id
+                    or previous_failures.get((row["home"], row["ref_id"])) != row["generation"]]
     if failures:
         row = failures[0]
         typer.secho(f"Error: 机器 note 未写入 {row['ref_id']}: {row['generation'].get('reason') or row['reason']}；使用 kairo notes generate 重试", fg=typer.colors.RED, err=True)
@@ -1482,11 +1485,14 @@ def retry_ref(
     if ref_id not in ws.list_reference_ids():
         typer.secho(f"reference 不存在:{ref_id}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1)
+    from kairo.generated_note import failed_notes
+    previous_failures = {(row["home"], row["ref_id"]): row["generation"]
+                         for row in failed_notes(ws)}
     progressed = engine_retry_reference(
         ws, select_provider(require_read_dirs=True), ref_id
     )
     _exit_if_ref_failed(ws, ref_id)
-    _exit_if_notes_failed(ws, ref_id)
+    _exit_if_notes_failed(ws, ref_id, previous_failures=previous_failures)
     typer.echo("retried" if progressed else "no change")
 
 
