@@ -128,6 +128,41 @@ def test_s3_status_and_understanding_only_success(tmp_path, monkeypatch):
     assert after["blocked_reason"] is None
 
 
+@pytest.mark.parametrize("action,exit_code", [("ok", 0), ("invalid", 1), ("timeout", 1)])
+def test_understanding_only_reports_compose_result_with_historical_note_failure(
+    tmp_path, monkeypatch, action, exit_code
+):
+    import hashlib
+
+    ws = Workspace.init(tmp_path / "ws", topic="综合")
+    digest = ws.root / add_digest(ws, "HISTORICAL", 100)
+    ledger = digest.parent / "generated-note.json"
+    ledger.write_text(json.dumps({
+        "schema_version": 1, "status": "failed", "reason": "历史 note 生成失败",
+        "digest_hash": hashlib.sha256(digest.read_bytes()).hexdigest(),
+    }))
+    before = (digest.read_bytes(), ledger.read_bytes(), _understanding(ws))
+    provider = CompactProvider([action])
+    _bind(monkeypatch, ws, provider)
+    monkeypatch.setattr(
+        "kairo.generated_note.select_note_provider",
+        lambda: pytest.fail("只综合不应调用 note 模型"),
+    )
+
+    result = runner.invoke(app, ["step", "--understanding-only"])
+
+    assert result.exit_code == exit_code, result.output
+    assert "机器 note 未写入" not in result.output
+    assert (digest.read_bytes(), ledger.read_bytes()) == before[:2]
+    target = _status(monkeypatch, ws)[2]
+    if action == "ok":
+        assert _understanding(ws) and target["folded"] == 1
+        assert target["unfolded"] == 0 and target["blocked_reason"] is None
+    else:
+        assert _understanding(ws) == before[2]
+        assert target["unfolded"] == 1 and target["blocked_reason"] is not None
+
+
 @pytest.mark.parametrize("actions,reason", [(["long", "long"], "compose-over-budget"), (["invalid"], "compose-provenance-invalid")])
 def test_s3_failure_keeps_unfolded_when_nothing_commits(tmp_path, monkeypatch, actions, reason):
     ws = Workspace.init(tmp_path / "ws")

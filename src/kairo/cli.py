@@ -1022,10 +1022,11 @@ def _exit_if_notes_failed(ws, ref_id=None):
         raise typer.Exit(1)
 
 
-def _exit_if_run_failed(ws: Workspace) -> None:
+def _exit_if_run_failed(ws: Workspace, *, check_notes: bool = True) -> None:
     """provider 或终态 target blocked 后非零退出,避免 CLI/Web 假成功。"""
     promote_oversized_degraded(ws)
-    _exit_if_notes_failed(ws)
+    if check_notes:
+        _exit_if_notes_failed(ws)
     if has_provider_failed(ws):
         typer.secho(
             "Error: provider-failed — see kairo status / Web blocks",
@@ -1141,7 +1142,7 @@ def step(
         understanding_only=understanding_only,
     )
     typer.echo("stepped" if progressed else "no change")
-    _exit_if_run_failed(ws)
+    _exit_if_run_failed(ws, check_notes=not understanding_only)
 
 
 @app.command(name="run")
