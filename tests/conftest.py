@@ -24,3 +24,21 @@ def _isolate_serve_root(monkeypatch):
     """
     monkeypatch.delenv("KAIRO_SERVE_ROOT", raising=False)
 
+
+# #436：隔离新增自动 note 的模型调用；供应商专测可以再次替换 runner。
+import json
+from pathlib import Path
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def isolate_automatic_note_model(monkeypatch):
+    import kairo.provider as provider
+    original = provider._default_cli_runner
+    def runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
+        prompt = Path(cwd) / "_prompt.md"
+        if cmd == "grok" and prompt.is_file() and prompt.read_text().startswith("根据下面这一份详备纪要写一条短 note"):
+            Path(stdout_file).write_text(json.dumps({"type": "result", "result": "测试自动 note：已有纪要的事实。"}) + "\n")
+            return None
+        return original(cmd, args, cwd=cwd, input=input, stdout_file=stdout_file, timeout=timeout)
+    monkeypatch.setattr(provider, "_default_cli_runner", runner)

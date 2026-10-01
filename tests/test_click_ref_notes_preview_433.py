@@ -48,7 +48,7 @@ def test_left_click_hx_lands_on_notes_panel(tmp_path, monkeypatch):
     page = TestClient(create_app(serve)).get("/w/energy", params={"ref": rid}, headers=ZH)
     assert page.status_code == 200
     enc = quote(rid, safe="")
-    assert f'hx-get="/w/energy/ref/{enc}?panel=notes"' in page.text
+    assert f'hx-get="/w/energy/ref/{enc}"' in page.text
     assert f'href="/w/energy?ref={enc}"' in page.text
 
 

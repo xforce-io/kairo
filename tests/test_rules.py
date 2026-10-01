@@ -811,8 +811,8 @@ def test_leftover_degraded_oversized_is_observed_as_migration(tmp_path):
     ws.write_state(state)
 
     plan = workspace_run_plan(ws)
-    assert plan["mode"] == "retry"
-    assert plan["pending_count"] == 0
+    assert plan["mode"] == "run_and_retry"
+    assert plan["pending_count"] == 1  # #436 缺失自动 note 可独立加工
     assert plan["blocked_count"] == 1
     assert plan["retryable_blocked_count"] == 1
     assert plan["blocked_targets"][0]["reason"] == REASON_COMPOSE_MIGRATION_REQUIRED

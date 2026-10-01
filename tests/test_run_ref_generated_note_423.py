@@ -121,7 +121,7 @@ def test_s1_appends_machine_note_without_touching_understanding(tmp_path, monkey
     } == folded
 
 
-def test_s1_again_appends_and_keeps_prior_notes(tmp_path, monkeypatch):
+def test_s1_again_preserves_generated_and_prior_notes(tmp_path, monkeypatch):
     _serve, ws = _ws(tmp_path, monkeypatch)
     ref_id = _add_text(ws, tmp_path, "a.txt", "再次")
     human = runner.invoke(
@@ -135,25 +135,26 @@ def test_s1_again_appends_and_keeps_prior_notes(tmp_path, monkeypatch):
     again = runner.invoke(app, ["run", "--ref", ref_id])
     assert again.exit_code == 0, again.output + again.stderr
     items = _show(ref_id)["items"]
-    assert [item["content"] for item in items] == ["人工判断", "第一条机器", "第二条机器"]
-    assert [item["type"] for item in items] == ["decision", "generated", "generated"]
+    assert [item["content"] for item in items] == ["人工判断", "第一条机器"]
+    assert [item["type"] for item in items] == ["decision", "generated"]
     assert items[0]["author"] != "machine"
-    assert len(provider.contexts) == 2
+    assert len(provider.contexts) == 1
 
 
 def test_s2_failure_empty_and_overlong_keep_success(tmp_path, monkeypatch):
     _serve, ws = _ws(tmp_path, monkeypatch)
     ref_id = _add_text(ws, tmp_path, "a.txt", "会失败的纪要")
     cases = (RuntimeError("model down"), "  \n", "超" * 801)
-    for note in cases:
+    for index, note in enumerate(cases):
         provider = _NoteProvider(note)
         _bind(monkeypatch, provider)
         digest = None
         path = ws.root / "references" / ref_id / "digest.md"
         if path.is_file():
             digest = path.read_bytes()
-        result = runner.invoke(app, ["run", "--ref", ref_id])
-        assert result.exit_code == 0, result.output + result.stderr
+        args = ["run", "--ref", ref_id] if index == 0 else ["notes", "generate", ref_id, "--home", "topic"]
+        result = runner.invoke(app, args)
+        assert result.exit_code == 1, result.output + result.stderr
         assert _show(ref_id)["count"] == 0
         assert len(provider.contexts) == 1
         if digest is not None:

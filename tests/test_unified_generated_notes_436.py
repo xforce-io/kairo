@@ -1,0 +1,188 @@
+"""#436 formal entry points, provenance home, failure recovery and preservation."""
+import hashlib
+import json
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from urllib.parse import quote
+
+import pytest
+from fastapi.testclient import TestClient
+from typer.testing import CliRunner
+from kairo.cli import app
+from kairo.engine import step
+from kairo.generated_note import ensure_generated_note, generation_path, read_generation
+from kairo.models import ProductState
+from kairo.notes import add_note, pin_note, show_notes
+from kairo.provider import StubProvider
+from kairo.refs import create_tag, global_home, add_tag, set_include_tags
+from kairo.web.server import create_app
+from kairo.workspace import Workspace
+from test_run_ref_generated_note_423 import _NoteProvider
+
+runner = CliRunner()
+
+
+def setup(tmp_path, monkeypatch):
+    root = tmp_path / 'root'; root.mkdir()
+    ws = Workspace.init(root / 'energy', topic='energy')
+    create_tag(root, 'energy')
+    set_include_tags(root, 'energy', ['energy'])
+    monkeypatch.setenv('KAIRO_SERVE_ROOT', str(root)); monkeypatch.chdir(ws.root)
+    monkeypatch.setattr('kairo.cli.select_provider', lambda **_: StubProvider())
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: _NoteProvider('自动 note 事实'))
+    return root, ws
+
+
+def add(ws, tmp_path, name, digest=False):
+    src = tmp_path / name; src.write_text('明确事实和决定。')
+    rid = ws.add([src])
+    if ws.root.name != 'global-home':
+        add_tag(ws.root.parent, home=ws.root.name, ref_id=rid, tag='energy')
+    if digest:
+        (ws.references_dir()/rid/'digest.md').write_text('# 已有 digest\n\n明确事实。')
+    return rid
+
+
+def tower(root, ws, rid):
+    home = 'global' if ws.root.name == 'global-home' else ws.root.name
+    return show_notes(root, ref_id=rid, home=home)['items']
+
+
+def test_s1_run_global_actual_home_and_no_duplicates(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch)
+    g = global_home(root); rid = add(g, tmp_path, 'global.txt')
+    add_tag(root, home='', ref_id=rid, tag='energy')
+    human = add_note(root, ref_id=rid, home='global', content='人工决定')
+    pin_note(root, ref_id=rid, home='global', note_id=human['stable_id'].split('/')[-1])
+    before = (g.references_dir()/rid/'note-pin.json').read_bytes()
+    for _ in range(2):
+        result = runner.invoke(app, ['run', '--ref', rid])
+        assert result.exit_code == 0, result.output
+    assert len(tower(root,g,rid)) == 2
+    assert tower(root,g,rid)[0]['content'] == '人工决定'
+    assert (g.references_dir()/rid/'note-pin.json').read_bytes() == before
+    assert not (ws.references_dir()/rid).exists()
+    assert read_generation(g,rid)['status'] == 'succeeded'
+
+
+def test_s1_step_retry_and_view_entrypoints(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch)
+    rid = add(ws, tmp_path, 'local.txt')
+    first = runner.invoke(app, ['step'])
+    assert first.exit_code == 0, first.output
+    assert len(tower(root,ws,rid)) == 1
+    again = runner.invoke(app, ['retry-ref', rid])
+    assert again.exit_code == 0, again.output
+    assert len(tower(root,ws,rid)) == 1
+    other = add(ws, tmp_path, 'view.txt')
+    ws.read_manifest(other)
+    result = runner.invoke(app, ['run-view', str(root), '--day', __import__('datetime').date.today().isoformat(), '--yes', '--json'])
+    assert result.exit_code == 0, result.output
+    assert len(tower(root,ws,other)) == 1
+
+
+@pytest.mark.parametrize('note', [RuntimeError('timeout password=secret'), '', '超'*801])
+def test_s2_failure_persistent_and_note_only_recovery(tmp_path, monkeypatch, note):
+    root, ws = setup(tmp_path, monkeypatch); rid = add(ws,tmp_path,'fail.txt')
+    provider = _NoteProvider(note)
+    monkeypatch.setattr('kairo.generated_note.select_note_provider',lambda:provider)
+    result = runner.invoke(app,['run','--ref',rid])
+    assert result.exit_code == 1, result.output
+    assert read_generation(ws,rid)['status'] == 'failed'
+    assert 'password=secret' not in generation_path(ws,rid).read_text()
+    assert len(provider.contexts) == 1
+    runner.invoke(app,['run','--ref',rid])
+    assert len(provider.contexts) == 1  # no endless automatic retries
+    files=[ws.references_dir()/rid/'digest.md',ws.references_dir()/rid/'manifest.yaml',ws.root/'.kairo/state.json']
+    before=[p.read_bytes() for p in files]
+    monkeypatch.setattr('kairo.generated_note.select_note_provider',lambda:_NoteProvider('恢复事实'))
+    result=runner.invoke(app,['notes','generate',rid,'--home','energy','--json'])
+    assert result.exit_code == 0,result.output
+    assert [p.read_bytes() for p in files] == before
+    assert len(tower(root,ws,rid)) == 1
+    assert read_generation(ws,rid)['status'] == 'succeeded'
+
+
+def test_s2_concurrent_and_interrupted_recovery(tmp_path,monkeypatch):
+    root,ws=setup(tmp_path,monkeypatch);rid=add(ws,tmp_path,'concurrent.txt',True)
+    generation_path(ws,rid).write_text(json.dumps({'schema_version':1,'status':'running'}))
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results=list(pool.map(lambda _:ensure_generated_note(ws,rid),range(2)))
+    assert sorted(r['status'] for r in results)==['already-generated','succeeded']
+    assert len(tower(root,ws,rid))==1
+
+
+def test_s3_ref_fallback_global_pin_and_error(tmp_path,monkeypatch):
+    root,ws=setup(tmp_path,monkeypatch);rid=add(ws,tmp_path,'empty.txt',True)
+    g=global_home(root);gr=add(g,tmp_path,'global-empty.txt',True);add_tag(root,home='',ref_id=gr,tag='energy')
+    existing=add(ws,tmp_path,'existing.txt',True)
+    n=add_note(root,ref_id=existing,home='energy',content='置顶正文')
+    pin_note(root,ref_id=existing,home='energy',note_id=n['stable_id'].split('/')[-1])
+    client=TestClient(create_app(root)); client.headers.update({"Accept-Language":"zh-CN"}); page=client.get('/w/energy').text
+    assert f'hx-get="/w/energy/ref/{quote(rid,safe="")}"' in page
+    assert f'hx-get="/w/energy/ref/{quote(gr,safe="")}?home=global"' in page
+    assert f'hx-get="/w/energy/ref/{quote(existing,safe="")}?panel=notes"' in page
+    assert '置顶正文' in client.get(f'/w/energy/ref/{existing}?panel=notes').text
+    assert '明确事实' in client.get(f'/w/energy/ref/{gr}?home=global').text
+    (ws.references_dir()/rid/'notes.jsonl').write_text('invalid json')
+    page=client.get('/w/energy').text
+    assert f'hx-get="/w/energy/ref/{quote(rid,safe="")}?panel=notes"' in page
+    error=client.get(f'/w/energy/ref/{rid}?panel=notes').text
+    assert 'notes 无法读取' in error or '洞察 notes' in error
+
+
+def test_s4_preview_no_writes_apply_preserve_and_repeat(tmp_path,monkeypatch):
+    root,ws=setup(tmp_path,monkeypatch);a=add(ws,tmp_path,'one.txt',True);b=add(ws,tmp_path,'two.txt',True)
+    missing=add(ws,tmp_path,'no.txt');blocked=add(ws,tmp_path,'blocked.txt',True)
+    state=ws.read_state();state.products[f'references/{blocked}/digest.md']=ProductState(input_hash='x',status='blocked',reason='digest-degraded');ws.write_state(state)
+    before={str(p):p.read_bytes() for p in root.rglob('*') if p.is_file()}
+    preview=runner.invoke(app,['notes','backfill','--topic','energy','--json'])
+    assert preview.exit_code==0,preview.output
+    assert {str(p):p.read_bytes() for p in root.rglob('*') if p.is_file()}==before
+    payload=json.loads(preview.stdout)
+    assert [r['status'] for r in payload['items']].count('ready')==2
+    calls=[]
+    def select():
+        calls.append(1);return _NoteProvider(RuntimeError('down') if len(calls)==1 else '成功正文')
+    monkeypatch.setattr('kairo.generated_note.select_note_provider',select)
+    done=runner.invoke(app,['notes','backfill','--topic','energy','--apply','--json'])
+    assert done.exit_code==1,done.output
+    assert json.loads(done.stdout)['written']==1 and json.loads(done.stdout)['failed']==1
+    monkeypatch.setattr('kairo.generated_note.select_note_provider',lambda:_NoteProvider('恢复正文'))
+    done=runner.invoke(app,['notes','backfill','--topic','energy','--apply','--json'])
+    assert done.exit_code==0,done.output
+    assert json.loads(done.stdout)['written']==1
+    repeated=runner.invoke(app,['notes','backfill','--topic','energy','--apply','--json'])
+    assert json.loads(repeated.stdout)['written']==0
+    assert len(tower(root,ws,a))==len(tower(root,ws,b))==1
+    assert not generation_path(ws,missing).exists() and not generation_path(ws,blocked).exists()
+
+
+def test_s2_note_written_before_state_crash_recovers_without_model(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch)
+    rid = add(ws, tmp_path, 'written-before-crash.txt', True)
+    from kairo.notes import append_generated_note
+    append_generated_note(root, ref_id=rid, home='energy', content='已成功写入的事实')
+    generation_path(ws, rid).write_text(json.dumps({'schema_version':1, 'status':'running'}))
+    def unexpected():
+        pytest.fail('已落盘 note 不能再次调用模型')
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', unexpected)
+    result = runner.invoke(app, ['notes', 'generate', rid, '--home', 'energy', '--json'])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)['written'] == 0
+    assert read_generation(ws, rid)['status'] == 'succeeded'
+    assert len(tower(root, ws, rid)) == 1
+
+
+@pytest.mark.parametrize('entry', ['step', 'retry-ref', 'run-view'])
+def test_s2_every_entry_reports_note_failure(tmp_path, monkeypatch, entry):
+    root, ws = setup(tmp_path, monkeypatch)
+    rid = add(ws, tmp_path, 'entry-failure.txt')
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: _NoteProvider(RuntimeError('note down')))
+    args = [entry] if entry == 'step' else [entry, rid] if entry == 'retry-ref' else [entry, str(root), '--day', __import__('datetime').date.today().isoformat(), '--yes', '--json']
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1, result.output
+    assert read_generation(ws, rid)['status'] == 'failed'
+    assert not tower(root, ws, rid)
+    if entry == 'run-view':
+        assert json.loads(result.stdout)['failed'] == ['energy']

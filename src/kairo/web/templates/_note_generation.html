@@ -1,0 +1,7 @@
+{% if note_generation.status == 'failed' %}
+<p class="notes-error" role="alert">自动 note 生成失败：{{ note_generation.reason }}。可用 <code>kairo notes generate</code> 只重试 note。</p>
+{% elif note_generation.status == 'running' %}
+<p class="panel-hint">自动 note 尚未完成；若运行已中断，可用 <code>kairo notes generate</code> 恢复。</p>
+{% elif note_generation.status == 'not-attempted' %}
+<p class="panel-hint">自动 note 尚未尝试生成。</p>
+{% endif %}

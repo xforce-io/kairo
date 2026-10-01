@@ -1,5 +1,7 @@
 # #433 左侧点击参考进入 notes 预览
 
+> 历史验收记录：#436 的当前契约见 [unified-generated-notes.md](unified-generated-notes.md)。重复生成、失败退出码及无 note 的默认落点以 #436 为准。
+
 Drive **主题页左侧参考**（`/w/{slug}?ref={id}` 的 `hx-get`，带 `panel=notes`）。中间区换成该参考的 notes 预览。置顶展开仍只认已发布规则，本票不写 `note-pin.json`。不碰现网 serve root。不触发 LLM / `step` / `compose`。
 
 ## 入口
