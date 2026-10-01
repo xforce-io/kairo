@@ -112,7 +112,8 @@ def test_s2_concurrent_and_interrupted_recovery(tmp_path,monkeypatch):
     assert len(tower(root,ws,rid))==1
 
 
-def test_s3_ref_fallback_global_pin_and_error(tmp_path,monkeypatch):
+@pytest.mark.parametrize("broken", ["invalid json", "{}", "[]"])
+def test_s3_ref_fallback_global_pin_and_error(tmp_path,monkeypatch,broken):
     root,ws=setup(tmp_path,monkeypatch);rid=add(ws,tmp_path,'empty.txt',True)
     g=global_home(root);gr=add(g,tmp_path,'global-empty.txt',True);add_tag(root,home='',ref_id=gr,tag='energy')
     existing=add(ws,tmp_path,'existing.txt',True)
@@ -124,7 +125,7 @@ def test_s3_ref_fallback_global_pin_and_error(tmp_path,monkeypatch):
     assert f'hx-get="/w/energy/ref/{quote(existing,safe="")}?panel=notes"' in page
     assert '置顶正文' in client.get(f'/w/energy/ref/{existing}?panel=notes').text
     assert '明确事实' in client.get(f'/w/energy/ref/{gr}?home=global').text
-    (ws.references_dir()/rid/'notes.jsonl').write_text('invalid json')
+    (ws.references_dir()/rid/'notes.jsonl').write_text(broken)
     page=client.get('/w/energy').text
     assert f'hx-get="/w/energy/ref/{quote(rid,safe="")}?panel=notes"' in page
     error=client.get(f'/w/energy/ref/{rid}?panel=notes').text
@@ -246,3 +247,12 @@ def test_s2_shared_ref_failure_reported_by_clean_batch_branch(tmp_path, monkeypa
         assert 'failed 2' in result.output and 'energy: note failed' in result.output
         repeated = runner.invoke(app, args)
         assert repeated.exit_code == 1 and len(provider.contexts) == 1
+
+
+@pytest.mark.parametrize('payload', [{'schema_version':1}, {'schema_version':1,'status':[]}, {'schema_version':1,'status':'failed','reason':{}}])
+def test_s2_malformed_generation_state_has_readable_diagnostic(tmp_path, monkeypatch, payload):
+    root, ws = setup(tmp_path, monkeypatch); rid = add(ws, tmp_path, 'state.txt', True)
+    generation_path(ws, rid).write_text(json.dumps(payload))
+    result = runner.invoke(app, ['notes', 'status', '--ref', rid, '--home', 'energy'])
+    assert result.exit_code == 0, result.output
+    assert 'note failed' in result.output and '状态无法读取' in result.output

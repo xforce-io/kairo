@@ -52,10 +52,12 @@ def read_generation(ws, ref_id: str) -> dict:
         return {"status": "not-attempted", "reason": ""}
     try:
         data = json.loads(path.read_text())
-        if not isinstance(data, dict) or data.get("schema_version") != 1:
+        if (not isinstance(data, dict) or data.get("schema_version") != 1
+                or data.get("status") not in {"running", "succeeded", "failed", "not-attempted"}
+                or not isinstance(data.get("reason", ""), str)):
             raise ValueError("invalid note generation state")
         return data
-    except (OSError, ValueError):
+    except (OSError, ValueError, TypeError):
         return {"status": "failed", "reason": "note 生成状态无法读取", "code": "state-unreadable"}
 
 
@@ -97,7 +99,7 @@ def eligibility(ws, ref_id: str, state=None) -> tuple[str, str]:
         return "no-digest", "尚无有效 digest"
     try:
         generated = _generated(ws, ref_id)
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, KeyError, TypeError) as exc:
         from kairo.rules import safe_provider_summary
         return "failed", "notes 无法读取：" + safe_provider_summary(exc)
     if generated:

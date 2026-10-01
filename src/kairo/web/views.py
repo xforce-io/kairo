@@ -1230,7 +1230,7 @@ def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False) ->
             generation = {**generation, "status": "succeeded", "reason": ""}
         return {"ok": True, "items": items, "count": int(data.get("count") or 0), "types": NOTE_TYPES,
                 "generation": generation}
-    except (NotesError, ValueError, OSError) as exc:
+    except (NotesError, ValueError, OSError, KeyError, TypeError) as exc:
         return {"ok": False, "error": "notes 无法读取", "code": getattr(exc, "code", "read-failed"), "items": [], "count": 0, "types": NOTE_TYPES}
 
 
