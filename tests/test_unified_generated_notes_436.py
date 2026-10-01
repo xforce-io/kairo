@@ -258,9 +258,10 @@ def test_s2_malformed_generation_state_has_readable_diagnostic(tmp_path, monkeyp
     assert 'note failed' in result.output and '状态无法读取' in result.output
 
 
-def test_s2_unreadable_state_waits_for_explicit_retry(tmp_path, monkeypatch):
+@pytest.mark.parametrize("broken", ["invalid json", json.dumps({"schema_version":1,"status":"failed"}), json.dumps({"schema_version":1,"status":"failed","digest_hash":"bogus"})])
+def test_s2_unreadable_state_waits_for_explicit_retry(tmp_path, monkeypatch, broken):
     root, ws = setup(tmp_path, monkeypatch); rid = add(ws, tmp_path, 'explicit-recovery.txt', True)
-    path = generation_path(ws, rid); path.write_text('invalid json'); before = path.read_bytes()
+    path = generation_path(ws, rid); path.write_text(broken); before = path.read_bytes()
     from kairo.generated_note import note_stale
     assert not note_stale(ws, rid)
     provider = _NoteProvider('显式恢复事实')

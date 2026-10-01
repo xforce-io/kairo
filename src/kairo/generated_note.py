@@ -59,6 +59,11 @@ def read_generation_path(path: Path) -> dict:
                 or data.get("status") not in {"running", "succeeded", "failed", "not-attempted"}
                 or not isinstance(data.get("reason", ""), str)):
             raise ValueError("invalid note generation state")
+        digest_hash = data.get("digest_hash")
+        if data["status"] == "failed" and (not isinstance(digest_hash, str)
+                or len(digest_hash) != 64
+                or any(char not in "0123456789abcdef" for char in digest_hash)):
+            raise ValueError("failed note generation state has no valid digest hash")
         return data
     except (OSError, ValueError, TypeError):
         return {"status": "failed", "reason": "note 生成状态无法读取", "code": "state-unreadable"}
