@@ -11,11 +11,11 @@
 | ID | 入口、动作 | 必需结果 |
 |---|---|---|
 | S1.A1 | 正式 CLI run --ref、step、run-view --yes、retry-ref；本地与 global，再执行 | 成功各确保一条 generated≤800；重复0条；actual home 正确，旧 notes/置顶不改 |
-| S2.A1 | notes status --ref/--topic；失败后 notes generate REF --home | 失败非零、持久化且脱敏、无半条；成功仅写 note 与生成状态，其它产物不变 |
-| S2.A2 | 同 Ref 并发与 running 中断恢复 | 最多1条；已落 note 但状态未落可恢复；不重复模型调用 |
+| S2.A1 | notes status --ref/--topic；失败后 notes generate REF --home | 失败非零、持久化且脱敏、默认文本可读；generate 不合格材料非零、无半条；成功仅写 note 与生成状态，其它产物不变 |
+| S2.A2 | 同 Ref 并发与 running 中断恢复 | 最多1条；已落 note 但状态未落可恢复；Windows换行 digest 同 hash 失败收敛；不重复模型调用 |
 | S3.A1 | /w/energy 左侧点击本地/global 无 note Ref、有 note Ref；显式 notes 空态；损坏 notes | 每 Ref 无 note 落 digest；有 note 落原 pin 预览；错误可见不伪装空；Ref 详情能读诊断 |
 | S3.A1-public | 同路径 public-read 服务 | 无追加、置顶、重试入口，无内部诊断；GET 不写文件 |
-| S4.A1 | backfill 无 apply、apply 单项失败、恢复、再次 apply | 默认0写0模型；仅合格缺失；失败继续且非零；再次0条；旧notes/置顶不改 |
+| S4.A1 | backfill 无 apply、apply 单项失败、恢复、再次 apply | 默认0写0模型；仅合格缺失；失败继续且非零；批量共享 Ref 在 clean 分支仍报告既存失败；再次0条；旧notes/置顶不改 |
 
 S3 关联 #431 已置顶全文与追加后保持原置顶、#411 人工 notes 详情/列表阅读。必须真实浏览器点击，HTTP测试只作辅助。证据按 handbook 保存 before/after PNG、snapshot 与原始 CLI 输出。
 

@@ -131,8 +131,9 @@ def ensure_generated_note(ws, ref_id: str, *, state=None) -> dict:
                                      note_id=_generated(ws, ref_id)[0]["stable_id"], reason="", recovered=True)
         if status != "ready":
             return {"status": status, "reason": reason}
-        digest = (folder / "digest.md").read_text()
-        digest_hash = hashlib.sha256(digest.encode()).hexdigest()
+        digest_bytes = (folder / "digest.md").read_bytes()
+        digest = digest_bytes.decode("utf-8")
+        digest_hash = hashlib.sha256(digest_bytes).hexdigest()
         _write_generation(ws, ref_id, "running", digest_hash, provider="grok", reason="")
         try:
             raw = _run_agent(select_note_provider(), _PERSONA, digest, _ARTIFACT,

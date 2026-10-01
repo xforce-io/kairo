@@ -186,3 +186,63 @@ def test_s2_every_entry_reports_note_failure(tmp_path, monkeypatch, entry):
     assert not tower(root, ws, rid)
     if entry == 'run-view':
         assert json.loads(result.stdout)['failed'] == ['energy']
+
+
+def test_s2_crlf_digest_failure_converges_and_status_is_readable(tmp_path, monkeypatch):
+    root, ws = setup(tmp_path, monkeypatch)
+    rid = add(ws, tmp_path, 'crlf.txt', True)
+    (ws.references_dir()/rid/'digest.md').write_bytes(b'# digest\r\nfacts\r\n')
+    provider = _NoteProvider(RuntimeError('timeout password=secret'))
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: provider)
+    assert ensure_generated_note(ws, rid)['status'] == 'failed'
+    from kairo.generated_note import note_stale
+    assert not note_stale(ws, rid)
+    result = runner.invoke(app, ['notes', 'status', '--ref', rid, '--home', 'energy'])
+    assert result.exit_code == 0
+    assert 'note failed' in result.output and 'timeout' in result.output
+    assert 'failed 1' in result.output and 'password=secret' not in result.output
+    assert len(provider.contexts) == 1
+
+
+@pytest.mark.parametrize('kind', ['no-digest', 'empty', 'corpus', 'blocked'])
+def test_s2_generate_ineligible_is_not_success(tmp_path, monkeypatch, kind):
+    root, ws = setup(tmp_path, monkeypatch)
+    rid = add(ws, tmp_path, 'ineligible.txt', True)
+    path = ws.references_dir()/rid/'digest.md'
+    if kind == 'no-digest':
+        path.unlink()
+    elif kind == 'empty':
+        path.write_text('   ')
+    elif kind == 'corpus':
+        manifest = ws.read_manifest(rid); manifest.source_class = 'corpus'; ws.write_manifest(rid, manifest)
+    else:
+        state = ws.read_state(); state.products[f'references/{rid}/digest.md'] = ProductState(input_hash='x', status='blocked', reason='digest-degraded'); ws.write_state(state)
+    def unexpected():
+        pytest.fail('不合格材料不得调用模型')
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', unexpected)
+    result = runner.invoke(app, ['notes', 'generate', rid, '--home', 'energy', '--json'])
+    assert result.exit_code == 1, result.output
+    payload = json.loads(result.stdout)
+    assert payload['ok'] is False and payload['written'] == 0 and payload['failed'] == 1
+    assert not tower(root, ws, rid)
+
+
+@pytest.mark.parametrize('entry', ['all', 'view'])
+def test_s2_shared_ref_failure_reported_by_clean_batch_branch(tmp_path, monkeypatch, entry):
+    root, ws = setup(tmp_path, monkeypatch)
+    beta = Workspace.init(root/'beta', topic='beta'); create_tag(root, 'beta'); set_include_tags(root, 'beta', ['energy'])
+    for topic in [ws, beta]:
+        con = topic.constitution; con.targets = []; topic.write_constitution(con)
+    g = global_home(root); rid = add(g, tmp_path, 'shared-failure.txt'); add_tag(root, home='', ref_id=rid, tag='energy')
+    provider = _NoteProvider(RuntimeError('note down'))
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: provider)
+    args = ['run', '--all'] if entry == 'all' else ['run-view', str(root), '--day', __import__('datetime').date.today().isoformat(), '--yes', '--json']
+    result = runner.invoke(app, args)
+    assert result.exit_code == 1, result.output
+    assert len(provider.contexts) == 1  # beta处理失败，energy已clean但必须报告原失败
+    if entry == 'view':
+        assert json.loads(result.stdout)['failed'] == ['beta', 'energy']
+    else:
+        assert 'failed 2' in result.output and 'energy: note failed' in result.output
+        repeated = runner.invoke(app, args)
+        assert repeated.exit_code == 1 and len(provider.contexts) == 1

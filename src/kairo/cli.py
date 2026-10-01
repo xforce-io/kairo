@@ -799,7 +799,10 @@ def _note_output(payload, as_json):
         _dump(True, payload)
     else:
         for row in payload["items"]:
-            typer.echo(f"{row['home'] or 'global'}/{row['ref_id']}: {row['status']} {row.get('reason', '')}")
+            generation = row["generation"]
+            detail = row.get("reason") or generation.get("reason", "")
+            attempt = f"; note {generation['status']}" if row["status"] == "ready" else ""
+            typer.echo(f"{row['home'] or 'global'}/{row['ref_id']}: {row['status']}{attempt} {detail}")
         typer.echo(f"written {payload.get('written', 0)}; failed {payload.get('failed', 0)}")
 
 
@@ -815,7 +818,9 @@ def notes_status_cmd(
         rows = _note_rows(selected)
     except (ValueError, OSError) as exc:
         _notes_fail(as_json, exc)
-    _note_output({"ok": True, "items": rows}, as_json)
+    failed = sum(row["status"] == "failed" or (row["status"] == "ready"
+                 and row["generation"]["status"] == "failed") for row in rows)
+    _note_output({"ok": True, "failed": failed, "items": rows}, as_json)
 
 
 @notes_app.command("generate")
@@ -859,7 +864,8 @@ def _notes_process(root, topic, ref_id, home, apply, as_json):
     except (ValueError, OSError) as exc:
         _notes_fail(as_json, exc)
     written = sum(row["status"] == "succeeded" and not row["generation"].get("recovered") for row in rows)
-    failed = sum(row["status"] == "failed" for row in rows)
+    failed = sum(row["status"] not in {"succeeded", "already-generated"} if ref_id
+                 else row["status"] == "failed" for row in rows)
     _note_output({"ok": failed == 0, "apply": apply, "written": written, "failed": failed, "items": rows}, as_json)
     if failed:
         raise typer.Exit(1)
@@ -1214,6 +1220,7 @@ def _run_all_topics() -> None:
 
 def _run_all_topics_locked(serve: Path) -> None:
     from kairo.web.discovery import scan_topic_identities
+    from kairo.generated_note import failed_notes
 
     provider = select_provider(require_read_dirs=True)
     ran: list[str] = []
@@ -1224,6 +1231,10 @@ def _run_all_topics_locked(serve: Path) -> None:
         ws = Workspace.open(serve / identity.slug)
         promote_oversized_degraded(ws)
         mode = workspace_run_plan(ws)["mode"]
+        if mode == "clean" and failed_notes(ws):
+            failed.append(identity.slug)
+            typer.secho(f"{identity.slug}: note failed; use kairo notes generate", fg=typer.colors.RED, err=True)
+            continue
         if mode == "clean":
             skipped.append(identity.slug)
             typer.echo(f"{identity.slug}: up to date")
@@ -1301,6 +1312,7 @@ def _execute_view_run(
     """Serial in-process run of in-set slugs. Not TaskRegistry, not kairo run --all."""
     from contextlib import nullcontext, redirect_stderr, redirect_stdout
     from io import StringIO
+    from kairo.generated_note import failed_notes
     provider = select_provider(require_read_dirs=True)
     ran: list[str] = []
     failed: list[str] = []
@@ -1318,6 +1330,11 @@ def _execute_view_run(
                     fg=typer.colors.RED,
                     err=True,
                 )
+            continue
+        if mode == "clean" and failed_notes(ws):
+            failed.append(topic.slug)
+            if not quiet:
+                typer.secho(f"{topic.slug}: note failed; use kairo notes generate", fg=typer.colors.RED, err=True)
             continue
         if mode == "clean":
             ran.append(topic.slug)
