@@ -265,7 +265,7 @@ class StubProvider:
         config.artifact_dir.mkdir(parents=True, exist_ok=True)
         art = config.artifact or "output.md"
         if art == "generated-note.txt":
-            content = "⚠️ STUB OUTPUT：自动 note，仅用于离线验证。"
+            content = "**STUB**：自动 note，仅用于离线验证。\n\n- 离线"
         elif art == "doc.md":
             content = _stub_compose_document(
                 config.persona, config.context, artifact_dir=config.artifact_dir

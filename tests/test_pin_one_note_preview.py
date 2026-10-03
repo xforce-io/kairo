@@ -72,7 +72,7 @@ def test_pin_replace_delete_and_machine_do_not_leave_two(tmp_path, monkeypatch):
     assert json.loads(_pin_file(serve, rid).read_text()) == {"note_id": second_id}
     before = _pin_file(serve, rid).read_bytes()
     add_note(serve, ref_id=rid, content="人工追加", home="energy")
-    append_generated_note(serve, ref_id=rid, content="机器追加", home="energy")
+    append_generated_note(serve, ref_id=rid, content="**机器**：追加\n", home="energy")
     assert _pin_file(serve, rid).read_bytes() == before
     shown = runner.invoke(cli_app, ["notes", "show", "--ref", rid, "--home", "energy", "--json"])
     assert shown.exit_code == 0

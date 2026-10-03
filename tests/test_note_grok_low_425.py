@@ -103,7 +103,7 @@ def test_s1_run_ref_note_argv_is_grok_low_not_digest_codex(tmp_path, monkeypatch
         seen["cmd"] = cmd
         seen["args"] = list(args)
         seen["timeout"] = timeout
-        Path(stdout_file).write_text(_grok_ndjson("机器短记"))
+        Path(stdout_file).write_text(_grok_ndjson("**机器**：短记\n"))
 
     _bind_digest(monkeypatch, digest_provider)
     monkeypatch.setenv("KAIRO_PROVIDER", "codex")
@@ -119,7 +119,7 @@ def test_s1_run_ref_note_argv_is_grok_low_not_digest_codex(tmp_path, monkeypatch
     assert shown["count"] == 1
     assert shown["items"][0]["type"] == "generated"
     assert shown["items"][0]["author"] == "machine"
-    assert shown["items"][0]["content"] == "机器短记"
+    assert shown["items"][0]["content"] == "**机器**：短记"
 
 
 def test_s2_note_uses_default_timeout_cap_not_agent_timeout(tmp_path, monkeypatch):
@@ -132,7 +132,7 @@ def test_s2_note_uses_default_timeout_cap_not_agent_timeout(tmp_path, monkeypatc
     def fake_runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         seen["cmd"] = cmd
         seen["timeout"] = timeout
-        Path(stdout_file).write_text(_grok_ndjson("短超时笔记"))
+        Path(stdout_file).write_text(_grok_ndjson("**短**：超时笔记\n"))
 
     _bind_digest(monkeypatch, digest_provider)
     monkeypatch.setattr("kairo.provider._default_cli_runner", fake_runner)

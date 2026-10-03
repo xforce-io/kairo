@@ -38,7 +38,7 @@ def isolate_automatic_note_model(monkeypatch):
     def runner(cmd, args, *, cwd, input, stdout_file=None, timeout=None):
         prompt = Path(cwd) / "_prompt.md"
         if cmd == "grok" and prompt.is_file() and prompt.read_text().startswith("根据下面这一份详备纪要写一条短 note"):
-            Path(stdout_file).write_text(json.dumps({"type": "result", "result": "测试自动 note：已有纪要的事实。"}) + "\n")
+            Path(stdout_file).write_text(json.dumps({"type": "result", "result": "**事实**：测试自动 note，已有纪要。\n\n- 扫读要点"}) + "\n")
             return None
         return original(cmd, args, cwd=cwd, input=input, stdout_file=stdout_file, timeout=timeout)
     monkeypatch.setattr(provider, "_default_cli_runner", runner)

@@ -9,6 +9,8 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
+from markdown_it import MarkdownIt
+
 MAX_GENERATED_CHARS = 800
 DEFAULT_NOTE_TIMEOUT_CAP_S = 120
 _ARTIFACT = "generated-note.txt"
@@ -16,13 +18,55 @@ _PERSONA = (
     "根据下面这一份详备纪要写一条短 note，供人以后扫读。"
     "只使用这一份纪要里已有的内容，不要补充别的材料，也不要写成决定、修正或待确认问题。"
     f"正文不超过 {MAX_GENERATED_CHARS} 个字符，标点和空白计入。"
-    "直接输出 note 正文，不要加标题。"
+    "用 Markdown 标出主次：先写一句加粗（**）的总判断，下面用列表写出最多五个主题，"
+    "每条是一个加粗的短标签加一句结论。"
+    "不要把纪要里的每句话都列成同级列表，次要过程和例子省掉。"
+    "并且分成多行，不要输出零换行的一整段。"
+    "直接输出 note 正文。"
 )
+# 与 web/render.py 同一套 CommonMark，列表标记含 + 与 1)。
+_MD = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
+MAX_LIST_ITEMS = 6
+
+
+def _tokens(body: str):
+    def walk(tokens):
+        for token in tokens or []:
+            yield token
+            yield from walk(token.children)
+
+    yield from walk(_MD.parse(body or ""))
+
+
+def has_scan_structure(body: str) -> bool:
+    """扫读短记要能分出主次：标题、加粗或列表至少一种。"""
+    return any(
+        token.type in ("heading_open", "strong_open", "list_item_open")
+        for token in _tokens(body)
+    )
+
+
+def list_item_count(body: str) -> int:
+    """只数最外层列表项，和预览里能扫到的同级条目一致。"""
+    depth = 0
+    count = 0
+    for token in _tokens(body):
+        if token.type in ("bullet_list_open", "ordered_list_open"):
+            depth += 1
+        elif token.type in ("bullet_list_close", "ordered_list_close"):
+            depth -= 1
+        elif token.type == "list_item_open" and depth == 1:
+            count += 1
+    return count
 
 
 def prepared_body(text: str) -> str | None:
     body = (text or "").strip()
-    return body if body and len(body) <= MAX_GENERATED_CHARS else None
+    if not body or len(body) > MAX_GENERATED_CHARS or not has_scan_structure(body):
+        return None
+    if list_item_count(body) > MAX_LIST_ITEMS:
+        return None
+    return body
 
 
 def resolve_note_timeout_cap() -> int:
@@ -160,7 +204,7 @@ def ensure_generated_note(ws, ref_id: str, *, state=None, retry_failed: bool = F
                              timeout_cap=resolve_note_timeout_cap())
             body = prepared_body(raw)
             if body is None:
-                raise ValueError("note 正文为空或超过 800 个字符")
+                raise ValueError("note 正文为空、超过 800 个字符、没有 Markdown 结构，或同级列表超过 6 条")
             result = append_generated_note_to_ref(_ref_record(ws, ref_id), content=body)
             return _write_generation(ws, ref_id, "succeeded", digest_hash,
                                      provider="grok", note_id=result["stable_id"], reason="")

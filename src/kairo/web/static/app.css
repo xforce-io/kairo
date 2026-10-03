@@ -1421,8 +1421,11 @@ body:has(> .doc .sheet-preview) > .artifact-back { max-width: 1200px; }
 .notes-panel .notes-preview-content h6 {
   font: 650 16px/1.45 var(--sans); margin: .8em 0 .4em; padding: 0; border: 0;
 }
+/* .notes-list 把 list-style 设成 none，该属性会继承到卡片里的 Markdown 列表。 */
 .notes-panel .notes-preview-content ul,
 .notes-panel .notes-preview-content ol { margin: .4em 0 .6em; padding-left: 1.5em; }
+.notes-panel .notes-preview-content ul { list-style: disc; }
+.notes-panel .notes-preview-content ol { list-style: decimal; }
 .notes-panel .notes-preview-content li { margin: .2em 0; }
 .notes-panel .notes-preview-content blockquote { margin: .6em 0; padding: .2em .8em; border-left: 3px solid var(--line-2); color: var(--ink-soft); }
 .notes-panel .notes-preview-content pre { margin: .6em 0; padding: 10px; overflow: auto; background: var(--paper-2); color: var(--ink); border-radius: 6px; }

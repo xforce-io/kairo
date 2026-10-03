@@ -241,6 +241,11 @@ def append_generated_note_to_ref(rec: RefRecord, *, content: str, now: datetime 
         raise NotesError("正文为空", code="invalid_request")
     if len(body) > 800:
         raise NotesError("正文超过 800 个字符", code="invalid_request")
+    from kairo.generated_note import MAX_LIST_ITEMS, has_scan_structure, list_item_count
+    if not has_scan_structure(body):
+        raise NotesError("正文没有 Markdown 结构", code="invalid_request")
+    if list_item_count(body) > MAX_LIST_ITEMS:
+        raise NotesError("正文是同级流水账", code="invalid_request")
     return _commit_note(
         rec,
         kind="generated",
