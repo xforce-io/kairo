@@ -5,10 +5,11 @@ import fcntl
 import hashlib
 import json
 import os
-import re
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
+
+from markdown_it import MarkdownIt
 
 MAX_GENERATED_CHARS = 800
 DEFAULT_NOTE_TIMEOUT_CAP_S = 120
@@ -23,19 +24,40 @@ _PERSONA = (
     "并且分成多行，不要输出零换行的一整段。"
     "直接输出 note 正文。"
 )
-_HEADING_RE = re.compile(r"(?m)^#{1,6}[ \t]+\S")
-_LIST_RE = re.compile(r"(?m)^[ \t]*(?:[-*]|[0-9]+\.)[ \t]+\S")
-_BOLD_RE = re.compile(r"\*\*[^*\n]+\*\*")
+# 与 web/render.py 同一套 CommonMark，列表标记含 + 与 1)。
+_MD = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
 MAX_LIST_ITEMS = 6
+
+
+def _tokens(body: str):
+    def walk(tokens):
+        for token in tokens or []:
+            yield token
+            yield from walk(token.children)
+
+    yield from walk(_MD.parse(body or ""))
 
 
 def has_scan_structure(body: str) -> bool:
     """扫读短记要能分出主次：标题、加粗或列表至少一种。"""
-    return bool(_HEADING_RE.search(body) or _LIST_RE.search(body) or _BOLD_RE.search(body))
+    return any(
+        token.type in ("heading_open", "strong_open", "list_item_open")
+        for token in _tokens(body)
+    )
 
 
 def list_item_count(body: str) -> int:
-    return len(_LIST_RE.findall(body or ""))
+    """只数最外层列表项，和预览里能扫到的同级条目一致。"""
+    depth = 0
+    count = 0
+    for token in _tokens(body):
+        if token.type in ("bullet_list_open", "ordered_list_open"):
+            depth += 1
+        elif token.type in ("bullet_list_close", "ordered_list_close"):
+            depth -= 1
+        elif token.type == "list_item_open" and depth == 1:
+            count += 1
+    return count
 
 
 def prepared_body(text: str) -> str | None:

@@ -11,6 +11,7 @@ from kairo.generated_note import (
     MAX_GENERATED_CHARS,
     _PERSONA,
     ensure_generated_note,
+    list_item_count,
     prepared_body,
 )
 from kairo.notes import NotesError, append_generated_note, show_notes
@@ -40,6 +41,14 @@ def _preview(html: str) -> str:
     match = re.search(r'<div class="notes-preview-content">(.*?)</div>', html, re.S)
     assert match, html
     return match.group(1)
+
+
+def test_renderer_list_markers_count_as_structure_and_toward_cap():
+    plus = "\n".join(f"+ 第{i}点" for i in range(1, 8))
+    assert prepared_body("+ 只有这一条") == "+ 只有这一条"
+    assert prepared_body("1) 只有这一条") == "1) 只有这一条"
+    assert prepared_body(f"**总判断**：会上对过口径。\n\n{plus}") is None
+    assert list_item_count(plus) == 7
 
 
 def test_persona_asks_for_markdown_structure():
