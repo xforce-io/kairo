@@ -19,5 +19,6 @@
 | `click-ref-notes-preview.md` | #433 历史默认 notes 路径；当前逐 Ref 落点见 unified-generated-notes.md (#436) | `/w/{slug}` 左侧 `hx-get` 带 `panel=notes`。无 `panel=notes` 的 `/ref/{id}` 仍是摘要。LLM / step / compose **skip** |
 
 | `unified-generated-notes.md` | #436 四类入口确保自动 note、持久化失败/只补、逐 Ref 缺 note 落 digest、历史补齐与发布后能源恢复 | 正式 CLI + `/w/{slug}` 左侧本地/global 与 `/refs/{id}`，S1.A1–S7.A1 全映射；真实发布与数据单列 |
+| `topic-member-notes-any-home.md` | #438 Topic 成员不论 home 在哪都能追加和置顶 note；写入仍在该 Ref 自己的 notes | `/w/{slug}/ref/{id}/notes`、`?home=global`、`/refs/{id}?home=global`。公开只读无表单。LLM / step / compose **skip** |
 
 新增用户可见功能时在此加一行并补功能文件；验收 Story 对不上任何一行即 BLOCKED。
