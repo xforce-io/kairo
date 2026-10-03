@@ -91,6 +91,18 @@ def test_acceptance_rejects_empty_overlong_and_plain_paragraph(tmp_path, monkeyp
     assert shown["items"][0]["author"] == "machine"
 
 
+def test_offline_stub_writes_a_structured_machine_note(tmp_path, monkeypatch):
+    _serve_root, ws, ref_id = _serve(tmp_path, monkeypatch)
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    done = ensure_generated_note(ws, ref_id)
+    assert done["status"] == "succeeded", done
+    item = show_notes(ws.root.parent, ref_id=ref_id, home="energy")["items"][0]
+    assert item["type"] == "generated"
+    assert item["author"] == "machine"
+    assert item["content"].startswith("**STUB**")
+    assert prepared_body(item["content"]) == item["content"]
+
+
 def test_ensure_generated_note_rejects_plain_then_writes_structured(tmp_path, monkeypatch):
     _serve_root, ws, ref_id = _serve(tmp_path, monkeypatch)
     monkeypatch.setattr(

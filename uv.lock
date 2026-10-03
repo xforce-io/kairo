@@ -534,6 +534,7 @@ name = "kairo"
 version = "0.0.1"
 source = { editable = "." }
 dependencies = [
+    { name = "markdown-it-py" },
     { name = "markitdown", extra = ["docx", "pdf", "pptx", "xlsx"] },
     { name = "openai" },
     { name = "pydantic" },
@@ -560,6 +561,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", marker = "extra == 'web'", specifier = ">=0.110" },
     { name = "jinja2", marker = "extra == 'web'", specifier = ">=3.1" },
+    { name = "markdown-it-py", specifier = ">=3.0" },
     { name = "markdown-it-py", marker = "extra == 'web'", specifier = ">=3.0" },
     { name = "markitdown", extras = ["docx", "pdf", "pptx", "xlsx"], specifier = ">=0.1.6" },
     { name = "openai", specifier = ">=1.0" },
