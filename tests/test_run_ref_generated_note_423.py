@@ -67,10 +67,15 @@ def _understanding(ws) -> bytes:
     return path.read_bytes() if path.is_file() else b""
 
 
-def test_prepared_body_rejects_blank_and_overlong():
-    assert prepared_body("  短记  ") == "短记"
+def test_prepared_body_rejects_blank_overlong_and_plain():
+    assert prepared_body("  **短记**\n\n- 一点  ") == "**短记**\n\n- 一点"
     assert prepared_body(" \n") is None
-    assert prepared_body("测" * 800) == "测" * 800
+    assert prepared_body("一整段没有标记的文字。") is None
+    fitted = "**记**\n" + ("测" * (800 - len("**记**\n")))
+    assert len(fitted) == 800
+    assert prepared_body(fitted) == fitted
+    assert prepared_body("测" * 800) is None
+    assert prepared_body(fitted + "测") is None
     assert prepared_body("测" * 801) is None
 
 
@@ -95,7 +100,7 @@ def test_human_add_rejects_generated(tmp_path, monkeypatch):
 def test_s1_appends_machine_note_without_touching_understanding(tmp_path, monkeypatch):
     _serve, ws = _ws(tmp_path, monkeypatch)
     ref_id = _add_text(ws, tmp_path, "a.txt", "纪要材料")
-    provider = _NoteProvider("机器短记")
+    provider = _NoteProvider("**机器**：短记\n")
     _bind(monkeypatch, provider)
     before = _understanding(ws)
     folded = {
@@ -112,7 +117,7 @@ def test_s1_appends_machine_note_without_touching_understanding(tmp_path, monkey
     item = shown["items"][0]
     assert item["type"] == "generated"
     assert item["author"] == "machine"
-    assert item["content"] == "机器短记"
+    assert item["content"] == "**机器**：短记"
     assert len(item["content"]) <= 800
     assert (ws.root / "references" / ref_id / "digest.md").read_text(encoding="utf-8") == digest
     assert _understanding(ws) == before
@@ -128,14 +133,14 @@ def test_s1_again_preserves_generated_and_prior_notes(tmp_path, monkeypatch):
         app, ["notes", "add", ref_id, "--content", "人工判断", "--type", "decision", "--json"]
     )
     assert human.exit_code == 0, human.output
-    provider = _NoteProvider("第一条机器")
+    provider = _NoteProvider("**第一条**：机器\n")
     _bind(monkeypatch, provider)
     assert runner.invoke(app, ["run", "--ref", ref_id]).exit_code == 0
     provider.note = "第二条机器"
     again = runner.invoke(app, ["run", "--ref", ref_id])
     assert again.exit_code == 0, again.output + again.stderr
     items = _show(ref_id)["items"]
-    assert [item["content"] for item in items] == ["人工判断", "第一条机器"]
+    assert [item["content"] for item in items] == ["人工判断", "**第一条**：机器"]
     assert [item["type"] for item in items] == ["decision", "generated"]
     assert items[0]["author"] != "machine"
     assert len(provider.contexts) == 1
@@ -165,7 +170,7 @@ def test_s3_does_not_backfill_other_refs_or_understanding(tmp_path, monkeypatch)
     _serve, ws = _ws(tmp_path, monkeypatch)
     target = _add_text(ws, tmp_path, "one.txt", "指定这一条")
     other = _add_text(ws, tmp_path, "two.txt", "历史那一条")
-    provider = _NoteProvider("只写指定条")
+    provider = _NoteProvider("**指定**：这一条\n")
     _bind(monkeypatch, provider)
     before = _understanding(ws)
     result = runner.invoke(app, ["run", "--ref", target])

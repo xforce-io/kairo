@@ -29,7 +29,7 @@ def setup(tmp_path, monkeypatch):
     set_include_tags(root, 'energy', ['energy'])
     monkeypatch.setenv('KAIRO_SERVE_ROOT', str(root)); monkeypatch.chdir(ws.root)
     monkeypatch.setattr('kairo.cli.select_provider', lambda **_: StubProvider())
-    monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: _NoteProvider('自动 note 事实'))
+    monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: _NoteProvider('**自动**：note 事实。\n'))
     return root, ws
 
 
@@ -95,7 +95,7 @@ def test_s2_failure_persistent_and_note_only_recovery(tmp_path, monkeypatch, not
     assert len(provider.contexts) == 1  # no endless automatic retries
     files=[ws.references_dir()/rid/'digest.md',ws.references_dir()/rid/'manifest.yaml',ws.root/'.kairo/state.json']
     before=[p.read_bytes() for p in files]
-    monkeypatch.setattr('kairo.generated_note.select_note_provider',lambda:_NoteProvider('恢复事实'))
+    monkeypatch.setattr('kairo.generated_note.select_note_provider',lambda:_NoteProvider('**恢复**：事实。\n'))
     result=runner.invoke(app,['notes','generate',rid,'--home','energy','--json'])
     assert result.exit_code == 0,result.output
     assert [p.read_bytes() for p in files] == before
@@ -144,12 +144,12 @@ def test_s4_preview_no_writes_apply_preserve_and_repeat(tmp_path,monkeypatch):
     assert [r['status'] for r in payload['items']].count('ready')==2
     calls=[]
     def select():
-        calls.append(1);return _NoteProvider(RuntimeError('down') if len(calls)==1 else '成功正文')
+        calls.append(1);return _NoteProvider(RuntimeError('down') if len(calls)==1 else '**成功**：正文。\n')
     monkeypatch.setattr('kairo.generated_note.select_note_provider',select)
     done=runner.invoke(app,['notes','backfill','--topic','energy','--apply','--json'])
     assert done.exit_code==1,done.output
     assert json.loads(done.stdout)['written']==1 and json.loads(done.stdout)['failed']==1
-    monkeypatch.setattr('kairo.generated_note.select_note_provider',lambda:_NoteProvider('恢复正文'))
+    monkeypatch.setattr('kairo.generated_note.select_note_provider',lambda:_NoteProvider('**恢复**：正文。\n'))
     done=runner.invoke(app,['notes','backfill','--topic','energy','--apply','--json'])
     assert done.exit_code==0,done.output
     assert json.loads(done.stdout)['written']==1
@@ -163,7 +163,7 @@ def test_s2_note_written_before_state_crash_recovers_without_model(tmp_path, mon
     root, ws = setup(tmp_path, monkeypatch)
     rid = add(ws, tmp_path, 'written-before-crash.txt', True)
     from kairo.notes import append_generated_note
-    append_generated_note(root, ref_id=rid, home='energy', content='已成功写入的事实')
+    append_generated_note(root, ref_id=rid, home='energy', content='**事实**：已成功写入。\n')
     generation_path(ws, rid).write_text(json.dumps({'schema_version':1, 'status':'running'}))
     def unexpected():
         pytest.fail('已落盘 note 不能再次调用模型')
@@ -264,7 +264,7 @@ def test_s2_unreadable_state_waits_for_explicit_retry(tmp_path, monkeypatch, bro
     path = generation_path(ws, rid); path.write_text(broken); before = path.read_bytes()
     from kairo.generated_note import note_stale
     assert not note_stale(ws, rid)
-    provider = _NoteProvider('显式恢复事实')
+    provider = _NoteProvider('**显式**：恢复事实。\n')
     monkeypatch.setattr('kairo.generated_note.select_note_provider', lambda: provider)
     from kairo.rules import GeneratedNoteRule
     items = GeneratedNoteRule(ws, None).discover(ws.read_state())
@@ -347,7 +347,7 @@ def test_s2_retry_reports_new_other_ref_note_failure_but_not_unchanged_history(
                 raise RuntimeError("B note failed")
             return super().run(config, signal)
 
-    provider = FailOther("A 的自动事实")
+    provider = FailOther("**自动**：A 的事实。\n")
     monkeypatch.setattr("kairo.generated_note.select_note_provider", lambda: provider)
     if prior != "none":
         failed = runner.invoke(app, ["run", "--ref", other])
@@ -372,7 +372,7 @@ def test_s2_retry_reports_new_other_ref_note_failure_but_not_unchanged_history(
 
 def test_s2_concurrent_automatic_failure_converges_and_explicit_retry_recovers(tmp_path, monkeypatch):
     root, ws = setup(tmp_path, monkeypatch); rid = add(ws, tmp_path, "once.txt", True)
-    providers = [_NoteProvider(RuntimeError("first attempt failed")), _NoteProvider("显式恢复成功")]
+    providers = [_NoteProvider(RuntimeError("first attempt failed")), _NoteProvider("**显式**：恢复成功。\n")]
     calls = []
     def select():
         provider = providers[len(calls)]; calls.append(provider)
@@ -404,7 +404,7 @@ def test_s2_retry_target_identity_excludes_same_id_global_historical_failure(tmp
     local = tmp_path / "local-target.txt"; local.write_text("本地独立事实。")
     assert ws.add([local], ref_id=rid) == rid
     add_tag(root, home="energy", ref_id=rid, tag="energy")
-    recovered = _NoteProvider("仅本地目标成功")
+    recovered = _NoteProvider("**本地**：目标成功。\n")
     monkeypatch.setattr("kairo.generated_note.select_note_provider", lambda: recovered)
 
     result = runner.invoke(app, ["retry-ref", rid])
