@@ -10,6 +10,7 @@ dependencies = [
     "pyyaml>=6.0",
     "openai>=1.0",
     "markitdown[docx,pdf,pptx,xlsx]>=0.1.6",
+    "markdown-it-py>=3.0",
 ]
 
 [project.scripts]

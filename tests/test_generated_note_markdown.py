@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import tomllib
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -41,6 +43,11 @@ def _preview(html: str) -> str:
     match = re.search(r'<div class="notes-preview-content">(.*?)</div>', html, re.S)
     assert match, html
     return match.group(1)
+
+
+def test_markdown_parser_is_a_core_dependency():
+    data = tomllib.loads(Path(__file__).resolve().parents[1].joinpath("pyproject.toml").read_text())
+    assert any(item.startswith("markdown-it-py") for item in data["project"]["dependencies"])
 
 
 def test_renderer_list_markers_count_as_structure_and_toward_cap():
