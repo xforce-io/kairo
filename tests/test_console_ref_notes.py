@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import re
 
 from fastapi.testclient import TestClient
 
 from kairo.notes import add_note, show_notes
-from kairo.refs import create_tag
+from kairo.refs import add_tag, create_tag, global_home, set_include_tags
+from kairo.web.public import set_reference_public
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 from typer.testing import CliRunner
@@ -313,3 +315,130 @@ def test_s6_markdown_preview_uses_full_body_and_separate_detail_link(tmp_path, m
     assert card.lstrip().startswith('<div class="notes-card-head">')
     assert 'is-expanded' in preview
     assert 'class="notes-more"' not in preview
+
+
+def test_topic_panel_writes_global_member_note_on_its_own_file(tmp_path, monkeypatch):
+    serve = tmp_path / "root"
+    serve.mkdir()
+    create_tag(serve, "energy")
+    ws = Workspace.init(serve / "energy", topic="energy")
+    set_include_tags(serve, "energy", ["energy"])
+    monkeypatch.setenv("KAIRO_SERVE_ROOT", str(serve))
+    monkeypatch.chdir(ws.root)
+
+    local_src = tmp_path / "本地.txt"
+    local_src.write_text("本地材料")
+    local_id = ws.add([local_src])
+    add_tag(serve, home="energy", ref_id=local_id, tag="energy")
+
+    owned_bin = tmp_path / "owned.bin"
+    owned_bin.write_bytes(b"\x00\x01owned")
+    owned_id = ws.add([owned_bin])
+    add_tag(serve, home="energy", ref_id=owned_id, tag="energy")
+
+    g = global_home(serve)
+    shared_bin = tmp_path / "shared.bin"
+    shared_bin.write_bytes(b"\x00\x01shared")
+    gid = g.add([shared_bin])
+    add_tag(serve, home="", ref_id=gid, tag="energy")
+
+    client = TestClient(create_app(serve))
+    local_notes = client.get(f"/w/energy/ref/{local_id}/notes", headers=ZH)
+    global_notes = client.get(f"/w/energy/ref/{gid}/notes", params={"home": "global"}, headers=ZH)
+    assert local_notes.status_code == 200
+    assert global_notes.status_code == 200
+    for html in (local_notes.text, global_notes.text):
+        assert "新增" in html
+        assert "追加 note" in html
+        assert 'class="notes-add"' in html
+
+    owned_meta = client.get(f"/w/energy/ref/{owned_id}", headers=ZH)
+    assert owned_meta.status_code == 200
+    assert "meta-title-input" in owned_meta.text
+    assert "meta-lock" in owned_meta.text
+    assert "在系统中打开" in owned_meta.text
+
+    global_meta = client.get(f"/w/energy/ref/{gid}", params={"home": "global"}, headers=ZH)
+    assert global_meta.status_code == 200
+    assert "meta-title" in global_meta.text
+    assert "meta-title-input" not in global_meta.text
+    assert "meta-lock" not in global_meta.text
+    assert "data-public-lock" not in global_meta.text
+    assert "在系统中打开" not in global_meta.text
+    assert "/open" not in global_meta.text
+
+    missing = client.get("/w/energy/ref/not-a-member/notes", params={"home": "global"}, headers=ZH)
+    assert missing.status_code == 404
+    assert client.post(
+        "/w/energy/ref/not-a-member/notes",
+        params={"home": "global"},
+        data={"content": "非成员"},
+        headers=ZH,
+    ).status_code == 404
+
+    body = "从主题写下的判断"
+    posted = client.post(
+        f"/w/energy/ref/{gid}/notes",
+        params={"home": "global"},
+        data={"content": body, "type": "insight"},
+        headers=ZH,
+    )
+    assert posted.status_code == 200
+    assert body in posted.text
+    notes_path = g.references_dir() / gid / "notes.jsonl"
+    lines = [ln for ln in notes_path.read_text().splitlines() if ln.strip()]
+    assert len(lines) == 1
+    saved = json.loads(lines[0])
+    assert saved["type"] == "insight"
+    assert saved["content"] == body
+    assert not (ws.references_dir() / gid).exists()
+    assert body in client.get(
+        f"/w/energy/ref/{gid}/notes", params={"home": "global"}, headers=ZH
+    ).text
+    detail = client.get(f"/refs/{gid}", params={"home": "global"}, headers=ZH)
+    assert detail.status_code == 200
+    assert body in detail.text
+
+    second = "后写的判断"
+    assert client.post(
+        f"/w/energy/ref/{gid}/notes",
+        params={"home": "global"},
+        data={"content": second, "type": "insight"},
+        headers=ZH,
+    ).status_code == 200
+    items = show_notes(serve, ref_id=gid, home="global")["items"]
+    assert [item["content"] for item in items] == [body, second]
+    second_id = items[1]["stable_id"].rsplit("/", 1)[-1]
+    pinned = client.post(
+        f"/w/energy/ref/{gid}/notes/{second_id}/pin",
+        params={"home": "global"},
+        headers=ZH,
+    )
+    assert pinned.status_code == 200
+    again = client.get(f"/w/energy/ref/{gid}/notes", params={"home": "global"}, headers=ZH)
+    assert again.status_code == 200
+    expanded = again.text.split("notes-card-body notes-expanded", 1)[1].split("</div>", 1)[0]
+    assert second in expanded
+    assert body not in expanded
+    assert json.loads((g.references_dir() / gid / "note-pin.json").read_text())["note_id"] == second_id
+    assert len([ln for ln in notes_path.read_text().splitlines() if ln.strip()]) == 2
+    assert not (ws.references_dir() / gid).exists()
+
+    (g.references_dir() / gid / "digest.md").write_text("# 纪要\n\n事实。\n")
+    set_reference_public(serve, g, gid, public=True)
+    public = TestClient(create_app(serve, mode="public-read"))
+    hidden = public.get(f"/w/energy/ref/{gid}/notes", params={"home": "global"}, headers=ZH)
+    assert "notes-add" not in hidden.text
+    assert "追加 note" not in hidden.text
+    assert "新增" not in hidden.text
+    before = show_notes(serve, ref_id=gid, home="global")
+    denied = public.post(
+        f"/w/energy/ref/{gid}/notes",
+        params={"home": "global"},
+        data={"content": "匿名不该写入", "type": "insight"},
+        headers=ZH,
+    )
+    assert denied.status_code in (403, 404)
+    after = show_notes(serve, ref_id=gid, home="global")
+    assert after["count"] == before["count"] == 2
+    assert all(item["content"] != "匿名不该写入" for item in after["items"])

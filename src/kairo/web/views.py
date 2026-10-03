@@ -1793,7 +1793,7 @@ def ref_view(
             "home": source or "global",
             "notes": notes,
             "notes_error": "",
-            "can_write": (not _is_public_read(request)) and source == slug,
+            "can_write": not _is_public_read(request),
         }
     return _render(
         request,
@@ -2010,7 +2010,7 @@ def _notes_reader_page(
             "form_query": query,
             "notes": notes,
             "notes_error": notes_error,
-            "can_write": (not _is_public_read(request)) and source == slug,
+            "can_write": not _is_public_read(request),
         },
     )
 
@@ -2030,9 +2030,7 @@ async def ref_notes_add_view(
     from kairo.notes import NotesError, add_note
 
     t = _t(request)
-    ws, source = _open_topic_ref(request, slug, ref_id, home)
-    if source != slug:
-        raise HTTPException(status_code=403, detail=t("notes.submit_error"))
+    _ws, source = _open_topic_ref(request, slug, ref_id, home)
     form = await request.form()
     content = str(form.get("content") or "")
     note_type = str(form.get("type") or "") or None
@@ -2064,8 +2062,6 @@ def ref_notes_pin_view(
 
     t = _t(request)
     _ws, source = _open_topic_ref(request, slug, ref_id, home)
-    if source != slug:
-        raise HTTPException(status_code=403, detail=t("notes.submit_error"))
     try:
         pin_note(
             _serve(request),
