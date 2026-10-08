@@ -521,6 +521,26 @@ header.top .back:hover { background: var(--pine-soft); border-color: #cfe0d6; co
 .transcript-unit p, .transcript-untimed { margin: 0; white-space: pre-wrap; }
 .transcript-untimed { color: var(--ink-soft); }
 .doc-img { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); box-shadow: 0 8px 24px -12px rgba(20,16,10,.4); }
+.img-preview { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.img-preview-bar { display: flex; flex-wrap: wrap; gap: 8px; }
+.img-preview-bar button {
+  cursor: pointer; font-family: var(--sans); font-size: 13px; font-weight: 600;
+  color: var(--ink); background: var(--card); border: 1px solid var(--line-2);
+  border-radius: 7px; padding: 6px 12px;
+}
+.img-preview-bar button:hover { background: var(--pine-soft); border-color: #cfe0d6; }
+.img-preview-viewport {
+  width: 100%; height: min(70vh, 520px); overflow: hidden;
+  border-radius: 8px; border: 1px solid var(--line); background: var(--paper-2);
+  touch-action: none; cursor: grab;
+}
+.img-preview-viewport.is-dragging { cursor: grabbing; }
+/* 放大必须能超过栏宽；未就绪前仍按栏宽缩小，避免脚本未跑时铺开原图像素。 */
+.img-preview .doc-img {
+  display: block; width: 100%; max-width: 100%; height: auto;
+  border: 0; box-shadow: none; border-radius: 0; box-sizing: border-box;
+}
+.img-preview.is-ready .doc-img { max-width: none; width: auto; }
 .doc table { border-collapse: collapse; width: 100%; margin: 18px 0; font-family: var(--sans); font-size: 14px; }
 .doc th, .doc td { border: 1px solid var(--line-2); padding: 7px 11px; text-align: left; vertical-align: top; }
 .doc th { background: var(--paper-2); font-weight: 600; }

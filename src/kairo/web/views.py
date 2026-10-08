@@ -32,6 +32,7 @@ from kairo.engine import (
 )
 from kairo.engine import accept as engine_accept
 from kairo.listen_read import pair_audio_transcripts, parse_units
+from kairo.web.image_preview import render_image_preview
 from kairo.review import (
     ReviewError,
     collect_digests,
@@ -276,17 +277,31 @@ def _render_transcript(path: Path, *, slug: str | None = None, ref_home: str | N
     return "".join(parts) + "</div>"
 
 
+def _image_preview_html(src: str, name: str, t) -> str:
+    """Topic 阅读区与全局 Ref 预览共用的图片预览片段。"""
+    return render_image_preview(
+        src,
+        name,
+        {
+            "toolbar": t("img.toolbar"),
+            "zoom_in": t("img.zoom_in"),
+            "zoom_out": t("img.zoom_out"),
+            "fit": t("img.fit"),
+        },
+    )
+
+
 def _form_preview_html(
     ws: Workspace, slug: str, ref_id: str, form: dict, *,
-    file_src: str | None = None, ref_home: str | None = None
+    file_src: str | None = None, ref_home: str | None = None, t=None,
 ) -> str | None:
-    """按 form 类型生成预览 HTML:图片走 <img>,文本走 markdown/pre。"""
+    """按 form 类型生成预览 HTML:图片走预览控件,文本走 markdown/pre。"""
+    if t is None:
+        t = lambda key: key
     path = _form_path(ws, form["location"])
     if _is_image_file(path):
         src = file_src or f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(form['key'])}"
-        return (
-            f'<img class="doc-img" src="{src}" alt="{escape(path.name)}">'
-        )
+        return _image_preview_html(src, path.name, t)
     if _is_text_file(path):
         return (
             _render_transcript(path, slug=slug, ref_home=ref_home)
@@ -1205,7 +1220,7 @@ def _global_ref_primary_body(ws: Workspace, rid: str, man, t) -> tuple[str, str]
         form = next((f for f in forms if f["role"] == role and f["previewable"]), None)
         if not form:
             continue
-        html = _form_preview_html(ws, ws.root.name, rid, form)
+        html = _form_preview_html(ws, ws.root.name, rid, form, t=t)
         if html:
             return t(heading_key), html
     return t("ref.digest"), ""
@@ -1764,6 +1779,7 @@ def ref_view(
             ws, slug, ref_id, primary,
             ref_home=source or "global",
             file_src=f"{form_base}/file/{quote(primary['key'], safe='')}{form_query}",
+            t=t,
         ) if primary else None
     )
     open_form = next((f for f in forms if f.get("openable")), None) if primary is None else None
@@ -1952,8 +1968,11 @@ def _form_preview_response(
             },
         )
     if _is_image_file(path):
-        img = f'<img class="doc-img" src="{file_src}" alt="{escape(path.name)}">'
-        return _render(request, "_doc.html", {"title": title, "html": img})
+        return _render(
+            request,
+            "_doc.html",
+            {"title": title, "html": _image_preview_html(file_src, path.name, t)},
+        )
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
     return _render(
