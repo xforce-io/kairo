@@ -177,7 +177,7 @@ def test_s6_notes_compact_not_card_form(tmp_path, monkeypatch):
     client = TestClient(create_app(serve))
     ref_page = client.get(f"/refs/{rid}?home=energy", headers=ZH)
     assert ref_page.status_code == 200
-    assert 'href="/static/app.css?v=note-md-list-markers"' in ref_page.text
+    assert 'href="/static/app.css?v=442-image-preview"' in ref_page.text
     assert "396-view-run-exec" not in ref_page.text
     css = client.get("/static/app.css")
     assert css.status_code == 200
