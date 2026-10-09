@@ -141,4 +141,4 @@ def test_global_ref_and_topic_reader_render_note_markdown(tmp_path, monkeypatch)
     css = client.get("/static/app.css")
     assert css.status_code == 200
     assert ".notes-panel .notes-preview-content ul { list-style: disc; }" in css.text
-    assert 'href="/static/app.css?v=442-image-preview"' in pages[0].text
+    assert 'href="/static/app.css?v=442.2-image-preview"' in pages[0].text

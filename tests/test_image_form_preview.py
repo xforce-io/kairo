@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from kairo.refs import add_global_ref
 from kairo.web.image_preview import (
+    PREVIEW_SCRIPT,
     ZOOM_RATIO,
     fit,
     image_point_visible,
@@ -33,6 +34,9 @@ def _assert_preview_chrome(html: str, file_url: str) -> None:
     assert "data-img-zoom-out" in html
     assert "data-img-fit" in html
     assert f'data-zoom-ratio="{format(ZOOM_RATIO, "g")}"' in html
+    assert html.index("img-preview-viewport") < html.index("img-preview-bar") < html.index('class="doc-img"')
+    assert "kairoScanImagePreview" in html
+    assert PREVIEW_SCRIPT in html
     assert 'class="listen-read"' not in html
     assert 'class="lr-play"' not in html
 
@@ -79,7 +83,6 @@ def test_topic_shell_selects_image_into_reader(tmp_path):
 
     fragment = client.get(fragment_url)
     assert fragment.status_code == 200
-    assert "image_preview.js" not in fragment.text
     assert '<main id="reader" class="pane-read" hx-swap-oob="true">' in fragment.text
     _assert_preview_chrome(fragment.text, f"/w/ws/ref/{rid}/file/0")
 
@@ -104,7 +107,6 @@ def test_global_ref_page_selects_image_form(tmp_path):
     assert button, "global ref page did not offer the image form"
     preview = client.get(button.group(1))
     assert preview.status_code == 200
-    assert "image_preview.js" not in preview.text
     _assert_preview_chrome(preview.text, f"/refs/{rid}/file/")
     assert "ResizeObserver" in script
     assert "clientWidth < 2" in script
@@ -191,7 +193,11 @@ def test_renderer_uses_module_ratio():
     )
     assert f'data-zoom-ratio="{format(ZOOM_RATIO, "g")}"' in html
     assert "Zoom in" in html
+    assert html.index("img-preview-viewport") < html.index("data-img-zoom-in")
+    shell = Path("src/kairo/web/templates/base.html").read_text(encoding="utf-8")
+    assert f'src="{PREVIEW_SCRIPT}"' in shell
     js = Path("src/kairo/web/static/image_preview.js").read_text(encoding="utf-8")
     assert "data-img-zoom-in" in js
     assert "dataset.zoomRatio" in js
     assert "dataset.maxZoom" in js
+    assert "window.kairoScanImagePreview" in js
