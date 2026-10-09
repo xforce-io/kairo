@@ -1,4 +1,9 @@
 (function () {
+  if (window.kairoScanImagePreview) {
+    window.kairoScanImagePreview(document);
+    return;
+  }
+
   function clampOffset(displayW, displayH, vw, vh, ox, oy) {
     var minX = Math.min(0, vw - displayW);
     var minY = Math.min(0, vh - displayH);
@@ -49,73 +54,34 @@
 
   function bind(root) {
     if (root.getAttribute("data-img-bound") === "1") return;
-    root.setAttribute("data-img-bound", "1");
     var vp = root.querySelector(".img-preview-viewport");
     var img = root.querySelector(".doc-img");
     if (!vp || !img) return;
+    root.setAttribute("data-img-bound", "1");
 
     function kick() {
       ensureLayout(root);
     }
     img.addEventListener("load", kick);
-    if (img.complete) kick();
+    if (img.complete && img.naturalWidth) kick();
+    else if (img.decode) img.decode().then(kick).catch(function () {});
     if (window.ResizeObserver) {
       var obs = new ResizeObserver(kick);
       obs.observe(vp);
     }
 
-    var zoomIn = root.querySelector("[data-img-zoom-in]");
-    var zoomOut = root.querySelector("[data-img-zoom-out]");
-    var fit = root.querySelector("[data-img-fit]");
-
-    function requireReady() {
-      ensureLayout(root);
-      return root.getAttribute("data-img-ready") === "1";
-    }
-
-    if (zoomIn) {
-      zoomIn.addEventListener("click", function () {
-        if (!requireReady()) return;
-        var opened = Number(root.dataset.openedWidth);
-        var current = Number(root.dataset.displayWidth);
-        var ratio = Number(root.dataset.zoomRatio);
-        var cap = opened * Number(root.dataset.maxZoom);
-        var next = Math.min(current * ratio, cap);
-        if (current <= opened) next = Math.min(Math.max(next, opened * ratio), cap);
-        root.dataset.displayWidth = String(next);
-        clamp(root, img, vp);
-        apply(root, img);
-      });
-    }
-    if (zoomOut) {
-      zoomOut.addEventListener("click", function () {
-        if (!requireReady()) return;
-        var opened = Number(root.dataset.openedWidth);
-        var current = Number(root.dataset.displayWidth);
-        var ratio = Number(root.dataset.zoomRatio);
-        var next = Math.max(opened, current / ratio);
-        root.dataset.displayWidth = String(next);
-        if (next <= opened) {
-          root.dataset.offsetX = "0";
-          root.dataset.offsetY = "0";
-        }
-        clamp(root, img, vp);
-        apply(root, img);
-      });
-    }
-    if (fit) {
-      fit.addEventListener("click", function () {
-        if (!requireReady()) return;
-        root.dataset.displayWidth = root.dataset.openedWidth;
-        root.dataset.offsetX = "0";
-        root.dataset.offsetY = "0";
-        apply(root, img);
+    var bar = root.querySelector(".img-preview-bar");
+    if (bar) {
+      bar.addEventListener("pointerdown", function (e) {
+        e.stopPropagation();
       });
     }
 
     var drag = null;
     vp.addEventListener("pointerdown", function (e) {
-      if (!requireReady()) return;
+      if (e.target.closest && e.target.closest(".img-preview-bar")) return;
+      if (!root.getAttribute("data-img-ready")) ensureLayout(root);
+      if (root.getAttribute("data-img-ready") !== "1") return;
       if (e.button != null && e.button !== 0) return;
       drag = {
         id: e.pointerId,
@@ -144,6 +110,44 @@
     vp.addEventListener("pointercancel", endDrag);
   }
 
+  function applyZoom(root, button) {
+    bind(root);
+    ensureLayout(root);
+    if (root.getAttribute("data-img-ready") !== "1") return;
+    var vp = root.querySelector(".img-preview-viewport");
+    var img = root.querySelector(".doc-img");
+    if (!vp || !img) return;
+    var opened = Number(root.dataset.openedWidth);
+    var current = Number(root.dataset.displayWidth);
+    var ratio = Number(root.dataset.zoomRatio);
+    if (button.hasAttribute("data-img-zoom-in")) {
+      var cap = opened * Number(root.dataset.maxZoom);
+      var next = Math.min(current * ratio, cap);
+      if (current <= opened) next = Math.min(Math.max(next, opened * ratio), cap);
+      root.dataset.displayWidth = String(next);
+      clamp(root, img, vp);
+      apply(root, img);
+      return;
+    }
+    if (button.hasAttribute("data-img-zoom-out")) {
+      var shrunk = Math.max(opened, current / ratio);
+      root.dataset.displayWidth = String(shrunk);
+      if (shrunk <= opened) {
+        root.dataset.offsetX = "0";
+        root.dataset.offsetY = "0";
+      }
+      clamp(root, img, vp);
+      apply(root, img);
+      return;
+    }
+    if (button.hasAttribute("data-img-fit")) {
+      root.dataset.displayWidth = root.dataset.openedWidth;
+      root.dataset.offsetX = "0";
+      root.dataset.offsetY = "0";
+      apply(root, img);
+    }
+  }
+
   function scan(scope) {
     var root = scope && scope.querySelectorAll ? scope : document;
     root.querySelectorAll(".img-preview").forEach(bind);
@@ -158,8 +162,18 @@
     document.body.addEventListener("htmx:afterSwap", rescan);
     document.body.addEventListener("htmx:afterSettle", rescan);
     document.body.addEventListener("htmx:oobAfterSwap", rescan);
+    document.addEventListener("click", function (e) {
+      var el = e.target;
+      if (!el || !el.closest) return;
+      var button = el.closest("[data-img-zoom-in], [data-img-zoom-out], [data-img-fit]");
+      if (!button) return;
+      var root = button.closest(".img-preview");
+      if (!root) return;
+      applyZoom(root, button);
+    });
   }
 
+  window.kairoScanImagePreview = scan;
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);
   else start();
 })();
