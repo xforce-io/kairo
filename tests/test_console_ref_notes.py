@@ -117,7 +117,7 @@ def test_s5_topic_preview_follows_selected_ref(tmp_path, monkeypatch):
     assert 'hx-get="/w/energy/ref/' in meta.text and "/notes" in meta.text
     assert 'hx-target="#reader"' in meta.text
     assert "ref-open-details" in meta.text
-    assert "打开资料详情" in meta.text
+    assert "打开事项包详情" in meta.text
     assert 'href="/refs/' in meta.text
     assert "追加 note" not in meta.text
     canvas = client.get(f"/w/energy/ref/{rid}/notes", headers=ZH)

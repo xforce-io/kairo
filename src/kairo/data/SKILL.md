@@ -1,6 +1,6 @@
 ---
 name: kairo
-description: Use when the user wants to operate kairo Topics in a session — phrases like kairo 现在有哪些调研, 某主题现在什么情况, 事实/判断到哪了, 帮我总结 kairo 结论, 为什么卡住/blocked, 怎么推进, 推进一下/step/重算/re-step, 接受手改/accept, archive 到 Kairo, 归档会话, 注册音频到 Topic, 附加 form. Not for one-off machine ASR/LLM config unless the user explicitly asks to configure.
+description: Use when the user wants to operate kairo Topics in a session — phrases like kairo 现在有哪些调研, 某主题现在什么情况, 事实/判断到哪了, 帮我总结 kairo 结论, 为什么卡住/blocked, 怎么推进, 推进一下/step/重算/re-step, 接受手改/accept, archive 到 Kairo, 归档会话, 注册音频到 Topic, 附加 form, 登记目录为事项包. Not for one-off machine ASR/LLM config unless the user explicitly asks to configure.
 ---
 
 # kairo operator
@@ -49,7 +49,8 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 | 回退 / rollback | 说明文档回退到快照、references 不动 → 确认后 `kairo rollback <seq>`（可先 `kairo history` / `kairo diff` 只读预览） |
 | 注册音频到 Topic / 全局登记 | **场景一**：将音频/文件注册为全局 Ref 并加入 Topic —— 确认后 `kairo add <audio> --topic <slug> [--copy] [--occurred YYYY-MM-DD]`（须先 `kairo tag create <slug>` 且确保 Topic 的 include_tags 包含该 Tag）。若只要这一条的转写和纪要，下一步是 `kairo run --ref <id>`，不是默认 `kairo step` |
 | 附加 form 到现有 Ref / attach | **场景二**：往既有 Ref 追加形态 —— 确认后 `kairo add <file> --to <ref_id> [--copy]`（Ref 成员资格不变；仅当 Ref 还不是 Topic 成员时才需单独 `--topic`） |
-| Topic 内新 Ref | 在 Topic 目录内 `kairo add <file> [--copy] [--corpus]`（home 自动为当前 Topic） |
+| 目录登记为一条多形态 Ref | **场景三**：一次事项的当场材料在同一目录 —— 确认后 `kairo add <dir> [--copy] [--topic <slug>]`（#67：一条 Ref 多 forms，不是每个文件一条） |
+| Topic 内新 Ref | 在 Topic 目录内 `kairo add <file|dir> [--copy] [--corpus]`（目录→一条多形态事项包；home 自动为当前 Topic） |
 | 归档会话 / archive 到 Kairo | 确认后 `kairo archive`（见下节）；**不要**用 `kairo add`。成功回执必须原样写回；**不**自动 `step` |
 | 改参考展示名 / title | 确认后 `kairo title <id> <新名>`（不改 id） |
 | 发生时间 / 时间轴 | 只读 `kairo timeline [root]`（`--day` / `--recent` / `--json`）；写发生时间确认后 `kairo occurred <id> YYYY-MM-DD` 或 `--clear` |
@@ -67,7 +68,7 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 
 `--in` 默认 `title`，字面包含、区分大小写；不是语义检索。`--home global` 表示 global home；JSON 的 `home` 为 `""`。零命中 `count 0` 不是失败。多条不要静默取第一条。`--form digest` 与 `transcript` 不可互换。
 
-## 两个用户故事
+## 三个用户故事
 
 ### 故事一：音频 → Topic Ref
 
@@ -87,6 +88,15 @@ kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SE
 1. **确认 Ref id**：`kairo ref find --title …` 或 `kairo timeline --json`
 2. **attach form**：`kairo add <file> --to <ref_id> [--copy]`
 3. Ref 的成员资格不变（已在 Topic 内就不需要重复 `--topic`）
+
+### 故事三：目录 → 一条多形态事项包
+
+用户有一次事项的当场材料（录音、幻灯、附件）在同一目录，要登记为**一条** Ref：
+
+1. **确认范围**：目录内文件同属这一次事项（另一场会另开一条 Ref）
+2. **登记**：确认后 `kairo add <dir> [--copy] [--topic <slug>]`
+3. **结果**：一条多形态 Ref（#67），至多一份 digest；不是每个文件一条
+4. 只要这一条的转写和纪要：`kairo run --ref <id>`。往这条再追加形态走故事二 `--to`
 
 ## 怎么读知识产物
 
