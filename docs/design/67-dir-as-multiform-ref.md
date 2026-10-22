@@ -4,7 +4,7 @@
 - 分支: `feat/67-dir-as-multiform-ref`
 - 状态: 已实现(TDD),待合入
 - 日期: 2026-07-15
-- 关联: #44 多形态 digest、#64 路径+copy、#24 corpus 目录指针
+- 关联: #44 多形态 digest、#64 路径+copy、#24 corpus 目录指针、[#446](446-ref-matter-package.md) 事项包口径
 
 ## 1. 决策
 

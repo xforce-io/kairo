@@ -98,4 +98,4 @@ N/A。Issue、L1 与本机部署/失败回退已获用户批准。
 
 ## 13 关联
 
-[#357](https://github.com/xforce-io/kairo/issues/357)、[L1](https://github.com/xforce-io/kairo/issues/357#issuecomment-5601070243)、#354。
+[#357](https://github.com/xforce-io/kairo/issues/357)、[L1](https://github.com/xforce-io/kairo/issues/357#issuecomment-5601070243)、#354、[#446](446-ref-matter-package.md) 事项包口径（本票仍是附加形态，不改对象模型）。
