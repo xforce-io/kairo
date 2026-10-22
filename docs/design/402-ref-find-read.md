@@ -37,7 +37,7 @@ N/A。无 Console 新页。用户可见面为 CLI。
 
 ### 4.2 检索与读取
 
-`ref find`：AND 过滤。标题包含匹配、区分大小写。`--day` 精确等于 occurred 日（`YYYY-MM-DD`）。`--topic` 为该 slug 的**成员**（含 global-home 打 Tag 进入者），不是 home 等于 slug。至少指定 `--title`、`--day`、`--topic` 之一。
+`ref find`：AND 过滤。标题包含匹配、区分大小写。`--day` 精确等于 occurred 日（`YYYY-MM-DD`）。`--topic` 为该 slug 的**成员**（含 global-home 打 Tag 进入者），不是 home 等于 slug。至少指定 `--title`、`--day`、`--topic` 之一。`#445` 在此命令上增加 `--in title|digest|notes|transcript|all`（默认 `title`，字面包含）；见 [445-ref-find-in.md](445-ref-find-in.md)。
 
 `ref read`：按 `--id` + 可选 `--home` 定位；`--form digest|transcript`。成功 JSON 含 `content` 与 `source`（出处，不含仓库内部路径）。
 
@@ -81,7 +81,7 @@ flowchart TD
 ### 8.1 命令
 
 ```
-kairo ref find [--title TEXT] [--day YYYY-MM-DD] [--topic SLUG] [--json] [--root PATH]
+kairo ref find [TEXT] [--title TEXT] [--in title|digest|notes|transcript|all] [--day YYYY-MM-DD] [--topic SLUG] [--json] [--root PATH]
 kairo ref read --id ID [--home HOME] --form digest|transcript [--json] [--root PATH]
 ```
 

@@ -1,4 +1,4 @@
-"""#402 kairo ref find / ref read。不扫内部 state 当入口，不触发 step。"""
+"""#402 / #445 kairo ref find / ref read。不扫内部 state 当入口，不触发 step。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,10 @@ from pathlib import Path
 from kairo.refs import is_global_home, list_all_refs, list_topic_slugs, topic_members
 from kairo.timeline import effective_occurred, parse_calendar_date
 from kairo.workspace import Workspace, WorkspaceNotFound
+
+FIND_IN_FIELDS = ("title", "digest", "notes", "transcript")
+FIND_IN_VALUES = (*FIND_IN_FIELDS, "all")
+DEFAULT_FIND_IN = "title"
 
 
 class RefLookupError(ValueError):
@@ -64,14 +68,84 @@ def _item(serve: Path, rec, catalog) -> dict:
     }
 
 
+def _resolve_query(query: str | None, title: str | None) -> str | None:
+    q = query if query else None
+    t = title if title else None
+    if q is not None and t is not None and q != t:
+        raise RefLookupError("位置参数与 --title 冲突", code="invalid_request")
+    return q if q is not None else t
+
+
+def _read_optional_text(path: Path | None) -> str:
+    if path is None or not path.is_file():
+        return ""
+    try:
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError) as exc:
+        raise RefLookupError("形态文件不可读", code="read_failed") from exc
+
+
+def _digest_text(rec) -> str:
+    if rec.digest_path is not None:
+        return _read_optional_text(rec.digest_path)
+    if rec.dir is None:
+        return ""
+    return _read_optional_text(rec.dir / "digest.md")
+
+
+def _transcript_text(rec) -> str:
+    try:
+        path, _registered = _transcript_path(rec)
+    except RefLookupError:
+        return ""
+    return _read_optional_text(path)
+
+
+def _notes_text(rec) -> str:
+    if rec.dir is None:
+        return ""
+    from kairo.notes import show_ref_notes
+
+    try:
+        data = show_ref_notes(rec)
+    except (OSError, ValueError) as exc:
+        raise RefLookupError("notes 不可读", code="read_failed") from exc
+    return "\n".join((it.get("content") or "") for it in data.get("items") or [])
+
+
+def _field_text(rec, field: str) -> str:
+    if field == "title":
+        return rec.title or ""
+    if field == "digest":
+        return _digest_text(rec)
+    if field == "notes":
+        return _notes_text(rec)
+    if field == "transcript":
+        return _transcript_text(rec)
+    raise RefLookupError(f"非法 --in:{field}", code="invalid_request")
+
+
+def _matches_in(rec, query: str, where: str) -> bool:
+    fields = FIND_IN_FIELDS if where == "all" else (where,)
+    return any(query in _field_text(rec, field) for field in fields)
+
+
 def find_refs(
     serve: Path,
     *,
     title: str | None,
     day: str | None,
     topic: str | None,
+    query: str | None = None,
+    find_in: str | None = None,
 ) -> dict:
-    if not (title or day or topic):
+    where = DEFAULT_FIND_IN if find_in is None else find_in
+    if where not in FIND_IN_VALUES:
+        raise RefLookupError(f"非法 --in:{find_in}", code="invalid_request")
+    query_text = _resolve_query(query, title)
+    if where != DEFAULT_FIND_IN and not query_text:
+        raise RefLookupError("请指定要匹配的字面片段", code="invalid_request")
+    if not (query_text or day or topic):
         raise RefLookupError("请指定 --title、--day 或 --topic 之一", code="invalid_request")
     parsed = None
     if day:
@@ -80,8 +154,8 @@ def find_refs(
             raise RefLookupError(f"非法发生时间:{day}", code="invalid_request")
     catalog = list_all_refs(serve)
     rows = list(catalog)
-    if title:
-        rows = [r for r in rows if title in (r.title or "")]
+    if query_text:
+        rows = [r for r in rows if _matches_in(r, query_text, where)]
     if parsed is not None:
         want = parsed.isoformat()
         rows = [r for r in rows if _occurred_iso(r) == want]

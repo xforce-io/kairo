@@ -11,7 +11,7 @@
 | `interactive-project-read.md` | #400 交互式读取 Project 登记源及一跳外链：临时读、引用记录、前置失败指引 | 正式 CLI `project context/read/read-url`、`project record *`。无 Console；真网 Reader / LLM **skip** |
 | `continuous-compose.md` | #408 连续新增材料自动整理、分批恢复、失败保护与旧容量恢复 | CLI `run/status`；Topic 主按钮、产物与运行摘要；scratch 确定性 provider，无真实 LLM |
 | `status-fold-progress.md` | #401 status 待处理／已融入／增量／blocked 口径与按 Ref 核当前 digest | 正式 CLI `kairo status`、`--json`、`--ref`。无 Console；LLM **skip** |
-| `ref-find-read.md` | #402 按标题／发生日／Topic 检索并直接读 digest 或 transcript | 正式 CLI `kairo ref find`、`kairo ref read`。无 Console；LLM / step **skip** |
+| `ref-find-read.md` | #402 / #445 按标题或 `--in` 字段字面检索并直接读 digest 或 transcript | 正式 CLI `kairo ref find`、`kairo ref read`。无 Console；LLM / step **skip** |
 | `ref-markdown-notes.md` | #410 Ref 级 markdown notes 盖楼：CLI list/add/show、近窗稳定键、provenance 样例 | 正式 CLI `kairo notes`。无 Console（#411）；LLM / step / compose **skip** |
 | `console-ref-notes.md` | #411 Console：Ref 详情 notes（digest 之上）列表/只读/空态/轻量追加；阅读画布与详情同一套文档批注观感；单条详情确认删除；Markdown 多行预览与更多/收起；Topic 形态整行进 `#reader` | `/w/{slug}` 形态与 `#reader`、`/refs/{id}`、`/refs/{id}/notes/{note_id}`。LLM / step / compose **skip** |
 | `run-ref-generated-note.md` | #423 历史单条机器 note 路径；当前契约见 unified-generated-notes.md (#436) | 正式 CLI `kairo run --ref` 与 `kairo notes`。无新 Console；真网 LLM 可用确定性替身 |
