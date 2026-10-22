@@ -61,11 +61,11 @@ description: Use when the user wants to operate kairo Topics in a session — ph
 定位 Ref 正文用正式 CLI，不要 `find`/`ls` 扫 `references/` 或读内部 state：
 
 ```
-kairo ref find [--title TEXT] [--day YYYY-MM-DD] [--topic SLUG] [--json] --root SERVE_ROOT
+kairo ref find [TEXT] [--title TEXT] [--in title|digest|notes|transcript|all] [--day YYYY-MM-DD] [--topic SLUG] [--json] --root SERVE_ROOT
 kairo ref read --id ID [--home HOME] --form digest|transcript [--json] --root SERVE_ROOT
 ```
 
-`--home global` 表示 global home；JSON 的 `home` 为 `""`。零命中 `count 0` 不是失败。多条不要静默取第一条。`--form digest` 与 `transcript` 不可互换。
+`--in` 默认 `title`，字面包含、区分大小写；不是语义检索。`--home global` 表示 global home；JSON 的 `home` 为 `""`。零命中 `count 0` 不是失败。多条不要静默取第一条。`--form digest` 与 `transcript` 不可互换。
 
 ## 两个用户故事
 

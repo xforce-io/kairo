@@ -1,4 +1,4 @@
-"""#402 kairo ref find / ref read。"""
+"""#402 / #445 kairo ref find / ref read。"""
 
 from __future__ import annotations
 
@@ -8,6 +8,8 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from kairo.cli import app
+from kairo.notes import add_note
+from kairo.ref_find import FIND_IN_VALUES
 from kairo.refs import create_tag, global_home_path
 from kairo.workspace import Workspace
 
@@ -162,3 +164,66 @@ def test_no_step_run_re_step(tmp_path, monkeypatch):
     runner.invoke(app, ["ref", "find", "--title", "北港", "--json"])
     runner.invoke(app, ["ref", "read", "--id", titles["北港现场同步"], "--form", "digest", "--json"])
     assert calls["n"] == 0
+
+
+def _ids(result):
+    return {i["id"] for i in _load(result)["items"]}
+
+
+def test_s1_in_enum_and_invalid(tmp_path, monkeypatch):
+    serve, titles = _setup(tmp_path, monkeypatch)
+    monkeypatch.chdir(serve)
+    help_r = runner.invoke(app, ["ref", "find", "--help"])
+    assert help_r.exit_code == 0, help_r.output
+    assert "--in" in help_r.stdout
+    for value in FIND_IN_VALUES:
+        assert value in help_r.stdout
+    assert FIND_IN_VALUES == ("title", "digest", "notes", "transcript", "all")
+    bad = runner.invoke(app, ["ref", "find", "纪要甲", "--in", "body", "--json"])
+    payload = _fail(bad)
+    assert payload["code"] == "invalid_request"
+    assert "非法 --in" in payload["error"]
+    human = runner.invoke(app, ["ref", "find", "纪要甲", "--in", "semantic"])
+    assert human.exit_code != 0
+    assert "非法 --in" in (human.stderr or "") + human.output
+
+
+def test_s2_omit_in_equals_title(tmp_path, monkeypatch):
+    serve, titles = _setup(tmp_path, monkeypatch)
+    monkeypatch.chdir(serve)
+    omitted = _ids(runner.invoke(app, ["ref", "find", "--title", "北港", "--json"]))
+    explicit = _ids(runner.invoke(app, ["ref", "find", "--title", "北港", "--in", "title", "--json"]))
+    positional = _ids(runner.invoke(app, ["ref", "find", "北港", "--json"]))
+    assert omitted == explicit == positional
+    assert omitted == {titles["北港现场同步"], titles["北港产品计划"]}
+
+
+def test_s3_literal_field_and_all(tmp_path, monkeypatch):
+    serve, titles = _setup(tmp_path, monkeypatch)
+    monkeypatch.chdir(serve)
+    rid = titles["北港现场同步"]
+    add_note(serve, ref_id=rid, content="洞察标记词", home="energy")
+    cases = (
+        ("纪要甲", "digest", rid),
+        ("转写甲", "transcript", rid),
+        ("洞察标记词", "notes", rid),
+    )
+    for needle, field, expect in cases:
+        miss = _load(runner.invoke(app, ["ref", "find", needle, "--in", "title", "--json"]))
+        assert miss["count"] == 0, field
+        hit = _ids(runner.invoke(app, ["ref", "find", needle, "--in", field, "--json"]))
+        assert hit == {expect}, field
+        via_title = _ids(
+            runner.invoke(app, ["ref", "find", "--title", needle, "--in", field, "--json"])
+        )
+        assert via_title == {expect}, field
+        also = _ids(runner.invoke(app, ["ref", "find", needle, "--in", "all", "--json"]))
+        assert expect in also, field
+    no_query = _fail(runner.invoke(app, ["ref", "find", "--in", "digest", "--day", "2026-09-11", "--json"]))
+    assert no_query["code"] == "invalid_request"
+    clash = _fail(runner.invoke(app, ["ref", "find", "纪要甲", "--title", "北港", "--in", "digest", "--json"]))
+    assert clash["code"] == "invalid_request"
+    title_only = Path(__file__).resolve().parents[1] / "src" / "kairo" / "ref_find.py"
+    source = title_only.read_text(encoding="utf-8").lower()
+    for banned in ("embedding", "vector", "semantic", "similarity"):
+        assert banned not in source

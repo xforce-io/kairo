@@ -75,7 +75,7 @@ record_app = typer.Typer(
 )
 project_app.add_typer(record_app, name="record")
 ref_app = typer.Typer(
-    help="按标题／发生日／Topic 检索并读取 digest 或 transcript。不要扫内部目录。"
+    help="按字面片段／发生日／Topic 检索并读取 digest 或 transcript。不要扫内部目录。"
 )
 app.add_typer(ref_app, name="ref")
 notes_app = typer.Typer(
@@ -628,17 +628,30 @@ def _ref_fail(as_json: bool, exc) -> None:
 
 @ref_app.command("find")
 def ref_find_cmd(
-    title: str = typer.Option(None, "--title", help="标题包含匹配，区分大小写"),
+    query: str = typer.Argument(None, help="字面片段；与 --title 二选一"),
+    title: str = typer.Option(None, "--title", help="字面片段（兼容；省略 --in 时即标题包含）"),
+    in_field: str = typer.Option(
+        "title",
+        "--in",
+        help="匹配字段 title|digest|notes|transcript|all，默认 title；字面包含、区分大小写",
+    ),
     day: str = typer.Option(None, "--day", help="发生日 YYYY-MM-DD"),
     topic: str = typer.Option(None, "--topic", help="Topic 成员（slug）"),
     root: Path = typer.Option(None, "--root", "-r", help="serve root"),
     as_json: bool = typer.Option(False, "--json/--no-json"),
 ) -> None:
-    """按标题／发生日／Topic 检索 Ref。零命中不算失败。多条不自动读取。"""
+    """按字面片段／发生日／Topic 检索 Ref。--in 选字段，默认 title。零命中不算失败。多条不自动读取。"""
     from kairo.ref_find import RefLookupError, find_refs, format_find
 
     try:
-        payload = find_refs(_serve_root(root), title=title, day=day, topic=topic)
+        payload = find_refs(
+            _serve_root(root),
+            title=title,
+            day=day,
+            topic=topic,
+            query=query,
+            find_in=in_field,
+        )
     except RefLookupError as e:
         _ref_fail(as_json, e)
     if as_json:
