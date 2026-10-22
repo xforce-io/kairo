@@ -2,13 +2,13 @@
 
 [English](README.md) | 简体中文
 
-> step 驱动的增量知识构建引擎 —— 丢一个 reference，step 一下，知识往前长一格。
+> step 驱动的增量知识构建引擎 —— 登记一条 Ref（事项包），step 一下，知识往前长一格。
 
 把「录音 → 转写 → 纪要 → 理解/判断」这条手工活，变成 `step` 驱动的增量知识构建引擎。它秉持工程纪律（可追溯、派生物可重生），是**编排 LLM** 的增量构建系统。
 
 ## 核心心智
 
-一次 `kairo step` 把骨牌倒到底：`add` 一条 reference → ASR/doc2text → Digest（高密度记忆纪要 = 这条 reference 的记忆）→ Compose（增量综合进 `understanding.md`）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
+一次 `kairo step` 把骨牌倒到底：`add` 文件或目录成一条事项包（多形态、至多一份 digest）→ ASR/doc2text → Digest（高密度记忆纪要 = 这条 Ref 的记忆）→ Compose（增量综合进 `understanding.md`）。像 `make`：不执行命令，而是朝宪法声明的状态**调和**，跑到收敛。
 
 > **可读全文 prose（可选，[#33](https://github.com/xforce-io/kairo/issues/33) / [#60](https://github.com/xforce-io/kairo/issues/60)）**：raw ASR 噪声大（无标点、口语化、同音错字），不便人通读。可旁挂规范化可读全文 `prose.md` 作**人读档案**——补标点、分段、纠错、合并口水。关键是它**只给人读、不进 digest 路径**：digest 恒从 raw `transcript` 派生（信息上界）。默认**关**；`constitution.yaml` 设 `pipeline.normalize.enabled: true` 可在 `step` 时批量生成，或在 Web 对单条参考点「生成可读文稿」/ CLI `kairo prose <ref_id>` 按需生成。只对机器派生的誊录（`origin≠added`）生效，人给文本与 corpus 不碰。
 
@@ -51,7 +51,7 @@ $HOME/.local/bin/kairo
 kairo init "我的调研主题"            # 当前目录初始化为 Topic + 默认宪法
 kairo add 录音.m4a                  # 登记路径指针（默认 stream/观测）
 kairo add 录音.m4a --copy           # 先复制进 Topic 再登记（源删除仍可用）
-kairo add ./会议夹                  # 目录→一条多形态参考(夹内音频/文档/图)
+kairo add ./会议夹                  # 目录→一条多形态事项包(夹内音频/文档/图)
 kairo add 调研报告.docx             # 二进制源(docx/pptx/xlsx/pdf)自动转 source_text
 kairo add 白皮书.md --corpus        # 登记为 corpus/基线（权威参考资料）
 kairo step                         # 调和到收敛:ASR/doc2text → Digest → Compose(开启 normalize 时旁挂 prose)

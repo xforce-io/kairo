@@ -2,13 +2,13 @@
 
 English | [简体中文](README.zh-CN.md)
 
-> A step-driven incremental knowledge-construction engine — drop in a reference, run a `step`, and knowledge grows one notch.
+> A step-driven incremental knowledge-construction engine — register a Ref (事项包), run a `step`, and knowledge grows one notch.
 
 Turns the manual chain of "recording → transcription → minutes → understanding/judgment" into a `step`-driven incremental knowledge-construction engine. It upholds engineering discipline (traceable; derivatives are regenerable) and is an incremental construction system that **orchestrates LLMs**.
 
 ## Core mental model
 
-One `kairo step` topples the dominoes all the way down: `add` a reference → ASR/doc2text → Digest (dense memory minutes = this reference's memory) → Compose (incrementally synthesize into `understanding.md`). Like `make`: it doesn't run commands, it **reconciles** toward the state declared in the constitution, running until convergence.
+One `kairo step` topples the dominoes all the way down: `add` a file or directory as one Ref (matter package: several forms, at most one digest) → ASR/doc2text → Digest (dense memory minutes = this Ref's memory) → Compose (incrementally synthesize into `understanding.md`). Like `make`: it doesn't run commands, it **reconciles** toward the state declared in the constitution, running until convergence.
 
 > **Readable full-text prose (optional, [#33](https://github.com/xforce-io/kairo/issues/33) / [#60](https://github.com/xforce-io/kairo/issues/60))**: raw ASR is noisy (no punctuation, colloquial, homophone errors) and hard to read through. A normalized readable full text `prose.md` can be produced as a **human-reading archive** — punctuation, paragraphing, fixes, less filler. It is **for human reading only and never enters the digest path** (digest always from raw `transcript`). Off by default; set `pipeline.normalize.enabled: true` for batch generation on `step`, or generate on demand via Web (“Generate readable prose”) / `kairo prose <ref_id>`. Only machine-derived transcriptions (`origin≠added`); human text and corpus are untouched.
 
@@ -51,7 +51,7 @@ Audio transcription depends on a local whisper — see "Local ASR configuration"
 kairo init "My research topic"            # initialize the current directory as a Topic + default constitution
 kairo add recording.m4a                   # register a path pointer (stream/observation by default)
 kairo add recording.m4a --copy            # copy into Topic first, then register
-kairo add ./meeting-folder                # directory → one multi-form reference (audio/docs/images inside)
+kairo add ./meeting-folder                # directory → one multi-form Ref (audio/docs/images inside)
 kairo add report.docx                     # binary sources (docx/pptx/xlsx/pdf) auto-convert to source_text
 kairo add whitepaper.md --corpus          # register as corpus/baseline (authoritative reference material)
 kairo step                                # reconcile to convergence: ASR/doc2text → Digest → Compose (prose alongside when normalize is on)

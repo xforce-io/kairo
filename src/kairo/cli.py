@@ -54,10 +54,11 @@ from kairo.run_lock import RunOccupiedError, acquire_run_lock
 from kairo.workspace import AddError, Workspace, WorkspaceNotFound, delete_workspace
 
 _EPILOG = (
-    '快速上手:kairo init "<topic>" → kairo add <file>'
-    "(--corpus 标基线,默认 stream 观测)→ kairo step(调和到收敛)。\n\n"
+    '快速上手:kairo init "<topic>" → kairo add <file|dir>'
+    "(--corpus 标基线,默认 stream 观测)→ kairo step(调和到收敛)。"
+    "文件或目录登记为一条事项包(多形态 Ref,至多一份 digest);目录不是每个文件一条。\n\n"
     "音频→Topic Ref:kairo add <audio> --topic <slug> --copy,再 kairo step --topic <slug>。\n\n"
-    "附加 form:kairo add <file> --to <ref_id> --copy。\n\n"
+    "附加 form:kairo add <file> --to <ref_id> --copy(往既有事项包追加形态,#357)。\n\n"
     "产出 understanding.md(中立事实)。心智与协议定义在 constitution.yaml。"
 )
 
@@ -384,12 +385,16 @@ def archive(
 
 @app.command()
 def add(
-    files: list[Path],
+    files: list[Path] = typer.Argument(
+        ...,
+        metavar="FILE|DIR",
+        help="文件或目录;目录→一条多形态事项包(#67),不是每个文件一条 Ref",
+    ),
     ref_id: str = typer.Option(
         None,
         "--id",
         "--to",
-        help="追加 form 到现有 Ref(不创建新 Ref);对标 Web attach",
+        help="往既有事项包追加形态(不创建新 Ref);对标 Web attach(#357)",
     ),
     role: str = typer.Option(None, "--role", help="覆盖按扩展名猜测的 role"),
     corpus: bool = typer.Option(
@@ -409,9 +414,11 @@ def add(
     root: Path = typer.Option(
         None, "--root", "-r", help="serve root;非 Topic 目录时写入全局库"
     ),
-    title: str = typer.Option(None, "--title", help="新建 Ref 的展示名;省略则用文件 stem"),
+    title: str = typer.Option(
+        None, "--title", help="新建事项包的展示名;省略则用路径 stem(Ref ≠ 单文件)"
+    ),
 ) -> None:
-    """登记 Ref。cwd 为 Topic 则 home 在该目录并打该 Topic 名称 Tag;--topic 另打 Tag。"""
+    """登记一条事项包(Ref)。`add <file|dir>`:目录→一条多形态 Ref(#67),不是单文件。`--to` 往既有 Ref 追加形态(#357)。cwd 为 Topic 则 home 在该目录并打该 Topic 名称 Tag;--topic 另打 Tag。"""
     from kairo.refs import RefError, add_global_ref, stamp_add_membership
 
     try:
