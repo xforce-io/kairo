@@ -183,3 +183,4 @@ HTML：`/`、`/w/{slug}`、`/timeline?tag=`、`/refs/{id}`、`/projects/{id}`。
 
 - 父 #242；子 #243–#247
 - 既有 #138 Timeline、#232 Project 闭环、#234 后续事件
+- 后续口径：[#446](446-ref-matter-package.md) 把 Ref 明确为一次事项的多形态资料包（不改本文件硬约束）
