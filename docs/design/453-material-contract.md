@@ -3,7 +3,7 @@
 - Issue: [#453](https://github.com/xforce-io/kairo/issues/453)
 - 版本: `453-l1-v1`
 - 分支: `feat/453-material-contract`
-- 状态: **L1 Draft**（待正式批准注记写入本文件头；**不自批 Approved**）
+- 状态: **L1 Approved**（peng 2026-10-24 ~17:23 Asia/Shanghai：批准 453-l1-v1；S5 默认组合 = transcript|source_text + attachment(图)）
 - 日期: 2026-10-24 Asia/Shanghai
 - L1: write · L2: write（见 [453-material-contract-l2.md](453-material-contract-l2.md)）
 - 产品确认来源（会话口径，尚未等同文件头正式批准）：peng 2026-10-24 Asia/Shanghai 对话 — 元数据与类型处理声明化；理解交给模型；贵且稳的变换仍是工具；文件不单开「文件」模态；网址偏推荐正文 Transform 或书签式只读；验证要求 digest 支持并反映同 Ref ≥2 种模态 form。Issue 正文已收录该约定。
@@ -209,9 +209,9 @@ flowchart TD
 
 ### 开放问题（实现前建议拍板）
 
-1. **正式批准**：本文件头仍为 L1 Draft。会话口径是否直接视为产品基线进入 L2/实现，还是等文件头写上正式批准注记？（交接：Jenny → peng 确认）
+1. **正式批准**：**已解决** — peng 2026-10-24 ~17:23 Asia/Shanghai 批准 `453-l1-v1` 作产品基线并继续端到端。
 2. **glossary**：是否在实现阶段为「推荐正文工具 / 仅原件可读 / role」补名词表行，或继续只以本 L1 为字段事实源？
-3. **S5 最小模态组合**：验收默认采用「transcript|source_text + attachment(图片)」是否足够，还是必须包含「双正文 role」组合？
+3. **S5 最小模态组合**：**已解决** — 默认「正文类（transcript|source_text）+ attachment(图)」即可；本票不强制双正文组合。
 
 不影响主路径的探索（通用网页抓取、新二进制格式）不在本票实现范围。
 
