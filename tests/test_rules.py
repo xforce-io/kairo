@@ -1195,6 +1195,7 @@ def test_compose_persona_carries_output_discipline(tmp_path):
     persona = prov.calls[0].persona
     assert "只输出文档正文" in persona  # P1 无旁白/提议
     assert "只产出当前这一个文档" in persona  # P2 不内联其它文档
+    assert "多模态材料" not in persona  # #453 digest-only; compose keeps generic 按需
     # #99:短 ID + 索引,禁止正文堆叠完整路径
     assert "短 ID" in persona or "来源索引" in persona or "S-…" in persona
     assert "待核" in persona  # P6 可疑专名标 ⚠️
@@ -1211,6 +1212,7 @@ def test_digest_persona_carries_output_discipline(tmp_path):
     persona = prov.calls[0].persona
     assert "只输出文档正文" in persona  # P1
     assert "待核" in persona  # P6
+    assert "多模态材料" in persona  # #453 S5: cite non-text attachments
 
 
 # ---- #13:源分层 corpus(基线)/ stream(观测),prompt 级 ----

@@ -1,6 +1,7 @@
 # tests/test_rules_digest_attach.py
+from kairo.catalog import format_catalog
 from kairo.workspace import Workspace
-from kairo.models import Manifest, Form
+from kairo.models import Manifest, Form, State
 from kairo.provider import StubProvider
 from kairo.rules import DigestRule
 
@@ -78,3 +79,63 @@ def test_no_attachment_fingerprint_matches_legacy_formula(tmp_path):
     wi = next(i for i in items if i.key == "references/m/digest.md")
     legacy = _hash(f"{rule.prompt}\n\n---正文---\n{body}")
     assert wi.input_hash == legacy
+
+
+def _body_plus_image(tmp_path, *, ref_id="m"):
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    rdir = ws.references_dir() / ref_id
+    rdir.mkdir(parents=True)
+    (rdir / "transcript.md").write_text("转写：讨论分流上线")
+    (rdir / "board.png").write_bytes(b"\x89PNG\r\n")
+    ws.write_manifest(
+        ref_id,
+        Manifest(
+            id=ref_id,
+            title=ref_id,
+            forms=[
+                Form(role="transcript", location=f"references/{ref_id}/transcript.md", hash="t1"),
+                Form(role="attachment", location=f"references/{ref_id}/board.png", hash="img9"),
+            ],
+        ),
+    )
+    return ws
+
+
+def test_catalog_includes_body_and_attachment(tmp_path):
+    """#453 S5: body_roles 必读 + attachment 按需，同进 digest 可消费集合。"""
+    ws = _body_plus_image(tmp_path)
+    items = DigestRule(ws, StubProvider())._catalog_items(ws.read_manifest("m"))
+    by_role = {it.role: it for it in items}
+    assert by_role["transcript"].required is True
+    assert by_role["attachment"].required is False
+    catalog = format_catalog(items)
+    assert "| 必读 | transcript |" in catalog
+    assert "| 按需 | attachment |" in catalog
+
+
+def test_digest_persona_requires_attachment_reflection(tmp_path):
+    """#453 S5: digest persona 要求反映非文本 attachment；产物须可指认引用。"""
+    ws = _body_plus_image(tmp_path)
+    captured = []
+
+    class Probe:
+        name = "probe"
+        model = "probe"
+        supports_read_dirs = True
+
+        def run(self, config, signal=None):
+            captured.append(config)
+            dest = config.artifact_dir / (config.artifact or "digest.md")
+            dest.write_text("纪要：分流上线。白板图 board.png 可见方案对照。")
+            return None
+
+    DigestRule(ws, Probe()).discover()[0].run(State())
+    assert captured, "digest provider was not called"
+    persona = captured[0].persona
+    assert "多模态材料" in persona
+    assert "可指认" in persona
+    assert "attachment" in persona
+    assert "| 必读 | transcript |" in captured[0].context
+    assert "| 按需 | attachment |" in captured[0].context
+    digest = (ws.root / "references" / "m" / "digest.md").read_text()
+    assert "board.png" in digest

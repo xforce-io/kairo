@@ -411,6 +411,15 @@ _CATALOG_DISCIPLINE = (
     "- 不要编造文件中没有的事实。"
 )
 
+# #453 S5: digest-only. Compose keeps generic 按需. Attachments stay catalog-optional
+# (not body) but must still be reflected when present.
+_DIGEST_MULTIFORM_DISCIPLINE = (
+    "\n\n[多模态材料]\n"
+    "- 若材料目录含 attachment（图片等非文本原件），必须 Read，"
+    "并在纪要中至少一处可指认反映（引用文件名、转述可见内容或写明依据）。\n"
+    "- 禁止只消化单一正文、对其余形态零指认。"
+)
+
 # 退化护栏(#28):上一版充分长却被骤缩覆盖 → 极可能是 agent 吐了变更说明而非全文。
 # 阈值保守,仅拦灾难性缩水;正常的重组/修正/推翻不会触发。
 # digest 写路径共用同一谓词,避免失败短文盖掉长纪要。
@@ -687,6 +696,7 @@ class DigestRule:
                 self.prompt
                 + knowledge_context
                 + _CATALOG_DISCIPLINE
+                + _DIGEST_MULTIFORM_DISCIPLINE
                 + _OUTPUT_DISCIPLINE
             )
             context = format_catalog(catalog)

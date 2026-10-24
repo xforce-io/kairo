@@ -34,7 +34,7 @@
 
 本票预期改动面（实现阶段，非本 L2 已改代码）：
 
-- **文档**：L1/L2（本对）；glossary **仅当** L1 规范名需要名词表行时再改。
+- **文档**：L1/L2（本对）；glossary 已补「role / 推荐正文工具 / 仅原件可读」三行。
 - **运行时**：以「声明补齐 + 验收门禁」为主；若现网已满足 S4/S5，可只加测与 verify，不扩引擎。若缺口（例如某路径静默丢 attachment），最小修补 DigestRule/catalog 消费，禁止平行管线。
 - **verify**：新增或扩展功能文件覆盖 S5（见 §8）。
 
@@ -51,6 +51,18 @@ URL（现状）→ project_materials.read_url_material → 材料身份 type=url
 ```
 
 失败：backend blocked → `state.products[key].status=blocked` + reason；step 收敛且可观察（L1 R4）。
+
+Transform blocked 露出（S4，稳定 reason：`missing-source` / `no-asr` / `asr-failed` / `convert-failed`）：
+
+| 面 | 读法 |
+|---|---|
+| `state.products[<transform-key>]` | `status=blocked` + `reason` |
+| `ref_product_blocks(ws, id)` | Web / CLI 单条 Ref 的 product blocks |
+| `kairo status` | `⚠ blocked:reason` |
+| `kairo status --json` | `blocked_reasons[].reason`（`scope=ref`） |
+| Web run plan | `blocked_refs` |
+
+`asr-failed` / `convert-failed` 为终态（须 `retry-ref` / `re-step`）；`no-asr` / `missing-source` 条件恢复后可自动重试。
 
 ## 4. 数据与状态契约
 
@@ -86,7 +98,7 @@ URL（现状）→ project_materials.read_url_material → 材料身份 type=url
 | S2.A1 | 设计建议表 | 人读 |
 | S3.A1 | 设计对照结论 | 人读 |
 | S4.A1 | TransformRule + step | 既有 `tests/test_transform.py` 等；CLI step 证据 |
-| S5.A1 | DigestRule catalog + digest 产出反映 | **主功能文件**：实现时新增 `.agents/skills/verify-kairo-web/features/material-multiform-digest.md`（或等价名）；可链 `tests/test_meeting_multiform_e2e.py` / `test_rules_digest_attach.py` 作编排旁证。真路径证明以 verify 手册为准，不以单测代替「产出可指认反映」 |
+| S5.A1 | DigestRule catalog + digest 产出反映 | **主功能文件**：`.agents/skills/verify-kairo-web/features/material-multiform-digest.md`；旁证 `tests/test_meeting_multiform_e2e.py` / `test_rules_digest_attach.py`。真路径证明以 verify 手册为准，不以单测代替「产出可指认反映」 |
 
 每个 Issue S 一个主要功能文件：S5 → 上述 material-multiform-digest；S4 可与 `ref-run-runtime.md` 交叉链接，但 S5 反映口径不并进 notes 类 feature。
 
