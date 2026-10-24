@@ -1,9 +1,9 @@
 # #453 L2 — 材料元数据契约 · 最小技术合同
 
 - Issue: [#453](https://github.com/xforce-io/kairo/issues/453)
-- L1 基线：`docs/design/453-material-contract.md` 版本 **`453-l1-v1`**（Draft；实现前须按 when-to-ask 取得适用产品确认）
+- L1 基线：`docs/design/453-material-contract.md` 版本 **`453-l1-v1`**（**Approved** peng 2026-10-24 ~17:23 Asia/Shanghai；S5=正文+图）
 - 版本: `453-l2-v1`
-- 状态: Draft（随 L1；不自批）
+- 状态: Active（随已批准 L1；实现阶段）
 - 日期: 2026-10-24 Asia/Shanghai
 - L2: write 依据见 how 文末：公共契约面 + Ref vs Project URL 责任边界 + verify 地图（S5）
 - how：`/tmp/kairo-verify/453/how.md`
@@ -94,4 +94,4 @@ URL（现状）→ project_materials.read_url_material → 材料身份 type=url
 
 - S5「可指认反映」依赖模型产出，需在 verify 步骤写明判定样例（引用/转述/依据句），避免主观口头 pass。
 - 若真实 ASR 环境缺失，S4 音频路径用 blocked 可观察或受控 stub，并在证据中标明边界。
-- L1 开放问题（正式批准、glossary、S5 最小组合）未决前，实现不得缩小 L1.8 必需项。
+- L1 开放问题 1/3 已决（批准 + S5 正文+图）；glossary 是否补名词表行由实现决定，不得缩小 L1.8 必需项。
