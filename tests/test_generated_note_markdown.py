@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import tomllib
 from pathlib import Path
@@ -14,15 +15,27 @@ from kairo.generated_note import (
     _PERSONA,
     ensure_generated_note,
     list_item_count,
+    normalize_emphasis_colons,
     prepared_body,
 )
 from kairo.notes import NotesError, append_generated_note, show_notes
 from kairo.refs import create_tag
+from kairo.web.render import render_markdown
 from kairo.web.server import create_app
 from kairo.workspace import Workspace
 from test_run_ref_generated_note_423 import _NoteProvider
 
 OK = "**主点**：方案与交付先握手。\n\n- 数据分两级"
+LEAK_ITEM = "- **客户在问：**怎么管"
+FIXED_ITEM = "- **客户在问**：怎么管"
+LEAK_NOTE = (
+    "**上午对齐从演示转到现状和取舍：天溯走垂类应用，自建语义与数据中间层，"
+    "基座只接入，主业做自己的产品化平台。**\n\n"
+    "- **客户在问：**怎么管、集团怎么分工、AI怎么赋能、性能和安全怎么撑；"
+    "上量后数仓多次顶不住，增量和换Doris被提前做。\n"
+    "- **底座到哪：**互联互通大体已有，模型以千问调用为主。"
+)
+ADJACENT = "- **标签：** **正文**"
 
 
 def _serve(tmp_path, monkeypatch):
@@ -63,6 +76,102 @@ def test_persona_asks_for_markdown_structure():
     assert "加粗（**）" in _PERSONA
     assert "列表" in _PERSONA
     assert "零换行" in _PERSONA
+    assert "冒号写在加粗外面" in _PERSONA
+    assert "**标签**：结论" in _PERSONA
+    assert "**标签：**结论" in _PERSONA
+
+
+def test_normalize_emphasis_colons_moves_colon_outside_bold():
+    assert normalize_emphasis_colons(LEAK_ITEM) == FIXED_ITEM
+    assert normalize_emphasis_colons("- **客户在问:**怎么管") == "- **客户在问**:怎么管"
+    assert normalize_emphasis_colons(OK) == OK
+    assert normalize_emphasis_colons(FIXED_ITEM) == FIXED_ITEM
+    assert normalize_emphasis_colons(ADJACENT) == "- **标签**： **正文**"
+    assert "**客户在问：**" not in normalize_emphasis_colons(LEAK_NOTE)
+    assert "**客户在问**：" in normalize_emphasis_colons(LEAK_NOTE)
+    assert "**底座到哪**：" in normalize_emphasis_colons(LEAK_NOTE)
+    html = render_markdown(LEAK_ITEM)
+    assert "<strong>" not in html
+    assert "**" in html
+
+
+def test_prepared_body_and_append_move_colon_outside_bold(tmp_path, monkeypatch):
+    serve, _ws, ref_id = _serve(tmp_path, monkeypatch)
+    body = f"**总判断**：会上对过口径。\n\n{LEAK_ITEM}"
+    expected = f"**总判断**：会上对过口径。\n\n{FIXED_ITEM}"
+    assert prepared_body(body) == expected
+    written = append_generated_note(serve, ref_id=ref_id, content=body, home="energy")
+    assert written["type"] == "generated"
+    shown = show_notes(serve, ref_id=ref_id, home="energy")
+    assert shown["items"][0]["content"] == expected
+
+
+def test_ensure_generated_note_writes_colon_outside_bold(tmp_path, monkeypatch):
+    _serve_root, ws, ref_id = _serve(tmp_path, monkeypatch)
+    raw = f"**总判断**：会上对过口径。\n\n{LEAK_ITEM}"
+    monkeypatch.setattr(
+        "kairo.generated_note.select_note_provider",
+        lambda: _NoteProvider(raw),
+    )
+    done = ensure_generated_note(ws, ref_id)
+    assert done["status"] == "succeeded", done
+    item = show_notes(ws.root.parent, ref_id=ref_id, home="energy")["items"][0]
+    assert item["content"] == f"**总判断**：会上对过口径。\n\n{FIXED_ITEM}"
+
+
+def test_preview_renders_existing_colon_inside_bold(tmp_path, monkeypatch):
+    serve, ws, ref_id = _serve(tmp_path, monkeypatch)
+    note_id = "n-leak-451"
+    (ws.references_dir() / ref_id / "notes.jsonl").write_text(
+        json.dumps(
+            {
+                "id": note_id,
+                "type": "generated",
+                "author": "machine",
+                "created_at": "2026-10-24T07:12:32Z",
+                "content": LEAK_NOTE,
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    client = TestClient(create_app(serve))
+    pages = (
+        client.get(f"/refs/{ref_id}?home=energy"),
+        client.get(f"/w/energy/ref/{ref_id}/notes"),
+        client.get(f"/refs/{ref_id}/notes/{note_id}?home=energy"),
+    )
+    for page in pages:
+        assert page.status_code == 200, page.text
+        html = page.text
+        if "notes-preview-content" in html:
+            html = _preview(html)
+        assert "<strong>客户在问</strong>" in html
+        assert "<strong>底座到哪</strong>" in html
+        assert "**" not in html
+
+
+def test_preview_renders_adjacent_bold_fragments(tmp_path, monkeypatch):
+    serve, ws, ref_id = _serve(tmp_path, monkeypatch)
+    (ws.references_dir() / ref_id / "notes.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "n-adj",
+                "type": "generated",
+                "author": "machine",
+                "created_at": "2026-10-24T07:12:32Z",
+                "content": f"**总判断**：相邻。\n\n{ADJACENT}",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    inner = _preview(TestClient(create_app(serve)).get(f"/w/energy/ref/{ref_id}/notes").text)
+    assert "<strong>标签</strong>" in inner
+    assert "<strong>正文</strong>" in inner
+    assert "**" not in inner
 
 
 def test_acceptance_rejects_empty_overlong_and_plain_paragraph(tmp_path, monkeypatch):

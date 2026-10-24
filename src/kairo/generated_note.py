@@ -5,6 +5,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -19,7 +20,8 @@ _PERSONA = (
     "只使用这一份纪要里已有的内容，不要补充别的材料，也不要写成决定、修正或待确认问题。"
     f"正文不超过 {MAX_GENERATED_CHARS} 个字符，标点和空白计入。"
     "用 Markdown 标出主次：先写一句加粗（**）的总判断，下面用列表写出最多五个主题，"
-    "每条是一个加粗的短标签加一句结论。"
+    "每条是一个加粗的短标签，冒号写在加粗外面，再跟一句结论（**标签**：结论）。"
+    "不要写成 **标签：**结论。"
     "不要把纪要里的每句话都列成同级列表，次要过程和例子省掉。"
     "并且分成多行，不要输出零换行的一整段。"
     "直接输出 note 正文。"
@@ -27,6 +29,15 @@ _PERSONA = (
 # 与 web/render.py 同一套 CommonMark，列表标记含 + 与 1)。
 _MD = MarkdownIt("commonmark", {"html": False, "linkify": True}).enable("table")
 MAX_LIST_ITEMS = 6
+# CommonMark will not close ** when the closer sits after a colon inside the span
+# and the next character is not whitespace or punctuation. Models often emit
+# **标签：**结论; the OK form is **标签**：结论.
+_EMPHASIS_COLON_RE = re.compile(r"\*\*([^*]+?)([:：])\*\*")
+
+
+def normalize_emphasis_colons(text: str) -> str:
+    """Move a colon that sits inside **...：** / **...:** outside the span."""
+    return _EMPHASIS_COLON_RE.sub(r"**\1**\2", text or "")
 
 
 def _tokens(body: str):
@@ -61,7 +72,7 @@ def list_item_count(body: str) -> int:
 
 
 def prepared_body(text: str) -> str | None:
-    body = (text or "").strip()
+    body = normalize_emphasis_colons((text or "").strip())
     if not body or len(body) > MAX_GENERATED_CHARS or not has_scan_structure(body):
         return None
     if list_item_count(body) > MAX_LIST_ITEMS:
