@@ -71,6 +71,7 @@ from kairo.web.public import (
     public_bounds,
     set_reference_public,
 )
+from kairo.generated_note import normalize_emphasis_colons
 from kairo.web.render import preview_datasource_html, render_markdown
 from kairo.web.tasks import classify_task, stream_events
 from kairo.models import State
@@ -1240,7 +1241,10 @@ def _notes_tower(serve, ref_id: str, home: str, *, render_body: bool = False, re
         for it in items:
             it["note_id"] = _note_id_of(it)
             if render_body:
-                it["body_html"] = render_markdown(it.get("content") or "", slug=home if home and home != "global" else None)
+                it["body_html"] = render_markdown(
+                    normalize_emphasis_colons(it.get("content") or ""),
+                    slug=home if home and home != "global" else None,
+                )
         from kairo.generated_note import read_generation_path
         generation = read_generation_path(rec.dir / "generated-note.json")
         if any(it["type"] == "generated" for it in items):
@@ -1412,7 +1416,9 @@ def global_note_view(
         item = show_notes(_serve(request), stable_id=sid)
     except NotesError:
         raise HTTPException(status_code=404, detail=t("notes.missing"))
-    html = render_markdown(item.get("content") or "", slug=ws.root.name)
+    html = render_markdown(
+        normalize_emphasis_colons(item.get("content") or ""), slug=ws.root.name
+    )
     suffix = _ref_query(home, back)
     return _render(
         request,

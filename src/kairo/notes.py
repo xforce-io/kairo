@@ -236,12 +236,17 @@ def append_generated_note_to_ref(rec: RefRecord, *, content: str, now: datetime 
     """对调用方已解析的实际 Ref 写机器 note，复用同一校验与原子提交。"""
     if rec.dir is None or not (rec.dir / "manifest.yaml").is_file():
         raise NotesError("reference 不存在", code="not_found")
-    body = (content or "").strip()
+    from kairo.generated_note import (
+        MAX_LIST_ITEMS,
+        has_scan_structure,
+        list_item_count,
+        normalize_emphasis_colons,
+    )
+    body = normalize_emphasis_colons((content or "").strip())
     if not body:
         raise NotesError("正文为空", code="invalid_request")
     if len(body) > 800:
         raise NotesError("正文超过 800 个字符", code="invalid_request")
-    from kairo.generated_note import MAX_LIST_ITEMS, has_scan_structure, list_item_count
     if not has_scan_structure(body):
         raise NotesError("正文没有 Markdown 结构", code="invalid_request")
     if list_item_count(body) > MAX_LIST_ITEMS:
