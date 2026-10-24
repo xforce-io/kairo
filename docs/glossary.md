@@ -27,6 +27,9 @@
 | stream | 观测型参考，digest 后 fold 进产物。 | 流水、观测流 |
 | corpus | 基线型参考，只读参考层，不 digest、不 fold。 | 语料库 |
 | digest | 一条 reference 的高密度记忆纪要，compose / 时段回顾的输入。 | 摘要、纪要原文 |
+| role | form 的类型槽（如 audio、document、attachment、transcript、source_text）；由扩展名映射或 Transform 派生，不是「文件」单一模态。 | 文件类型、模态名 |
+| 推荐正文工具 | 贵且稳的 Transform（听写、抽字等），产物进 body_roles，供 digest 必读。 | 自动摘要、平行 digest 管线 |
+| 仅原件可读 | 不派生正文（如图片 attachment），进材料目录按需，由模型 Read。 | 必须 OCR、必读附件 |
 | brief | 一条 Ref 的一句话概述，由该 Ref 的 digest 经一次短调用产出（按 `BRIEF:` 锚点取正文），存于该 Ref 的 manifest；缺失即不展示，不从正文派生。 | 摘要、简介、一句话摘要、副标题 |
 | notes | 挂在 Ref 上的人写 markdown 洞察盖楼，可追加；不是 digest、不是 brief、不是 fold 产物。 | 纪要、洞察 digest、已 fold 批注 |
 | preset | constitution 建仓时选用的填法名；运行时读 digest.enabled / targets / review_input。 | 工作区类型枚举 |

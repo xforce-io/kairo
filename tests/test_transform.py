@@ -178,6 +178,53 @@ def test_corpus_binary_step_no_source_text(tmp_path, monkeypatch):
         assert not any(crid in k for k in ts.folded)
 
 
+def test_s4_audio_and_document_transform_or_blocked_visible(tmp_path, monkeypatch):
+    """#453 S4: audio→transcript 与 document→source_text 仍工作；blocked 露出 products + status。"""
+    from kairo.engine import ref_product_blocks
+    from kairo.status_view import topic_status_payload
+
+    ws = Workspace.init(tmp_path / "ws", topic="t")
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    did = _add_doc(ws)
+    doc_state = State()
+    TransformRule(ws, **DOC_BACKEND).discover()[0].run(doc_state)
+    ws.write_state(doc_state)
+    source_text = (ws.root / "references" / did / "source_text.md").read_text()
+    assert "港湾通系统" in source_text
+
+    monkeypatch.setenv("KAIRO_STUB", "1")
+    audio = tmp_path / "talk.m4a"
+    audio.write_bytes(b"\x00\x01")
+    arid = ws.add([audio])
+    audio_state = ws.read_state()
+    TransformRule(ws).discover()[0].run(audio_state)
+    ws.write_state(audio_state)
+    assert "STUB TRANSCRIPT" in (ws.root / "references" / arid / "transcript.md").read_text()
+
+    monkeypatch.delenv("KAIRO_STUB", raising=False)
+    bad = ws.root / "broken.docx"
+    bad.write_bytes(b"")
+    brid = ws.add([bad])
+    blocked_state = ws.read_state()
+    item = next(
+        it
+        for it in TransformRule(ws, **DOC_BACKEND).discover()
+        if brid in it.key
+    )
+    item.run(blocked_state)
+    ws.write_state(blocked_state)
+    key = f"references/{brid}/source_text.md"
+    ps = ws.read_state().products[key]
+    assert ps.status == "blocked" and ps.reason == "convert-failed"
+    blocks = ref_product_blocks(ws, brid)
+    assert any(b["reason"] == "convert-failed" for b in blocks)
+    payload = topic_status_payload(ws)
+    assert any(
+        r.get("scope") == "ref" and r.get("reason") == "convert-failed"
+        for r in payload["blocked_reasons"]
+    )
+
+
 def test_corpus_document_stamp_changes_on_edit(tmp_path):
     """二进制基线 stamp 跟文件字节走,不 read_text。"""
     ws = Workspace.init(tmp_path)
