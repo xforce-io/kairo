@@ -8,10 +8,10 @@
 | Ref 身份键 | Ref 在 serve root 内由 home 与 id 组成的稳定键，用于跨来源解析和加工记账。 | digest 路径、资料路径 |
 | 历史归属回填 | 一次性把历史 Ref 的 workspace home 映射为同名 Topic Tag，并为该 Topic 写入同名包含规则的受控迁移。 | home 成员兼容、自动打标 |
 | Tag | 打在 Ref 上的分类标签，可多选，不拥有资料。 | 文件夹、Inbox |
-| Timeline | serve root 上唯一的中立时间流，按发生日浏览 Ref、Project 事件与 Artifact。 | Inbox、排期、最近加入 |
+| Timeline | serve root 上唯一的中立时间流，按发生日浏览 Ref、Project 事件与 Artifact。Web Console 中有进展的 Ref 按最近进展日期展示。 | Inbox、排期、最近加入 |
 | 未加工 | Timeline 当前日历视图内尚无 digest 的 stream Ref；与缺 brief 无关。 | 待办、stale、Inbox 项 |
 | 入集 Topic | 当前日历视图中至少有一条未加工 stream 作为成员、且普通 `kairo run` 可推进的 Topic。 | 屏幕可见 Topic、home Topic |
-| 系统事件 | Timeline 按发生日列出的一条 Ref、Project 或 Artifact 记录；Timeline 不拥有该实体。 | 日程、Timeline 条目 |
+| 系统事件 | Timeline 列出的一条 Ref、Project 或 Artifact 记录；Timeline 不拥有该实体。 | 日程、Timeline 条目 |
 | 包含规则 | Topic 声明的 Tag 列表；Ref 命中其中任一即成为成员。 | 智能合集、AND 规则 |
 | constitution | workspace 里声明期望状态的 `constitution.yaml`，step 朝它调和。 | 宪法文件 |
 | 真名册 | 按层登记的领域规范名、说明与别名表，是后续文本产物的权威输入。 | — |
@@ -81,3 +81,5 @@
 | generated | 该 Ref 有效 digest 就绪后由统一加工或只补入口确保存在的机器 note 类型；作者固定为机器，不是人的决定或修正。 | 人工批注、insight、决策 |
 | 置顶 | 一条参考上由人指定、至多一条、用来决定预览默认展开哪条 note 的标识。 | 钉住、收藏、星标 |
 | note 生成状态 | Ref 实际目录内记录自动 note 未尝试、进行中、成功或失败的独立结果，不代表 digest 或综合失败。 | — |
+| 进展 | 用户在同一 Ref 下追加的一条带日期的讨论更新。 | — |
+| 最近进展日期 | 一条 Ref 已记录进展中的最晚日期，用于 Timeline 归日。 | 最后修改时间、登记日期 |

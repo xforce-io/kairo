@@ -15,7 +15,7 @@
         <span class="tl-meta"{% if it.display_time %} title="{{ it.display_time }}"{% endif %}>{{ home_label(it) }}{% if it.kind != 'ref' and it.display_time %} · {{ clock_label(it.display_time) }}{% elif extra_meta %} · {{ extra_meta }}{% endif %}</span>
       </a>
 {% endmacro %}
-{% macro recent_meta(it) %}{{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {{ t('tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) if it.occurred_at else t('tl.occurred_unknown') }}{% endmacro %}
+{% macro recent_meta(it) %}{{ t('tl.added_at').format(t=it.added_at.astimezone().strftime('%H:%M')) }} · {{ t('tl.progress_on' if it.progress_day else 'tl.occurred_on').format(d=it.occurred_at.strftime('%m-%d')) if it.occurred_at else t('tl.occurred_unknown') }}{% endmacro %}
 {% macro day_meta(it) %}{{ it.occurred_at.strftime('%m-%d') if it.occurred_at else t('tl.occurred_unknown') }}{% endmacro %}
 {% macro folded_block(it, mode='') %}
       {% if it.folded %}
@@ -108,7 +108,7 @@
           <span class="count">{{ day_items|length }}</span>
         </div>
         {% set show_run = visible_undigested > 0 and not public_read %}
-        {% set show_rev = range_on and (too_long or day_items) %}
+        {% set show_rev = range_on and (too_long or day_items or digest_n or no_digest_n) %}
         {% if show_run or show_rev %}
         <div class="rev-actions">
           {% if show_run %}

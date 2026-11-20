@@ -89,10 +89,12 @@ class TimelineItem:
     display_time: str = ""
     fold: bool = True  # source_class.fold; corpus 为 False
     undigested: bool = False  # 仅日历 pane 标注；只看 digest 文件
+    progress_day: dt.date | None = None
 
 
-def scan_timeline(root: Path | str) -> list[TimelineItem]:
+def scan_timeline(root: Path | str, *, include_progress: bool = False) -> list[TimelineItem]:
     """扫全部可访问 Ref（Topic home + 全局库）；损坏 manifest 跳过。"""
+    from kairo.ref_progress import read_progress
     from kairo.refs import list_all_refs, resolve_open
     from kairo.workspace import WorkspaceNotFound
 
@@ -111,6 +113,15 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
         if not man_path.is_file():
             continue
         added = effective_added_at(man.added_at, man_path)
+        progress_day = None
+        if include_progress:
+            try:
+                progress = read_progress(man_path.parent)
+            except (ValueError, OSError):
+                # Keep the Ref discoverable while its progress file is unavailable.
+                progress = []
+            if progress:
+                progress_day = progress[-1].day
         topic_name = rec.home
         if rec.home:
             try:
@@ -134,11 +145,22 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
                 kind="ref",
                 href=f"/refs/{ref_id}?home={home}",
                 fold=is_fold_class(ws, man.source_class),
+                progress_day=progress_day,
             )
         )
     items.extend(_scan_project_events(root))
     return items
 
+
+
+def project_progress_dates(items: list[TimelineItem]) -> list[TimelineItem]:
+    """Use the latest progress day for Console grouping and current-view selection."""
+    return [
+        replace(item, occurred_at=item.progress_day, occurred_source="progress")
+        if item.progress_day is not None
+        else item
+        for item in items
+    ]
 
 def _dt_and_day(text: str) -> tuple[dt.datetime | None, dt.date | None]:
     parsed = parse_added_at(text)
