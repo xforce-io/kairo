@@ -33,6 +33,7 @@ from kairo.engine import (
 from kairo.engine import accept as engine_accept
 from kairo.listen_read import pair_audio_transcripts, parse_units
 from kairo.web.image_preview import render_image_preview
+from kairo.ref_progress import ProgressEntry, append_progress, read_progress
 from kairo.review import (
     ReviewError,
     collect_digests,
@@ -569,7 +570,7 @@ def timeline_view(
         )
     except TimelineQueryError:
         raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
-    items = scan_timeline(request.app.state.root)
+    items = scan_timeline(request.app.state.root, by_progress=True)
     from kairo.refs import list_tags
     tag_filters = []
     for raw in tag or []:
@@ -794,7 +795,7 @@ def timeline_run_preview(
     from kairo.view_run import plan_view_run
 
     plan = plan_view_run(
-        request.app.state.root, a, b, tags=tag_filters or None
+        request.app.state.root, a, b, tags=tag_filters or None, by_progress=True
     )
     hx = (request.headers.get("hx-request") or "").lower() == "true"
     accept = request.headers.get("accept") or ""
@@ -907,7 +908,7 @@ def timeline_run(
     from kairo.web.view_run_exec import start_view_run_pump
 
     plan = plan_view_run(
-        request.app.state.root, a, b, tags=tag_filters or None
+        request.app.state.root, a, b, tags=tag_filters or None, by_progress=True
     )
     if plan.topic_count == 0:
         raise HTTPException(status_code=400, detail=t("tl.run_empty"))
@@ -1283,6 +1284,19 @@ def _note_id_of(item: dict) -> str:
 def global_ref_view(
     request: Request, ref_id: str, home: str = "", back: str = "", note_err: str = "", note_deleted: bool = False
 ) -> HTMLResponse:
+    return _render_ref_detail(request, ref_id, home, back, note_err, note_deleted)
+
+
+def _render_ref_detail(
+    request: Request,
+    ref_id: str,
+    home: str,
+    back: str,
+    note_err: str = "",
+    note_deleted: bool = False,
+    *,
+    progress_input: tuple[str, str, str] | None = None,
+) -> HTMLResponse:
     from kairo.refs import (
         RefError,
         is_locked_home_tag,
@@ -1318,6 +1332,15 @@ def global_ref_view(
     project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+(?:\?[^\r\n#]*)?", back)) and not _is_public_read(request)
     back_url = back if project_back or back == "/timeline" or back.startswith("/timeline?") else "/timeline"
     notes = _notes_tower(serve, rid, home, render_body=True)
+    progress_read_error = False
+    try:
+        progress = read_progress(ws.references_dir() / rid)
+    except (OSError, ValueError):
+        progress = []
+        progress_read_error = True
+    progress_day, progress_content, progress_error = progress_input or (
+        datetime.date.today().isoformat(), "", "",
+    )
     return _render(
         request,
         "global_ref.html",
@@ -1331,6 +1354,11 @@ def global_ref_view(
             "home": home,
             "related_topics": related_topics,
             "occurred_display": occurred_display,
+            "progress": progress,
+            "progress_read_error": progress_read_error,
+            "progress_day": progress_day,
+            "progress_content": progress_content,
+            "progress_error": progress_error,
             "primary_heading": primary_heading,
             "primary_html": primary_html,
             "forms": forms,
@@ -1356,6 +1384,48 @@ def _ref_query(home: str, back: str) -> str:
     if back:
         parts.append("back=" + quote(back, safe="/"))
     return ("?" + "&".join(parts)) if parts else ""
+
+
+@router.post("/refs/{ref_id}/progress")
+def ref_progress_add_view(
+    request: Request,
+    ref_id: str,
+    home: str = Form(""),
+    back: str = Form(""),
+    day: str = Form(""),
+    content: str = Form(""),
+) -> HTMLResponse:
+    _console_only(request)
+    from kairo.refs import RefError, resolve_open
+
+    t = _t(request)
+    home = "" if home == "global" else home
+    try:
+        ws, rid = resolve_open(_serve(request), home, ref_id)
+    except RefError:
+        raise HTTPException(status_code=404, detail=t("err.reference_not_found")) from None
+
+    parsed = parse_calendar_date(day)
+    if parsed is None:
+        error, status = t("tl.bad_date"), 400
+    elif not content.strip():
+        error, status = t("progress.empty_body"), 400
+    else:
+        try:
+            append_progress(ws.references_dir() / rid, ProgressEntry(parsed, content.strip()))
+        except (OSError, ValueError):
+            error, status = t("progress.save_error"), 500
+        else:
+            return RedirectResponse(
+                f"/refs/{quote(rid)}{_ref_query(home, back)}#progress",
+                status_code=303,
+            )
+
+    response = _render_ref_detail(
+        request, rid, home, back, progress_input=(day, content, error)
+    )
+    response.status_code = status
+    return response
 
 
 @router.post("/refs/{ref_id}/notes")

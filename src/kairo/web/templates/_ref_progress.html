@@ -1,0 +1,32 @@
+<section class="ref-section" id="progress">
+  <h2>{{ t('progress.title') }}</h2>
+  {% if progress_read_error %}
+  <p class="panel-hint" role="alert">{{ t('progress.read_error') }}</p>
+  {% elif progress %}
+  <ol class="ref-progress-list">
+    {% for entry in progress %}
+    <li>
+      <time datetime="{{ entry.day }}">{{ entry.day }}</time>
+      <p>{{ entry.content }}</p>
+    </li>
+    {% endfor %}
+  </ol>
+  {% else %}
+  <p class="panel-hint">{{ t('progress.empty') }}</p>
+  {% endif %}
+  {% if not public_read %}
+  <details{% if progress_error %} open{% endif %}>
+    <summary>{{ t('progress.add') }}</summary>
+    <form class="notes-add" method="post" action="/refs/{{ ref_id | urlencode }}/progress#progress">
+      <input type="hidden" name="home" value="{{ home or 'global' }}">
+      <input type="hidden" name="back" value="{{ back_url }}">
+      {% if progress_error %}<p class="panel-hint" role="alert">{{ progress_error }}</p>{% endif %}
+      <label for="progress-day">{{ t('progress.day') }}</label>
+      <input type="date" id="progress-day" name="day" value="{{ progress_day }}" required>
+      <label for="progress-content">{{ t('progress.body') }}</label>
+      <textarea id="progress-content" name="content" rows="3" required>{{ progress_content }}</textarea>
+      <button class="btn btn-step btn-inline" type="submit">{{ t('progress.save') }}</button>
+    </form>
+  </details>
+  {% endif %}
+</section>

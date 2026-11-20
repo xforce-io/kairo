@@ -91,8 +91,9 @@ class TimelineItem:
     undigested: bool = False  # 仅日历 pane 标注；只看 digest 文件
 
 
-def scan_timeline(root: Path | str) -> list[TimelineItem]:
+def scan_timeline(root: Path | str, *, by_progress: bool = False) -> list[TimelineItem]:
     """扫全部可访问 Ref（Topic home + 全局库）；损坏 manifest 跳过。"""
+    from kairo.ref_progress import read_progress
     from kairo.refs import list_all_refs, resolve_open
     from kairo.workspace import WorkspaceNotFound
 
@@ -111,6 +112,14 @@ def scan_timeline(root: Path | str) -> list[TimelineItem]:
         if not man_path.is_file():
             continue
         added = effective_added_at(man.added_at, man_path)
+        if by_progress:
+            try:
+                progress = read_progress(man_path.parent)
+            except (ValueError, OSError):
+                # Keep the Ref discoverable while its progress file is unavailable.
+                progress = []
+            if progress:
+                occ, src = progress[-1].day, "progress"
         topic_name = rec.home
         if rec.home:
             try:
