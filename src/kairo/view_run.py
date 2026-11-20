@@ -26,6 +26,7 @@ from kairo.timeline import (
     collapse_artifacts,
     filter_by_tags,
     filter_range,
+    project_progress_dates,
     scan_timeline,
 )
 from kairo.workspace import Workspace, WorkspaceNotFound
@@ -327,7 +328,9 @@ def plan_view_run(
     root = Path(root).resolve()
     if end < start:
         start, end = end, start
-    items = scan_timeline(root, by_progress=by_progress)
+    items = scan_timeline(root, include_progress=by_progress)
+    if by_progress:
+        items = project_progress_dates(items)
     if tags:
         items = filter_by_tags(items, list(tags))
     items = annotate_undigested(root, items)

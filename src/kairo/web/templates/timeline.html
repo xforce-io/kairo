@@ -108,7 +108,7 @@
           <span class="count">{{ day_items|length }}</span>
         </div>
         {% set show_run = visible_undigested > 0 and not public_read %}
-        {% set show_rev = range_on and (too_long or day_items) %}
+        {% set show_rev = range_on and (too_long or day_items or digest_n or no_digest_n) %}
         {% if show_run or show_rev %}
         <div class="rev-actions">
           {% if show_run %}

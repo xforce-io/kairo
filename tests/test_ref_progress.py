@@ -62,7 +62,13 @@ def test_progress_moves_web_ref_and_preserves_occurred_date(tmp_path):
     source.write_text("Corrected discussion")
     assert retry_reference(ws, StubProvider(), rid)
     assert (ws.references_dir() / rid / "digest.md").is_file()
-    assert scan_timeline(tmp_path, by_progress=True)[0].occurred_at == date(2026, 8, 26)
+    assert href in client.get("/timeline?day=2026-08-26").text
+    original_range = client.get("/timeline?from=2026-08-24&to=2026-08-25").text
+    latest_range = client.get("/timeline?from=2026-08-25&to=2026-08-26").text
+    assert href not in original_range
+    assert 'action="/timeline/review"' in original_range
+    assert href in latest_range
+    assert 'action="/timeline/review"' not in latest_range
     assert [entry.day.day for entry in read_progress(ws.references_dir() / rid)] == [25, 25, 26]
 
 

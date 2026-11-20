@@ -58,6 +58,7 @@ from kairo.timeline import (
     is_fold_class,
     month_cells,
     parse_calendar_date,
+    project_progress_dates,
     range_day_count,
     resolve_timeline_query,
     scan_timeline,
@@ -570,13 +571,15 @@ def timeline_view(
         )
     except TimelineQueryError:
         raise HTTPException(status_code=400, detail=t("tl.bad_query")) from None
-    items = scan_timeline(request.app.state.root, by_progress=True)
+    root = Path(request.app.state.root)
+    occurred_items = scan_timeline(root, include_progress=True)
     from kairo.refs import list_tags
     tag_filters = []
     for raw in tag or []:
         tag_filters.extend(part for part in str(raw).split() if part)
     if tag_filters:
-        items = filter_by_tags(items, tag_filters)
+        occurred_items = filter_by_tags(occurred_items, tag_filters)
+    items = project_progress_dates(occurred_items)
     presented = collapse_artifacts(items)
     unknown_items = [it for it in presented if it.occurred_at is None]
     counts: dict[str, int] = {}
@@ -647,14 +650,18 @@ def timeline_view(
         range_groups = [{"key": k, "entries": buckets[k]} for k in order]
     from kairo.refs import timeline_digest_path
 
-    ref_items = [it for it in day_items if it.kind == "ref"]
-    digest_n = sum(
-        1
-        for it in ref_items
-        if timeline_digest_path(Path(request.app.state.root), it.workspace, it.id).is_file()
-    )
     span = range_day_count(r0, r1) if range_on else 1
     too_long = span > MAX_RANGE_DAYS
+    review_refs = []
+    if range_on and not too_long:
+        review_refs = [
+            it
+            for it in filter_range(occurred_items, r0, r1)
+            if it.kind == "ref" and not is_journal_item(it, root)
+        ]
+    digest_n = sum(
+        timeline_digest_path(root, it.workspace, it.id).is_file() for it in review_refs
+    )
     recent_groups = (
         [
             {"key": g["key"], "entries": collapse_artifacts(g["entries"])}
@@ -703,7 +710,7 @@ def timeline_view(
             "range_label": format_range_label(r0, r1, zh=(lang == "zh")),
             "range_groups": range_groups,
             "digest_n": digest_n,
-            "no_digest_n": len(ref_items) - digest_n,
+            "no_digest_n": len(review_refs) - digest_n,
             "too_long": too_long,
             "max_range_days": MAX_RANGE_DAYS,
             "tag_filters": tag_filters,
