@@ -240,6 +240,7 @@ def _is_html_previewable(ws: Workspace, path: Path) -> bool:
 
 def _html_preview_frame(src: str, name: str) -> str:
     return (
+        '<link rel="stylesheet" href="/static/html_preview.css">'
         f'<iframe class="doc-html-preview" title="{escape(name)}" src="{escape(src)}" '
         'sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>'
     )
