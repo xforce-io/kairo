@@ -36,6 +36,7 @@ def test_copied_html_has_isolated_preview_and_stays_console_only(tmp_path):
         assert preview.status_code == 200
         assert f'src="{base}/file/1{suffix}"' in preview.text
         assert 'sandbox="allow-scripts"' in preview.text
+        assert 'href="/static/html_preview.css"' in preview.text
         assert "Interactive board" not in preview.text
         raw = client.get(f"{base}/file/1{suffix}")
         assert raw.status_code == 200
@@ -91,4 +92,6 @@ def test_html_only_ref_defaults_to_isolated_reader(tmp_path):
     fragment = client.get(f"/w/topic/ref/{rid}")
     assert fragment.status_code == 200
     assert 'class="doc-html-preview"' in fragment.text
+    assert 'href="/static/html_preview.css"' in fragment.text
+    assert client.get("/static/html_preview.css").status_code == 200
     assert f'src="/w/topic/ref/{rid}/file/0"' in fragment.text

@@ -1,6 +1,6 @@
 # Ref 的 HTML 形态预览
 
-版本 v1 · [Issue #457](https://github.com/xforce-io/kairo/issues/457) · [L1 v1](https://github.com/xforce-io/kairo/issues/457#issuecomment-7035610742)
+版本 v1.1 · [Issue #457](https://github.com/xforce-io/kairo/issues/457) · [L1 v1](https://github.com/xforce-io/kairo/issues/457#issuecomment-7035610742)
 
 ## 1 背景
 
@@ -18,7 +18,7 @@ N/A。沿用[名词表](../glossary.md)中的 Topic 与 Ref。
 
 ### 4.1 UI/UX
 
-Topic 的现有形态行在中间阅读区打开 HTML。独立 Ref 页的现有形态按钮在抽屉内打开同一内容。框架可滚动，保留文档内部交互。材料不存在时显示现有不可预览状态。
+Topic 的现有形态行在中间阅读区打开 HTML。独立 Ref 页的现有形态按钮在抽屉内打开同一内容。框架铺开在阅读区内并可滚动，保留文档内部交互。已打开的页面选择该形态时也能加载布局，不依赖页面预先加载新版通用样式。材料不存在时显示现有不可预览状态。
 
 ## 5 思路与折衷
 
@@ -26,7 +26,7 @@ Topic 的现有形态行在中间阅读区打开 HTML。独立 Ref 页的现有�
 
 ## 6 架构
 
-预览资格由现有 Console 判断与形态文件读取范围共同决定。外层返回带 `sandbox="allow-scripts"` 的 iframe，仅允许在隔离的文档中运行脚本。内层文件响应独立施加 CSP sandbox、同源嵌入限制和资源限制。允许内联脚本和样式以及 data 图片、字体。表单、子框架、窗口和顶层导航保持受限。文件不可达时返回现有错误。公开只读中的形态行、直接预览和原始文件路由均不暴露这一 HTML 路径。
+预览资格由现有 Console 判断与形态文件读取范围共同决定。布局样式随预览片段加载，两处入口共用。外层返回带 `sandbox="allow-scripts"` 的 iframe，仅允许在隔离的文档中运行脚本。内层文件响应独立施加 CSP sandbox、同源嵌入限制和资源限制。允许内联脚本和样式以及 data 图片、字体。表单、子框架、窗口和顶层导航保持受限。文件不可达时返回现有错误。公开只读中的形态行、直接预览和原始文件路由均不暴露这一 HTML 路径。
 
 ## 7 模块
 
@@ -48,7 +48,7 @@ Web Console 形态列表、预览片段与文件响应共享 HTML 资格与读�
 
 | 验收 | 取证 |
 |---|---|
-| S1.A1 | 浏览器从 Topic 打开已有交互 HTML，点击节点，切回 Markdown。 |
+| S1.A1 | 浏览器从 Topic 打开已有交互 HTML，点击节点，切回 Markdown。分别用当前和缓存的旧版通用样式验证预览尺寸。 |
 | S2.A1 | 浏览器从 Timeline 打开独立 Ref 页，在抽屉操作并关闭。 |
 | S3.A1 | 浏览器核对图片、文本与框架属性，Integration 核对文件响应的隔离策略。 |
 | S3.A2 | 浏览器核对公开只读形态列表，Integration 核对公开请求与越界路径。 |
