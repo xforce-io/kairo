@@ -24,5 +24,6 @@
 | `image-form-zoom.md` | #442 图片 form 预览可放大、缩小、拖到超出区域并适应预览区 | `/w/{slug}/ref/{id}`、`/refs/{id}` 的 form 预览。不改文本与听读。LLM / step / compose **skip** |
 | `material-multiform-digest.md` | #453 digest 支持并反映同 Ref 正文+图；S1–S4 人读/Transform 指针 | scratch CLI/pytest 材料目录与 digest；真 LLM 识图 **skip**（Jenny） |
 | `ref-progress-timeline.md` | #455 同一 Ref 的进展、补录与 Timeline 归日 | `/timeline?day=`、`/refs/{id}?home=`、Topic 改名；S1.A1 至 S3.A1 |
+| `ref-html-preview.md` | #457 自包含 HTML 形态、两处预览和公开只读边界 | Topic 阅读区、独立 Ref 抽屉、公开只读 |
 
 新增用户可见功能时在此加一行并补功能文件；验收 Story 对不上任何一行即 BLOCKED。
