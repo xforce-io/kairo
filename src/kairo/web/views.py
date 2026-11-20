@@ -222,6 +222,29 @@ def _is_image_file(path: Path) -> bool:
     return path.is_file() and path.suffix.lower() in _IMAGE_SUFFIXES
 
 
+_HTML_SUFFIXES = {".html", ".htm"}
+_HTML_PREVIEW_POLICY = (
+    "sandbox allow-scripts; frame-ancestors 'self'; default-src 'none'; "
+    "script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+    "img-src data:; font-src data:; base-uri 'none'; form-action 'none'"
+)
+
+
+def _is_html_previewable(ws: Workspace, path: Path) -> bool:
+    return (
+        path.suffix.lower() in _HTML_SUFFIXES
+        and path.is_file()
+        and path.resolve().is_relative_to(ws.root.resolve())
+    )
+
+
+def _html_preview_frame(src: str, name: str) -> str:
+    return (
+        f'<iframe class="doc-html-preview" title="{escape(name)}" src="{escape(src)}" '
+        'sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>'
+    )
+
+
 def _open_local_path(path: Path, t) -> None:
     """用本机默认应用打开文件(本地 console;路径须已由 manifest 解析出)。"""
     path = path.resolve()
@@ -302,6 +325,8 @@ def _form_preview_html(
     if t is None:
         t = lambda key: key
     path = _form_path(ws, form["location"])
+    if form.get("html_preview") and file_src is not None:
+        return _html_preview_frame(file_src, path.name)
     if _is_image_file(path):
         src = file_src or f"/w/{quote(slug)}/ref/{quote(ref_id)}/file/{quote(form['key'])}"
         return _image_preview_html(src, path.name, t)
@@ -1333,7 +1358,10 @@ def _render_ref_detail(
     occurred_display = (
         t("tl.occurred_on").format(d=occ.isoformat()) if occ is not None else t("ref.occurred_unknown")
     )
-    forms = [f for f in _ref_forms(ws, rid, man, t) if f["role"] != "digest"]
+    forms = [
+        f for f in _ref_forms(ws, rid, man, t, allow_html=not _is_public_read(request))
+        if f["role"] != "digest"
+    ]
     primary_heading, primary_html = _global_ref_primary_body(ws, rid, man, t)
     locked_tags = [tag for tag in tags if is_locked_home_tag(serve, home, rid, tag)]
     project_back = bool(re.fullmatch(r"/projects/prj-[a-zA-Z0-9-]+(?:\?[^\r\n#]*)?", back)) and not _is_public_read(request)
@@ -1576,7 +1604,7 @@ def global_ref_form_view(
 def global_ref_file(request: Request, ref_id: str, key: str, home: str = "") -> FileResponse:
     ws, rid, _home = _named_ref(request, ref_id, home)
     t = _t(request)
-    return _form_file_response(ws, rid, key, t)
+    return _form_file_response(request, ws, rid, key, t)
 
 
 @router.get("/w/{slug}", response_class=HTMLResponse)
@@ -1774,7 +1802,7 @@ def _role_label(role: str, t) -> str:
     return label if label != key else role
 
 
-def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
+def _ref_forms(ws: Workspace, ref_id: str, man, t, *, allow_html: bool = False) -> list[dict]:
     """form 列表(标注可预览 + 预览 key + 人读标签)。digest 是这条 reference 的目的产物,
     置顶以示主次;其余形态(音频/转写/附件等)按 manifest 顺序随后。"""
     forms = []
@@ -1794,8 +1822,10 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
         )
     for i, f in enumerate(man.forms):
         p = _form_path(ws, f.location)
+        html_preview = allow_html and _is_html_previewable(ws, p)
         previewable = (
-            _is_text_file(p)
+            html_preview
+            or _is_text_file(p)
             or _is_image_file(p)
             or (f.role == "audio" and p.is_file())
         )
@@ -1808,6 +1838,7 @@ def _ref_forms(ws: Workspace, ref_id: str, man, t) -> list[dict]:
                 "filename": name,
                 "ext": (p.suffix.lstrip(".").upper() if p.suffix else "FILE"),
                 "previewable": previewable,
+                "html_preview": html_preview,
                 "openable": (not previewable) and p.is_file(),
                 "key": str(i),
             }
@@ -1845,7 +1876,7 @@ def ref_view(
     )
     t = _t(request)
     man = ws.read_manifest(ref_id)
-    forms = _ref_forms(ws, ref_id, man, t)
+    forms = _ref_forms(ws, ref_id, man, t, allow_html=not _is_public_read(request))
     # 优先正文形态;避免尚无 transcript 时默认把 PNG 当文本打开
     primary = (
         next((f for f in forms if f["role"] == "digest" and f["previewable"]), None)
@@ -2056,6 +2087,13 @@ def _form_preview_response(
             "_doc.html",
             {"title": title, "html": _image_preview_html(file_src, path.name, t)},
         )
+    if _is_html_previewable(ws, path):
+        _console_only(request)
+        return _render(
+            request,
+            "_doc.html",
+            {"title": title, "html": _html_preview_frame(file_src, path.name)},
+        )
     if not _is_text_file(path):
         raise HTTPException(status_code=404, detail="not previewable")
     return _render(
@@ -2073,17 +2111,25 @@ def _form_preview_response(
     )
 
 
-def _form_file_response(ws: Workspace, ref_id: str, key: str, t) -> FileResponse:
-    man = ws.read_manifest(ref_id)
-    try:
-        idx = int(key)
-    except ValueError:
-        raise HTTPException(status_code=404, detail=t("err.form_not_found")) from None
-    if not 0 <= idx < len(man.forms):
+def _form_file_response(request: Request, ws: Workspace, ref_id: str, key: str, t) -> FileResponse:
+    if key == "digest":
         raise HTTPException(status_code=404, detail=t("err.form_not_found"))
-    path = _form_path(ws, man.forms[idx].location).resolve()
+    _, registered, _, _ = _resolve_ref_form(ws, ref_id, key, t)
+    path = registered.resolve()
     if ws.root.resolve() not in path.parents or not path.is_file():
         raise HTTPException(status_code=404, detail=t("err.file_not_found"))
+    if registered.suffix.lower() in _HTML_SUFFIXES or path.suffix.lower() in _HTML_SUFFIXES:
+        _console_only(request)
+        return FileResponse(
+            path,
+            media_type="text/html",
+            headers={
+                "Content-Security-Policy": _HTML_PREVIEW_POLICY,
+                "X-Content-Type-Options": "nosniff",
+                "X-DNS-Prefetch-Control": "off",
+                "Referrer-Policy": "no-referrer",
+            },
+        )
     return FileResponse(path)
 
 
@@ -2205,7 +2251,7 @@ def ref_form_file(
     再校验落在 workspace 内,杜绝越界。"""
     ws, _ = _open_topic_ref(request, slug, ref_id, home)
     t = _t(request)
-    return _form_file_response(ws, ref_id, key, t)
+    return _form_file_response(request, ws, ref_id, key, t)
 
 
 @router.post("/w/{slug}/ref/{ref_id}/form/{key}/open")
