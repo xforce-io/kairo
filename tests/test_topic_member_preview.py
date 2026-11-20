@@ -70,11 +70,11 @@ def test_s3_removed_member_clears_reader_and_denies_forms(members, home):
     remove_tag(root, home="" if home == "global" else home, ref_id="shared", tag="reading")
     params = {"home": home}
     response = client.get('/w/topic/ref/shared', params=params)
-    assert 'This reference is unavailable' in response.text
+    assert 'This Ref is unavailable' in response.text
     assert 'hx-swap-oob="true"' in response.text
     assert 'DIGEST BODY' not in response.text
     page = client.get('/w/topic', params={"ref": "shared", **params})
-    assert 'This reference is unavailable' in page.text
+    assert 'This Ref is unavailable' in page.text
     assert 'nav-doc is-ref is-active' not in page.text
     for suffix in ['form/digest', 'file/0']:
         assert client.get(f'/w/topic/ref/shared/{suffix}', params=params).status_code == 404
@@ -86,7 +86,7 @@ def test_s3_invalid_home_does_not_guess_same_id(members, home):
     _, _, client = members
     for path in ['/w/topic', '/w/topic/ref/shared']:
         response = client.get(path, params={"home": home, "ref": "shared"})
-        assert 'This reference is unavailable' in response.text
+        assert 'This Ref is unavailable' in response.text
         assert 'DIGEST BODY' not in response.text
 
 
@@ -102,7 +102,7 @@ def test_s3_empty_material_and_recovery(members):
     assert 'hx-swap-oob="true"' in empty.text
     assert 'DIGEST BODY' not in empty.text
     assert 'global DIGEST BODY' in client.get('/w/topic/ref/shared?home=global').text
-    assert 'This reference is unavailable' in client.get('/w/topic/ref/missing?home=global').text
+    assert 'This Ref is unavailable' in client.get('/w/topic/ref/missing?home=global').text
 
 
 def test_s1_audio_image_and_corpus_use_member_routes(members):
@@ -186,7 +186,7 @@ def test_markdown_digest_links_keep_topic_and_source(members, home):
         assert 'Linked body' in client.get(unescape(link[2])).text
         assert 'nav-doc is-ref is-active' in client.get(address).text
         denied = re.search(r'<a href="[^"]+" hx-get="([^"]+)"[^>]*>unavailable</a>', response.text)
-        assert 'This reference is unavailable' in client.get(unescape(denied[1])).text
+        assert 'This Ref is unavailable' in client.get(unescape(denied[1])).text
 
 
 def test_public_stale_member_returns_swappable_404(members):
@@ -199,6 +199,6 @@ def test_public_stale_member_returns_swappable_404(members):
     response = client.get('/w/topic/ref/shared?home=other', headers={'HX-Request': 'true'})
     assert response.status_code == 404
     assert response.headers['X-Kairo-Ref-Unavailable'] == '1'
-    assert 'This reference is unavailable' in response.text
+    assert 'This Ref is unavailable' in response.text
     assert 'hx-swap-oob="true"' in response.text
     assert 'DIGEST BODY' not in response.text
